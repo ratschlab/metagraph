@@ -521,16 +521,183 @@ void cluster_seeds(const IDBGAligner &aligner,
                    const DBGAlignerConfig &config,
                    std::vector<Seed>&& fwd_seeds,
                    std::vector<Seed>&& bwd_seeds,
-                   const std::function<void(Chain&&, score_t)> &callback,
+                   const std::function<void(Alignment&&)> &callback,
                    const std::function<bool(Alignment::Column)> &skip_column) {
-    std::ignore = aligner;
-    std::ignore = forward;
-    std::ignore = reverse;
-    std::ignore = config;
-    std::ignore = fwd_seeds;
-    std::ignore = bwd_seeds;
-    std::ignore = callback;
-    std::ignore = skip_column;
+    const auto &graph = aligner.get_graph();
+
+    const auto *topology = graph.get_extension_threadsafe<graph::GraphTopology>();
+    if (!topology)
+        return;
+
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+
+    std::vector<node_index> nodes;
+    nodes.reserve(fwd_seeds.size() + bwd_seeds.size());
+    for (auto &fwd_seed : fwd_seeds) {
+        assert(fwd_seed.get_nodes().front());
+        nodes.emplace_back(fwd_seed.get_nodes().front());
+    }
+    for (auto &bwd_seed : bwd_seeds) {
+        assert(bwd_seed.get_nodes().front());
+        nodes.emplace_back(bwd_seed.get_nodes().front());
+    }
+    assert(nodes.size() == fwd_seeds.size() + bwd_seeds.size());
+
+    auto coords = topology->get_coords(nodes);
+    assert(coords.size() == nodes.size());
+    assert(std::all_of(coords.begin(), coords.end(), [](const auto &coord) {
+        return std::is_sorted(coord.begin(), coord.end(), [](const auto &a, const auto &b) {
+            return a.first.first < b.first.first;
+        });
+    }));
+
+    auto it = coords.begin();
+    size_t seed_count = 0;
+
+    using Cluster = tsl::hopscotch_map<size_t, tsl::hopscotch_map<size_t, std::vector<Seed>>>;
+    std::vector<tsl::hopscotch_map<Alignment::Column, Cluster>> clustered_seed_maps(2);
+    auto parse_set = [&](const auto &seeds, auto &clustered_seeds) {
+        for (const auto &seed : seeds) {
+            assert(it != coords.end());
+            if (labeled_aligner) {
+                throw std::runtime_error("Fix me");
+            } else {
+                assert(it->size() <= 2);
+                for (const auto &[col, topo] : *it) {
+                    auto &cur = clustered_seeds[col.first][topo.second][topo.first].emplace_back(seed);
+                    cur.label_coordinates.clear();
+                    cur.label_coordinates.emplace_back(1, col.second + cur.get_offset());
+                }
+            }
+            ++it;
+        }
+    };
+
+    parse_set(fwd_seeds, clustered_seed_maps[0]);
+    parse_set(bwd_seeds, clustered_seed_maps[1]);
+    assert(it == coords.end());
+
+    // for each orientation
+    for (auto &clustered_seeds : clustered_seed_maps) {
+        // for each column
+        for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
+            if (skip_column(it->first))
+                continue;
+
+            // for each cluster
+            std::vector<Alignment> initial_alignments;
+            for (auto kt = it.value().begin(); kt != it.value().end(); ++kt) {
+                // for each unitig
+                for (auto jt = kt.value().begin(); jt != kt.value().end(); ++jt) {
+                    auto &anchors = jt.value();
+
+                    if (anchors.size() == 1) {
+                        if (anchors[0].get_query_view().size() > config.min_seed_length) {
+                            anchors[0].label_coordinates.clear();
+                            initial_alignments.emplace_back(Alignment(anchors[0], config));
+                        }
+
+                        continue;
+                    }
+
+                    std::sort(anchors.begin(), anchors.end(), [&](const auto &a, const auto &b) {
+                        return a.get_query_view().end() > b.get_query_view().end();
+                    });
+
+                    chain_anchors<Seed>(config, anchors.data(), anchors.data() + anchors.size(),
+                        [&](const Seed &a_i, ssize_t /* max_dist */, const Seed *begin, const Seed *end, auto *chain_scores, const auto &update_score) {
+                            // connect a_i -> a_j
+                            std::string_view query_i = a_i.get_query_view();
+
+                            std::for_each(begin, end, [&](const auto &a_j) {
+                                std::string_view query_j = a_j.get_query_view();
+                                const auto &[score_j, last_j, last_dist_j] = *chain_scores;
+
+                                if (query_i.begin() >= query_j.begin()
+                                        || query_i.end() >= query_j.end()) {
+                                    ++chain_scores;
+                                    return;
+                                }
+
+                                score_t coord_dist = a_j.label_coordinates[0][0] + query_j.size() - a_i.label_coordinates[0][0] - query_i.size();
+                                score_t dist = query_j.end() - query_i.end();
+
+                                // logger->info("Check: {} -> {}\tc: {} vs. q: {}", Alignment(a_i, config), Alignment(a_j, config), coord_dist, dist);
+
+                                score_t score = score_j;
+
+                                if (query_i.end() <= query_j.begin()) {
+                                    score += a_i.get_score(config);
+                                } else {
+                                    std::string_view ext(query_i.data(),
+                                                        query_j.begin() - query_i.begin());
+                                    score += config.match_score(ext);
+
+                                    if (!a_i.get_clipping())
+                                        score += config.left_end_bonus;
+                                }
+
+                                if (coord_dist != dist) {
+                                    score_t diff = std::abs(coord_dist - dist);
+                                    score += config.gap_opening_penalty + (diff - 1) * config.gap_extension_penalty;
+                                }
+
+                                update_score(score, &a_j, coord_dist);
+                                ++chain_scores;
+                            });
+                        },
+                        [&](const auto &chain, auto) { return true; },
+                        true,
+                        [&](const Seed *next, Alignment&& cur, size_t coord_dist, score_t, const auto &callback) {
+                            if (cur.empty()) {
+                                cur = Alignment(*next, config);
+                                callback(std::move(cur));
+                                return;
+                            }
+
+                            std::string_view query = !next->get_orientation()
+                                ? forward
+                                : reverse;
+
+                            // logger->info("Connect: {} -> {}", Alignment(*next, config), cur);
+
+                            auto extensions = aligner.build_extender(query)->get_extensions(
+                                Alignment(*next, config),
+                                config.ninf,                         // min_path_score
+                                true,                                // force_fixed_seed
+                                coord_dist + next->get_query_view().size(),                          // target_length
+                                cur.get_nodes().back(),           // target_node
+                                false,                               // trim_offset_after_extend
+                                cur.get_end_clipping()           // trim_query_suffix
+                            );
+
+                            for (auto&& ext : extensions) {
+                                callback(std::move(ext));
+                            }
+                        },
+                        [&](Alignment&& aln) {
+                            aln.trim_offset();
+                            aln.label_coordinates.clear();
+                            initial_alignments.emplace_back(std::move(aln));
+                        }
+                    );
+                }
+            }
+
+            // pick the best alignment
+            if (initial_alignments.size()) {
+                auto &best = *std::max_element(
+                    initial_alignments.begin(),
+                    initial_alignments.end(),
+                    [](const auto &a, const auto &b) { return a.get_score() < b.get_score(); }
+                );
+                ++seed_count;
+                callback(std::move(best));
+            }
+        }
+    }
+
+    logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
 }
 
 

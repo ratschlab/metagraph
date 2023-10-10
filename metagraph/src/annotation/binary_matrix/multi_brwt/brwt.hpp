@@ -38,6 +38,12 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
 
+    virtual Vector<std::pair<Column, uint64_t>>
+    get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const override;
+
+    virtual std::vector<Vector<std::pair<Column, uint64_t>>>
+    get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &row_coords) const override;
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 

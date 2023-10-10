@@ -13,7 +13,9 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
+#include "load/load_annotation.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -205,22 +207,97 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename,
                    size_t num_chunks_open = 2000) {
-    auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
-    const size_t k = anno_graph->get_graph().get_k();
+    // not too small, not too large
+    const size_t batch_size = 1'000;
+    const size_t batch_length = 100'000;
+
+    const size_t k = graph->get_k();
+
+    Timer timer;
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
     bool forward_and_reverse = config.forward_and_reverse;
-    if (anno_graph->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL) {
+    if (graph->get_mode() != graph::DeBruijnGraph::BASIC) {
         logger->trace("Annotating canonical graph");
         forward_and_reverse = false;
     }
 
-    Timer timer;
+    if (config.superbubbles) {
+        if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<graph::CanonicalDBG>(graph);
+            logger->trace("Primary graph wrapped into canonical");
+        }
 
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+        auto annot = initialize_annotation(config.anno_type, config.num_columns_cached,
+                                           config.sparse, graph->max_index(),
+                                           config.tmp_dir, config.memory_available,
+                                           config.count_width, num_chunks_open,
+                                           config.RA_ivbuffer_size);
 
-    // not too small, not too large
-    const size_t batch_size = 1'000;
-    const size_t batch_length = 100'000;
+        std::mutex mu;
+        for (const auto &file : files) {
+            BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
+                [&](auto&& data) {
+                    thread_pool.enqueue([&](auto &data) {
+                        for (auto &[seq, labels] : data) {
+                            std::vector<graph::AnnotatedDBG::row_index> cur_rows;
+                            graph->map_to_nodes_sequentially(seq, [&](auto node) {
+                                if (node > 0)
+                                    cur_rows.emplace_back(graph::AnnotatedDBG::graph_to_anno_index(node));
+                            });
+
+                            std::lock_guard<std::mutex> lock(mu);
+                            annot->add_labels(std::move(cur_rows), std::move(labels));
+                        }
+                    }, std::move(data));
+                },
+                batch_size, batch_length, batch_size
+            );
+            std::string last_header = "0";
+            std::string last_seq = "";
+
+            call_annotations(
+                file,
+                config.refpath,
+                *graph,
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence, auto labels) {
+                    if (sequence.size() >= k) {
+                        if (config.annotate_sequence_headers) {
+                            if (labels.back() != last_header) {
+                                batcher.push_and_pay(k, std::move(last_seq),
+                                                     std::vector<std::string>{ file });
+                                last_header = std::move(labels.back());
+                            }
+
+                            last_seq = sequence.substr(sequence.size() - k);
+                        } else {
+                            assert(config.filename_anno);
+                            batcher.push_and_pay(k, sequence.substr(sequence.size() - k),
+                                                 std::move(labels));
+                        }
+                    }
+                }
+            );
+
+            if (last_seq.size()) {
+                assert(config.annotate_sequence_headers);
+                batcher.push_and_pay(k, std::move(last_seq), std::vector<std::string>{ file });
+            }
+        }
+
+        annot->serialize(annotator_filename);
+        return;
+    }
+
+    auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
 
     if (config.coordinates) {
         for (const auto &file : files) {
@@ -290,8 +367,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             },
             batch_size, batch_length, batch_size
         );
-        std::string last_header = "0";
-        std::string last_seq = "";
+
         call_annotations(
             file,
             config.refpath,
@@ -306,32 +382,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
                 if (sequence.size() >= k) {
-                    if (config.superbubbles) {
-                        if (config.annotate_sequence_headers) {
-                            if (labels.back() != last_header) {
-                                batcher.push_and_pay(k, std::move(last_seq),
-                                                     std::vector<std::string>{ file });
-                                last_header = std::move(labels.back());
-                            }
-
-                            last_seq = sequence.substr(sequence.size() - k);
-                        } else {
-                            assert(config.filename_anno);
-                            batcher.push_and_pay(k, sequence.substr(sequence.size() - k),
-                                                 std::move(labels));
-                        }
-                    } else {
-                        batcher.push_and_pay(sequence.size(), std::move(sequence),
-                                             std::move(labels));
-                    }
+                    batcher.push_and_pay(sequence.size(), std::move(sequence),
+                                         std::move(labels));
                 }
             }
         );
-
-        if (last_seq.size()) {
-            assert(config.annotate_sequence_headers);
-            batcher.push_and_pay(k, std::move(last_seq), std::vector<std::string>{ file });
-        }
     }
 
     thread_pool.join();

@@ -6,6 +6,10 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 
 namespace mtg {
@@ -26,6 +30,7 @@ template size_t max_test_k<DBGSuccinctBloomFPR<1, 10>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
 template size_t max_test_k<DBGSuccinctCached>();
+template size_t max_test_k<DBGSuccinctTopology>();
 
 template<> size_t max_test_k<DBGBitmap>() {
     return 63. / kmer::KmerExtractor2Bit().bits_per_char;
@@ -51,6 +56,45 @@ get_primary_contigs(size_t k, const std::vector<std::string> &sequences) {
     }, 1, true);
 
     return contigs;
+}
+
+std::shared_ptr<graph::GraphTopology>
+make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
+    std::vector<std::string> unitigs;
+    size_t last_cluster_id = 0;
+
+    auto unitig_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto cluster_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+
+    size_t coord = 0;
+    assemble_superbubbles(*graph, [&](const std::string &unitig, size_t cluster_id) {
+        unitigs.emplace_back(unitig);
+
+        if (last_cluster_id != cluster_id) {
+            cluster_anno->add_labels({ coord }, { std::string("") });
+            last_cluster_id = cluster_id;
+        }
+
+        assert(coord <= graph->num_nodes());
+        coord += unitig.size() - graph->get_k() + 1;
+        unitig_anno->add_labels({ coord }, { std::string("") });
+    });
+
+    if (unitigs.empty())
+        return {};
+
+    cluster_anno->add_labels({ coord }, { std::string("") });
+
+    std::vector<std::string> unitig_labels(unitigs.size(), "");
+    auto coord_anno = build_anno_graph<annot::ColumnCompressed<>>(
+        graph, unitigs, unitig_labels, true
+    );
+
+    return std::make_shared<graph::GraphTopology>(
+        *graph,
+        std::unique_ptr<graph::GraphTopology::Annotator>(coord_anno->release_annotator()),
+        std::move(unitig_anno), std::move(cluster_anno)
+    );
 }
 
 template <class Graph>
@@ -275,6 +319,19 @@ build_graph<DBGSuccinctCached>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctTopology>(uint64_t k,
+                                 std::vector<std::string> sequences,
+                                 DeBruijnGraph::Mode mode,
+                                 bool /* mask_dummy_kmers */) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode, false);
+    if (auto topology = make_topology(graph))
+        graph->add_extension(topology);
+
+    return graph;
+}
+
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
@@ -447,6 +504,19 @@ build_graph_batch<DBGSuccinctCached>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctTopology>(uint64_t k,
+                                       std::vector<std::string> sequences,
+                                       DeBruijnGraph::Mode mode,
+                                       bool mask_dummy_kmers) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode, mask_dummy_kmers);
+    if (auto topology = make_topology(graph))
+        graph->add_extension(topology);
+
+    return graph;
+}
+
 
 template <class Graph>
 bool check_graph(const std::string &alphabet, DeBruijnGraph::Mode mode, bool check_sequence) {
@@ -511,6 +581,7 @@ template bool check_graph<DBGSuccinctBloomFPR<1, 10>>(const std::string &, DeBru
 template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctBloom<4, 50>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctCached>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSuccinctTopology>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);

@@ -76,6 +76,34 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
     return result;
 }
 
+Vector<std::pair<ColumnMajor::Column, uint64_t>>
+ColumnMajor::get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const {
+    Vector<std::pair<Column, uint64_t>> result;
+    for (Column j : row_coords.second) {
+        assert(columns_[j]);
+        const bit_vector &col = *columns_[j];
+        result.emplace_back(j, col.rank1(row_coords.first));
+    }
+
+    return result;
+}
+
+std::vector<Vector<std::pair<ColumnMajor::Column, uint64_t>>>
+ColumnMajor::get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &row_coords) const {
+    std::vector<Vector<std::pair<Column, uint64_t>>> results;
+    results.reserve(row_coords.size());
+    for (const auto &row_coord : row_coords) {
+        auto &result = results.emplace_back();
+        for (const auto &coord_pair : row_coord) {
+            for (const auto &[c, r] : get_ranks(coord_pair)) {
+                result.emplace_back(c, r);
+            }
+        }
+    }
+
+    return results;
+}
+
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
                                const std::function<void(size_t, const bitmap&)> &callback,
                                size_t num_threads) const {

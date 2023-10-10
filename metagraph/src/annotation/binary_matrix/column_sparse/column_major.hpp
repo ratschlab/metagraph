@@ -28,6 +28,12 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
     get_column_ranks(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
 
+    Vector<std::pair<Column, uint64_t>>
+    get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const override;
+
+    std::vector<Vector<std::pair<Column, uint64_t>>>
+    get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &row_coords) const override;
+
     void call_columns(const std::vector<Column> &columns,
                       const std::function<void(size_t, const bitmap&)> &callback,
                       size_t num_threads = 1) const override;

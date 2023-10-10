@@ -63,6 +63,11 @@ using StringGenerator = std::function<void(const std::function<void(std::string_
 void assemble_superbubbles(const StringGenerator &generate,
                            size_t k,
                            const std::function<void(const std::string&, size_t)> &callback,
+                           DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+                           size_t num_threads = 1);
+
+void assemble_superbubbles(const DeBruijnGraph &dbg,
+                           const std::function<void(const std::string&, size_t)> &callback,
                            size_t num_threads = 1);
 
 } // namespace graph

@@ -37,6 +37,16 @@ class BinaryMatrix {
                                                        size_t num_threads = 1) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
+    virtual Vector<std::pair<Column, uint64_t>>
+    get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const {
+        throw std::runtime_error("Not implemented");
+    }
+
+    virtual std::vector<Vector<std::pair<Column, uint64_t>>>
+    get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &row_coords) const {
+        throw std::runtime_error("Not implemented");
+    }
+
     // For each column id in columns, run callback on its respective index in columns
     // and a bitmap represnting the column
     virtual void call_columns(const std::vector<Column> &columns,

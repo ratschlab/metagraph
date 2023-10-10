@@ -238,6 +238,62 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
+Vector<std::pair<BRWT::Column, uint64_t>>
+BRWT::get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const {
+    const auto &[i, columns] = row_coords;
+    assert(i < num_rows());
+
+    // check if the row is empty
+    uint64_t rank = nonzero_rows_->rank1(i);
+
+    // check whether it is a leaf
+    if (!child_nodes_.size()) {
+        assert(assignments_.size() == 1);
+        assert(columns.size() == 1);
+        // the bit is set
+        return {{ 0, rank }};
+    }
+
+    // check all child nodes
+    Vector<std::pair<BRWT::Column, uint64_t>> row;
+    uint64_t index_in_child = rank - 1;
+
+    std::vector<Vector<Column>> cur_child_nodes(child_nodes_.size());
+    for (Column column : columns) {
+        cur_child_nodes[assignments_.group(column)].emplace_back(column);
+    }
+
+    for (size_t k = 0; k < child_nodes_.size(); ++k) {
+        if (cur_child_nodes[k].empty())
+            continue;
+
+        const auto &child = *child_nodes_[k];
+
+        for (auto [col_id, rank] : child.get_ranks(std::make_pair(index_in_child, cur_child_nodes[k]))) {
+            row.emplace_back(assignments_.get(k, col_id), rank);
+        }
+    }
+
+    return row;
+}
+
+std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
+BRWT::get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &row_coords) const {
+    std::vector<Vector<std::pair<BRWT::Column, uint64_t>>> results;
+    results.reserve(row_coords.size());
+
+    for (const auto &coords : row_coords) {
+        auto &result = results.emplace_back();
+        for (const auto &coord_pair : coords) {
+            for (auto &[col, rank] : get_ranks(coord_pair)) {
+                result.emplace_back(col, rank);
+            }
+        }
+    }
+
+    return results;
+}
+
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     assert(column < num_columns());
 

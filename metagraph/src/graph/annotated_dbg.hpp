@@ -48,6 +48,7 @@ class AnnotatedSequenceGraph {
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
     virtual const Annotator& get_annotator() const { return *annotator_; }
+    virtual Annotator* release_annotator() { return annotator_.release(); }
 
     static row_index graph_to_anno_index(node_index kmer_index) {
         assert(kmer_index);

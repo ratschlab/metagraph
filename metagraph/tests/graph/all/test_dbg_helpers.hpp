@@ -52,6 +52,13 @@ class DBGSuccinctCached : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
+class DBGSuccinctTopology : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctTopology(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -123,7 +130,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 50>,
                          DBGSuccinctCached> StableGraphTypes;
 
-typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
+typedef ::testing::Types<DBGHashFast, DBGSuccinct, DBGSuccinctTopology> FewGraphTypes;
 
 } // namespace test
 } // namespace mtg

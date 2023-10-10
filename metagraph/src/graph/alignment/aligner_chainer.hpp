@@ -32,7 +32,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                    const DBGAlignerConfig &config,
                    std::vector<Seed>&& fwd_seeds,
                    std::vector<Seed>&& bwd_seeds,
-                   const std::function<void(Chain&&, score_t)> &callback,
+                   const std::function<void(Alignment&&)> &callback,
                    const std::function<bool(Alignment::Column)> &skip_column
                        = [](Alignment::Column) { return false; });
 

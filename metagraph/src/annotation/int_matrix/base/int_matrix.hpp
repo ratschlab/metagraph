@@ -17,6 +17,9 @@ class IntMatrix {
 
     virtual ~IntMatrix() {}
 
+    virtual bool load(std::istream &in) = 0;
+    virtual void serialize(std::ostream &out) const = 0;
+
     // |row| is in [0, num_rows), |column| is in [0, num_columns)
     virtual std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const = 0;
 

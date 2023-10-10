@@ -6,6 +6,7 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 #include "aligner_labeled.hpp"
 
 namespace mtg {
@@ -842,14 +843,21 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
 #endif
 
-    auto fwd_seeds = forward_seeder.get_alignments();
+    std::vector<Alignment> fwd_seeds;
+    std::vector<Alignment> bwd_seeds;
+    cluster_seeds(*this, forward, reverse, config_, forward_seeder.get_seeds(),
+                  reverse_seeder ? reverse_seeder->get_seeds() : std::vector<Seed>{},
+                  [&](Alignment&& aln) {
+        if (!aln.get_orientation()) {
+            fwd_seeds.emplace_back(std::move(aln));
+        } else {
+            bwd_seeds.emplace_back(std::move(aln));
+        }
+    });
+
     std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
-
-    std::vector<Alignment> bwd_seeds;
-    if (reverse_seeder)
-        bwd_seeds = reverse_seeder->get_alignments();
 
     std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();

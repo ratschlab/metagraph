@@ -110,7 +110,8 @@ int build_graph(Config *config) {
                 config->k,
                 [&](const std::string &unitig, size_t cluster_id) {
                     write_fasta(gz_out, std::to_string(cluster_id), unitig);
-                }
+                },
+                config->graph_mode
             );
 
             gzclose(gz_out);

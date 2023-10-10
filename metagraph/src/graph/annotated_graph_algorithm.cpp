@@ -442,11 +442,17 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 void assemble_superbubbles(const StringGenerator &generate,
                            size_t k,
                            const std::function<void(const std::string&, size_t)> &callback,
+                           DeBruijnGraph::Mode mode,
                            size_t num_threads) {
     // assemble graph
-    DBGHashFast dbg(k);
+    DBGHashFast dbg(k, mode);
     generate([&dbg](std::string_view seq) { dbg.add_sequence(seq); });
+    assemble_superbubbles(dbg, callback, num_threads);
+}
 
+void assemble_superbubbles(const DeBruijnGraph &dbg,
+                           const std::function<void(const std::string&, size_t)> &callback,
+                           size_t num_threads) {
     using unitig_index = node_index;
     using superbubble_index = node_index;
 
@@ -549,11 +555,13 @@ void assemble_superbubbles(const StringGenerator &generate,
                     size_t superbubble_id = ++num_superbubbles;
                     uint64_t coord = 1;
 
+                    assert(visited[0] < unitig_to_superbubble.size());
                     auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[0]];
                     start_sb = superbubble_id;
 
                     for (size_t i = 1; i < visited.size(); ++i) {
                         coord += std::get<2>(unitigs[visited[i] - 1]);
+                        assert(visited[i] < unitig_to_superbubble.size());
                         auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[i]];
                         if (coord > mid_c) {
                             mid_sb = superbubble_id;
@@ -562,9 +570,10 @@ void assemble_superbubbles(const StringGenerator &generate,
                     }
 
                     {
-                       auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[S[0]];
-                       term_sb = superbubble_id;
-                       term_c = coord;
+                        assert(S[0] < unitig_to_superbubble.size());
+                        auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[S[0]];
+                        term_sb = superbubble_id;
+                        term_c = coord;
                     }
 
                     superbubbles.emplace_back(std::move(visited), has_tips).first.emplace_back(S[0]);
@@ -585,12 +594,14 @@ void assemble_superbubbles(const StringGenerator &generate,
         if (!mid_sb && start_sb && !term_sb && !in_chain[start_sb]) {
             // start of a chain
             auto &chain = chains.emplace_back();
+            assert(!in_chain[start_sb]);
             in_chain[start_sb] = true;
             chain.emplace_back(start_sb);
             auto cur_start_sb = start_sb;
             while (cur_start_sb) {
-                cur_start_sb = 0;
                 const auto &[superbubble, has_tips] = superbubbles[cur_start_sb - 1];
+                cur_start_sb = 0;
+                assert(superbubble.back() < unitig_to_superbubble.size());
                 const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
                 if (next_start_sb && !next_mid_sb) {
                     chain.emplace_back(next_start_sb);

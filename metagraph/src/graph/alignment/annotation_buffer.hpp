@@ -30,8 +30,22 @@ class AnnotationBuffer {
         queued_paths_.push_back(std::move(path));
     }
 
-    // fetch annotations for the queued nodes from the buffer and reset the buffer
-    void fetch_queued_annotations();
+    void fetch_queued_annotations() {
+        fetch_annotations(queued_paths_, column_sets_, node_to_cols_, label_coords_);
+        queued_paths_.clear();
+    }
+
+    std::tuple<VectorSet<Columns, utils::VectorHash>,
+               VectorMap<node_index, size_t>,
+               std::vector<CoordinateSet>>
+    fetch_annotations(const std::vector<std::vector<node_index>> &queued_paths) const {
+        std::tuple<VectorSet<Columns, utils::VectorHash>,
+                   VectorMap<node_index, size_t>,
+                   std::vector<CoordinateSet>> result;
+        auto &[column_sets, node_to_cols, label_coords] = result;
+        fetch_annotations(queued_paths, column_sets, node_to_cols, label_coords);
+        return result;
+    }
 
     bool has_coordinates() const { return multi_int_; }
 
@@ -54,9 +68,7 @@ class AnnotationBuffer {
     // `column_sets_`. These column sets can later be fetched with `get_cached_column_set()`
     template <typename... Args>
     inline size_t cache_column_set(Args&&... args) {
-        auto it = column_sets_.emplace(std::forward<Args>(args)...).first;
-        assert(std::is_sorted(it->begin(), it->end()));
-        return it - column_sets_.begin();
+        return cache_column_set_impl(column_sets_, std::forward<Args>(args)...);
     }
 
     // Fetch a label set given its index returned by `cache_column_set()`
@@ -89,6 +101,22 @@ class AnnotationBuffer {
     std::vector<CoordinateSet> label_coords_;
     // buffer of paths to later querying with fetch_queued_annotations()
     std::vector<std::vector<node_index>> queued_paths_;
+
+    // fetch annotations for the queued nodes from the buffer and reset the buffer
+    void fetch_annotations(const std::vector<std::vector<node_index>> &queued_paths,
+                           VectorSet<Columns, utils::VectorHash> &column_sets,
+                           VectorMap<node_index, size_t> &node_to_cols,
+                           std::vector<CoordinateSet> &label_coords) const;
+
+    // This method lets the caller push additional column sets to dictionary
+    // `column_sets_`. These column sets can later be fetched with `get_cached_column_set()`
+    template <typename... Args>
+    inline static size_t cache_column_set_impl(VectorSet<Columns, utils::VectorHash> &column_sets,
+                                               Args&&... args) {
+        auto it = column_sets.emplace(std::forward<Args>(args)...).first;
+        assert(std::is_sorted(it->begin(), it->end()));
+        return it - column_sets.begin();
+    }
 };
 
 } // namespace align

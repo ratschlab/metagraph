@@ -6,15 +6,10 @@
 #include <vector>
 #include <string>
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
-
-namespace graph {
-    class AnnotatedDBG;
-}
-
 namespace test {
 
 template <class Graph, class Annotation>
@@ -25,6 +20,13 @@ build_anno_graph(uint64_t k,
                  graph::DeBruijnGraph::Mode mode = graph::DeBruijnGraph::BASIC,
                  bool coordinates = false,
                  bool mask_dummy_kmers = true);
+
+template <class Annotation>
+std::unique_ptr<graph::AnnotatedDBG>
+build_anno_graph(std::shared_ptr<graph::DeBruijnGraph> graph,
+                 const std::vector<std::string> &sequences = {},
+                 const std::vector<std::string> &labels = {},
+                 bool coordinates = false);
 
 } // namespace test
 } // namespace mtg

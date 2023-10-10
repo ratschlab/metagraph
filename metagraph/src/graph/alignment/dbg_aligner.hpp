@@ -36,6 +36,8 @@ class IDBGAligner {
     AlignmentResults align(std::string_view query) const;
 
     virtual bool has_coordinates() const = 0;
+
+    virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const = 0;
 };
 
 
@@ -44,7 +46,8 @@ template <class Seeder = SuffixSeeder<UniMEMSeeder>,
           class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public IDBGAligner {
   public:
-    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
+    DBGAligner(const DeBruijnGraph &graph,
+               const DBGAlignerConfig &config);
 
     virtual ~DBGAligner() {}
 
@@ -55,6 +58,10 @@ class DBGAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
     virtual bool has_coordinates() const override { return false; }
+
+    virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const {
+        return std::make_shared<Extender>(*this, query);
+    }
 
   protected:
     typedef typename Seeder::node_index node_index;
