@@ -336,7 +336,16 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     }
 }
 
-TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
+TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        common::logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>) {
+        return;
+    }
+
     size_t k = 7;
     std::string query = "TCGTACGGGGGG";
     const std::vector<std::string> sequences { "TCGTACTAGCTA" };
@@ -349,7 +358,8 @@ TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
 #endif
                                       DeBruijnGraph::BASIC
                                   }) {
-        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
             k, sequences, labels, mode, false, false
         );
 
@@ -363,7 +373,16 @@ TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
     }
 }
 
-TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
+TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        common::logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>) {
+        return;
+    }
+
     size_t k = 4;
     /*  B    B                  AB   AB
        TCGA-CGAA                TGCC-GCCT
@@ -379,7 +398,8 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
-    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
         k, sequences, labels, DeBruijnGraph::BASIC, false, false
     );
 
