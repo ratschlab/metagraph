@@ -514,7 +514,6 @@ chain_seeds(const DBGAlignerConfig &config,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-
 void cluster_seeds(const IDBGAligner &aligner,
                    std::string_view forward,
                    std::string_view reverse,
@@ -585,18 +584,15 @@ void cluster_seeds(const IDBGAligner &aligner,
                 continue;
 
             // for each cluster
-            std::vector<Alignment> initial_alignments;
             for (auto kt = it.value().begin(); kt != it.value().end(); ++kt) {
-                // for each unitig
+                std::vector<Alignment> initial_alignments;
+                // co-linear chain the seeds within each unitig
                 for (auto jt = kt.value().begin(); jt != kt.value().end(); ++jt) {
                     auto &anchors = jt.value();
 
                     if (anchors.size() == 1) {
-                        if (anchors[0].get_query_view().size() > config.min_seed_length) {
-                            anchors[0].label_coordinates.clear();
-                            initial_alignments.emplace_back(Alignment(anchors[0], config));
-                        }
-
+                        initial_alignments.emplace_back(Alignment(anchors[0], config));
+                        // logger->info("Alignment: {}", initial_alignments.back());
                         continue;
                     }
 
@@ -613,16 +609,16 @@ void cluster_seeds(const IDBGAligner &aligner,
                                 std::string_view query_j = a_j.get_query_view();
                                 const auto &[score_j, last_j, last_dist_j] = *chain_scores;
 
-                                if (query_i.begin() >= query_j.begin()
-                                        || query_i.end() >= query_j.end()) {
+                                score_t dist = query_j.end() - query_i.end();
+                                score_t coord_dist = a_j.label_coordinates[0][0] + query_j.size() - a_i.label_coordinates[0][0] - query_i.size();
+
+                                // logger->info("Check: {} -> {}\tc: {} vs. q: {}", Alignment(a_i, config), Alignment(a_j, config), coord_dist, dist);
+
+                                if (query_i.begin() >= query_j.begin() || dist <= 0
+                                        || coord_dist <= 0) {
                                     ++chain_scores;
                                     return;
                                 }
-
-                                score_t coord_dist = a_j.label_coordinates[0][0] + query_j.size() - a_i.label_coordinates[0][0] - query_i.size();
-                                score_t dist = query_j.end() - query_i.end();
-
-                                // logger->info("Check: {} -> {}\tc: {} vs. q: {}", Alignment(a_i, config), Alignment(a_j, config), coord_dist, dist);
 
                                 score_t score = score_j;
 
@@ -661,8 +657,12 @@ void cluster_seeds(const IDBGAligner &aligner,
 
                             // logger->info("Connect: {} -> {}", Alignment(*next, config), cur);
 
+                            Alignment next_aln(*next, config);
+                            int64_t coord = next->label_coordinates[0][0];
+
+                            next_aln.label_coordinates.clear();
                             auto extensions = aligner.build_extender(query)->get_extensions(
-                                Alignment(*next, config),
+                                std::move(next_aln),
                                 config.ninf,                         // min_path_score
                                 true,                                // force_fixed_seed
                                 coord_dist + next->get_query_view().size(),                          // target_length
@@ -672,27 +672,35 @@ void cluster_seeds(const IDBGAligner &aligner,
                             );
 
                             for (auto&& ext : extensions) {
+                                ext.label_coordinates.resize(1);
+                                ext.label_coordinates[0].assign(1, coord);
                                 callback(std::move(ext));
+                            }
+
+                            if (extensions.empty()) {
+                                cur.trim_offset();
+                                initial_alignments.emplace_back(std::move(cur));
                             }
                         },
                         [&](Alignment&& aln) {
                             aln.trim_offset();
-                            aln.label_coordinates.clear();
                             initial_alignments.emplace_back(std::move(aln));
                         }
                     );
                 }
-            }
 
-            // pick the best alignment
-            if (initial_alignments.size()) {
-                auto &best = *std::max_element(
-                    initial_alignments.begin(),
-                    initial_alignments.end(),
-                    [](const auto &a, const auto &b) { return a.get_score() < b.get_score(); }
-                );
-                ++seed_count;
-                callback(std::move(best));
+                // pick the best alignment after co-linear chaining
+                if (initial_alignments.size()) {
+                    auto &best = *std::max_element(
+                        initial_alignments.begin(),
+                        initial_alignments.end(),
+                        [](const auto &a, const auto &b) { return a.get_score() < b.get_score(); }
+                    );
+                    ++seed_count;
+                    best.label_coordinates.clear();
+                    // logger->info("Alignment: {}", best);
+                    callback(std::move(best));
+                }
             }
         }
     }

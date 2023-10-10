@@ -261,7 +261,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                 const CoordinateSet coords = {}) {
         auto do_push = [&](auto find, size_t labels_i) {
             find.value() = labels_i;
-            if (has_coordinates()) {
+            if (has_local_coordinates()) {
                 assert(coords.size());
                 size_t coord_idx = find - node_to_cols.begin();
                 if (coord_idx == label_coords.size()) {
@@ -300,7 +300,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
 
     auto row_it = queued_rows.begin();
     auto node_it = queued_nodes.begin();
-    if (has_coordinates()) {
+    if (has_local_coordinates()) {
         assert(multi_int_);
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows.values_container())) {
@@ -364,7 +364,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
         assert(find != node_to_cols.end());
         assert(find->second == nannot || find->second == find_base->second);
         find.value() = find_base->second;
-        if (has_coordinates()) {
+        if (has_local_coordinates()) {
             size_t base_coord_idx = find_base - node_to_cols.begin();
             assert(base_coord_idx < label_coords.size());
 
@@ -401,7 +401,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                 auto [prev_labels, prev_coords] = get_labels_and_coords(prev);
                 CoordinateSet merged_prev_coords;
                 if (!prev_labels) {
-                    if (has_coordinates()) {
+                    if (has_local_coordinates()) {
                         assert(coords);
                         merged_prev_coords.reserve(coords->size());
                         for (auto &tuple : *coords) {
@@ -419,7 +419,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                      merged_prev_coords);
                 } else {
                     Columns merged_columns;
-                    if (has_coordinates()) {
+                    if (has_local_coordinates()) {
                         assert(coords);
                         assert(prev_coords);
                         utils::match_indexed_values(labels->begin(), labels->end(),
@@ -482,7 +482,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
 
     ret_val.first = &column_sets_.data()[it->second];
 
-    if (has_coordinates()) {
+    if (has_local_coordinates()) {
         assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
         ret_val.second = &label_coords_[it - node_to_cols_.begin()];
     }

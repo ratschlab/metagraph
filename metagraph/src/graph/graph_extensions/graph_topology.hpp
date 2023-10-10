@@ -28,7 +28,7 @@ class GraphTopology : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const graph::SequenceGraph &, bool = true) const { return true; }
 
-    const Annotator& get_coord_annotator() const {
+    const Annotator& get_annotator() const {
         assert(annotator_);
         return *annotator_;
     }

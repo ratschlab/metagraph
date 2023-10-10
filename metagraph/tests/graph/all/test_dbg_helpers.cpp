@@ -83,6 +83,7 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     if (unitigs.empty())
         return {};
 
+    assert(coord);
     cluster_anno->add_labels({ coord }, { std::string("") });
 
     std::vector<std::string> unitig_labels(unitigs.size(), "");

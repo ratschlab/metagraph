@@ -144,6 +144,10 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
         return annotation_buffer_.has_coordinates();
     }
 
+    virtual bool has_local_coordinates() const override final {
+        return annotation_buffer_.has_local_coordinates();
+    }
+
   private:
     mutable AnnotationBuffer annotation_buffer_;
     size_t max_seed_length_;

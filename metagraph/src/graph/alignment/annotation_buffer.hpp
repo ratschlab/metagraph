@@ -47,7 +47,11 @@ class AnnotationBuffer {
         return result;
     }
 
-    bool has_coordinates() const { return multi_int_; }
+    bool has_coordinates() const {
+        return multi_int_ && graph_.get_mode() == DeBruijnGraph::BASIC;
+    }
+
+    bool has_local_coordinates() const { return multi_int_; }
 
     // Get the annotations and coordinates of a node if they have been fetched.
     // The returned pointers are valid until next fetch_queued_annotations().
@@ -60,6 +64,7 @@ class AnnotationBuffer {
     }
 
     const Annotator& get_annotator() const { return annotator_; }
+    const DeBruijnGraph& get_graph() const { return graph_; }
 
     size_t num_nodes_buffered() const { return node_to_cols_.size(); }
     size_t num_column_sets() const { return column_sets_.size(); }

@@ -36,6 +36,7 @@ class IDBGAligner {
     AlignmentResults align(std::string_view query) const;
 
     virtual bool has_coordinates() const = 0;
+    virtual bool has_local_coordinates() const = 0;
 
     virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const = 0;
 };
@@ -58,6 +59,7 @@ class DBGAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
     virtual bool has_coordinates() const override { return false; }
+    virtual bool has_local_coordinates() const override { return false; }
 
     virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const {
         return std::make_shared<Extender>(*this, query);
