@@ -222,7 +222,7 @@ void LabeledExtender
     auto columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
 
     // no coordinates are present in the annotation
-    if (!annotation_buffer_.get_labels_and_coords(node).second) {
+    if (!annotation_buffer_.has_coordinates()) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
