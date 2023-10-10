@@ -1082,8 +1082,11 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
                 });
             },
-            [&](const AnchorChain<Anchor> &chain, score_t score) {
+            [&](const AnchorChain<Anchor> &chain, const std::vector<score_t> &score_traceback) {
                 assert(chain.size());
+                assert(score_traceback.size());
+
+                score_t score = score_traceback[0];
                 if (chain_score == score && std::equal(chain.begin(), chain.end(),
                                                        last_chain.begin(), last_chain.end(),
                                                        [](const auto &a, const auto &b) {

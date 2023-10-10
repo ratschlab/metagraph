@@ -33,8 +33,44 @@ template <typename Anchor>
 using AnchorChain = std::vector<std::pair<const Anchor*, size_t>>;
 
 template <typename Anchor>
-using BacktrackStarter = std::function<bool(const AnchorChain<Anchor>&, score_t)>;
+using BacktrackStarter = std::function<bool(const AnchorChain<Anchor>&, // chain
+                                            const std::vector<score_t>& // score traceback
+                                           )>;
 
+template <typename Anchor>
+void extend_chain(const AnchorChain<Anchor> &chain,
+                  const std::vector<score_t> &score_traceback,
+                  const AnchorExtender<Anchor> &anchor_extender,
+                  const AlignmentCallback &callback,
+                  const std::function<bool()> &terminate = []() { return false; }) {
+    auto jt = score_traceback.rbegin();
+    std::vector<Alignment> alns;
+    anchor_extender(chain.back().first, Alignment(), 0, *jt,
+                    [&](Alignment&& aln) { alns.emplace_back(aln); });
+    ++jt;
+
+    for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it, ++jt) {
+        assert(jt != score_traceback.rend());
+        std::vector<Alignment> next_alns;
+        for (auto&& aln : alns) {
+            anchor_extender((it + 1)->first, std::move(aln), it->second, *jt,
+                [&](Alignment&& next_aln) {
+                    next_alns.emplace_back(std::move(next_aln));
+                }
+            );
+        }
+        std::swap(next_alns, alns);
+    }
+
+    assert(jt == score_traceback.rend());
+
+    for (auto&& aln : alns) {
+        if (terminate())
+            return;
+
+        callback(std::move(aln));
+    }
+}
 
 template <typename Anchor>
 void chain_anchors(const DBGAlignerConfig &config,
@@ -42,7 +78,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                    const Anchor *anchors_end,
                    const AnchorConnector<Anchor> &anchor_connector,
                    const BacktrackStarter<Anchor> &start_backtrack
-                       = [](const AnchorChain<Anchor>&, score_t) { return true; },
+                       = [](const AnchorChain<Anchor>&, const std::vector<score_t>&) { return true; },
                    bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
                        = [](const Anchor*,
@@ -177,42 +213,13 @@ void chain_anchors(const DBGAlignerConfig &config,
             scores.emplace_back(score);
         }
 
-        if (!start_backtrack(chain, -nscore))
-            continue;
-
-        for (const auto &[a_ptr, dist] : chain) {
-            used[a_ptr - anchors_begin] = true;
-        }
-
-        if (!extend_anchors)
-            continue;
-
-        auto jt = scores.rbegin();
-        std::vector<Alignment> alns;
-        anchor_extender(chain.back().first, Alignment(), 0, *jt,
-                        [&](Alignment&& aln) { alns.emplace_back(aln); });
-        ++jt;
-
-        for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it, ++jt) {
-            assert(jt != scores.rend());
-            std::vector<Alignment> next_alns;
-            for (auto&& aln : alns) {
-                anchor_extender((it + 1)->first, std::move(aln), it->second, *jt,
-                    [&](Alignment&& next_aln) {
-                        next_alns.emplace_back(std::move(next_aln));
-                    }
-                );
+        if (start_backtrack(chain, scores)) {
+            for (const auto &[a_ptr, dist] : chain) {
+                used[a_ptr - anchors_begin] = true;
             }
-            std::swap(next_alns, alns);
-        }
 
-        assert(jt == scores.rend());
-
-        for (auto&& aln : alns) {
-            if (terminate())
-                return;
-
-            callback(std::move(aln));
+            if (extend_anchors)
+                extend_chain(chain, scores, anchor_extender, callback, terminate);
         }
     }
 }
