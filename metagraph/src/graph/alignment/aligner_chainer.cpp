@@ -579,20 +579,24 @@ void cluster_seeds(const IDBGAligner &aligner,
     // for each orientation
     for (auto &clustered_seeds : clustered_seed_maps) {
         // for each column
+        std::vector<Alignment> initial_alignments;
         for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
             if (skip_column(it->first))
                 continue;
 
             // for each cluster
             for (auto kt = it.value().begin(); kt != it.value().end(); ++kt) {
-                std::vector<Alignment> initial_alignments;
+                std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> best_chains;
                 // co-linear chain the seeds within each unitig
                 for (auto jt = kt.value().begin(); jt != kt.value().end(); ++jt) {
                     auto &anchors = jt.value();
 
                     if (anchors.size() == 1) {
-                        initial_alignments.emplace_back(Alignment(anchors[0], config));
-                        // logger->info("Alignment: {}", initial_alignments.back());
+                        best_chains.emplace_back(
+                            it->first,
+                            AnchorChain<Seed>{ { &anchors[0], 0 } },
+                            std::vector<score_t>(1, anchors[0].get_score(config))
+                        );
                         continue;
                     }
 
@@ -601,7 +605,12 @@ void cluster_seeds(const IDBGAligner &aligner,
                     });
 
                     chain_anchors<Seed>(config, anchors.data(), anchors.data() + anchors.size(),
-                        [&](const Seed &a_i, ssize_t /* max_dist */, const Seed *begin, const Seed *end, auto *chain_scores, const auto &update_score) {
+                        [&config](const Seed &a_i,
+                                  ssize_t /* max_dist */,
+                                  const Seed *begin,
+                                  const Seed *end,
+                                  auto *chain_scores,
+                                  const auto &update_score) {
                             // connect a_i -> a_j
                             std::string_view query_i = a_i.get_query_view();
 
@@ -642,18 +651,39 @@ void cluster_seeds(const IDBGAligner &aligner,
                                 ++chain_scores;
                             });
                         },
-                        [&](const auto &chain, auto) { return true; },
-                        true,
-                        [&](const Seed *next, Alignment&& cur, size_t coord_dist, score_t, const auto &callback) {
+                        [&](const AnchorChain<Seed> &chain, const std::vector<score_t> &score_traceback) {
+                            best_chains.emplace_back(it->first, chain, score_traceback);
+                            return true;
+                        },
+                        false
+                    );
+                }
+
+                if (best_chains.empty())
+                    continue;
+
+                std::sort(best_chains.begin(), best_chains.end(), [&](const auto &a, const auto &b) {
+                    const auto &[a_col, a_chain, a_score_traceback] = a;
+                    const auto &[b_col, b_chain, b_score_traceback] = b;
+                    return a_score_traceback[0] > b_score_traceback[0];
+                });
+
+                for (const auto &[col, chain, score_traceback] : best_chains) {
+                    if (score_traceback[0] < std::get<2>(best_chains[0])[0])
+                        break;
+
+                    if (skip_column(col))
+                        continue;
+
+                    extend_chain<Seed>(chain, score_traceback,
+                        [&](const Seed *next, Alignment&& cur, size_t coord_dist, const auto&, const auto &callback) {
                             if (cur.empty()) {
                                 cur = Alignment(*next, config);
                                 callback(std::move(cur));
                                 return;
                             }
 
-                            std::string_view query = !next->get_orientation()
-                                ? forward
-                                : reverse;
+                            std::string_view query = !next->get_orientation() ? forward : reverse;
 
                             // logger->info("Connect: {} -> {}", Alignment(*next, config), cur);
 
@@ -688,21 +718,16 @@ void cluster_seeds(const IDBGAligner &aligner,
                         }
                     );
                 }
-
-                // pick the best alignment after co-linear chaining
-                if (initial_alignments.size()) {
-                    auto &best = *std::max_element(
-                        initial_alignments.begin(),
-                        initial_alignments.end(),
-                        [](const auto &a, const auto &b) { return a.get_score() < b.get_score(); }
-                    );
-                    ++seed_count;
-                    best.label_coordinates.clear();
-                    // logger->info("Alignment: {}", best);
-                    callback(std::move(best));
-                }
             }
         }
+
+        std::for_each(std::make_move_iterator(initial_alignments.begin()),
+                      std::make_move_iterator(initial_alignments.end()),
+                      [&](Alignment&& aln) {
+                          ++seed_count;
+                          aln.label_coordinates.clear();
+                          callback(std::move(aln));
+                      });
     }
 
     logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
