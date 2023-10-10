@@ -66,12 +66,13 @@ PenaltyBreakString: 1000
 PenaltyBreakTemplateDeclaration: 1
 PenaltyExcessCharacter: 5
 PenaltyReturnTypeOnItsOwnLine: 60
-PointerAlignment: Right
+PointerAlignment: Left
 RawStringFormats:
   - Delimiters:
       - 'pb'
     Language:        TextProto
     BasedOnStyle:    LLVM
+ReferenceAlignment: Left
 ReflowComments: true
 SortIncludes: false
 SortUsingDeclarations: false

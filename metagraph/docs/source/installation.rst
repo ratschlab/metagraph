@@ -72,21 +72,21 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-            brew install libomp cmake make bzip2 boost jemalloc
+            brew install libomp cmake make bzip2 boost jemalloc automake autoconf
 
 
     .. group-tab:: Ubuntu / Debian
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev
+            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf
 
 
     .. group-tab:: CentOS
 
         For **CentOS** (8 or higher)::
 
-            yum install cmake bzip2-devel jemalloc-devel boost-devel
+            yum install cmake bzip2-devel jemalloc-devel boost-devel automake autoconf
 
 
     .. group-tab:: brew + GNU gcc
