@@ -21,12 +21,26 @@ static_assert(std::is_same_v<GraphTopology::Column, BinaryMatrix::Column>);
 static_assert(std::is_same_v<GraphTopology::Row, BinaryMatrix::Row>);
 
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
-                             std::unique_ptr<Annotator>&& annotator,
+                             std::shared_ptr<const Annotator> annotator,
+                             std::unique_ptr<Annotator>&& unitigs,
+                             std::unique_ptr<Annotator>&& clusters)
+      : graph_(graph), annotator_(annotator),
+        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_)),
+        unitig_annotator_(std::move(unitigs)), cluster_annotator_(std::move(clusters)) {
+    assert(annotator_);
+    assert(unitig_annotator_);
+    assert(cluster_annotator_);
+    assert(annotator_->num_labels() == unitig_annotator_->num_labels());
+    assert(annotator_->num_labels() == cluster_annotator_->num_labels());
+}
+
+GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
+                             std::shared_ptr<align::AnnotationBuffer> buffer,
                              std::unique_ptr<Annotator>&& unitigs,
                              std::unique_ptr<Annotator>&& clusters)
       : graph_(graph),
-        annotator_(std::move(annotator)),
-        unitig_annotator_(std::move(unitigs)),
+        annotator_(std::shared_ptr<const Annotator>{}, &buffer_->get_annotator()),
+        buffer_(buffer), unitig_annotator_(std::move(unitigs)),
         cluster_annotator_(std::move(clusters)) {
     assert(annotator_);
     assert(unitig_annotator_);
@@ -38,15 +52,14 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
 auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         -> std::vector<Coords> {
     assert(annotator_);
-    align::AnnotationBuffer buffer(graph_, *annotator_);
-    buffer.queue_path(std::vector<node_index>(nodes));
-    buffer.fetch_queued_annotations();
+    buffer_->queue_path(std::vector<node_index>(nodes));
+    buffer_->fetch_queued_annotations();
 
     std::vector<RowTuples> tuples;
     tuples.reserve(nodes.size());
     for (node_index node : nodes) {
         auto &row_tuple = tuples.emplace_back();
-        const auto [cols, coords] = buffer.get_labels_and_coords(node);
+        const auto [cols, coords] = buffer_->get_labels_and_coords(node);
         assert(cols);
         assert(coords);
         assert(cols->size());
@@ -123,14 +136,6 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
 
 bool GraphTopology::load(const std::string &filename_base) {
     {
-        std::string fname = filename_base + annotator_->file_extension();
-        if (!annotator_->load(fname)) {
-            common::logger->error("Failed to load coords from {}", fname);
-            return false;
-        }
-    }
-
-    {
         std::string fname = filename_base + unitig_annotator_->file_extension();
         if (!unitig_annotator_->load(fname)) {
             common::logger->error("Failed to load unitig indicator from {}", fname);
@@ -153,7 +158,6 @@ bool GraphTopology::load(const std::string &filename_base) {
 }
 
 void GraphTopology::serialize(const std::string &filename_base) const {
-    annotator_->serialize(filename_base + annotator_->file_extension());
     unitig_annotator_->serialize(filename_base + unitig_annotator_->file_extension());
     cluster_annotator_->serialize(filename_base + cluster_annotator_->file_extension());
 }

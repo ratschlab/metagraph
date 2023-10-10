@@ -4,8 +4,11 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 
-namespace mtg {
-namespace graph {
+namespace mtg::graph {
+
+namespace align {
+    class AnnotationBuffer;
+}
 
 class GraphTopology : public SequenceGraph::GraphExtension {
   public:
@@ -17,9 +20,14 @@ class GraphTopology : public SequenceGraph::GraphExtension {
     using Coords = Vector<std::pair<Coord, TopologyIndex>>;
 
     GraphTopology(const graph::DeBruijnGraph &graph,
-                  std::unique_ptr<Annotator>&& annotator,
-                  std::unique_ptr<Annotator>&& unitigs,
-                  std::unique_ptr<Annotator>&& clusters);
+                  std::shared_ptr<const Annotator> annotator = {},
+                  std::unique_ptr<Annotator>&& unitigs = {},
+                  std::unique_ptr<Annotator>&& clusters = {});
+
+    GraphTopology(const graph::DeBruijnGraph &graph,
+                  std::shared_ptr<align::AnnotationBuffer> buffer,
+                  std::unique_ptr<Annotator>&& unitigs = {},
+                  std::unique_ptr<Annotator>&& clusters = {});
 
     std::vector<Coords> get_coords(const std::vector<graph::DeBruijnGraph::node_index> &nodes) const;
 
@@ -35,12 +43,12 @@ class GraphTopology : public SequenceGraph::GraphExtension {
 
   private:
     const DeBruijnGraph &graph_;
-    std::unique_ptr<Annotator> annotator_;
+    std::shared_ptr<const Annotator> annotator_;
+    std::shared_ptr<align::AnnotationBuffer> buffer_;
     std::unique_ptr<Annotator> unitig_annotator_;
     std::unique_ptr<Annotator> cluster_annotator_;
 };
 
-} // namespace graph
-} // namespace mtg
+} // namespace mtg::graph
 
 #endif // __GRAPH_TOPOLOGY_HPP__
