@@ -579,14 +579,13 @@ void cluster_seeds(const IDBGAligner &aligner,
     // for each orientation
     for (auto &clustered_seeds : clustered_seed_maps) {
         // for each column
-        std::vector<Alignment> initial_alignments;
+        std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> best_chains;
         for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
             if (skip_column(it->first))
                 continue;
 
             // for each cluster
             for (auto kt = it.value().begin(); kt != it.value().end(); ++kt) {
-                std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> best_chains;
                 // co-linear chain the seeds within each unitig
                 for (auto jt = kt.value().begin(); jt != kt.value().end(); ++jt) {
                     auto &anchors = jt.value();
@@ -604,6 +603,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                         return a.get_query_view().end() > b.get_query_view().end();
                     });
 
+                    std::vector<std::pair<AnchorChain<Seed>, std::vector<score_t>>> chains;
                     chain_anchors<Seed>(config, anchors.data(), anchors.data() + anchors.size(),
                         [&config](const Seed &a_i,
                                   ssize_t /* max_dist */,
@@ -652,82 +652,104 @@ void cluster_seeds(const IDBGAligner &aligner,
                             });
                         },
                         [&](const AnchorChain<Seed> &chain, const std::vector<score_t> &score_traceback) {
-                            best_chains.emplace_back(it->first, chain, score_traceback);
-                            return true;
+                            if (chains.empty() || score_traceback[0] == chains.back().second[0]) {
+                                chains.emplace_back(chain, score_traceback);
+                                return true;
+                            } else if (score_traceback[0] > chains.back().second[0]) {
+                                chains.clear();
+                                chains.emplace_back(chain, score_traceback);
+                                return true;
+                            }
+                            return false;
                         },
                         false
                     );
-                }
 
-                if (best_chains.empty())
-                    continue;
-
-                std::sort(best_chains.begin(), best_chains.end(), [&](const auto &a, const auto &b) {
-                    const auto &[a_col, a_chain, a_score_traceback] = a;
-                    const auto &[b_col, b_chain, b_score_traceback] = b;
-                    return a_score_traceback[0] > b_score_traceback[0];
-                });
-
-                for (const auto &[col, chain, score_traceback] : best_chains) {
-                    if (score_traceback[0] < std::get<2>(best_chains[0])[0])
-                        break;
-
-                    if (skip_column(col))
-                        continue;
-
-                    extend_chain<Seed>(chain, score_traceback,
-                        [&](const Seed *next, Alignment&& cur, size_t coord_dist, const auto&, const auto &callback) {
-                            if (cur.empty()) {
-                                cur = Alignment(*next, config);
-                                callback(std::move(cur));
-                                return;
-                            }
-
-                            std::string_view query = !next->get_orientation() ? forward : reverse;
-
-                            // logger->info("Connect: {} -> {}", Alignment(*next, config), cur);
-
-                            Alignment next_aln(*next, config);
-                            int64_t coord = next->label_coordinates[0][0];
-
-                            next_aln.label_coordinates.clear();
-                            auto extensions = aligner.build_extender(query)->get_extensions(
-                                std::move(next_aln),
-                                config.ninf,                         // min_path_score
-                                true,                                // force_fixed_seed
-                                coord_dist + next->get_query_view().size(),                          // target_length
-                                cur.get_nodes().back(),           // target_node
-                                false,                               // trim_offset_after_extend
-                                cur.get_end_clipping()           // trim_query_suffix
-                            );
-
-                            for (auto&& ext : extensions) {
-                                ext.label_coordinates.resize(1);
-                                ext.label_coordinates[0].assign(1, coord);
-                                callback(std::move(ext));
-                            }
-
-                            if (extensions.empty()) {
-                                cur.trim_offset();
-                                initial_alignments.emplace_back(std::move(cur));
-                            }
-                        },
-                        [&](Alignment&& aln) {
-                            aln.trim_offset();
-                            initial_alignments.emplace_back(std::move(aln));
-                        }
-                    );
+                    for (auto &[chain, score_traceback] : chains) {
+                        best_chains.emplace_back(it->first, std::move(chain),
+                                                 std::move(score_traceback));
+                    }
                 }
             }
         }
 
-        std::for_each(std::make_move_iterator(initial_alignments.begin()),
-                      std::make_move_iterator(initial_alignments.end()),
-                      [&](Alignment&& aln) {
-                          ++seed_count;
-                          aln.label_coordinates.clear();
-                          callback(std::move(aln));
-                      });
+        if (best_chains.empty())
+            continue;
+
+        std::sort(best_chains.begin(), best_chains.end(), [&](const auto &a, const auto &b) {
+            const auto &[a_col, a_chain, a_score_traceback] = a;
+            const auto &[b_col, b_chain, b_score_traceback] = b;
+            return a_score_traceback[0] > b_score_traceback[0];
+        });
+
+        for (const auto &[col, chain, score_traceback] : best_chains) {
+            if (skip_column(col))
+                continue;
+
+            // logger->info("Chain");
+            // for (const auto &[a, dist] : chain) {
+            //     logger->info("\t{}\t{}", Alignment(*a, config), dist);
+            // }
+
+            const Seed *last;
+            extend_chain<Seed>(chain, score_traceback,
+                [&](const Seed *next, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
+                    if (cur.empty()) {
+                        last = next;
+                        cur = Alignment(*next, config);
+                        continue_callback(std::move(cur));
+                        return;
+                    }
+
+                    std::string_view query = !next->get_orientation() ? forward : reverse;
+
+                    coord_dist += next->get_query_view().size() + (cur.get_nodes().size() - last->get_nodes().size());
+                    // logger->info("Connect: {} -> {}\tdist: {}", Alignment(*next, config), cur, coord_dist);
+
+                    Alignment next_aln(*next, config);
+                    int64_t coord = next->label_coordinates[0][0];
+                    next_aln.label_coordinates.clear();
+
+                    auto extensions = aligner.build_extender(query)->get_extensions(
+                        std::move(next_aln),
+                        config.ninf,                         // min_path_score
+                        true,                                // force_fixed_seed
+                        coord_dist,                          // target_length
+                        cur.get_nodes().back(),           // target_node
+                        false,                               // trim_offset_after_extend
+                        cur.get_end_clipping()           // trim_query_suffix
+                    );
+
+                    bool found = false;
+                    for (auto&& ext : extensions) {
+                        if (ext.get_query_view().end() == cur.get_query_view().end()
+                                && ext.get_nodes().back() == cur.get_nodes().back()) {
+                            found = true;
+                            ext.label_coordinates.resize(1);
+                            ext.label_coordinates[0].assign(1, coord);
+                            continue_callback(std::move(ext));
+                        }
+                    }
+
+                    if (!found) {
+                        cur.trim_offset();
+                        cur.label_coordinates.clear();
+                        ++seed_count;
+                        // logger->info("Failed: Chain: {} Score: {} -> Alignment: {}", chain.size(), score_traceback[0], cur);
+                        callback(std::move(cur));
+                    }
+
+                    last = next;
+                },
+                [&](Alignment&& aln) {
+                    aln.trim_offset();
+                    aln.label_coordinates.clear();
+                    ++seed_count;
+                    // logger->info("Success: Chain: {} Score: {} -> Alignment: {}", chain.size(), score_traceback[0], aln);
+                    callback(std::move(aln));
+                }
+            );
+        }
     }
 
     logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
