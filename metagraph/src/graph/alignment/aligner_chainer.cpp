@@ -525,10 +525,17 @@ void cluster_seeds(const IDBGAligner &aligner,
     const auto &graph = aligner.get_graph();
 
     const auto *topology = graph.get_extension_threadsafe<graph::GraphTopology>();
-    if (!topology)
-        return;
+    if (!topology) {
+        for (const auto &seed : fwd_seeds) {
+            callback(Alignment(seed, config));
+        }
 
-    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+        for (const auto &seed : bwd_seeds) {
+            callback(Alignment(seed, config));
+        }
+
+        return;
+    }
 
     std::vector<node_index> nodes;
     nodes.reserve(fwd_seeds.size() + bwd_seeds.size());
@@ -558,15 +565,10 @@ void cluster_seeds(const IDBGAligner &aligner,
     auto parse_set = [&](const auto &seeds, auto &clustered_seeds) {
         for (const auto &seed : seeds) {
             assert(it != coords.end());
-            if (labeled_aligner) {
-                throw std::runtime_error("Fix me");
-            } else {
-                assert(it->size() <= 2);
-                for (const auto &[col, topo] : *it) {
-                    auto &cur = clustered_seeds[col.first][topo.second][topo.first].emplace_back(seed);
-                    cur.label_coordinates.clear();
-                    cur.label_coordinates.emplace_back(1, col.second + cur.get_offset());
-                }
+            for (const auto &[col, topo] : *it) {
+                auto &cur = clustered_seeds[col.first][topo.second][topo.first].emplace_back(seed);
+                cur.label_coordinates.clear();
+                cur.label_coordinates.emplace_back(1, col.second + cur.get_offset());
             }
             ++it;
         }
@@ -578,8 +580,9 @@ void cluster_seeds(const IDBGAligner &aligner,
 
     // for each orientation
     for (auto &clustered_seeds : clustered_seed_maps) {
-        // for each column
         std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> best_chains;
+
+        // for each column
         for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
             if (skip_column(it->first))
                 continue;
@@ -676,27 +679,49 @@ void cluster_seeds(const IDBGAligner &aligner,
         if (best_chains.empty())
             continue;
 
-        std::sort(best_chains.begin(), best_chains.end(), [&](const auto &a, const auto &b) {
-            const auto &[a_col, a_chain, a_score_traceback] = a;
-            const auto &[b_col, b_chain, b_score_traceback] = b;
-            return a_score_traceback[0] > b_score_traceback[0];
-        });
+        struct AnchorChainHash {
+            inline std::size_t operator()(const AnchorChain<Seed> &chain) const {
+                uint64_t hash = 0;
+                for (const auto &[aln, dist] : chain) {
+                    for (node_index node : aln->get_nodes()) {
+                        hash ^= node + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+                    }
+                    hash ^= dist + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+                }
+                return hash;
+            }
+        };
+
+        if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
+            auto *anno_buffer = &labeled_aligner->get_annotation_buffer();
+            tsl::hopscotch_map<AnchorChain<Seed>, Vector<Alignment::Column>, AnchorChainHash> chain_map;
+            for (const auto &[col, chain, score_traceback] : best_chains) {
+                if (skip_column(col))
+                    continue;
+
+                chain_map[chain].emplace_back(col);
+            }
+
+            std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> merged_best_chains;
+            for (const auto &[chain, cols] : chain_map) {
+                merged_best_chains.emplace_back(
+                    anno_buffer->cache_column_set(cols.begin(), cols.end()),
+                    chain,
+                    std::vector<score_t>(chain.size(), 0)
+                );
+            }
+
+            std::swap(merged_best_chains, best_chains);
+        }
 
         for (const auto &[col, chain, score_traceback] : best_chains) {
-            if (skip_column(col))
-                continue;
-
-            // logger->info("Chain");
-            // for (const auto &[a, dist] : chain) {
-            //     logger->info("\t{}\t{}", Alignment(*a, config), dist);
-            // }
-
             const Seed *last;
             extend_chain<Seed>(chain, score_traceback,
                 [&](const Seed *next, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
                     if (cur.empty()) {
                         last = next;
                         cur = Alignment(*next, config);
+                        cur.label_columns = col;
                         continue_callback(std::move(cur));
                         return;
                     }
@@ -707,6 +732,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                     // logger->info("Connect: {} -> {}\tdist: {}", Alignment(*next, config), cur, coord_dist);
 
                     Alignment next_aln(*next, config);
+                    next_aln.label_columns = col;
                     int64_t coord = next->label_coordinates[0][0];
                     next_aln.label_coordinates.clear();
 

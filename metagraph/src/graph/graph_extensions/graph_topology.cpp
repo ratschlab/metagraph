@@ -47,6 +47,17 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
     assert(cluster_annotator_);
     assert(annotator_->num_labels() == unitig_annotator_->num_labels());
     assert(annotator_->num_labels() == cluster_annotator_->num_labels());
+
+#ifndef NDEBUG
+    for (const auto &label : annotator_->get_label_encoder().get_labels()) {
+        auto anno_enc = annotator_->get_label_encoder().encode(label);
+        auto unitig_enc = unitig_annotator_->get_label_encoder().encode(label);
+        auto cluster_enc = cluster_annotator_->get_label_encoder().encode(label);
+
+        assert(anno_enc == unitig_enc);
+        assert(cluster_enc == unitig_enc);
+    }
+#endif
 }
 
 auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
@@ -82,7 +93,6 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         VectorMap<Row, Vector<Column>> row_coords;
 
         for (const auto &[c, tuple] : row_tuples) {
-            assert(tuple.size() <= 2);
             for (auto coord : tuple) {
                 row_coords[coord].emplace_back(c);
                 result[i].emplace_back(Coord(c, coord), TopologyIndex());

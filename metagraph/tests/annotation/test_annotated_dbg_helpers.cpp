@@ -7,6 +7,8 @@
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/utils/file_utils.hpp"
@@ -23,6 +25,38 @@ using common::logger;
 
 typedef typename RowDiffCoordAnnotator::binary_matrix_type CoordRowDiff;
 
+std::shared_ptr<graph::GraphTopology>
+make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
+              std::shared_ptr<const AnnotatedDBG::Annotator> coord_anno,
+              const std::vector<std::string> &unitigs,
+              const std::vector<size_t> &cluster_ids,
+              const std::vector<std::string> &labels) {
+    assert(unitigs.size() == cluster_ids.size());
+    assert(unitigs.size() == labels.size());
+
+    if (unitigs.empty())
+        return {};
+
+    auto unitig_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto cluster_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    size_t coord = 0;
+
+    for (size_t i = 0; i < unitigs.size(); ++i) {
+        coord += unitigs[i].size() - graph->get_k() + 1;
+        unitig_anno->add_labels({ coord }, { labels[i] });
+
+        if (i + 1 == unitigs.size() || cluster_ids[i + 1] != cluster_ids[i] || labels[i] != labels[i + 1]) {
+            cluster_anno->add_labels({ coord }, { labels[i] });
+            if (i + 1 != unitigs.size() && labels[i] != labels[i + 1])
+                coord = 0;
+        }
+    }
+
+    return std::make_shared<graph::GraphTopology>(
+        *graph, coord_anno, std::move(unitig_anno), std::move(cluster_anno)
+    );
+}
+
 template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
@@ -31,17 +65,55 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                bool coordinates,
                                                bool mask_dummy_kmers) {
     if constexpr(std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
-        static_assert(std::is_same_v<Graph, DBGSuccinct>);
+        static_assert(std::is_base_of_v<DBGSuccinct, Graph>);
     } else if constexpr(std::is_same_v<Annotation, RowDiffDiskAnnotator>) {
-        static_assert(std::is_same_v<Graph, DBGSuccinct>);
-    } else {
-        throw std::runtime_error("Unsupported combination");
+        static_assert(std::is_base_of_v<DBGSuccinct, Graph>);
     }
 
-    return build_anno_graph<Annotation>(
-        build_graph_batch<Graph>(k, sequences, mode, mask_dummy_kmers),
-        sequences, labels, coordinates
-    );
+    if constexpr(!std::is_same_v<Graph, DBGSuccinctTopology>) {
+        return build_anno_graph<Annotation>(
+            build_graph_batch<Graph>(k, sequences, mode, mask_dummy_kmers),
+            sequences, labels, coordinates
+        );
+    } else {
+        std::ignore = coordinates;
+    }
+
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode, mask_dummy_kmers);
+    tsl::hopscotch_map<std::string, std::vector<std::string>> label_sets;
+    assert(sequences.size() == labels.size());
+    for (size_t i = 0; i < sequences.size(); ++i) {
+        label_sets[labels[i]].emplace_back(sequences[i]);
+    }
+
+    std::vector<std::string> unitigs;
+    std::vector<std::string> unitig_labels;
+    std::vector<size_t> cluster_ids;
+    for (const auto &[label, sequences] : label_sets) {
+        assemble_superbubbles(
+            [&](const auto &callback) {
+                std::for_each(sequences.begin(), sequences.end(), callback);
+            },
+            k,
+            [&](const std::string &unitig, size_t cluster_id) {
+                unitigs.emplace_back(unitig);
+                unitig_labels.emplace_back(label);
+                cluster_ids.emplace_back(cluster_id);
+            },
+            mode
+        );
+    }
+
+    auto anno_graph = build_anno_graph<Annotation>(graph, unitigs, unitig_labels, true);
+    graph->add_extension(make_topology(graph,
+                                       std::shared_ptr<const AnnotatedDBG::Annotator>(
+                                           std::shared_ptr<const AnnotatedDBG::Annotator>{},
+                                           &anno_graph->get_annotator()
+                                       ),
+                                       unitigs, cluster_ids, unitig_labels
+    ));
+
+    return anno_graph;
 }
 
 template <class Annotation>
@@ -251,12 +323,14 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
 }
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
@@ -264,6 +338,8 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAn
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
 
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<ColumnCompressed<>>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool);

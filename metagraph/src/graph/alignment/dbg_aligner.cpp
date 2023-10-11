@@ -845,6 +845,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     std::vector<Alignment> fwd_seeds;
     std::vector<Alignment> bwd_seeds;
+
     cluster_seeds(*this, forward, reverse, config_, forward_seeder.get_seeds(),
                   reverse_seeder ? reverse_seeder->get_seeds() : std::vector<Seed>{},
                   [&](Alignment&& aln) {

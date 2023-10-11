@@ -52,9 +52,12 @@ class LabeledAlignerTest : public ::testing::Test {};
 
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinctTopology, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinctTopology, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGSuccinctTopology, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
@@ -159,6 +162,16 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
         return;
     }
 
+    if constexpr(std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>
+            && !std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        common::logger->warn("RowDiff only supported for DBGSuccinct");
+        return;
+    }
+
+    if constexpr(std::is_same_v<typename TypeParam::first_type, DBGSuccinctTopology>) {
+        return;
+    }
+
     size_t k = 3;
     /*  B                  AB  AB
        CGA                 GCC-CCT
@@ -222,6 +235,16 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
         return;
     }
 
+    if constexpr(std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>
+            && !std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        common::logger->warn("RowDiff only supported for DBGSuccinct");
+        return;
+    }
+
+    if constexpr(std::is_same_v<typename TypeParam::first_type, DBGSuccinctTopology>) {
+        return;
+    }
+
     size_t k = 3;
     /*  B                  AB  AB
        CGA                 GCC-CCT
@@ -282,6 +305,16 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     // TODO: for now, not implemented for other annotators
     if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
                     && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    if constexpr(std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>
+            && !std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        common::logger->warn("RowDiff only supported for DBGSuccinct");
+        return;
+    }
+
+    if constexpr(std::is_same_v<typename TypeParam::first_type, DBGSuccinctTopology>) {
         return;
     }
 

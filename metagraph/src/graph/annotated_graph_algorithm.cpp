@@ -459,7 +459,7 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
     // assemble unitigs
     std::vector<std::tuple<node_index, node_index, size_t, std::string>> unitigs;
     std::atomic<unitig_index> num_unitigs { 0 };
-    std::vector<unitig_index> node_to_unitig(dbg.num_nodes() + 1);
+    std::vector<unitig_index> node_to_unitig(dbg.max_index() + 1);
     std::mutex mu;
 
     dbg.call_unitigs([&](const std::string &seq, const auto &path) {
