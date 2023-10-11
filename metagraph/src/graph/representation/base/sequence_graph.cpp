@@ -154,9 +154,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
             ++progress_bar;
 
             targets.clear();
-            graph.call_outgoing_kmers(node,
-                [&](node_index next, char c) { targets.emplace_back(next, c); }
-            );
+            graph.call_outgoing_kmers(node, [&](node_index next, char c) {
+                targets.emplace_back(next, c);
+            });
 
             if (targets.empty())
                 break;
@@ -316,6 +316,21 @@ void call_sequences(const DeBruijnGraph &graph,
 
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
+
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph)) {
+        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
+            if (!dbg_succ->get_mask()) {
+                bitmap_vector dummy_mask(dbg_succ->get_boss().mark_all_dummy_edges(num_threads));
+                dummy_mask.call_ones_in_range(1, dummy_mask.size(),
+                    [&](auto i) {
+                        discovered[i] = true;
+                        discovered[canonical->reverse_complement(i)] = true;
+                    }
+                );
+            }
+        }
+    }
+
     sdsl::bit_vector visited = discovered;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
