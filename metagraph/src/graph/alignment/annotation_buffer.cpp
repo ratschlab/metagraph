@@ -335,7 +335,11 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
             assert(!dbg_succ || dbg_succ->get_mask()
                 || !dbg_succ->get_boss().is_dummy(AnnotatedDBG::anno_to_graph_index(*row_it)));
             if (labels.empty()) {
-                logger->error("Failed\t{}:{}", AnnotatedDBG::anno_to_graph_index(*row_it),graph_.get_node_sequence(AnnotatedDBG::anno_to_graph_index(*row_it)));
+                logger->error(
+                    "Failed\t{}:{}",
+                    AnnotatedDBG::anno_to_graph_index(*row_it),
+                    graph_.get_node_sequence(AnnotatedDBG::anno_to_graph_index(*row_it))
+                );
             }
             assert(labels.size());
             std::sort(labels.begin(), labels.end());

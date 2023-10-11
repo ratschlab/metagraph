@@ -412,14 +412,6 @@ void CanonicalDBG::call_sequences(const CallPath &callback,
     }
 }
 
-void CanonicalDBG::call_unitigs(const CallPath &callback,
-                                size_t num_threads,
-                                size_t min_tip_size,
-                                bool kmers_in_single_form) const {
-    // TODO: port over implementation from DBGSuccinct to DeBruijnGraph
-    DeBruijnGraph::call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
-}
-
 std::string CanonicalDBG::get_node_sequence(node_index index) const {
     assert(index <= offset_ * 2);
     node_index node = get_base_node(index);

@@ -86,11 +86,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                                 size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const override final;
 
-    virtual void call_unitigs(const CallPath &callback,
-                              size_t num_threads = 1,
-                              size_t min_tip_size = 1,
-                              bool kmers_in_single_form = false) const override final;
-
     virtual uint64_t num_nodes() const override final { return graph_->num_nodes() * 2; }
     virtual uint64_t max_index() const override final { return graph_->max_index() * 2; }
 
