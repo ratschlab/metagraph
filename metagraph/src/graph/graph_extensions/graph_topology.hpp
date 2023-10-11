@@ -41,12 +41,18 @@ class GraphTopology : public SequenceGraph::GraphExtension {
         return *annotator_;
     }
 
+    static std::string unitig_extension() { return kUnitigExtension; }
+    static std::string cluster_extension() { return kClusterExtension; }
+
   private:
     const DeBruijnGraph &graph_;
     std::shared_ptr<const Annotator> annotator_;
     std::shared_ptr<align::AnnotationBuffer> buffer_;
     std::unique_ptr<Annotator> unitig_annotator_;
     std::unique_ptr<Annotator> cluster_annotator_;
+
+    static constexpr auto kUnitigExtension = ".unitigs";
+    static constexpr auto kClusterExtension = ".clusters";
 };
 
 } // namespace mtg::graph

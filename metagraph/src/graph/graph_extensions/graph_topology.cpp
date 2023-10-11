@@ -146,7 +146,7 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
 
 bool GraphTopology::load(const std::string &filename_base) {
     {
-        std::string fname = filename_base + unitig_annotator_->file_extension();
+        std::string fname = filename_base + kUnitigExtension + unitig_annotator_->file_extension();
         if (!unitig_annotator_->load(fname)) {
             common::logger->error("Failed to load unitig indicator from {}", fname);
             return false;
@@ -154,7 +154,7 @@ bool GraphTopology::load(const std::string &filename_base) {
     }
 
     {
-        std::string fname = filename_base + cluster_annotator_->file_extension();
+        std::string fname = filename_base + kClusterExtension + cluster_annotator_->file_extension();
         if (!cluster_annotator_->load(fname)) {
             common::logger->error("Failed to load cluster indicator from {}", fname);
             return false;
@@ -168,8 +168,8 @@ bool GraphTopology::load(const std::string &filename_base) {
 }
 
 void GraphTopology::serialize(const std::string &filename_base) const {
-    unitig_annotator_->serialize(filename_base + unitig_annotator_->file_extension());
-    cluster_annotator_->serialize(filename_base + cluster_annotator_->file_extension());
+    unitig_annotator_->serialize(filename_base + kUnitigExtension + unitig_annotator_->file_extension());
+    cluster_annotator_->serialize(filename_base + kClusterExtension + cluster_annotator_->file_extension());
 }
 
 } // namespace mtg::graph
