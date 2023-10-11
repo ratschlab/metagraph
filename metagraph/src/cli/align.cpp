@@ -12,6 +12,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "graph/graph_extensions/hll_wrapper.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -371,7 +372,15 @@ int align_to_graph(Config *config) {
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            auto *topology = graph->template get_extension_threadsafe<GraphTopology>();
             graph = std::make_shared<CanonicalDBG>(graph);
+
+            if (topology) {
+                graph->add_extension(std::shared_ptr<GraphTopology>(
+                    std::shared_ptr<GraphTopology>{}, topology
+                ));
+            }
+
             logger->trace("Primary graph wrapped into canonical");
         }
 
