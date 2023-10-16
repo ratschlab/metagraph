@@ -132,7 +132,8 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
 
     LabeledAligner(const DeBruijnGraph &graph,
                    const DBGAlignerConfig &config,
-                   const Annotator &annotator);
+                   const Annotator &annotator,
+                   bool global_coordinates = true);
 
     virtual ~LabeledAligner();
 

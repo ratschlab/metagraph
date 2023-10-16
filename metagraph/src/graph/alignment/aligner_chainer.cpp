@@ -578,6 +578,18 @@ void cluster_seeds(const IDBGAligner &aligner,
     parse_set(bwd_seeds, clustered_seed_maps[1]);
     assert(it == coords.end());
 
+    if (clustered_seed_maps[0].empty() && clustered_seed_maps[1].empty()) {
+        for (const auto &seed : fwd_seeds) {
+            callback(Alignment(seed, config));
+        }
+
+        for (const auto &seed : bwd_seeds) {
+            callback(Alignment(seed, config));
+        }
+
+        return;
+    }
+
     // for each orientation
     for (auto &clustered_seeds : clustered_seed_maps) {
         std::vector<std::tuple<Alignment::Column, AnchorChain<Seed>, std::vector<score_t>>> best_chains;

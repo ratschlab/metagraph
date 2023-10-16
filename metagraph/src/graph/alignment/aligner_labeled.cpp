@@ -473,9 +473,10 @@ template <class Seeder, class Extender, class AlignmentCompare>
 LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::LabeledAligner(const DeBruijnGraph &graph,
                  const DBGAlignerConfig &config,
-                 const Annotator &annotator)
+                 const Annotator &annotator,
+                 bool global_coordinates)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator),
+        annotation_buffer_(graph, annotator, global_coordinates),
         max_seed_length_(this->config_.max_seed_length) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {

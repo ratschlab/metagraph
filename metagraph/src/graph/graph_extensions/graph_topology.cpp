@@ -26,7 +26,7 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
                              std::unique_ptr<Annotator>&& unitigs,
                              std::unique_ptr<Annotator>&& clusters)
       : graph_(graph), annotator_(annotator),
-        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_)),
+        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)),
         unitig_annotator_(std::move(unitigs)), cluster_annotator_(std::move(clusters)) {
     assert(annotator_);
     assert(unitig_annotator_);
@@ -94,7 +94,6 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         VectorMap<Row, Vector<Column>> row_coords;
 
         for (const auto &[c, tuple] : row_tuples) {
-            common::logger->info("Column: {}\tNode: {}\tCoords: {}",c,graph_.get_node_sequence(nodes[i]), fmt::join(tuple, ","));
             assert(graph_.get_mode() != DeBruijnGraph::BASIC || tuple.size() <= 1);
             assert(tuple.size() <= 2);
             for (auto coord : tuple) {

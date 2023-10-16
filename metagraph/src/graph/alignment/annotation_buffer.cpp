@@ -23,13 +23,17 @@ typedef annot::matrix::BinaryMatrix::Column Column;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
-AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
+AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
+                                   const Annotator &annotator,
+                                   bool global_coordinates)
       : graph_(graph),
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
+        global_coords_(global_coordinates),
         column_sets_({ {} }) {
     if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
+        global_coords_ = false;
         logger->warn("Coordinates not supported when aligning to CANONICAL "
                      "or PRIMARY mode graphs. Alignments may be truncated.");
     }

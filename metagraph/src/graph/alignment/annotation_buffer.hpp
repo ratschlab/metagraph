@@ -24,7 +24,9 @@ class AnnotationBuffer {
     typedef Vector<Alignment::Column> Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 
-    AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
+    AnnotationBuffer(const DeBruijnGraph &graph,
+                     const Annotator &annotator,
+                     bool global_coordinates = true);
 
     void queue_path(std::vector<node_index>&& path) {
         queued_paths_.push_back(std::move(path));
@@ -47,10 +49,7 @@ class AnnotationBuffer {
         return result;
     }
 
-    bool has_coordinates() const {
-        return multi_int_ && graph_.get_mode() == DeBruijnGraph::BASIC;
-    }
-
+    bool has_coordinates() const { return global_coords_; }
     bool has_local_coordinates() const { return multi_int_; }
 
     // Get the annotations and coordinates of a node if they have been fetched.
@@ -94,6 +93,7 @@ class AnnotationBuffer {
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
     const CanonicalDBG *canonical_;
+    bool global_coords_;
 
     mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
 
