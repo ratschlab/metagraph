@@ -252,10 +252,33 @@ int assemble(Config *config) {
         return 0;
     }
 
+    std::mutex write_mutex;
+
+    if (config->superbubbles) {
+        std::string fname = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
+        gzFile gz_out;
+        gz_out = gzopen(fname.c_str(), "w");
+        if (gz_out == Z_NULL) {
+            logger->error("Can't write to {}", fname);
+            exit(1);
+        }
+        assemble_superbubbles(*graph,
+            [&](const std::string &unitig, size_t cluster_id) {
+                std::lock_guard<std::mutex> lock(write_mutex);
+                seq_io::write_fasta(gz_out, std::to_string(cluster_id), unitig);
+            },
+            get_num_threads()
+        );
+
+        gzclose(gz_out);
+
+        logger->trace("Sequences extracted in {} sec", timer.elapsed());
+        return 0;
+    }
+
     seq_io::FastaWriter writer(config->outfbase, config->header,
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
-    std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) {

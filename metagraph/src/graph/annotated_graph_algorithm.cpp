@@ -480,6 +480,8 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
     sdsl::bit_vector output_unitig(unitigs.size(), false);
 #endif
 
+    logger->trace("Assembled {} unitigs", unitigs.size());
+
     // assemble superbubbles
     superbubble_index num_superbubbles = 0;
     std::vector<std::tuple<superbubble_index, superbubble_index, superbubble_index, uint64_t, uint64_t>> unitig_to_superbubble(unitigs.size() + 1);
@@ -660,6 +662,8 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
 
         ++cluster_id;
     }
+
+    logger->trace("Found {} unitig clusters", cluster_id);
 }
 
 } // namespace graph
