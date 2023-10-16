@@ -455,7 +455,8 @@ void assemble_superbubbles(const StringGenerator &generate,
 
 void assemble_superbubbles(const DeBruijnGraph &dbg,
                            const std::function<void(const std::string&, size_t)> &callback,
-                           size_t num_threads) {
+                           size_t num_threads,
+                           bool ignore_nested_superbubbles) {
     using unitig_index = node_index;
     using superbubble_index = node_index;
 
@@ -486,6 +487,11 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t unitig_id = 1; unitig_id <= unitigs.size(); ++unitig_id) {
+        // If this node is in the middle of a superbubble, then any superbubble
+        // found here is a nested one -> ignore this unitig.
+        if (ignore_nested_superbubbles && std::get<1>(unitig_to_superbubble[unitig_id]))
+            continue;
+
         const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
 
         if (dbg.outdegree(back) <= 1)

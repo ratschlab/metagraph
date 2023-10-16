@@ -68,7 +68,8 @@ void assemble_superbubbles(const StringGenerator &generate,
 
 void assemble_superbubbles(const DeBruijnGraph &dbg,
                            const std::function<void(const std::string&, size_t)> &callback,
-                           size_t num_threads = 1);
+                           size_t num_threads = 1,
+                           bool ignore_nested_superbubbles = true);
 
 } // namespace graph
 } // namespace mtg
