@@ -403,9 +403,13 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                 assert(canonical_ || node_to_cols.count(prev));
                 assert(node_to_cols.count(base_node));
                 auto [prev_labels, prev_coords] = get_labels_and_coords(prev);
+
+                // Only define coordinates for dummy k-mers of we have a global
+                // coordinate system. Otherwise, they are undefined.
                 CoordinateSet merged_prev_coords;
+
                 if (!prev_labels) {
-                    if (has_local_coordinates()) {
+                    if (has_coordinates()) {
                         assert(coords);
                         merged_prev_coords.reserve(coords->size());
                         for (auto &tuple : *coords) {
@@ -415,6 +419,8 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                 prev_tuple.emplace_back(c - 1);
                             }
                         }
+                    } else {
+                        merged_prev_coords.resize(labels->size());
                     }
 
                     push_node_labels(prev,
@@ -423,7 +429,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                      merged_prev_coords);
                 } else {
                     Columns merged_columns;
-                    if (has_local_coordinates()) {
+                    if (has_coordinates()) {
                         assert(coords);
                         assert(prev_coords);
                         utils::match_indexed_values(labels->begin(), labels->end(),
@@ -442,6 +448,9 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                         std::set_union(labels->begin(), labels->end(),
                                        prev_labels->begin(), prev_labels->end(),
                                        std::back_inserter(merged_columns));
+
+                        if (has_local_coordinates())
+                            merged_prev_coords.resize(merged_columns.size());
                     }
 
                     push_node_labels(prev,
