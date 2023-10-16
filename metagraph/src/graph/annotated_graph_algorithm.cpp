@@ -1,5 +1,7 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <progress_bar.hpp>
+
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -488,119 +490,126 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
     std::vector<std::tuple<superbubble_index, superbubble_index, superbubble_index, uint64_t, uint64_t>> unitig_to_superbubble(unitigs.size() + 1);
     std::vector<std::pair<std::vector<unitig_index>, bool>> superbubbles;
 
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t unitig_id = 1; unitig_id <= unitigs.size(); ++unitig_id) {
-        // If this node is in the middle of a superbubble, then any superbubble
-        // found here is a nested one -> ignore this unitig.
-        if (ignore_nested_superbubbles && std::get<1>(unitig_to_superbubble[unitig_id]))
-            continue;
+    {
+        ProgressBar progress_bar(unitigs.size(), "Finding superbubbles",
+                                std::cerr, !common::get_verbose());
 
-        const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+        #pragma omp parallel for num_threads(num_threads)
+        for (size_t unitig_id = 1; unitig_id <= unitigs.size(); ++unitig_id) {
+            ++progress_bar;
 
-        if (dbg.outdegree(back) <= 1)
-            continue;
+            // If this node is in the middle of a superbubble, then any superbubble
+            // found here is a nested one -> ignore this unitig.
+            if (ignore_nested_superbubbles && std::get<1>(unitig_to_superbubble[unitig_id]))
+                continue;
 
-        // start superbubble search
-        bool has_tips = false;
-        bool found_cycle = false;
-        std::vector<node_index> S { unitig_id };
+            const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
 
-        std::vector<unitig_index> visited;
-        tsl::hopscotch_map<unitig_index, bool> seen;
+            if (dbg.outdegree(back) <= 1)
+                continue;
 
-        while (S.size()) {
-            unitig_index unitig = S.back();
-            S.pop_back();
+            // start superbubble search
+            bool has_tips = false;
+            bool found_cycle = false;
+            std::vector<node_index> S { unitig_id };
 
-            visited.emplace_back(unitig);
-            seen[unitig] = true;
+            std::vector<unitig_index> visited;
+            tsl::hopscotch_map<unitig_index, bool> seen;
 
-            node_index node = std::get<1>(unitigs[unitig - 1]);
+            while (S.size()) {
+                unitig_index unitig = S.back();
+                S.pop_back();
 
-            bool has_children = false;
-            dbg.call_outgoing_kmers(node, [&](node_index next_front, char c) {
-                if (c == boss::BOSS::kSentinel)
-                    return;
+                visited.emplace_back(unitig);
+                seen[unitig] = true;
 
-                has_children = true;
-                if (found_cycle)
-                    return;
+                node_index node = std::get<1>(unitigs[unitig - 1]);
 
-                bool all_visited = true;
-                unitig_index next_unitig = node_to_unitig[next_front];
+                bool has_children = false;
+                dbg.call_outgoing_kmers(node, [&](node_index next_front, char c) {
+                    if (c == boss::BOSS::kSentinel)
+                        return;
 
-                if (next_unitig == unitig_id) {
-                    // cycle detected
-                    found_cycle = true;
-                    return;
-                }
+                    has_children = true;
+                    if (found_cycle)
+                        return;
 
-                auto [find, inserted] = seen.try_emplace(next_unitig, false);
-                if (find->second) {
-                    visited.emplace_back(next_unitig);
-                } else {
-                    dbg.call_incoming_kmers(next_front, [&](node_index sibling_back, char c) {
-                        if (c == boss::BOSS::kSentinel)
-                            return;
+                    bool all_visited = true;
+                    unitig_index next_unitig = node_to_unitig[next_front];
 
-                        if (all_visited) {
-                            unitig_index sibling_unitig = node_to_unitig[sibling_back];
-                            auto find = seen.find(sibling_unitig);
-                            if (find != seen.end() && !find->second)
-                                all_visited = false;
-                        }
-                    });
-
-                    if (all_visited)
-                        S.push_back(next_unitig);
-                }
-            });
-
-            if (found_cycle || !has_children)
-                break;
-
-            if (S.size() == 1 && seen.size() == visited.size() + 1) {
-                dbg.adjacent_outgoing_nodes(std::get<1>(unitigs[S[0] - 1]), [&](node_index next_front) {
-                    const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
-                    if (next_front == front)
+                    if (next_unitig == unitig_id) {
+                        // cycle detected
                         found_cycle = true;
+                        return;
+                    }
+
+                    auto [find, inserted] = seen.try_emplace(next_unitig, false);
+                    if (find->second) {
+                        visited.emplace_back(next_unitig);
+                    } else {
+                        dbg.call_incoming_kmers(next_front, [&](node_index sibling_back, char c) {
+                            if (c == boss::BOSS::kSentinel)
+                                return;
+
+                            if (all_visited) {
+                                unitig_index sibling_unitig = node_to_unitig[sibling_back];
+                                auto find = seen.find(sibling_unitig);
+                                if (find != seen.end() && !find->second)
+                                    all_visited = false;
+                            }
+                        });
+
+                        if (all_visited)
+                            S.push_back(next_unitig);
+                    }
                 });
 
-                if (!found_cycle) {
-                    // found a superbubble
-                    #pragma omp critical
-                    {
-                    assert(visited[0] == unitig_id);
-                    size_t superbubble_id = ++num_superbubbles;
-                    uint64_t coord = 1;
+                if (found_cycle || !has_children)
+                    break;
 
-                    assert(visited[0] < unitig_to_superbubble.size());
-                    auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[0]];
-                    start_sb = superbubble_id;
+                if (S.size() == 1 && seen.size() == visited.size() + 1) {
+                    dbg.adjacent_outgoing_nodes(std::get<1>(unitigs[S[0] - 1]), [&](node_index next_front) {
+                        const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                        if (next_front == front)
+                            found_cycle = true;
+                    });
 
-                    for (size_t i = 1; i < visited.size(); ++i) {
-                        coord += std::get<2>(unitigs[visited[i] - 1]);
-                        assert(visited[i] < unitig_to_superbubble.size());
-                        auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[i]];
-                        if (coord > mid_c) {
-                            mid_sb = superbubble_id;
-                            mid_c = coord;
+                    if (!found_cycle) {
+                        // found a superbubble
+                        #pragma omp critical
+                        {
+                        assert(visited[0] == unitig_id);
+                        size_t superbubble_id = ++num_superbubbles;
+                        uint64_t coord = 1;
+
+                        assert(visited[0] < unitig_to_superbubble.size());
+                        auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[0]];
+                        start_sb = superbubble_id;
+
+                        for (size_t i = 1; i < visited.size(); ++i) {
+                            coord += std::get<2>(unitigs[visited[i] - 1]);
+                            assert(visited[i] < unitig_to_superbubble.size());
+                            auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[i]];
+                            if (coord > mid_c) {
+                                mid_sb = superbubble_id;
+                                mid_c = coord;
+                            }
+                        }
+
+                        {
+                            assert(S[0] < unitig_to_superbubble.size());
+                            auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[S[0]];
+                            term_sb = superbubble_id;
+                            term_c = coord;
+                        }
+
+                        superbubbles.emplace_back(std::move(visited), has_tips).first.emplace_back(S[0]);
+                        assert(superbubbles.back().first.size() >= 4);
                         }
                     }
 
-                    {
-                        assert(S[0] < unitig_to_superbubble.size());
-                        auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[S[0]];
-                        term_sb = superbubble_id;
-                        term_c = coord;
-                    }
-
-                    superbubbles.emplace_back(std::move(visited), has_tips).first.emplace_back(S[0]);
-                    assert(superbubbles.back().first.size() >= 4);
-                    }
+                    S.clear();
                 }
-
-                S.clear();
             }
         }
     }
@@ -609,7 +618,13 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
     size_t cluster_id = 0;
     sdsl::bit_vector in_chain(superbubbles.size() + 1);
     std::vector<std::vector<superbubble_index>> chains;
+
+    ProgressBar progress_bar(unitigs.size(), "Chaining superbubbles",
+                             std::cerr, !common::get_verbose());
+
     for (unitig_index unitig_id = 1; unitig_id < unitig_to_superbubble.size(); ++unitig_id) {
+        ++progress_bar;
+
         const auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[unitig_id];
         if (!mid_sb && start_sb && !term_sb && !in_chain[start_sb]) {
             // start of a chain
