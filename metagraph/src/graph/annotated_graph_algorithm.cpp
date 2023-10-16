@@ -445,6 +445,9 @@ void assemble_superbubbles(const StringGenerator &generate,
                            DeBruijnGraph::Mode mode,
                            size_t num_threads) {
     // assemble graph
+    if (mode == DeBruijnGraph::PRIMARY)
+        mode = DeBruijnGraph::CANONICAL;
+
     DBGHashFast dbg(k, mode);
     generate([&dbg](std::string_view seq) { dbg.add_sequence(seq); });
     assemble_superbubbles(dbg, callback, num_threads);
@@ -471,6 +474,10 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
         std::lock_guard<std::mutex> lock(mu);
         unitigs.emplace_back(path.front(), path.back(), path.size(), seq);
     }, num_threads);
+
+#ifndef NDEBUG
+    sdsl::bit_vector output_unitig(unitigs.size(), false);
+#endif
 
     // assemble superbubbles
     superbubble_index num_superbubbles = 0;
@@ -534,24 +541,21 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                 }
             });
 
-            if (found_cycle)
+            if (found_cycle || !has_children)
                 break;
-
-            has_tips |= !has_children;
 
             if (S.size() == 1 && seen.size() == visited.size() + 1) {
                 dbg.adjacent_outgoing_nodes(std::get<1>(unitigs[S[0] - 1]), [&](node_index next_front) {
                     const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
-                    if (next_front == front) {
-                        // TODO: still keep these?
+                    if (next_front == front)
                         found_cycle = true;
-                    }
                 });
 
                 if (!found_cycle) {
                     // found a superbubble
                     #pragma omp critical
                     {
+                    assert(visited[0] == unitig_id);
                     size_t superbubble_id = ++num_superbubbles;
                     uint64_t coord = 1;
 
@@ -577,6 +581,7 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                     }
 
                     superbubbles.emplace_back(std::move(visited), has_tips).first.emplace_back(S[0]);
+                    assert(superbubbles.back().first.size() >= 4);
                     }
                 }
 
@@ -605,27 +610,46 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                 const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
                 if (next_start_sb && !next_mid_sb) {
                     chain.emplace_back(next_start_sb);
+                    assert(!in_chain[next_start_sb]);
                     in_chain[next_start_sb] = true;
-                    if (!has_tips)
-                        cur_start_sb = next_start_sb;
+                    cur_start_sb = next_start_sb;
                 }
             }
         }
 
         if (!start_sb && !mid_sb && !term_sb) {
             const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+            assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+            output_unitig[unitig_id - 1] = true;
+#endif
             callback(seq, cluster_id++);
         }
     }
 
     // outputting superbubbles
     for (const auto &chain : chains) {
+        const auto &[unitig_ids, has_tips] = superbubbles[chain[0] - 1];
+        unitig_index unitig_id = unitig_ids[0];
+        const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+        assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+        output_unitig[unitig_id - 1] = true;
+#endif
+        callback(seq, cluster_id);
+
         for (superbubble_index superbubble_id : chain) {
             const auto &[unitig_ids, has_tips] = superbubbles[superbubble_id - 1];
-            for (unitig_index unitig_id : unitig_ids) {
-                const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
-                callback(seq, cluster_id);
-            }
+            std::for_each(unitig_ids.begin() + 1, unitig_ids.end(),
+                [&](unitig_index unitig_id) {
+                    const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                    assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+                    output_unitig[unitig_id - 1] = true;
+#endif
+                    callback(seq, cluster_id);
+                }
+            );
         }
 
         ++cluster_id;

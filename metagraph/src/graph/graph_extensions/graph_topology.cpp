@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/alignment/annotation_buffer.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 namespace mtg::graph {
 
@@ -93,13 +94,16 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         VectorMap<Row, Vector<Column>> row_coords;
 
         for (const auto &[c, tuple] : row_tuples) {
+            common::logger->info("Column: {}\tNode: {}\tCoords: {}",c,graph_.get_node_sequence(nodes[i]), fmt::join(tuple, ","));
+            assert(graph_.get_mode() != DeBruijnGraph::BASIC || tuple.size() <= 1);
+            assert(tuple.size() <= 2);
             for (auto coord : tuple) {
                 row_coords[coord].emplace_back(c);
                 result[i].emplace_back(Coord(c, coord), TopologyIndex());
             }
         }
 
-        assert(row_coords.size());
+        assert(row_coords.size() || graph_.get_node_sequence(nodes[i])[0] == boss::BOSS::kSentinel);
         coords.emplace_back(const_cast<RowColumnFlatMap&&>(row_coords.values_container()));
     }
     assert(coords.size() == tuples.size());
@@ -109,7 +113,6 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         assert(unitigs.size() == nodes.size());
         for (size_t i = 0; i < unitigs.size(); ++i) {
             const auto &row_unitigs = unitigs[i];
-            assert(row_unitigs.size());
             assert(row_unitigs.size() == result[i].size());
             assert(result[i].size() == row_unitigs.size());
 
@@ -127,7 +130,6 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         assert(clusters.size() == nodes.size());
         for (size_t i = 0; i < clusters.size(); ++i) {
             const auto &row_clusters = clusters[i];
-            assert(row_clusters.size());
             assert(row_clusters.size() == result[i].size());
             assert(result[i].size() == row_clusters.size());
 
