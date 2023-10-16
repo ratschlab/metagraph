@@ -5,6 +5,7 @@
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 
 namespace mtg {
@@ -517,7 +518,10 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
             node_index node = std::get<1>(unitigs[unitig - 1]);
 
             bool has_children = false;
-            dbg.adjacent_outgoing_nodes(node, [&](node_index next_front) {
+            dbg.call_outgoing_kmers(node, [&](node_index next_front, char c) {
+                if (c == boss::BOSS::kSentinel)
+                    return;
+
                 has_children = true;
                 if (found_cycle)
                     return;
@@ -535,7 +539,10 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                 if (find->second) {
                     visited.emplace_back(next_unitig);
                 } else {
-                    dbg.adjacent_incoming_nodes(next_front, [&](node_index sibling_back) {
+                    dbg.call_incoming_kmers(next_front, [&](node_index sibling_back, char c) {
+                        if (c == boss::BOSS::kSentinel)
+                            return;
+
                         if (all_visited) {
                             unitig_index sibling_unitig = node_to_unitig[sibling_back];
                             auto find = seen.find(sibling_unitig);
