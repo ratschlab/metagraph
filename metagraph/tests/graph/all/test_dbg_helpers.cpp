@@ -9,6 +9,7 @@
 #include "graph/graph_extensions/graph_topology.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/seq_indexed/seq_indexed.hpp"
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
 
@@ -63,8 +64,8 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     std::vector<std::string> unitigs;
     size_t last_cluster_id = 0;
 
-    auto unitig_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
-    auto cluster_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto unitig_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
 
     size_t coord = 0;
     assemble_superbubbles(*graph, [&](const std::string &unitig, size_t cluster_id) {
@@ -91,11 +92,12 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
         graph, unitigs, unitig_labels, true
     );
 
-    return std::make_shared<graph::GraphTopology>(
-        *graph,
-        std::unique_ptr<graph::GraphTopology::Annotator>(coord_anno->release_annotator()),
-        std::move(unitig_anno), std::move(cluster_anno)
+    auto seq_index = std::make_shared<annot::SeqIndexedAnnotator<std::string>>(
+        std::shared_ptr<const graph::GraphTopology::Annotator>(coord_anno->release_annotator()),
+        std::vector<std::shared_ptr<const graph::GraphTopology::Annotator>>{ unitig_anno, cluster_anno }
     );
+
+    return std::make_shared<graph::GraphTopology>(*graph, seq_index);
 }
 
 template <class Graph>

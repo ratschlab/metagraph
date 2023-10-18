@@ -14,6 +14,7 @@
 #include "common/utils/file_utils.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/representation/seq_indexed/seq_indexed.hpp"
 
 namespace mtg {
 namespace test {
@@ -37,8 +38,8 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (unitigs.empty())
         return {};
 
-    auto unitig_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
-    auto cluster_anno = std::make_unique<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto unitig_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
     size_t coord = 0;
 
     for (size_t i = 0; i < unitigs.size(); ++i) {
@@ -52,9 +53,12 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
         }
     }
 
-    return std::make_shared<graph::GraphTopology>(
-        *graph, coord_anno, std::move(unitig_anno), std::move(cluster_anno)
+    auto seq_index = std::make_shared<annot::SeqIndexedAnnotator<std::string>>(
+        coord_anno,
+        std::vector<std::shared_ptr<const graph::GraphTopology::Annotator>>{ unitig_anno, cluster_anno }
     );
+
+    return std::make_shared<graph::GraphTopology>(*graph, seq_index);
 }
 
 template <class Graph, class Annotation>

@@ -3,7 +3,6 @@
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
 #include "common/logger.hpp"
-#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/succinct/boss.hpp"
 
@@ -12,8 +11,7 @@ namespace mtg::graph {
 using namespace mtg::annot::matrix;
 using node_index = DeBruijnGraph::node_index;
 using Tuple = MultiIntMatrix::Tuple;
-using RowTuples = Vector<std::pair<GraphTopology::Column,
-                                   align::Alignment::Tuple>>;
+using RowTuples = MultiIntMatrix::RowTuples;
 
 using RowColumnFlatMap = std::vector<std::pair<GraphTopology::Row,
                                                Vector<GraphTopology::Column>>>;
@@ -22,43 +20,20 @@ static_assert(std::is_same_v<GraphTopology::Column, BinaryMatrix::Column>);
 static_assert(std::is_same_v<GraphTopology::Row, BinaryMatrix::Row>);
 
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
-                             std::shared_ptr<const Annotator> annotator,
-                             std::unique_ptr<Annotator>&& unitigs,
-                             std::unique_ptr<Annotator>&& clusters)
+                             std::shared_ptr<const annot::SeqIndexedAnnotator<Label>> annotator)
       : graph_(graph), annotator_(annotator),
-        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)),
-        unitig_annotator_(std::move(unitigs)), cluster_annotator_(std::move(clusters)) {
-    assert(annotator_);
-    assert(unitig_annotator_);
-    assert(cluster_annotator_);
-    assert(annotator_->num_labels() == unitig_annotator_->num_labels());
-    assert(annotator_->num_labels() == cluster_annotator_->num_labels());
-}
+        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)) {}
 
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
-                             std::shared_ptr<align::AnnotationBuffer> buffer,
-                             std::unique_ptr<Annotator>&& unitigs,
-                             std::unique_ptr<Annotator>&& clusters)
+                             std::shared_ptr<align::AnnotationBuffer> buffer)
       : graph_(graph),
-        annotator_(std::shared_ptr<const Annotator>{}, &buffer_->get_annotator()),
-        buffer_(buffer), unitig_annotator_(std::move(unitigs)),
-        cluster_annotator_(std::move(clusters)) {
-    assert(annotator_);
-    assert(unitig_annotator_);
-    assert(cluster_annotator_);
-    assert(annotator_->num_labels() == unitig_annotator_->num_labels());
-    assert(annotator_->num_labels() == cluster_annotator_->num_labels());
-
-#ifndef NDEBUG
-    for (const auto &label : annotator_->get_label_encoder().get_labels()) {
-        auto anno_enc = annotator_->get_label_encoder().encode(label);
-        auto unitig_enc = unitig_annotator_->get_label_encoder().encode(label);
-        auto cluster_enc = cluster_annotator_->get_label_encoder().encode(label);
-
-        assert(anno_enc == unitig_enc);
-        assert(cluster_enc == unitig_enc);
+        annotator_(std::shared_ptr<const annot::SeqIndexedAnnotator<Label>>{},
+                   dynamic_cast<const annot::SeqIndexedAnnotator<Label>*>(&buffer_->get_annotator())),
+        buffer_(buffer) {
+    if (!annotator_) {
+        common::logger->error("Annotator does not support graph topology.");
+        exit(1);
     }
-#endif
 }
 
 auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
@@ -78,99 +53,66 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         assert(cols->size() == coords->size());
 
         for (size_t i = 0; i < cols->size(); ++i) {
-            row_tuple.emplace_back(std::move((*cols)[i]), std::move((*coords)[i]));
+            if ((*coords)[i].size())
+                row_tuple.emplace_back((*cols)[i], Tuple((*coords)[i].begin(), (*coords)[i].end()));
         }
     }
-
-    assert(unitig_annotator_);
-    assert(cluster_annotator_);
+    assert(tuples.size() == nodes.size());
 
     std::vector<Coords> result(tuples.size());
+    auto row_seq_ids = annotator_->get_seq_ids(tuples);
+    assert(row_seq_ids.size() == nodes.size());
 
-    std::vector<RowColumnFlatMap> coords;
-    coords.reserve(tuples.size());
-    for (size_t i = 0; i < tuples.size(); ++i) {
-        const auto &row_tuples = tuples[i];
-        VectorMap<Row, Vector<Column>> row_coords;
+    for (size_t i = 0; i < row_seq_ids.size(); ++i) {
+        assert(row_seq_ids[i].size() == tuples[i].size());
+        for (size_t j = 0; j < row_seq_ids[i].size(); ++j) {
+            auto &[c, seq_ids] = row_seq_ids[i][j];
 
-        for (const auto &[c, tuple] : row_tuples) {
-            assert(graph_.get_mode() != DeBruijnGraph::BASIC || tuple.size() <= 1);
-            assert(tuple.size() <= 2);
-            for (auto coord : tuple) {
-                row_coords[coord].emplace_back(c);
-                result[i].emplace_back(Coord(c, coord), TopologyIndex());
-            }
-        }
+            assert(c == tuples[i][j].first);
+            auto &coords = tuples[i][j].second;
 
-        assert(row_coords.size() || graph_.get_node_sequence(nodes[i])[0] == boss::BOSS::kSentinel);
-        coords.emplace_back(const_cast<RowColumnFlatMap&&>(row_coords.values_container()));
-    }
-    assert(coords.size() == tuples.size());
+            assert(seq_ids.size() == 2);
+            assert(seq_ids[0].size() == seq_ids[1].size());
+            assert(coords.size() == seq_ids[0].size());
 
-    {
-        auto unitigs = unitig_annotator_->get_matrix().get_ranks(coords);
-        assert(unitigs.size() == nodes.size());
-        for (size_t i = 0; i < unitigs.size(); ++i) {
-            const auto &row_unitigs = unitigs[i];
-            assert(row_unitigs.size() == result[i].size());
-            assert(result[i].size() == row_unitigs.size());
-
-            for (size_t j = 0; j < row_unitigs.size(); ++j) {
-                const auto &[c, unitig_id] = row_unitigs[j];
-                auto &[coord, topo_index] = result[i][j];
-                assert(coord.first == c);
-                topo_index.first = unitig_id;
+            for (size_t k = 0; k < seq_ids[0].size(); ++k) {
+                result[i].emplace_back(Coord(c, coords[k]),
+                                       TopologyIndex(seq_ids[0][k], seq_ids[1][k]));
             }
         }
     }
 
-    {
-        auto clusters = cluster_annotator_->get_matrix().get_ranks(coords);
-        assert(clusters.size() == nodes.size());
-        for (size_t i = 0; i < clusters.size(); ++i) {
-            const auto &row_clusters = clusters[i];
-            assert(row_clusters.size() == result[i].size());
-            assert(result[i].size() == row_clusters.size());
-
-            for (size_t j = 0; j < row_clusters.size(); ++j) {
-                const auto &[c, cluster_id] = row_clusters[j];
-                auto &[coord, topo_index] = result[i][j];
-                assert(coord.first == c);
-                topo_index.second = cluster_id;
-            }
-        }
-    }
-
-    assert(result.size() == nodes.size());
     return result;
 }
 
 bool GraphTopology::load(const std::string &filename_base) {
-    {
-        std::string fname = filename_base + kUnitigExtension + unitig_annotator_->file_extension();
-        if (!unitig_annotator_->load(fname)) {
-            common::logger->error("Failed to load unitig indicator from {}", fname);
-            return false;
-        }
-    }
+    std::ignore = filename_base;
+    // {
+    //     std::string fname = filename_base + kUnitigExtension + unitig_annotator_->file_extension();
+    //     if (!unitig_annotator_->load(fname)) {
+    //         common::logger->error("Failed to load unitig indicator from {}", fname);
+    //         return false;
+    //     }
+    // }
 
-    {
-        std::string fname = filename_base + kClusterExtension + cluster_annotator_->file_extension();
-        if (!cluster_annotator_->load(fname)) {
-            common::logger->error("Failed to load cluster indicator from {}", fname);
-            return false;
-        }
-    }
+    // {
+    //     std::string fname = filename_base + kClusterExtension + cluster_annotator_->file_extension();
+    //     if (!cluster_annotator_->load(fname)) {
+    //         common::logger->error("Failed to load cluster indicator from {}", fname);
+    //         return false;
+    //     }
+    // }
 
-    assert(annotator_->num_labels() == unitig_annotator_->num_labels());
-    assert(annotator_->num_labels() == cluster_annotator_->num_labels());
+    // assert(annotator_->num_labels() == unitig_annotator_->num_labels());
+    // assert(annotator_->num_labels() == cluster_annotator_->num_labels());
 
     return true;
 }
 
 void GraphTopology::serialize(const std::string &filename_base) const {
-    unitig_annotator_->serialize(filename_base + kUnitigExtension + unitig_annotator_->file_extension());
-    cluster_annotator_->serialize(filename_base + kClusterExtension + cluster_annotator_->file_extension());
+    std::ignore = filename_base;
+    // unitig_annotator_->serialize(filename_base + kUnitigExtension + unitig_annotator_->file_extension());
+    // cluster_annotator_->serialize(filename_base + kClusterExtension + cluster_annotator_->file_extension());
 }
 
 } // namespace mtg::graph
