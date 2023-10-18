@@ -614,63 +614,154 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
         }
     }
 
+    logger->trace("Found {} (possibly nested) superbubbles", superbubbles.size());
+
     // find chains and print non-chained unitigs
     size_t cluster_id = 0;
     sdsl::bit_vector in_chain(superbubbles.size() + 1);
-    std::vector<std::vector<superbubble_index>> chains;
+    std::vector<std::pair<std::vector<superbubble_index>, bool>> chains;
 
-    ProgressBar progress_bar(unitigs.size(), "Chaining superbubbles",
+    {
+        ProgressBar progress_bar(unitigs.size(), "Finding linear chains",
+                                 std::cerr, !common::get_verbose());
+
+        for (unitig_index unitig_id = 1; unitig_id < unitig_to_superbubble.size(); ++unitig_id) {
+            ++progress_bar;
+
+            const auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[unitig_id];
+            // logger->info("Checking at {}\t{},{},{}", dbg.get_node_sequence(std::get<0>(unitigs[unitig_id - 1])),start_sb,mid_sb,term_sb);
+            if (!mid_sb && start_sb && !term_sb && !in_chain[start_sb]) {
+                // start of a chain
+                // logger->info("\tStart!");
+                auto &[chain, has_cycle] = chains.emplace_back();
+                assert(!in_chain[start_sb]);
+                in_chain[start_sb] = true;
+                chain.emplace_back(start_sb);
+                auto cur_start_sb = start_sb;
+                while (cur_start_sb) {
+                    const auto &[superbubble, has_tips] = superbubbles[cur_start_sb - 1];
+                    cur_start_sb = 0;
+                    assert(superbubble.back() < unitig_to_superbubble.size());
+                    const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
+                    if (next_start_sb && !next_mid_sb) {
+                        chain.emplace_back(next_start_sb);
+
+                        // break if we find a superbubble cycle
+                        if (in_chain[next_start_sb]) {
+                            // logger->info("\tCycle!");
+                            has_cycle = true;
+                            break;
+                        }
+
+                        assert(!in_chain[next_start_sb]);
+                        in_chain[next_start_sb] = true;
+                        cur_start_sb = next_start_sb;
+                    }
+                }
+            }
+
+            if (!start_sb && !mid_sb && !term_sb) {
+                // logger->info("\tIsolated superbubble!");
+                const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+                output_unitig[unitig_id - 1] = true;
+#endif
+                callback(seq, cluster_id++);
+            }
+        }
+    }
+
+    {
+        ProgressBar progress_bar(unitigs.size(), "Finding cyclic chains",
+                                 std::cerr, !common::get_verbose());
+
+        for (unitig_index unitig_id = 1; unitig_id < unitig_to_superbubble.size(); ++unitig_id) {
+            ++progress_bar;
+
+            const auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[unitig_id];
+            // logger->info("Checking at {}\t{},{},{}", dbg.get_node_sequence(std::get<0>(unitigs[unitig_id - 1])),start_sb,mid_sb,term_sb);
+            if (!mid_sb && start_sb && term_sb && !in_chain[start_sb]) {
+                // start of a cycle chain
+                // logger->info("\tStart!");
+                auto &[chain, has_cycle] = chains.emplace_back();
+                assert(!in_chain[start_sb]);
+                in_chain[start_sb] = true;
+                chain.emplace_back(start_sb);
+                auto cur_start_sb = start_sb;
+                while (cur_start_sb) {
+                    const auto &[superbubble, has_tips] = superbubbles[cur_start_sb - 1];
+                    cur_start_sb = 0;
+                    assert(superbubble.back() < unitig_to_superbubble.size());
+                    const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
+                    if (next_start_sb && !next_mid_sb) {
+                        chain.emplace_back(next_start_sb);
+
+                        // break if we find a superbubble cycle
+                        if (in_chain[next_start_sb]) {
+                            has_cycle = true;
+                            break;
+                        }
+
+                        assert(!in_chain[next_start_sb]);
+                        in_chain[next_start_sb] = true;
+                        cur_start_sb = next_start_sb;
+                    }
+                }
+
+                assert(has_cycle);
+            }
+        }
+    }
+
+    // outputting superbubbles
+    for (const auto &[chain, has_cycle] : chains) {
+        std::for_each(chain.begin(), chain.end() - 1, [&](superbubble_index superbubble_id) {
+            const auto &[unitig_ids, has_tips] = superbubbles[superbubble_id - 1];
+            std::for_each(unitig_ids.begin(), unitig_ids.end() - 1,
+                [&](unitig_index unitig_id) {
+                    const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                    assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+                    output_unitig[unitig_id - 1] = true;
+#endif
+                    callback(seq, cluster_id);
+                    if (has_cycle)
+                        ++cluster_id;
+                }
+            );
+        });
+
+        if (has_cycle)
+            continue;
+
+        const auto &[unitig_ids, has_tips] = superbubbles[chain.back() - 1];
+        std::for_each(unitig_ids.begin(), unitig_ids.end(),
+            [&](unitig_index unitig_id) {
+                const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                assert(!output_unitig[unitig_id - 1]);
+#ifndef NDEBUG
+                output_unitig[unitig_id - 1] = true;
+#endif
+                callback(seq, cluster_id);
+            }
+        );
+
+        ++cluster_id;
+    }
+
+    ProgressBar progress_bar(unitigs.size(), "Outputting remaining superbubbles",
                              std::cerr, !common::get_verbose());
 
     for (unitig_index unitig_id = 1; unitig_id < unitig_to_superbubble.size(); ++unitig_id) {
         ++progress_bar;
 
         const auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[unitig_id];
-        if (!mid_sb && start_sb && !term_sb && !in_chain[start_sb]) {
-            // start of a chain
-            auto &chain = chains.emplace_back();
-            assert(!in_chain[start_sb]);
+        if (!mid_sb && start_sb && !in_chain[start_sb]) {
             in_chain[start_sb] = true;
-            chain.emplace_back(start_sb);
-            auto cur_start_sb = start_sb;
-            while (cur_start_sb) {
-                const auto &[superbubble, has_tips] = superbubbles[cur_start_sb - 1];
-                cur_start_sb = 0;
-                assert(superbubble.back() < unitig_to_superbubble.size());
-                const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
-                if (next_start_sb && !next_mid_sb) {
-                    chain.emplace_back(next_start_sb);
-                    assert(!in_chain[next_start_sb]);
-                    in_chain[next_start_sb] = true;
-                    cur_start_sb = next_start_sb;
-                }
-            }
-        }
-
-        if (!start_sb && !mid_sb && !term_sb) {
-            const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
-            assert(!output_unitig[unitig_id - 1]);
-#ifndef NDEBUG
-            output_unitig[unitig_id - 1] = true;
-#endif
-            callback(seq, cluster_id++);
-        }
-    }
-
-    // outputting superbubbles
-    for (const auto &chain : chains) {
-        const auto &[unitig_ids, has_tips] = superbubbles[chain[0] - 1];
-        unitig_index unitig_id = unitig_ids[0];
-        const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
-        assert(!output_unitig[unitig_id - 1]);
-#ifndef NDEBUG
-        output_unitig[unitig_id - 1] = true;
-#endif
-        callback(seq, cluster_id);
-
-        for (superbubble_index superbubble_id : chain) {
+            auto superbubble_id = start_sb;
             const auto &[unitig_ids, has_tips] = superbubbles[superbubble_id - 1];
-            std::for_each(unitig_ids.begin() + 1, unitig_ids.end(),
+            std::for_each(unitig_ids.begin(), unitig_ids.end(),
                 [&](unitig_index unitig_id) {
                     const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
                     assert(!output_unitig[unitig_id - 1]);
@@ -680,9 +771,9 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                     callback(seq, cluster_id);
                 }
             );
-        }
 
-        ++cluster_id;
+            ++cluster_id;
+        }
     }
 
     logger->trace("Found {} unitig clusters", cluster_id);

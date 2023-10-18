@@ -1817,4 +1817,44 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 }
 #endif
 
+TYPED_TEST(DBGAlignerTest, align_superbubble_chain_cycle_nochain) {
+    size_t k = 7;
+
+    std::string reference1 = "ATGTGATCATGTAGCGATGTGAT";
+    std::string reference2 = "ATGTGATGATGTAGCCATGTGAT";
+    std::string query      = "ATGTGATAATGTAGCGATGTGAT";
+
+    auto graph = build_graph<TypeParam>(k, { reference1, reference2 });
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+}
+
+TYPED_TEST(DBGAlignerTest, align_superbubble_chain_cycle_maybechain) {
+    size_t k = 7;
+
+    std::string reference1 = "TCCCCCCAATGTGATCATGTAGCGATGTGAT";
+    std::string reference2 = "TCCCCCCTATGTGATGATGTAGCCATGTGAT";
+    std::string query      = "TCCCCCCGATGTGATAATGTAGCGATGTGAT";
+
+    auto graph = build_graph<TypeParam>(k, { reference1, reference2 });
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+}
+
 } // namespace
