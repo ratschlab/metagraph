@@ -123,13 +123,13 @@ void MultiLabelAnnotation<LabelType>::add_label_counts(const std::vector<Index> 
 }
 
 template <typename LabelType>
-void MultiLabelAnnotation<LabelType>::add_label_coord(Index, const VLabels &, uint64_t) {
+void MultiLabelAnnotation<LabelType>::add_label_coord(Index, const VLabels &, uint64_t, bool) {
     logger->error("Adding relation attributes is not implemented for this annotator");
     exit(1);
 }
 
 template <typename LabelType>
-void MultiLabelAnnotation<LabelType>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &,
+void MultiLabelAnnotation<LabelType>::add_label_coords(const std::vector<std::tuple<Index, uint64_t, bool>> &,
                                                        const VLabels &) {
     logger->error("Adding relation attributes is not implemented for this annotator");
     exit(1);

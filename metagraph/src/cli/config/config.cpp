@@ -155,6 +155,8 @@ Config::Config(int argc, char *argv[]) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
             annotate_sequence_headers = true;
+        } else if (!strcmp(argv[i], "--anno-seq-ends")) {
+            annotate_sequence_ends = true;
         } else if (!strcmp(argv[i], "--header-comment-delim")) {
             fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {

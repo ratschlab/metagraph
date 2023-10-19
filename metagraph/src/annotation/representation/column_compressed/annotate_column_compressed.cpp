@@ -24,6 +24,8 @@ using utils::remove_suffix;
 using utils::make_suffix;
 using mtg::common::logger;
 
+static const uint64_t SEQ_END = 0x8000000000000000;
+
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
@@ -44,6 +46,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                         }),
         count_width_(count_width),
         max_count_(sdsl::bits::lo_set[count_width]),
+        has_end_(false),
         max_chunks_open_(max_chunks_open) {}
 
 template <typename Label>
@@ -139,7 +142,8 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
 // for each label and index 'i' add numeric attribute 'coord'
 template <typename Label>
-void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
+void ColumnCompressed<Label>
+::add_label_coord(Index i, const VLabels &labels, uint64_t coord, bool is_end) {
     while (coords_.size() < num_labels()) {
         coords_.emplace_back(get_num_threads(),
                              buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
@@ -150,14 +154,18 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
         coords_[j].emplace_back(i, coord);
+        if (is_end)
+            coords_[j].emplace_back(i, coord | SEQ_END);
+
         max_coord_[j] = std::max(max_coord_[j], coord);
     }
 }
 
 // for each label and index 'i' add numeric attribute 'coord'
 template <typename Label>
-void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
-                                               const VLabels &labels) {
+void ColumnCompressed<Label>
+::add_label_coords(const std::vector<std::tuple<Index, uint64_t, bool>> &coords,
+                   const VLabels &labels) {
     while (coords_.size() < num_labels()) {
         coords_.emplace_back(get_num_threads(),
                              buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
@@ -168,9 +176,13 @@ void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index
 
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
-        for (const auto &v : coords) {
-            coords_[j].push_back(v);
-            max_coord_[j] = std::max(max_coord_[j], v.second);
+        for (const auto &[i, c, is_end] : coords) {
+            coords_[j].emplace_back(i, c);
+            if (is_end)
+                coords_[j].emplace_back(i, c | SEQ_END);
+
+            max_coord_[j] = std::max(max_coord_[j], c);
+            has_end_ |= is_end;
         }
     }
 }
@@ -278,6 +290,16 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         throw std::ofstream::failure("Bad stream");
     }
 
+    auto seq_fname = remove_suffix(filename, kExtension) + kSeqExtension;
+    std::ofstream out_seq;
+    if (has_end_) {
+        out_seq = utils::open_new_ofstream(seq_fname);
+        if (!out_seq) {
+            logger->error("Could not open file for writing: {}", seq_fname);
+            throw std::ofstream::failure("Bad stream");
+        }
+    }
+
     uint64_t num_coordinates = 0;
 
     fs::path tmp_path;
@@ -320,9 +342,17 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
             // pack coordinates
             sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord_[j]) + 1);
+
+            sdsl::bit_vector seq_delim(has_end_ ? max_coord_[j] + 1 : 0, false);
+
             uint64_t cur = 0;
             for (size_t i = 0; i < c_v.size(); ++i) {
                 auto [r, coord] = c_v[i];
+                if (coord & SEQ_END) {
+                    coord &= ~SEQ_END;
+                    seq_delim[coord] = true;
+                }
+
                 while (cur < r) {
                     delim[i + cur++] = 1;
                 }
@@ -335,6 +365,11 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
             bit_vector_smart(std::move(delim)).serialize(out);
             coords.serialize(out);
+
+            if (out_seq) {
+                assert(has_end_);
+                bit_vector_smart(std::move(seq_delim)).serialize(out_seq);
+            }
 
             num_coordinates += c_v.size();
         } else {
@@ -352,6 +387,11 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             sdsl::int_vector_buffer<1> delim(tmp_path/"delim", std::ios::out, 1024*1024);
             // pack coordinates
             sdsl::int_vector_buffer<> coords(tmp_path/"coords", std::ios::out, 1024*1024, sdsl::bits::hi(max_coord_[j]) + 1);
+
+            std::unique_ptr<sdsl::int_vector_buffer<1>> seq_delim;
+            if (has_end_)
+                seq_delim = std::make_unique<sdsl::int_vector_buffer<1>>(tmp_path/"seqdelim", std::ios::out, 1024*1024);
+
             uint64_t cur = 0;
 
             auto process_buffer = [&]() {
@@ -383,6 +423,16 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                         cur++;
                     }
                     delim.push_back(0);
+
+                    if (coord & SEQ_END) {
+                        coord &= ~SEQ_END;
+                        while (seq_delim->size() <= coord) {
+                            seq_delim->push_back(false);
+                        }
+
+                        seq_delim->push_back(true);
+                    }
+
                     coords.push_back(coord);
                 }
 
@@ -403,6 +453,10 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 delim.push_back(1);
             }
 
+            while (seq_delim && seq_delim->size() <= max_coord_[j]) {
+                seq_delim->push_back(false);
+            }
+
             assert(delim.size() == coords.size() + bitmatrix_[j]->num_set_bits() + 1);
 
             num_coordinates += coords.size();
@@ -415,6 +469,23 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 std::unique_ptr<std::ifstream> in = utils::open_ifstream(tmp_path/"delim");
                 delim_bv.load(*in);
                 bit_vector_smart(std::move(delim_bv)).serialize(out);
+            }
+
+            if (seq_delim) {
+                assert(has_end_);
+                assert(out_seq);
+
+                seq_delim->close();
+                sdsl::bit_vector seq_delim_bv;
+                std::unique_ptr<std::ifstream> in = utils::open_ifstream(tmp_path/"seqdelim");
+                seq_delim_bv.load(*in);
+                bit_vector_smart(std::move(seq_delim_bv)).serialize(out_seq);
+                out_seq.close();
+
+                utils::append_file(tmp_path/"seqdelim", seq_fname);
+                fs::remove(tmp_path/"seqdelim");
+
+                out_seq = std::ofstream(seq_fname, std::ios::binary | std::ios::app);
             }
 
             out.close();

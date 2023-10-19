@@ -68,8 +68,8 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
                           const VLabels &labels,
                           const std::vector<uint64_t> &counts) override;
     // for each label and index 'i' add numeric attribute 'coord'
-    void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
-    void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+    void add_label_coord(Index i, const VLabels &labels, uint64_t coord, bool is_end) override;
+    void add_label_coords(const std::vector<std::tuple<Index, uint64_t, bool>> &coords,
                           const VLabels &labels) override;
 
     void serialize(const std::string &filename) const override;
@@ -145,6 +145,7 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
     static constexpr auto kExtension = ".column.annodbg";
     static constexpr auto kCountExtension = ".column.annodbg.counts";
     static constexpr auto kCoordExtension = ".column.annodbg.coords";
+    static constexpr auto kSeqExtension = ".column.annodbg.seq";
 
   private:
     void set(Index i, size_t j, bool value);
@@ -178,6 +179,7 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
     // depending on parameters, coords are stored in RAM or in chunks dumped to disk
     std::vector<common::SortedVector<std::pair<Index, uint64_t>>> coords_;
     std::vector<uint64_t> max_coord_; // stores max coord stored in |coords_|
+    bool has_end_;
     size_t max_chunks_open_;
 
     using MultiLabelAnnotation<Label>::label_encoder_;

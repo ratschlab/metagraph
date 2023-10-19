@@ -45,9 +45,9 @@ class MultiLabelAnnotation {
                                   const VLabels &labels,
                                   const std::vector<uint64_t> &counts);
     // for each label and index 'i' add numeric attribute 'coord'
-    virtual void add_label_coord(Index i, const VLabels &labels, uint64_t coord);
+    virtual void add_label_coord(Index i, const VLabels &labels, uint64_t coord, bool is_end = false);
     // for each label and index 'i' add numeric attribute 'coord'
-    virtual void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+    virtual void add_label_coords(const std::vector<std::tuple<Index, uint64_t, bool>> &coords,
                                   const VLabels &labels);
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;

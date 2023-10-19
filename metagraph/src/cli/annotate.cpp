@@ -332,7 +332,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
                 [&](auto&& data) {
                     thread_pool.enqueue([&](auto &data) {
-                        anno_graph->annotate_kmer_coords(std::move(data));
+                        anno_graph->annotate_kmer_coords(std::move(data),
+                                                         config.annotate_sequence_ends);
                     }, std::move(data));
                 },
                 batch_size, batch_length, batch_size

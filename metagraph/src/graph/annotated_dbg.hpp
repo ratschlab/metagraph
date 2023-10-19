@@ -85,15 +85,18 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // add k-mer coordinates to the annotation, the binary annotation must exist
     void add_kmer_coord(std::string_view sequence,
                         const std::vector<Label> &labels,
-                        uint64_t start);
+                        uint64_t start,
+                        bool mark_end = false);
 
     // add k-mer coordinates to the annotation, the binary annotation must exist
     void add_kmer_coords(
-        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data,
+        bool mark_ends = false);
 
     // annotate k-mer and their coordinates (combines annotate_sequences and add_kmer_coords)
     void annotate_kmer_coords(
-        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data,
+        bool mark_ends = false);
 
     /*********************** Special queries **********************/
 

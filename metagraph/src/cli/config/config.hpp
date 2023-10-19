@@ -30,6 +30,7 @@ class Config {
     bool mark_dummy_kmers = false;
     bool filename_anno = false;
     bool annotate_sequence_headers = false;
+    bool annotate_sequence_ends = false;
     bool to_adj_list = false;
     bool to_fasta = false;
     bool enumerate_out_sequences = false;

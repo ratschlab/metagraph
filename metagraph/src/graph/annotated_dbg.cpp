@@ -133,7 +133,8 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
 
 void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
                                   const std::vector<Label> &labels,
-                                  uint64_t coord) {
+                                  uint64_t coord,
+                                  bool mark_end) {
     assert(check_compatibility());
 
     if (sequence.size() < dbg_.get_k())
@@ -143,16 +144,22 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (node_index i : indices) {
+    for (size_t j = 0; j < indices.size(); ++j) {
+        node_index i = indices[j];
         // only insert coordinates for matched k-mers and increment the coordinates
-        if (i > 0)
-            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+        if (i > 0) {
+            // TODO: what if end is missing?
+            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord,
+                                        mark_end && (j + 1 == indices.size()));
+        }
+
         coord++;
     }
 }
 
 void AnnotatedDBG::add_kmer_coords(
-        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data,
+        bool mark_ends) {
     assert(check_compatibility());
 
     std::vector<std::vector<row_index>> ids;
@@ -168,21 +175,26 @@ void AnnotatedDBG::add_kmer_coords(
         const auto &labels = std::get<1>(data[t]);
         uint64_t coord = std::get<2>(data[t]);
 
-        for (node_index i : ids[t]) {
+        for (size_t j = 0; j < ids[t].size(); ++j) {
+            node_index i = ids[t][j];
             // only insert coordinates for matched k-mers and increment the coordinates
-            if (i > 0)
-                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+            if (i > 0) {
+                // TODO: what if end is missing?
+                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord,
+                                            mark_ends && (j + 1 == ids[t].size()));
+            }
             coord++;
         }
     }
 }
 
 void AnnotatedDBG::annotate_kmer_coords(
-        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data,
+        bool mark_ends) {
     assert(check_compatibility());
 
     std::vector<std::vector<row_index>> ids(data.size());
-    std::vector<std::vector<std::pair<row_index, uint64_t>>> coords(data.size());
+    std::vector<std::vector<std::tuple<row_index, uint64_t, bool>>> coords(data.size());
     size_t last = 0;
 
     for (size_t t = 0; t < data.size(); ++t) {
@@ -200,13 +212,18 @@ void AnnotatedDBG::annotate_kmer_coords(
             coords[last].reserve(sequence.size() - dbg_.get_k() + 1);
         }
 
-        graph_->map_to_nodes(sequence, [&](node_index i) {
+        auto nodes = map_to_nodes(*graph_, sequence);
+        for (size_t j = 0; j < nodes.size(); ++j) {
+            node_index i = nodes[j];
             if (i > 0) {
                 ids[last].push_back(graph_to_anno_index(i));
-                coords[last].emplace_back(graph_to_anno_index(i), coord);
+
+                // TODO: what if the last node doesn't map?
+                coords[last].emplace_back(graph_to_anno_index(i), coord,
+                                          mark_ends && (j + 1 == nodes.size()));
             }
             coord++;
-        });
+        }
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
