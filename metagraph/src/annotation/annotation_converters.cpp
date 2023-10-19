@@ -1719,5 +1719,50 @@ template
 StaticBinRelAnnotator<TupleBRWT, std::string>
 load_coords<MultiBRWTAnnotator>(MultiBRWTAnnotator&&, const std::vector<std::string> &);
 
+ColumnCompressed<std::string>
+load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
+                    const std::vector<std::string> &files) {
+    size_t num_columns = 0;
+    for (const auto &file : files) {
+        const auto fname = utils::remove_suffix(file, ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kSeqExtension;
+        auto fin = utils::open_ifstream(fname);
+        if (!fin->good()) {
+            throw std::ifstream::failure("can't open file");
+        }
+
+        num_columns += load_number(*fin);
+    }
+
+    if (num_columns != label_encoder.size()) {
+        logger->error("Column count does not match label count: {} vs. {}",
+                      num_columns, label_encoder.get_labels().size());
+        exit(1);
+    }
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    columns.reserve(num_columns);
+    for (const auto &file : files) {
+        const auto fname = utils::remove_suffix(file, ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kSeqExtension;
+        auto fin = utils::open_ifstream(fname);
+        if (!fin->good()) {
+            throw std::ifstream::failure("can't open file");
+        }
+
+        size_t num_cur_columns = load_number(*fin);
+        assert(num_cur_columns);
+
+        for (size_t i = 0; i < num_cur_columns; ++i) {
+            auto &column = columns.emplace_back(std::make_unique<bit_vector_smart>());
+            column->load(*fin);
+        }
+    }
+
+    assert(columns.size() == num_columns);
+
+    return ColumnCompressed<std::string>(std::move(columns), label_encoder);
+}
+
 } // namespace annot
 } // namespace mtg

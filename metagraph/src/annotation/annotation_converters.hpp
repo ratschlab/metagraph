@@ -135,6 +135,9 @@ template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files);
 
+ColumnCompressed<std::string> load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
+                                                  const std::vector<std::string> &files);
+
 } // namespace annot
 } // namespace mtg
 

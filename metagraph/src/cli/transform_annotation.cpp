@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <filesystem>
+
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
@@ -660,6 +662,7 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::ColumnCompressed) {
         std::unique_ptr<ColumnCompressed<>> annotator;
 
+        LabelEncoder<std::string> label_encoder;
         // The entire annotation is loaded in all cases except for transforms
         // to BRWT, RbBRWT, RowDiff, or RowDisk-type annotations,
         // for which the construction is done with streaming columns from disk.
@@ -679,6 +682,8 @@ int transform_annotation(Config *config) {
                 exit(1);
             }
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
+
+            label_encoder = annotator->get_label_encoder();
         }
 
         switch (config->anno_type) {
@@ -691,6 +696,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 column_coord.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
+                label_encoder = column_coord.get_label_encoder();
                 break;
             }
             case Config::BRWTCoord: {
@@ -698,6 +704,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 brwt_coord.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
+                label_encoder = brwt_coord.get_label_encoder();
                 break;
             }
             case Config::RowDiffCoord: {
@@ -705,7 +712,7 @@ int transform_annotation(Config *config) {
 
                 ColumnCoordAnnotator column_coord = load_coords(std::move(*annotator), files);
 
-                auto label_encoder = column_coord.get_label_encoder();
+                label_encoder = column_coord.get_label_encoder();
 
                 auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleCSC>>(nullptr,
                             std::move(*column_coord.release_matrix()));
@@ -727,7 +734,7 @@ int transform_annotation(Config *config) {
 
                 auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
 
-                auto label_encoder = brwt_coord.get_label_encoder();
+                label_encoder = brwt_coord.get_label_encoder();
 
                 auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleBRWT>>(nullptr,
                             std::move(*brwt_coord.release_matrix()));
@@ -749,6 +756,7 @@ int transform_annotation(Config *config) {
                         files, config->infbase, config->outfbase,
                         get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
+                label_encoder = RowDiffDiskCoordAnnotator::read_label_encoder(config->outfbase);
                 break;
             }
             case Config::RowDiffBRWT: {
@@ -846,6 +854,13 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
+        }
+
+        if (files.size() && std::filesystem::exists(utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kSeqExtension)) {
+            logger->trace("Loading sequence delimiters");
+            load_seq_delimiters(label_encoder, files).serialize(config->outfbase + ".seq");
+            logger->trace("Serialized sequence delimiters to {}", config->outfbase);
         }
 
     } else if (input_anno_type == Config::RowDiff) {

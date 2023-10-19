@@ -292,12 +292,16 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
     auto seq_fname = remove_suffix(filename, kExtension) + kSeqExtension;
     std::ofstream out_seq;
+    size_t overall_max_coord = 0;
     if (has_end_) {
         out_seq = utils::open_new_ofstream(seq_fname);
         if (!out_seq) {
             logger->error("Could not open file for writing: {}", seq_fname);
             throw std::ofstream::failure("Bad stream");
         }
+
+        serialize_number(out_seq, coords_.size());
+        overall_max_coord = *std::max_element(max_coord_.begin(), max_coord_.end());
     }
 
     uint64_t num_coordinates = 0;
@@ -343,7 +347,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             // pack coordinates
             sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord_[j]) + 1);
 
-            sdsl::bit_vector seq_delim(has_end_ ? max_coord_[j] + 1 : 0, false);
+            sdsl::bit_vector seq_delim(has_end_ ? overall_max_coord + 1 : 0, false);
 
             uint64_t cur = 0;
             for (size_t i = 0; i < c_v.size(); ++i) {
@@ -453,7 +457,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 delim.push_back(1);
             }
 
-            while (seq_delim && seq_delim->size() <= max_coord_[j]) {
+            while (seq_delim && seq_delim->size() <= overall_max_coord) {
                 seq_delim->push_back(false);
             }
 
