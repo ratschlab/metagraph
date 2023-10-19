@@ -1,5 +1,7 @@
 #include "column_major.hpp"
 
+#include <tsl/hopscotch_set.h>
+
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/serialization.hpp"
 

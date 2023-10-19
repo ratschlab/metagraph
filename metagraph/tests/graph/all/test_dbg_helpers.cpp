@@ -64,7 +64,6 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     std::vector<std::string> unitigs;
     size_t last_cluster_id = 0;
 
-    auto unitig_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
     auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
 
     size_t coord = 0;
@@ -78,26 +77,29 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
 
         assert(coord <= graph->num_nodes());
         coord += unitig.size() - graph->get_k() + 1;
-        unitig_anno->add_labels({ coord }, { std::string("") });
     });
 
     if (unitigs.empty())
         return {};
 
-    assert(coord);
     cluster_anno->add_labels({ coord }, { std::string("") });
 
     std::vector<std::string> unitig_labels(unitigs.size(), "");
     auto coord_anno = build_anno_graph<annot::ColumnCompressed<>>(
-        graph, unitigs, unitig_labels, true
+        graph, unitigs, unitig_labels, true, true
     );
 
-    auto seq_index = std::make_shared<annot::SeqIndexedAnnotator<std::string>>(
-        std::shared_ptr<const graph::GraphTopology::Annotator>(coord_anno->release_annotator()),
-        std::vector<std::shared_ptr<const graph::GraphTopology::Annotator>>{ unitig_anno, cluster_anno }
+    using IndexedAnnotator = annot::SeqIndexedAnnotator<std::string>;
+    std::shared_ptr<const IndexedAnnotator> coord_indexed(
+        static_cast<const IndexedAnnotator*>(coord_anno->release_annotator())
     );
+    assert(coord_indexed->get_indexes().size() == 1);
+    assert(coord_indexed->get_indexes()[0]->num_labels() == 1);
+    assert(coord_indexed->get_indexes()[0]->num_objects() == coord);
 
-    return std::make_shared<graph::GraphTopology>(*graph, seq_index);
+    const_cast<IndexedAnnotator&>(*coord_indexed).add_index(cluster_anno);
+
+    return std::make_shared<graph::GraphTopology>(*graph, coord_indexed);
 }
 
 template <class Graph>

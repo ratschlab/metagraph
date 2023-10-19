@@ -226,7 +226,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (config.superbubbles) {
         if (config.coordinates) {
             logger->error("Constructing coordinates and topology at the same time not supported");
-            logger->error("Annotate with coordinates first, then with superbubbles.");
+            logger->error("Annotate with --coordinates --anno-seq-ends first, then with --superbubbles.");
             exit(1);
         }
 
@@ -240,31 +240,20 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             logger->trace("Primary graph wrapped into canonical");
         }
 
-        auto unitig_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
-                                                  config.sparse, graph->max_index() + 1,
-                                                  config.tmp_dir, config.memory_available,
-                                                  config.count_width, num_chunks_open,
-                                                  config.RA_ivbuffer_size);
         auto cluster_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
                                                    config.sparse, graph->max_index() + 1,
                                                    config.tmp_dir, config.memory_available,
                                                    config.count_width, num_chunks_open,
                                                    config.RA_ivbuffer_size);
 
-        std::mutex unitig_mu;
         std::mutex cluster_mu;
         for (const auto &file : files) {
-            BatchAccumulator<std::tuple<size_t, bool, std::vector<std::string>>> batcher(
+            BatchAccumulator<std::pair<size_t, std::vector<std::string>>> batcher(
                 [&](auto&& data) {
                     thread_pool.enqueue([&](auto &data) {
-                        for (auto &[coord, is_last, labels] : data) {
-                            if (is_last) {
-                                std::lock_guard<std::mutex> lock(cluster_mu);
-                                cluster_annot->add_labels({ coord }, std::move(labels));
-                            } else {
-                                std::lock_guard<std::mutex> lock(unitig_mu);
-                                unitig_annot->add_labels({ coord }, std::move(labels));
-                            }
+                        for (auto &[coord, labels] : data) {
+                            std::lock_guard<std::mutex> lock(cluster_mu);
+                            cluster_annot->add_labels({ coord }, std::move(labels));
                         }
                     }, std::move(data));
                 },
@@ -305,22 +294,21 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     labels.pop_back();
 
                     if (cluster_id != last_cluster_id) {
-                        batcher.push_and_pay(last_seq_size, coord, true, std::move(last_labels));
+                        batcher.push_and_pay(last_seq_size, coord, std::move(last_labels));
                         last_cluster_id = cluster_id;
                     }
 
                     coord += sequence.size() - k + 1;
                     last_labels = labels;
-                    batcher.push_and_pay(sequence.size(), coord, false, std::move(labels));
                     last_seq_size = sequence.size();
                 }
             );
 
             if (coord)
-                batcher.push_and_pay(last_seq_size, coord, true, std::move(last_labels));
+                batcher.push_and_pay(last_seq_size, coord, std::move(last_labels));
         }
 
-        unitig_annot->serialize(annotator_filename + graph::GraphTopology::unitig_extension());
+        thread_pool.join();
         cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
         return;
     }

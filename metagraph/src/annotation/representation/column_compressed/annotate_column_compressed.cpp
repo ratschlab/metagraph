@@ -154,8 +154,10 @@ void ColumnCompressed<Label>
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
         coords_[j].emplace_back(i, coord);
-        if (is_end)
+        if (is_end) {
             coords_[j].emplace_back(i, coord | SEQ_END);
+            has_end_ = true;
+        }
 
         max_coord_[j] = std::max(max_coord_[j], coord);
     }
@@ -178,11 +180,12 @@ void ColumnCompressed<Label>
         const size_t j = label_encoder_.encode(label);
         for (const auto &[i, c, is_end] : coords) {
             coords_[j].emplace_back(i, c);
-            if (is_end)
+            if (is_end) {
                 coords_[j].emplace_back(i, c | SEQ_END);
+                has_end_ = true;
+            }
 
             max_coord_[j] = std::max(max_coord_[j], c);
-            has_end_ |= is_end;
         }
     }
 }
@@ -322,10 +325,15 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 exit(1);
             }
 
+            std::atomic<size_t> num_col_coordinates { 0 };
+
             #pragma omp parallel for num_threads(get_num_threads())
             for (size_t i = 0; i < c_v.size(); ++i) {
                 if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
                     c_v[i].first = rank;
+                    if (!(c_v[i].second & SEQ_END))
+                        ++num_col_coordinates;
+
                 } else {
                     logger->warn("Trying to add attribute {} for not annotated object {}."
                                  " The attribute is ignored.", c_v[i].second, c_v[i].first);
@@ -343,27 +351,27 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             // marks where the next block starts
             //  *- * *
             // 1001010
-            sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
+            sdsl::bit_vector delim(num_col_coordinates + bitmatrix_[j]->num_set_bits() + 1, 0);
             // pack coordinates
-            sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord_[j]) + 1);
+            sdsl::int_vector<> coords(num_col_coordinates, 0, sdsl::bits::hi(max_coord_[j]) + 1);
 
             sdsl::bit_vector seq_delim(has_end_ ? overall_max_coord + 1 : 0, false);
 
             uint64_t cur = 0;
-            for (size_t i = 0; i < c_v.size(); ++i) {
-                auto [r, coord] = c_v[i];
+            size_t i = 0;
+            for (auto [r, coord] : c_v) {
                 if (coord & SEQ_END) {
-                    coord &= ~SEQ_END;
-                    seq_delim[coord] = true;
+                    seq_delim[coord & ~SEQ_END] = true;
+                    continue;
                 }
 
                 while (cur < r) {
                     delim[i + cur++] = 1;
                 }
-                coords[i] = coord;
+                coords[i++] = coord;
             }
 
-            for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
+            for (uint64_t t = cur + num_col_coordinates; t < delim.size(); ++t) {
                 delim[t] = 1;
             }
 
@@ -375,7 +383,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 bit_vector_smart(std::move(seq_delim)).serialize(out_seq);
             }
 
-            num_coordinates += c_v.size();
+            num_coordinates += num_col_coordinates;
         } else {
             auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
             c_v.flush();
@@ -422,12 +430,6 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                     if (!r)
                         continue;
 
-                    while (cur < r) {
-                        delim.push_back(1);
-                        cur++;
-                    }
-                    delim.push_back(0);
-
                     if (coord & SEQ_END) {
                         coord &= ~SEQ_END;
                         while (seq_delim->size() <= coord) {
@@ -435,8 +437,14 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                         }
 
                         seq_delim->push_back(true);
+                        continue;
                     }
 
+                    while (cur < r) {
+                        delim.push_back(1);
+                        cur++;
+                    }
+                    delim.push_back(0);
                     coords.push_back(coord);
                 }
 

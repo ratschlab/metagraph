@@ -58,6 +58,18 @@ class SeqIndexedAnnotator : public MultiLabelAnnotation<Label> {
         throw std::runtime_error("Not implemented for static");
     }
 
+    const std::vector<std::shared_ptr<const Annotation>>& get_indexes() const {
+        return seq_indexes_;
+    }
+
+    template <typename... Args>
+    void add_index(Args&&... args) {
+        seq_indexes_.emplace_back(std::forward<Args>(args)...);
+        assert(seq_indexes_.back());
+        assert(seq_indexes_.back()->get_label_encoder().get_labels()
+                == this->label_encoder_.get_labels());
+    }
+
   private:
     std::shared_ptr<const Annotation> base_anno_;
     std::vector<std::shared_ptr<const Annotation>> seq_indexes_;

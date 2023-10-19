@@ -393,7 +393,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
                                   }) {
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
-            k, sequences, labels, mode, false, false
+            k, sequences, labels, mode, false, false, false
         );
 
         DBGAlignerConfig config;
@@ -433,7 +433,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(
-        k, sequences, labels, DeBruijnGraph::BASIC, false, false
+        k, sequences, labels, DeBruijnGraph::BASIC, false, false, false
     );
 
     DBGAlignerConfig config;

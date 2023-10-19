@@ -22,7 +22,12 @@ static_assert(std::is_same_v<GraphTopology::Row, BinaryMatrix::Row>);
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
                              std::shared_ptr<const annot::SeqIndexedAnnotator<Label>> annotator)
       : graph_(graph), annotator_(annotator),
-        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)) {}
+        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)) {
+    if (annotator_->get_indexes().size() != 2) {
+        common::logger->error("Invalid annotator loaded as graph topology");
+        exit(1);
+    }
+}
 
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
                              std::shared_ptr<align::AnnotationBuffer> buffer)
@@ -32,6 +37,11 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
         buffer_(buffer) {
     if (!annotator_) {
         common::logger->error("Annotator does not support graph topology.");
+        exit(1);
+    }
+
+    if (annotator_->get_indexes().size() != 2) {
+        common::logger->error("Invalid annotator loaded as graph topology");
         exit(1);
     }
 }

@@ -9,6 +9,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/graph_extensions/graph_topology.hpp"
+#include "annotation/representation/seq_indexed/seq_indexed.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/utils/file_utils.hpp"
@@ -38,13 +39,11 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (unitigs.empty())
         return {};
 
-    auto unitig_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
     auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
     size_t coord = 0;
 
     for (size_t i = 0; i < unitigs.size(); ++i) {
         coord += unitigs[i].size() - graph->get_k() + 1;
-        unitig_anno->add_labels({ coord }, { labels[i] });
 
         if (i + 1 == unitigs.size() || cluster_ids[i + 1] != cluster_ids[i] || labels[i] != labels[i + 1]) {
             cluster_anno->add_labels({ coord }, { labels[i] });
@@ -53,12 +52,13 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
         }
     }
 
-    auto seq_index = std::make_shared<annot::SeqIndexedAnnotator<std::string>>(
-        coord_anno,
-        std::vector<std::shared_ptr<const graph::GraphTopology::Annotator>>{ unitig_anno, cluster_anno }
-    );
+    using IndexedAnnotator = annot::SeqIndexedAnnotator<std::string>;
+    auto coord_indexed = std::static_pointer_cast<const IndexedAnnotator>(coord_anno);
+    assert(coord_indexed->get_indexes().size() == 1);
 
-    return std::make_shared<graph::GraphTopology>(*graph, seq_index);
+    const_cast<IndexedAnnotator&>(*coord_indexed).add_index(cluster_anno);
+
+    return std::make_shared<graph::GraphTopology>(*graph, coord_indexed);
 }
 
 template <class Graph, class Annotation>
@@ -67,6 +67,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &labels,
                                                DeBruijnGraph::Mode mode,
                                                bool coordinates,
+                                               bool mark_seq_ends,
                                                bool mask_dummy_kmers) {
     if constexpr(std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
         static_assert(std::is_base_of_v<DBGSuccinct, Graph>);
@@ -77,10 +78,11 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     if constexpr(!std::is_same_v<Graph, DBGSuccinctTopology>) {
         return build_anno_graph<Annotation>(
             build_graph_batch<Graph>(k, sequences, mode, mask_dummy_kmers),
-            sequences, labels, coordinates
+            sequences, labels, coordinates, mark_seq_ends
         );
     } else {
         std::ignore = coordinates;
+        std::ignore = mark_seq_ends;
     }
 
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode, mask_dummy_kmers);
@@ -108,7 +110,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         );
     }
 
-    auto anno_graph = build_anno_graph<Annotation>(graph, unitigs, unitig_labels, true);
+    auto anno_graph = build_anno_graph<Annotation>(graph, unitigs, unitig_labels, true, true);
     graph->add_extension(make_topology(graph,
                                        std::shared_ptr<const AnnotatedDBG::Annotator>(
                                            std::shared_ptr<const AnnotatedDBG::Annotator>{},
@@ -124,7 +126,8 @@ template <class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> graph,
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels,
-                                               bool coordinates) {
+                                               bool coordinates,
+                                               bool mark_seq_ends) {
     assert(sequences.size() == labels.size());
 
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
@@ -138,6 +141,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
         std::make_unique<ColumnCompressed<>>(max_index)
     );
 
+    std::shared_ptr<const ColumnCompressed<>> seq_ends;
     if (coordinates) {
         tsl::hopscotch_map<std::string, size_t> last_coords;
         std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
@@ -146,19 +150,31 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
             data.emplace_back(sequences[i], std::vector<std::string>{ labels[i] }, last_coord);
             last_coord += sequences[i].size() - graph->get_k() + 1;
         }
-        anno_graph->annotate_kmer_coords(data);
+        anno_graph->annotate_kmer_coords(data, mark_seq_ends);
+
         if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
             std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
             std::string out_path = tmp_dir/"test_col";
             anno_graph->get_annotator().serialize(out_path);
+            std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
             std::unique_ptr<AnnotatedDBG::Annotator> anno(anno_graph->release_annotator());
-            return std::make_unique<AnnotatedDBG>(
-                graph,
-                std::unique_ptr<AnnotatedDBG::Annotator>(new ColumnCoordAnnotator(
-                    load_coords(std::move(dynamic_cast<ColumnCompressed<>&>(*anno)),
-                                std::vector<std::string>{out_path + ColumnCompressed<>::kExtension})
-                ))
-            );
+            std::unique_ptr<AnnotatedDBG::Annotator> coord_anno(new ColumnCoordAnnotator(
+                load_coords(std::move(dynamic_cast<ColumnCompressed<>&>(*anno)), files)
+            ));
+
+            if (mark_seq_ends) {
+                seq_ends.reset(new ColumnCompressed<>(
+                    load_seq_delimiters(coord_anno->get_label_encoder(), files)
+                ));
+                auto coord_index = std::make_unique<SeqIndexedAnnotator<AnnotatedDBG::Annotator::Label>>(
+                    std::shared_ptr<const AnnotatedDBG::Annotator>(coord_anno.release()),
+                    std::vector<std::shared_ptr<const AnnotatedDBG::Annotator>>{ seq_ends }
+                );
+                coord_anno = std::move(coord_index);
+            }
+
+            return std::make_unique<AnnotatedDBG>(graph, std::move(coord_anno));
+
         } else if constexpr(!std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
             static_assert("Coordinates only supported for ColumnCompressed and RowDiff");
         }
@@ -262,6 +278,17 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
                 std::move(delimiters), std::move(column_values)
             ));
 
+            if (mark_seq_ends) {
+                seq_ends.reset(new ColumnCompressed<>(
+                    load_seq_delimiters(annotator->get_label_encoder(), files)
+                ));
+                auto coord_index = std::make_unique<SeqIndexedAnnotator<AnnotatedDBG::Annotator::Label>>(
+                    std::shared_ptr<const AnnotatedDBG::Annotator>(annotator.release()),
+                    std::vector<std::shared_ptr<const AnnotatedDBG::Annotator>>{ seq_ends }
+                );
+                annotator = std::move(coord_index);
+            }
+
         } else {
             auto rd_path = out_fs_path.replace_extension(RowDiffColumnAnnotator::kExtension);
             annotator.reset(new RowDiffColumnAnnotator({}, static_cast<const DBGSuccinct*>(base_graph.get())));
@@ -281,6 +308,9 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
     } else if constexpr(std::is_same_v<Annotation, RowDiffDiskAnnotator>) {
         if (!dynamic_cast<const DBGSuccinct*>(base_graph.get()))
             throw std::runtime_error("Unsupported combination");
+
+        if (coordinates)
+            throw std::runtime_error("Coordinates not supported for this combination");
 
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
         auto out_fs_path = tmp_dir/"test_col";
@@ -326,30 +356,30 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> gr
     }
 }
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinctTopology, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, bool, bool);
 
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<ColumnCompressed<>>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowFlatAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowDiffColumnAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowDiffDiskAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<ColumnCompressed<>>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowFlatAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowDiffColumnAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<RowDiffDiskAnnotator>(std::shared_ptr<DeBruijnGraph>, const std::vector<std::string> &, const std::vector<std::string>&, bool, bool);
 
 } // namespace test
 } // namespace mtg
