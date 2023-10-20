@@ -1723,6 +1723,7 @@ ColumnCompressed<std::string>
 load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                     const std::vector<std::string> &files) {
     size_t num_columns = 0;
+    uint64_t max_num_objects = 0;
     for (const auto &file : files) {
         const auto fname = utils::remove_suffix(file, ColumnCompressed<>::kExtension)
                                                     + ColumnCompressed<>::kSeqExtension;
@@ -1732,6 +1733,7 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
         }
 
         num_columns += load_number(*fin);
+        max_num_objects = std::max(max_num_objects, load_number(*fin));
     }
 
     if (num_columns != label_encoder.size()) {
@@ -1739,6 +1741,9 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                       num_columns, label_encoder.get_labels().size());
         exit(1);
     }
+
+    logger->trace("Loading sequence delimiters from {} columns with at most {} coordinates",
+                  num_columns, max_num_objects);
 
     std::vector<std::unique_ptr<bit_vector>> columns;
     columns.reserve(num_columns);
@@ -1753,9 +1758,28 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
         size_t num_cur_columns = load_number(*fin);
         assert(num_cur_columns);
 
+        size_t num_objects = load_number(*fin);
+
         for (size_t i = 0; i < num_cur_columns; ++i) {
-            auto &column = columns.emplace_back(std::make_unique<bit_vector_smart>());
-            column->load(*fin);
+            size_t num_set_bits = load_number(*fin);
+            bit_vector_smart bv;
+            bv.load(*fin);
+            if (num_objects != bv.size()) {
+                logger->error("Incorrect size in column {} from file {}: {} != {}",
+                              i, file, num_objects, bv.size());
+                exit(1);
+            }
+            if (num_set_bits != bv.num_set_bits()) {
+                logger->error("Incorrect number of set bits in column {} from file {}: {} != {}",
+                              i, file, num_set_bits, bv.num_set_bits());
+                exit(1);
+            }
+
+            columns.emplace_back(std::make_unique<bit_vector_smart>(
+                [&](const auto &callback) { bv.call_ones(callback); },
+                max_num_objects,
+                num_set_bits
+            ));
         }
     }
 

@@ -305,6 +305,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
         serialize_number(out_seq, coords_.size());
         overall_max_coord = *std::max_element(max_coord_.begin(), max_coord_.end());
+        serialize_number(out_seq, overall_max_coord + 1);
     }
 
     uint64_t num_coordinates = 0;
@@ -380,7 +381,9 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
             if (out_seq) {
                 assert(has_end_);
-                bit_vector_smart(std::move(seq_delim)).serialize(out_seq);
+                bit_vector_smart seq_delim_comp(std::move(seq_delim));
+                serialize_number(out_seq, seq_delim_comp.num_set_bits());
+                seq_delim_comp.serialize(out_seq);
             }
 
             num_coordinates += num_col_coordinates;
@@ -491,7 +494,9 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 sdsl::bit_vector seq_delim_bv;
                 std::unique_ptr<std::ifstream> in = utils::open_ifstream(tmp_path/"seqdelim");
                 seq_delim_bv.load(*in);
-                bit_vector_smart(std::move(seq_delim_bv)).serialize(out_seq);
+                bit_vector_smart seq_delim_comp(std::move(seq_delim_bv));
+                serialize_number(out_seq, seq_delim_comp.num_set_bits());
+                seq_delim_comp.serialize(out_seq);
                 out_seq.close();
 
                 utils::append_file(tmp_path/"seqdelim", seq_fname);
