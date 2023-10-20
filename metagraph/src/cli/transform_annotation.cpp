@@ -7,6 +7,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -859,7 +860,9 @@ int transform_annotation(Config *config) {
         if (files.size() && std::filesystem::exists(utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kSeqExtension)) {
             logger->trace("Loading sequence delimiters");
-            load_seq_delimiters(label_encoder, files).serialize(config->outfbase + ".seq");
+            load_seq_delimiters(label_encoder, files).serialize(
+                config->outfbase + graph::GraphTopology::seq_extension()
+            );
             logger->trace("Serialized sequence delimiters to {}", config->outfbase);
         }
 

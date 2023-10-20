@@ -39,6 +39,7 @@ class GraphTopology : public SequenceGraph::GraphExtension {
         return *annotator_;
     }
 
+    static std::string seq_extension() { return kSeqExtension; }
     static std::string cluster_extension() { return kClusterExtension; }
 
   private:
@@ -46,6 +47,7 @@ class GraphTopology : public SequenceGraph::GraphExtension {
     std::shared_ptr<const annot::SeqIndexedAnnotator<Label>> annotator_;
     std::shared_ptr<align::AnnotationBuffer> buffer_;
 
+    static constexpr auto kSeqExtension = ".seq";
     static constexpr auto kClusterExtension = ".clusters";
 };
 

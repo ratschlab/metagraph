@@ -5,8 +5,10 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/seq_indexed/seq_indexed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 #include "common/logger.hpp"
 #include "cli/config/config.hpp"
 #include "load_graph.hpp"
@@ -41,8 +43,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             loaded = cc->merge_load(config.infbase_annotators);
         } else {
             if (config.infbase_annotators.size() > 1) {
-                logger->warn("Cannot merge annotations of this type. Only the first"
-                             " file {} will be loaded.", config.infbase_annotators.at(0));
+                logger->info("Loading the first file {} as the annotator and the rest as indexes.",
+                             config.infbase_annotators.at(0));
             }
             loaded = annotation_temp->load(config.infbase_annotators.at(0));
         }
@@ -68,6 +70,27 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
                 row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
+        }
+
+        // check for and load auxiliary sequence indexes
+        if (config.infbase_annotators.size() > 1
+                && (config.identity == Config::ALIGN || config.identity == Config::QUERY
+                    || config.identity == Config::SERVER_QUERY)) {
+            std::vector<std::shared_ptr<const annot::MultiLabelAnnotation<std::string>>> seq_indexes;
+            for (size_t i = 1; i < config.infbase_annotators.size(); ++i) {
+                auto seq_index = initialize_annotation(config.infbase_annotators.at(i), config, 0, max_chunks_open);
+                if (!seq_index->load(config.infbase_annotators.at(i))) {
+                    logger->error("Cannot load sequence indexes for graph {}, file corrupted",
+                          config.infbase);
+                    exit(1);
+                }
+                seq_indexes.emplace_back(seq_index.release());
+            }
+
+            annotation_temp = std::make_unique<annot::SeqIndexedAnnotator<std::string>>(
+                std::shared_ptr<const annot::MultiLabelAnnotation<std::string>>(annotation_temp.release()),
+                std::move(seq_indexes)
+            );
         }
     }
 

@@ -1729,7 +1729,8 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                                                     + ColumnCompressed<>::kSeqExtension;
         auto fin = utils::open_ifstream(fname);
         if (!fin->good()) {
-            throw std::ifstream::failure("can't open file");
+            logger->error("Failed to open file {}", fname);
+            exit(1);
         }
 
         num_columns += load_number(*fin);
@@ -1752,7 +1753,8 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                                                     + ColumnCompressed<>::kSeqExtension;
         auto fin = utils::open_ifstream(fname);
         if (!fin->good()) {
-            throw std::ifstream::failure("can't open file");
+            logger->error("Failed to open file {}", fname);
+            exit(1);
         }
 
         size_t num_cur_columns = load_number(*fin);
