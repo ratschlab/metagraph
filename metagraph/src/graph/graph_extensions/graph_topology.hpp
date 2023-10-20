@@ -29,8 +29,13 @@ class GraphTopology : public SequenceGraph::GraphExtension {
 
     std::vector<Coords> get_coords(const std::vector<graph::DeBruijnGraph::node_index> &nodes) const;
 
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
+    bool load(const std::string &) {
+        throw std::runtime_error("Load not implemented");
+    }
+
+    void serialize(const std::string &) const {
+        throw std::runtime_error("Serialize not implemented");
+    }
 
     bool is_compatible(const graph::SequenceGraph &, bool = true) const { return true; }
 
