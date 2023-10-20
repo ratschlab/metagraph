@@ -3,6 +3,8 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "annotation/representation/seq_indexed/seq_indexed.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 
 
 namespace mtg {
@@ -487,6 +489,13 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
     this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
+
+    if (dynamic_cast<const annot::SeqIndexedAnnotator<std::string>*>(&annotator)) {
+        this->topology_ = std::make_shared<const GraphTopology>(
+            this->graph_,
+            std::shared_ptr<AnnotationBuffer>(std::shared_ptr<AnnotationBuffer>{}, &annotation_buffer_)
+        );
+    }
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>

@@ -26,10 +26,11 @@ using namespace mtg::annot::matrix;
 using common::logger;
 
 typedef typename RowDiffCoordAnnotator::binary_matrix_type CoordRowDiff;
+using IndexedAnnotator = annot::SeqIndexedAnnotator<std::string>;
 
 std::shared_ptr<graph::GraphTopology>
 make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
-              std::shared_ptr<const AnnotatedDBG::Annotator> coord_anno,
+              std::shared_ptr<const IndexedAnnotator> coord_indexed,
               const std::vector<std::string> &unitigs,
               const std::vector<size_t> &cluster_ids,
               const std::vector<std::string> &labels) {
@@ -45,17 +46,15 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (size_t i = 0; i < unitigs.size(); ++i) {
         coord += unitigs[i].size() - graph->get_k() + 1;
 
-        if (i + 1 == unitigs.size() || cluster_ids[i + 1] != cluster_ids[i] || labels[i] != labels[i + 1]) {
+        if (i + 1 == unitigs.size() || cluster_ids[i + 1] != cluster_ids[i]
+                || labels[i] != labels[i + 1]) {
             cluster_anno->add_labels({ coord }, { labels[i] });
             if (i + 1 != unitigs.size() && labels[i] != labels[i + 1])
                 coord = 0;
         }
     }
 
-    using IndexedAnnotator = annot::SeqIndexedAnnotator<std::string>;
-    auto coord_indexed = std::static_pointer_cast<const IndexedAnnotator>(coord_anno);
     assert(coord_indexed->get_indexes().size() == 1);
-
     const_cast<IndexedAnnotator&>(*coord_indexed).add_index(cluster_anno);
 
     return std::make_shared<graph::GraphTopology>(*graph, coord_indexed);
@@ -111,12 +110,14 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     }
 
     auto anno_graph = build_anno_graph<Annotation>(graph, unitigs, unitig_labels, true, true);
-    graph->add_extension(make_topology(graph,
-                                       std::shared_ptr<const AnnotatedDBG::Annotator>(
-                                           std::shared_ptr<const AnnotatedDBG::Annotator>{},
-                                           &anno_graph->get_annotator()
-                                       ),
-                                       unitigs, cluster_ids, unitig_labels
+    auto seq_index_anno = std::shared_ptr<const IndexedAnnotator>(
+        std::shared_ptr<const IndexedAnnotator>{},
+        dynamic_cast<const IndexedAnnotator*>(&anno_graph->get_annotator())
+    );
+    assert(seq_index_anno);
+
+    graph->add_extension(make_topology(
+        graph, seq_index_anno, unitigs, cluster_ids, unitig_labels
     ));
 
     return anno_graph;

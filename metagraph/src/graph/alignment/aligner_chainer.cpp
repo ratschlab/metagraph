@@ -522,9 +522,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                    std::vector<Seed>&& bwd_seeds,
                    const std::function<void(Alignment&&)> &callback,
                    const std::function<bool(Alignment::Column)> &skip_column) {
-    const auto &graph = aligner.get_graph();
-
-    const auto *topology = graph.get_extension_threadsafe<graph::GraphTopology>();
+    const auto *topology = aligner.get_topology();
     if (!topology) {
         for (const auto &seed : fwd_seeds) {
             callback(Alignment(seed, config));

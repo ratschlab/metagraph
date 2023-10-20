@@ -31,10 +31,14 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
 
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
                              std::shared_ptr<align::AnnotationBuffer> buffer)
-      : graph_(graph),
-        annotator_(std::shared_ptr<const annot::SeqIndexedAnnotator<Label>>{},
-                   dynamic_cast<const annot::SeqIndexedAnnotator<Label>*>(&buffer_->get_annotator())),
-        buffer_(buffer) {
+      : graph_(graph), buffer_(buffer) {
+    assert(buffer_);
+
+    annotator_ = std::shared_ptr<const annot::SeqIndexedAnnotator<Label>>(
+        std::shared_ptr<const annot::SeqIndexedAnnotator<Label>>{},
+        dynamic_cast<const annot::SeqIndexedAnnotator<Label>*>(&buffer_->get_annotator())
+    );
+
     if (!annotator_) {
         common::logger->error("Annotator does not support graph topology.");
         exit(1);

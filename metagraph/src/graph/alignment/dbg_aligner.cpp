@@ -6,6 +6,7 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "aligner_labeled.hpp"
 
@@ -33,8 +34,14 @@ AlignmentResults IDBGAligner::align(std::string_view query) const {
 
 template <class Seeder, class Extender, class AlignmentCompare>
 DBGAligner<Seeder, Extender, AlignmentCompare>
-::DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-      : graph_(graph), config_(config) {
+::DBGAligner(const DeBruijnGraph &graph,
+             const DBGAlignerConfig &config,
+             std::shared_ptr<const GraphTopology> topology)
+      : graph_(graph), config_(config),
+        topology_(topology
+            ? topology
+            : std::shared_ptr<const GraphTopology>(std::shared_ptr<const GraphTopology>{},
+                                                   graph_.get_extension_threadsafe<GraphTopology>())) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
 
