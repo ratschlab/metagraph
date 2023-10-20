@@ -24,7 +24,6 @@ auto SeqIndexedAnnotator<Label>
     std::vector<std::vector<std::pair<Row, Vector<Column>>>> row_coords;
     row_coords.reserve(row_tuples.size());
     for (const auto &row_tuple : row_tuples) {
-        using RowColumnFlatMap = std::vector<std::pair<Row, Vector<Column>>>;
         VectorMap<Row, Vector<Column>> cur_row_coords;
 
         for (const auto &[c, tuple] : row_tuple) {
@@ -33,7 +32,7 @@ auto SeqIndexedAnnotator<Label>
             }
         }
 
-        row_coords.emplace_back(const_cast<RowColumnFlatMap&&>(
+        row_coords.emplace_back(const_cast<std::vector<std::pair<Row, Vector<Column>>>&&>(
             cur_row_coords.values_container()
         ));
     }

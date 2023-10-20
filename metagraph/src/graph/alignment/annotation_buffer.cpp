@@ -10,6 +10,7 @@
 #include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
 #include "graph/graph_extensions/hll_wrapper.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 
 namespace mtg {
 namespace graph {
@@ -32,10 +33,8 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
         global_coords_(global_coordinates),
         column_sets_({ {} }) {
-    if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
-        global_coords_ = false;
-        logger->warn("Coordinates not supported when aligning to CANONICAL "
-                     "or PRIMARY mode graphs. Alignments may be truncated.");
+    if (has_local_coordinates() && !has_coordinates()) {
+        logger->info("Only local coordinates");
     }
 }
 
@@ -161,7 +160,12 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                 assert(dbg_succ);
                 assert(!dbg_succ->get_mask());
                 assert(dbg_succ->get_boss().is_dummy(node));
-                assert(!node_to_cols.count(node));
+                auto find_node = node_to_cols.find(node);
+                if (find_node != node_to_cols.end()) {
+                    assert(find_node->second != nannot || dummy_nodes.count(node));
+                    return;
+                }
+
                 dummy_nodes.emplace(node);
             }
         };

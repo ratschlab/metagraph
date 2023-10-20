@@ -289,7 +289,6 @@ BRWT::get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Column>>>> &
                 result.emplace_back(col, rank);
             }
         }
-        assert(result.size() == coords.size());
     }
 
     return results;

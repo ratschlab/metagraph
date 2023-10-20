@@ -101,7 +101,6 @@ ColumnMajor::get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Colum
                 result.emplace_back(c, r);
             }
         }
-        assert(result.size() == row_coord.size());
     }
 
     return results;

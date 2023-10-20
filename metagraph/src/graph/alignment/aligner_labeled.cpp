@@ -17,6 +17,7 @@ typedef annot::matrix::BinaryMatrix::Row Row;
 typedef annot::matrix::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
+typedef annot::SeqIndexedAnnotator<std::string> IndexedAnnotator;
 
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
@@ -478,8 +479,14 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const Annotator &annotator,
                  bool global_coordinates)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator, global_coordinates),
+        annotation_buffer_(graph, annotator,
+                           global_coordinates
+                            && (!dynamic_cast<const IndexedAnnotator*>(&annotator)
+                                || dynamic_cast<const IndexedAnnotator*>(&annotator)->get_indexes().size() != 2)),
         max_seed_length_(this->config_.max_seed_length) {
+    const auto *seq_index = dynamic_cast<const IndexedAnnotator*>(&annotator);
+    bool has_topology_index = seq_index && seq_index->get_indexes().size() == 2;
+
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
         logger->trace("Coordinates detected. Enabling seed chaining");
@@ -490,10 +497,11 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
     this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
 
-    if (dynamic_cast<const annot::SeqIndexedAnnotator<std::string>*>(&annotator)) {
+    if (has_topology_index) {
         this->topology_ = std::make_shared<const GraphTopology>(
             this->graph_,
-            std::shared_ptr<AnnotationBuffer>(std::shared_ptr<AnnotationBuffer>{}, &annotation_buffer_)
+            std::shared_ptr<AnnotationBuffer>(std::shared_ptr<AnnotationBuffer>{},
+                                              &annotation_buffer_)
         );
     }
 }

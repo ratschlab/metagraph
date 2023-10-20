@@ -67,8 +67,11 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
         assert(cols->size() == coords->size());
 
         for (size_t i = 0; i < cols->size(); ++i) {
-            if ((*coords)[i].size())
-                row_tuple.emplace_back((*cols)[i], Tuple((*coords)[i].begin(), (*coords)[i].end()));
+            if ((*coords)[i].size()) {
+                row_tuple.emplace_back(
+                    (*cols)[i], Tuple((*coords)[i].begin(), (*coords)[i].end())
+                );
+            }
         }
     }
     assert(tuples.size() == nodes.size());
