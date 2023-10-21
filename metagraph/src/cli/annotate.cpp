@@ -223,99 +223,27 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         forward_and_reverse = false;
     }
 
-    if (config.superbubbles) {
-        if (config.coordinates) {
-            logger->error("Constructing coordinates and topology at the same time not supported");
-            logger->error("Annotate with --coordinates --anno-seq-ends first, then with --superbubbles.");
-            exit(1);
-        }
-
-        if (config.annotate_sequence_headers) {
-            logger->error("Annotating headers with superbubbles not supported");
-            exit(1);
-        }
-
-        if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
-            graph = std::make_shared<graph::CanonicalDBG>(graph);
-            logger->trace("Primary graph wrapped into canonical");
-        }
-
-        auto cluster_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
-                                                   config.sparse, graph->max_index() + 1,
-                                                   config.tmp_dir, config.memory_available,
-                                                   config.count_width, num_chunks_open,
-                                                   config.RA_ivbuffer_size);
-
-        std::mutex cluster_mu;
-        for (const auto &file : files) {
-            BatchAccumulator<std::pair<size_t, std::vector<std::string>>> batcher(
-                [&](auto&& data) {
-                    thread_pool.enqueue([&](auto &data) {
-                        for (auto &[coord, labels] : data) {
-                            std::lock_guard<std::mutex> lock(cluster_mu);
-                            cluster_annot->add_labels({ coord }, std::move(labels));
-                        }
-                    }, std::move(data));
-                },
-                batch_size, batch_length, batch_size
-            );
-
-            size_t coord = 0;
-            size_t last_cluster_id = 0;
-            size_t last_seq_size = 0;
-            std::vector<std::string> last_labels;
-
-            call_annotations(
-                file,
-                config.refpath,
-                *graph,
-                forward_and_reverse,
-                config.min_count,
-                config.max_count,
-                config.filename_anno,
-                true /* annotate_sequence_headers */,
-                config.fasta_anno_comment_delim,
-                config.fasta_header_delimiter,
-                config.anno_labels,
-                [&](std::string sequence, auto labels) {
-                    if (sequence.size() < k) {
-                        logger->error("Invalid sequence detected in file {}", file);
-                        exit(1);
-                    }
-                    graph->map_to_nodes_sequentially(sequence, [&](auto node) {
-                        if (!node) {
-                            logger->error("Invalid k-mer detected in file {}", file);
-                            exit(1);
-                        }
-                    });
-
-                    // order: anno_labels, filename, header
-                    size_t cluster_id = std::atoll(labels.back().c_str());
-                    labels.pop_back();
-
-                    if (cluster_id != last_cluster_id) {
-                        batcher.push_and_pay(last_seq_size, coord, std::move(last_labels));
-                        last_cluster_id = cluster_id;
-                    }
-
-                    coord += sequence.size() - k + 1;
-                    last_labels = labels;
-                    last_seq_size = sequence.size();
-                }
-            );
-
-            if (coord)
-                batcher.push_and_pay(last_seq_size, coord, std::move(last_labels));
-        }
-
-        thread_pool.join();
-        cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
-        return;
-    }
-
     auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
 
-    if (config.coordinates) {
+    if (config.coordinates || config.superbubbles) {
+        size_t last_cluster_id = 0;
+        std::vector<std::string> last_labels;
+        uint64_t last_coord = 0;
+        std::unique_ptr<annot::MultiLabelAnnotation<std::string>> cluster_annot;
+        std::mutex cluster_mu;
+        if (config.superbubbles) {
+            if (config.annotate_sequence_headers) {
+                logger->error("Annotating headers with superbubbles not supported");
+                exit(1);
+            }
+
+            cluster_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
+                                                  config.sparse, graph->max_index() + 1,
+                                                  config.tmp_dir, config.memory_available,
+                                                  config.count_width, num_chunks_open,
+                                                  config.RA_ivbuffer_size);
+        }
+
         for (const auto &file : files) {
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
                 [&](auto&& data) {
@@ -345,7 +273,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.min_count,
                 config.max_count,
                 config.filename_anno,
-                config.annotate_sequence_headers,
+                config.annotate_sequence_headers || config.superbubbles,
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
                 config.anno_labels,
@@ -358,18 +286,48 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                     if (sequence.size() >= k) {
                         uint64_t num_kmers = sequence.size() - k + 1;
+
+                        if (config.superbubbles) {
+                            // label order: anno_labels, filename, header
+                            size_t cluster_id = std::atoll(labels.back().c_str());
+                            labels.pop_back();
+                            if (last_cluster_id != cluster_id) {
+                                thread_pool.enqueue([&](size_t last_coord, auto last_labels) {
+                                    std::lock_guard<std::mutex> lock(cluster_mu);
+                                    cluster_annot->add_labels({ last_coord }, std::move(last_labels));
+                                }, last_coord, std::move(last_labels));
+                            }
+
+                            last_cluster_id = cluster_id;
+                            last_labels = labels;
+                            last_coord = coord + num_kmers - 1;
+                        }
+
                         batcher.push_and_pay(sequence.size(),
                                              std::move(sequence), std::move(labels), coord);
                         if (!config.annotate_sequence_headers)
                             coord += num_kmers;
+                    } else if (config.superbubbles) {
+                        logger->error("Invalid sequence detected in file {}", file);
+                        exit(1);
                     }
                 }
             );
+
+            if (config.superbubbles && last_coord) {
+                thread_pool.enqueue([&](size_t last_coord, auto last_labels) {
+                    std::lock_guard<std::mutex> lock(cluster_mu);
+                    cluster_annot->add_labels({ last_coord }, std::move(last_labels));
+                }, last_coord, std::move(last_labels));
+            }
         }
 
         thread_pool.join();
 
         anno_graph->get_annotator().serialize(annotator_filename);
+
+        if (cluster_annot)
+            cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
 
         return;
     }

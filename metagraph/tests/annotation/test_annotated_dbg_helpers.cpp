@@ -46,7 +46,7 @@ void make_topology(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         if (i + 1 == unitigs.size() || cluster_ids[i + 1] != cluster_ids[i]
                 || labels[i] != labels[i + 1]) {
-            cluster_anno->add_labels({ coord }, { labels[i] });
+            cluster_anno->add_labels({ coord - 1 }, { labels[i] });
             if (i + 1 != unitigs.size() && labels[i] != labels[i + 1])
                 coord = 0;
         }

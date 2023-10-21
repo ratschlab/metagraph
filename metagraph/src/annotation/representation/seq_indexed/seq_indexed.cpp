@@ -20,6 +20,7 @@ auto SeqIndexedAnnotator<Label>
 
     using Row = matrix::BinaryMatrix::Row;
     using Column = matrix::BinaryMatrix::Column;
+    using Tuple = matrix::MultiIntMatrix::Tuple;
 
     std::vector<std::vector<std::pair<Row, Vector<Column>>>> row_coords;
     row_coords.reserve(row_tuples.size());
@@ -28,7 +29,7 @@ auto SeqIndexedAnnotator<Label>
 
         for (const auto &[c, tuple] : row_tuple) {
             for (auto coord : tuple) {
-                cur_row_coords[coord].emplace_back(c);
+                cur_row_coords[std::max(coord, Tuple::value_type(1)) - 1].emplace_back(c);
             }
         }
 

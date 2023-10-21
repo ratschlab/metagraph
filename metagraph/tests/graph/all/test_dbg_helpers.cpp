@@ -71,7 +71,7 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
         unitigs.emplace_back(unitig);
 
         if (last_cluster_id != cluster_id) {
-            cluster_anno->add_labels({ coord }, { std::string("") });
+            cluster_anno->add_labels({ coord - 1 }, { std::string("") });
             last_cluster_id = cluster_id;
         }
 
@@ -82,7 +82,7 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     if (unitigs.empty())
         return {};
 
-    cluster_anno->add_labels({ coord }, { std::string("") });
+    cluster_anno->add_labels({ coord - 1 }, { std::string("") });
 
     std::vector<std::string> unitig_labels(unitigs.size(), "");
     auto coord_anno = build_anno_graph<annot::ColumnCompressed<>>(
