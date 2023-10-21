@@ -22,6 +22,8 @@ auto SeqIndexedAnnotator<Label>
     using Column = matrix::BinaryMatrix::Column;
     using Tuple = matrix::MultiIntMatrix::Tuple;
 
+    // TODO: do less querying if coords are 0
+
     std::vector<std::vector<std::pair<Row, Vector<Column>>>> row_coords;
     row_coords.reserve(row_tuples.size());
     for (const auto &row_tuple : row_tuples) {
@@ -63,8 +65,22 @@ auto SeqIndexedAnnotator<Label>
 
         auto &result = results.emplace_back();
         result.reserve(rearrange.size());
+        auto it = row_tuples[i].begin();
         for (const auto &[c, seq_ids] : rearrange) {
-            result.emplace_back(c, seq_ids);
+            assert(it->first == c);
+            assert(std::all_of(seq_ids.begin(), seq_ids.end(), [&](const auto &s) {
+                return s.size() == it->second.size();
+            }));
+            auto &ids = result.emplace_back(c, seq_ids).second;
+
+            // ensure that if the first coordinate is zero, then the returned rank is zero
+            for (auto &cur_ids : ids) {
+                for (size_t j = 0; j < cur_ids.size(); ++j) {
+                    if (!it->second[j])
+                        cur_ids[j] = 0;
+                }
+            }
+            ++it;
         }
     }
 
