@@ -80,6 +80,7 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
 
 Vector<std::pair<ColumnMajor::Column, uint64_t>>
 ColumnMajor::get_ranks(const std::pair<Row, Vector<Column>> &row_coords) const {
+    assert(std::is_sorted(row_coords.second.begin(), row_coords.second.end()));
     Vector<std::pair<Column, uint64_t>> result;
     for (Column j : row_coords.second) {
         assert(columns_[j]);
@@ -101,6 +102,7 @@ ColumnMajor::get_ranks(const std::vector<std::vector<std::pair<Row, Vector<Colum
                 result.emplace_back(c, r);
             }
         }
+        std::sort(result.begin(), result.end());
     }
 
     return results;

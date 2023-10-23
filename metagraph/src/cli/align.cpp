@@ -365,10 +365,8 @@ int align_to_graph(Config *config) {
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
-    if (config->infbase_annotators.size()) {
-        assert(config->infbase_annotators.size() == 1);
+    if (config->infbase_annotators.size())
         anno_dbg = initialize_annotated_dbg(graph, *config);
-    }
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {

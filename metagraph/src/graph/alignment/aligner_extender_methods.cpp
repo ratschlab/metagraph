@@ -67,8 +67,22 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     if (seed.empty())
         return false;
 
+    const auto &cigar = seed.get_cigar();
+    if (cigar.size() > 1) {
+        auto it = cigar.data().begin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        if (it->first != Cigar::MATCH)
+            return true;
+
+        ++it;
+        if (it != cigar.data().end() && it->first != Cigar::CLIPPED)
+            return true;
+    }
+
     assert(seed.get_nodes().back());
-    assert(seed.get_cigar().size());
+    assert(cigar.size());
 
     node_index node = seed.get_nodes().back();
     if (dynamic_cast<const RCDBG*>(graph_))

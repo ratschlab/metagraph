@@ -15,14 +15,11 @@ auto SeqIndexedAnnotator<Label>
                 return false;
         }
 
-        return true;
+        return std::is_sorted(row_tuple.begin(), row_tuple.end());
     }));
 
     using Row = matrix::BinaryMatrix::Row;
     using Column = matrix::BinaryMatrix::Column;
-    using Tuple = matrix::MultiIntMatrix::Tuple;
-
-    // TODO: do less querying if coords are 0
 
     std::vector<std::vector<std::pair<Row, Vector<Column>>>> row_coords;
     row_coords.reserve(row_tuples.size());
@@ -31,7 +28,8 @@ auto SeqIndexedAnnotator<Label>
 
         for (const auto &[c, tuple] : row_tuple) {
             for (auto coord : tuple) {
-                cur_row_coords[std::max(coord, Tuple::value_type(1)) - 1].emplace_back(c);
+                if (coord)
+                    cur_row_coords[coord - 1].emplace_back(c);
             }
         }
 
@@ -43,15 +41,37 @@ auto SeqIndexedAnnotator<Label>
     std::vector<std::vector<Vector<std::pair<Column, uint64_t>>>> matrix_ranks;
     matrix_ranks.reserve(seq_indexes_.size());
     for (const auto &seq_index : seq_indexes_) {
-        matrix_ranks.emplace_back(seq_index->get_matrix().get_ranks(row_coords));
-        assert(matrix_ranks.back().size() == row_tuples.size());
+        auto &merged_cur_matrix_ranks = matrix_ranks.emplace_back();
+        merged_cur_matrix_ranks.reserve(row_tuples.size());
+
+        auto cur_matrix_ranks = seq_index->get_matrix().get_ranks(row_coords);
+        assert(cur_matrix_ranks.size() == row_tuples.size());
+        for (size_t i = 0; i < row_tuples.size(); ++i) {
+            auto &cur_merged_row = merged_cur_matrix_ranks.emplace_back();
+            auto it = cur_matrix_ranks[i].begin();
+            assert(std::is_sorted(cur_matrix_ranks[i].begin(),
+                                  cur_matrix_ranks[i].end()));
+            for (const auto &[c, tuple] : row_tuples[i]) {
+                for (auto coord : tuple) {
+                    if (coord) {
+                        assert(it != cur_matrix_ranks[i].end());
+                        assert(c == it->first);
+                        cur_merged_row.emplace_back(c, it->second);
+                        ++it;
+                    } else {
+                        cur_merged_row.emplace_back(c, 0);
+                    }
+                }
+            }
+            assert(it == cur_matrix_ranks[i].end());
+        }
     }
 
     std::vector<SeqIds> results;
     results.reserve(row_tuples.size());
 
     for (size_t i = 0; i < row_tuples.size(); ++i) {
-        tsl::hopscotch_map<Column, Ids> rearrange;
+        VectorMap<Column, Ids> rearrange;
         for (size_t j = 0; j < matrix_ranks.size(); ++j) {
             const auto &ranks = matrix_ranks[j][i];
             for (const auto &[c, r] : ranks) {
@@ -62,6 +82,11 @@ auto SeqIndexedAnnotator<Label>
         }
 
         assert(rearrange.size() == row_tuples[i].size());
+        assert(std::equal(rearrange.begin(), rearrange.end(),
+                          row_tuples[i].begin(), row_tuples[i].end(),
+                          [&](const auto &a, const auto &b) {
+            return a.first == b.first;
+        }));
 
         auto &result = results.emplace_back();
         result.reserve(rearrange.size());
@@ -71,17 +96,10 @@ auto SeqIndexedAnnotator<Label>
             assert(std::all_of(seq_ids.begin(), seq_ids.end(), [&](const auto &s) {
                 return s.size() == it->second.size();
             }));
-            auto &ids = result.emplace_back(c, seq_ids).second;
-
-            // ensure that if the first coordinate is zero, then the returned rank is zero
-            for (auto &cur_ids : ids) {
-                for (size_t j = 0; j < cur_ids.size(); ++j) {
-                    if (!it->second[j])
-                        cur_ids[j] = 0;
-                }
-            }
+            result.emplace_back(c, seq_ids);
             ++it;
         }
+        assert(it == row_tuples[i].end());
     }
 
     return results;

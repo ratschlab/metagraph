@@ -408,7 +408,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
         for (size_t i = 0; i < 2; ++i) {
-            if (discarded_alignments[i].empty())
+            if (discarded_alignments[i].empty() || config_.chain_alignments)
                 continue;
 
             DEBUG_LOG("Merging discarded seeds into MEMs per label");
@@ -863,13 +863,15 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     });
 
-    std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
-        return a.get_query_view().begin() < b.get_query_view().begin();
-    });
+    if (!get_topology()) {
+        std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
+            return a.get_query_view().begin() < b.get_query_view().begin();
+        });
 
-    std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
-        return a.get_query_view().begin() < b.get_query_view().begin();
-    });
+        std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
+            return a.get_query_view().begin() < b.get_query_view().begin();
+        });
+    }
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));

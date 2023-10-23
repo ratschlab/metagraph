@@ -535,6 +535,11 @@ void cluster_seeds(const IDBGAligner &aligner,
         return;
     }
 
+    // TODO: steps:
+    // 1) chain within unitigs -> pick best
+    // 2) chain chains within clusters -> pick best
+    // 3) chain these universally
+
     std::vector<node_index> nodes;
     nodes.reserve(fwd_seeds.size() + bwd_seeds.size());
     for (auto &fwd_seed : fwd_seeds) {
@@ -599,13 +604,17 @@ void cluster_seeds(const IDBGAligner &aligner,
 
             // for each cluster
             for (auto kt = it.value().begin(); kt != it.value().end(); ++kt) {
+                std::vector<std::pair<AnchorChain<Seed>, std::vector<score_t>>> cluster_chains;
                 // co-linear chain the seeds within each unitig
                 for (auto jt = kt.value().begin(); jt != kt.value().end(); ++jt) {
                     auto &anchors = jt.value();
 
+                    size_t num_matches = get_num_char_matches_in_seeds(anchors.begin(), anchors.end());
+                    if (num_matches < forward.size() * 0.002)
+                        continue;
+
                     if (anchors.size() == 1) {
-                        best_chains.emplace_back(
-                            it->first,
+                        cluster_chains.emplace_back(
                             AnchorChain<Seed>{ { &anchors[0], 0 } },
                             std::vector<score_t>(1, anchors[0].get_score(config))
                         );
@@ -665,10 +674,10 @@ void cluster_seeds(const IDBGAligner &aligner,
                             });
                         },
                         [&](const AnchorChain<Seed> &chain, const std::vector<score_t> &score_traceback) {
-                            if (chains.empty() || score_traceback[0] == chains.back().second[0]) {
-                                chains.emplace_back(chain, score_traceback);
-                                return true;
-                            } else if (score_traceback[0] > chains.back().second[0]) {
+                            if (chains.empty() || score_traceback[0] > chains.back().second[0]
+                                    || (score_traceback[0] == chains.back().second[0]
+                                            && (chain.front().first->get_clipping() < chains.back().first.front().first->get_clipping()
+                                                || chain.back().first->get_end_clipping() < chains.back().first.back().first->get_end_clipping()))) {
                                 chains.clear();
                                 chains.emplace_back(chain, score_traceback);
                                 return true;
@@ -679,9 +688,19 @@ void cluster_seeds(const IDBGAligner &aligner,
                     );
 
                     for (auto &[chain, score_traceback] : chains) {
-                        best_chains.emplace_back(it->first, std::move(chain),
-                                                 std::move(score_traceback));
+                        cluster_chains.emplace_back(std::move(chain),
+                                                    std::move(score_traceback));
                     }
+                }
+
+                std::sort(cluster_chains.begin(), cluster_chains.end(),
+                          [&](const auto &a, const auto &b) {
+                              return a.second[0] > b.second[0];
+                          });
+
+                if (cluster_chains.size()) {
+                    best_chains.emplace_back(it->first, std::move(cluster_chains[0].first),
+                                             std::move(cluster_chains[0].second));
                 }
             }
         }
@@ -702,9 +721,25 @@ void cluster_seeds(const IDBGAligner &aligner,
             }
         };
 
+        struct AnchorChainEqual {
+            inline std::size_t operator()(const AnchorChain<Seed> &a,
+                                          const AnchorChain<Seed> &b) const {
+                if (a.size() != b.size())
+                    return false;
+
+                for (size_t i = 0; i < a.size(); ++i) {
+                    if (a[i].second != b[i].second || !(*a[i].first == *b[i].first))
+                        return false;
+                }
+
+                return true;
+            }
+        };
+
         if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
             auto *anno_buffer = &labeled_aligner->get_annotation_buffer();
-            tsl::hopscotch_map<AnchorChain<Seed>, Vector<Alignment::Column>, AnchorChainHash> chain_map;
+            tsl::hopscotch_map<AnchorChain<Seed>, Vector<Alignment::Column>,
+                               AnchorChainHash, AnchorChainEqual> chain_map;
             for (const auto &[col, chain, score_traceback] : best_chains) {
                 if (skip_column(col))
                     continue;
@@ -767,13 +802,13 @@ void cluster_seeds(const IDBGAligner &aligner,
                         }
                     }
 
-                    if (!found) {
-                        cur.trim_offset();
-                        cur.label_coordinates.clear();
-                        ++seed_count;
-                        // logger->info("Failed: Chain: {} Score: {} -> Alignment: {}", chain.size(), score_traceback[0], cur);
-                        callback(std::move(cur));
-                    }
+                    // if (!found) {
+                        // cur.trim_offset();
+                        // cur.label_coordinates.clear();
+                        // ++seed_count;
+                        // // logger->info("Failed: Chain: {} Score: {} -> Alignment: {}", chain.size(), score_traceback[0], cur);
+                        // callback(std::move(cur));
+                    // }
 
                     last = next;
                 },
@@ -781,6 +816,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                     aln.trim_offset();
                     aln.label_coordinates.clear();
                     ++seed_count;
+                    logger->trace("Found: {}\t{}", chain.size(), aln);
                     // logger->info("Success: Chain: {} Score: {} -> Alignment: {}", chain.size(), score_traceback[0], aln);
                     callback(std::move(aln));
                 }

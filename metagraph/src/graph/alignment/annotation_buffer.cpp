@@ -31,10 +31,10 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
-        global_coords_(global_coordinates),
+        global_coords_(global_coordinates && multi_int_),
         column_sets_({ {} }) {
     if (has_local_coordinates() && !has_coordinates()) {
-        logger->info("Only local coordinates");
+        logger->trace("Only local coordinates");
     }
 }
 

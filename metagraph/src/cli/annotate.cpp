@@ -248,8 +248,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
                 [&](auto&& data) {
                     thread_pool.enqueue([&](auto &data) {
-                        anno_graph->annotate_kmer_coords(std::move(data),
-                                                         config.annotate_sequence_ends);
+                        anno_graph->annotate_kmer_coords(
+                            std::move(data),
+                            config.annotate_sequence_ends || config.superbubbles
+                        );
                     }, std::move(data));
                 },
                 batch_size, batch_length, batch_size
@@ -326,10 +328,15 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         anno_graph->get_annotator().serialize(annotator_filename);
 
-        if (cluster_annot)
+        if (cluster_annot) {
             cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
+            logger->info("Number of clusters: {}", last_cluster_id);
+        }
 
         return;
+    } else if (config.annotate_sequence_ends) {
+        logger->error("--anno-seq-ends only supported with --coordinates or --superbubbles");
+        exit(1);
     }
 
     // iterate over input files

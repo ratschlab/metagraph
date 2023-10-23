@@ -43,8 +43,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             loaded = cc->merge_load(config.infbase_annotators);
         } else {
             if (config.infbase_annotators.size() > 1) {
-                logger->info("Loading the first file {} as the annotator and the rest as indexes.",
-                             config.infbase_annotators.at(0));
+                logger->trace("Loading the first file {} as the annotator and the rest as indexes.",
+                              config.infbase_annotators.at(0));
             }
             loaded = annotation_temp->load(config.infbase_annotators.at(0));
         }

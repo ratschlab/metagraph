@@ -361,7 +361,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             uint64_t cur = 0;
             size_t i = 0;
             for (auto [r, coord] : c_v) {
-                if (coord & SEQ_END) {
+                if (has_end_ && (coord & SEQ_END)) {
                     seq_delim[coord & ~SEQ_END] = true;
                     continue;
                 }
@@ -379,8 +379,8 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             bit_vector_smart(std::move(delim)).serialize(out);
             coords.serialize(out);
 
-            if (out_seq) {
-                assert(has_end_);
+            if (has_end_) {
+                assert(out_seq);
                 bit_vector_smart seq_delim_comp(std::move(seq_delim));
                 logger->info("Number of encoded sequences: {} in {}",
                              seq_delim_comp.num_set_bits(), seq_fname);
@@ -435,7 +435,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                     if (!r)
                         continue;
 
-                    if (coord & SEQ_END) {
+                    if (has_end_ && (coord & SEQ_END)) {
                         coord &= ~SEQ_END;
                         while (seq_delim->size() <= coord) {
                             seq_delim->push_back(false);
