@@ -538,7 +538,7 @@ void cluster_seeds(const IDBGAligner &aligner,
     // TODO: steps:
     // 1) chain within unitigs -> pick best
     // 2) chain chains within clusters -> pick best
-    // 3) chain these universally
+    // 3) chain across clusters
 
     std::vector<node_index> nodes;
     nodes.reserve(fwd_seeds.size() + bwd_seeds.size());
@@ -615,7 +615,8 @@ void cluster_seeds(const IDBGAligner &aligner,
 
                     if (anchors.size() == 1) {
                         cluster_chains.emplace_back(
-                            AnchorChain<Seed>{ { &anchors[0], 0 } },
+                            AnchorChain<Seed>(anchors[0].get_score(config),
+                                              AnchorChain<Seed>::storage_t{ std::make_pair(&anchors[0], 0) }),
                             std::vector<score_t>(1, anchors[0].get_score(config))
                         );
                         continue;
@@ -1099,7 +1100,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
         const Anchor *last_anchor;
         score_t chain_score = 0;
-        AnchorChain<Anchor> last_chain;
+        AnchorChain<Anchor> last_chain(0);
         Alignment::Columns col_idx = 0;
         score_t full_score = 0;
 

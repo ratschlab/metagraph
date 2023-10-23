@@ -30,7 +30,63 @@ using AnchorExtender = std::function<void(const Anchor*, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename Anchor>
-using AnchorChain = std::vector<std::pair<const Anchor*, size_t>>;
+struct AnchorChain {
+    using storage_t = std::vector<std::pair<const Anchor*, size_t>>;
+    using value_type = typename storage_t::value_type;
+    using reference = typename storage_t::reference;
+    using const_reference = typename storage_t::const_reference;
+    using iterator = typename storage_t::iterator;
+    using const_iterator = typename storage_t::const_iterator;
+    using const_reverse_iterator = typename storage_t::const_reverse_iterator;
+    using size_type = typename storage_t::size_type;
+
+    template <typename... Args>
+    AnchorChain(score_t score, Args&&... args)
+          : data_(std::forward<Args>(args)...), score_(score) {}
+
+    template <typename... Args>
+    constexpr reference& emplace_back(Args&&... args) {
+        return data_.emplace_back(std::forward<Args>(args)...);
+    }
+
+    constexpr iterator begin() { return data_.begin(); }
+    constexpr iterator end() { return data_.end(); }
+
+    constexpr const_iterator begin() const { return data_.begin(); }
+    constexpr const_iterator end() const { return data_.end(); }
+
+    constexpr const_reverse_iterator rbegin() const { return data_.rbegin(); }
+    constexpr const_reverse_iterator rend() const { return data_.rend(); }
+
+    constexpr const_reference front() const { return data_.front(); }
+    constexpr const_reference back() const { return data_.back(); }
+
+    constexpr const_reference operator[](size_t i) const { return data_[i]; }
+
+    constexpr size_type size() const { return data_.size(); }
+
+    constexpr score_t get_score() const { return score_; }
+
+    constexpr size_t get_clipping() const { return front().first->get_clipping(); }
+    constexpr size_t get_end_clipping() const { return back().first->get_end_clipping(); }
+
+    constexpr std::string_view get_query_view() const {
+        if (data_.empty())
+            return {};
+
+        return std::string_view(
+            front().first->get_query_view().data(),
+            back().first->get_query_view().end() - front().first->get_query_view().begin()
+        );
+    }
+
+    constexpr bool get_orientation() const {
+        return data_.size() ? front().first->get_orientation() : false;
+    }
+
+    std::vector<std::pair<const Anchor*, size_t>> data_;
+    score_t score_;
+};
 
 template <typename Anchor>
 using BacktrackStarter = std::function<bool(const AnchorChain<Anchor>&, // chain
@@ -198,7 +254,7 @@ void chain_anchors(const DBGAlignerConfig &config,
         if (used[i])
             continue;
 
-        std::vector<std::pair<const Anchor*, size_t>> chain;
+        AnchorChain<Anchor> chain(-nscore);
         std::vector<score_t> scores;
         const Anchor *last_anchor = anchors_begin + i;
         chain.emplace_back(last_anchor, 0);
@@ -218,8 +274,10 @@ void chain_anchors(const DBGAlignerConfig &config,
                 used[a_ptr - anchors_begin] = true;
             }
 
-            if (extend_anchors)
-                extend_chain(chain, scores, anchor_extender, callback, terminate);
+            if (extend_anchors) {
+                extend_chain<Anchor>(chain, scores, anchor_extender,
+                                     callback, terminate);
+            }
         }
     }
 }
