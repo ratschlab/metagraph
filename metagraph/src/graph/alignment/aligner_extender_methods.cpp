@@ -230,7 +230,8 @@ void update_column(size_t prev_end,
                    score_t xdrop_cutoff,
                    const DBGAlignerConfig &config_,
                    score_t init_score,
-                   size_t offset) {
+                   size_t offset,
+                   bool allow_del = true) {
     static_assert(DefaultColumnExtender::kPadding == 5);
     constexpr size_t width = DefaultColumnExtender::kPadding - 1;
     const simde__m128i gap_open = simde_mm_set1_epi32(config_.gap_opening_penalty);
@@ -256,23 +257,25 @@ void update_column(size_t prev_end,
             match = simde_mm_insert_epi32(match, ninf, 0);
         }
 
-        // del_score = std::max(del_open, del_extend);
-        simde__m128i del_score;
-        if (offset > 1) {
-            del_score = simde_mm_max_epi32(
-                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), gap_open),
-                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&F_prev_v[j]), gap_extend)
-            );
-            del_score = simde_mm_add_epi32(del_score, score_v);
-        } else {
-            del_score = ninf_v;
+        if (allow_del) {
+            // del_score = std::max(del_open, del_extend);
+            simde__m128i del_score;
+            if (offset > 1) {
+                del_score = simde_mm_max_epi32(
+                    simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), gap_open),
+                    simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&F_prev_v[j]), gap_extend)
+                );
+                del_score = simde_mm_add_epi32(del_score, score_v);
+            } else {
+                del_score = ninf_v;
+            }
+
+            // F_v[j] = del_score
+            simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
+
+            // match = max(match, del_score)
+            match = simde_mm_max_epi32(match, del_score);
         }
-
-        // F_v[j] = del_score
-        simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
-
-        // match = max(match, del_score)
-        match = simde_mm_max_epi32(match, del_score);
 
         // E_v[j + 1] = S[j] + gap_open
         simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
@@ -430,6 +433,21 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                                                      size_t trim_query_suffix,
                                                      score_t added_xdrop) {
     assert(this->seed_);
+
+    bool seed_is_exact_match = true;
+    const auto &cigar = this->seed_->get_cigar();
+    if (cigar.size() > 1) {
+        auto it = cigar.data().begin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        if (it->first != Cigar::MATCH)
+            seed_is_exact_match = false;
+
+        ++it;
+        if (it != cigar.data().end() && it->first != Cigar::CLIPPED)
+            seed_is_exact_match = false;
+    }
 
     ++num_extensions_;
 
@@ -628,7 +646,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                               F_prev.data() + trim - trim_prev,
                               S, E, F,
                               profile_score_[KmerExtractorBOSS::encode(c)].data() + start + trim,
-                              xdrop_cutoff, config_, score, offset);
+                              xdrop_cutoff, config_, score, offset,
+                              !in_seed || !force_fixed_seed || !seed_is_exact_match);
 
                 extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
 

@@ -198,13 +198,12 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
 // Extend the alignment first until it reaches the end of the alignment second.
 // Return whether the connection was successful. If not, then replace first with second
 // and push first to the back of partial_alignments.
-template <class Extender>
 bool align_connect(const DeBruijnGraph &graph,
                    const DBGAlignerConfig &config,
                    Alignment &first,
                    Alignment &second,
                    int64_t coord_dist,
-                   Extender &extender,
+                   SeedFilteringExtender &extender,
                    std::vector<Alignment> &partial_alignments) {
     auto [left, next] = split_seed(graph, config, first);
     coord_dist += second.get_sequence().size() + next.get_sequence().size()

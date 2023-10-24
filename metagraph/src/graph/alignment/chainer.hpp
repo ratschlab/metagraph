@@ -36,6 +36,7 @@ struct AnchorChain {
     using reference = typename storage_t::reference;
     using const_reference = typename storage_t::const_reference;
     using iterator = typename storage_t::iterator;
+    using reverse_iterator = typename storage_t::reverse_iterator;
     using const_iterator = typename storage_t::const_iterator;
     using const_reverse_iterator = typename storage_t::const_reverse_iterator;
     using size_type = typename storage_t::size_type;
@@ -49,17 +50,24 @@ struct AnchorChain {
         return data_.emplace_back(std::forward<Args>(args)...);
     }
 
+    template <typename... Args>
+    constexpr void insert(Args&&... args) { data_.insert(std::forward<Args>(args)...); }
+
     constexpr iterator begin() { return data_.begin(); }
     constexpr iterator end() { return data_.end(); }
 
     constexpr const_iterator begin() const { return data_.begin(); }
     constexpr const_iterator end() const { return data_.end(); }
 
+    constexpr reverse_iterator rbegin() { return data_.rbegin(); }
+    constexpr reverse_iterator rend() { return data_.rend(); }
     constexpr const_reverse_iterator rbegin() const { return data_.rbegin(); }
     constexpr const_reverse_iterator rend() const { return data_.rend(); }
 
     constexpr const_reference front() const { return data_.front(); }
     constexpr const_reference back() const { return data_.back(); }
+    constexpr reference front() { return data_.front(); }
+    constexpr reference back() { return data_.back(); }
 
     constexpr const_reference operator[](size_t i) const { return data_[i]; }
 
@@ -83,6 +91,10 @@ struct AnchorChain {
     constexpr bool get_orientation() const {
         return data_.size() ? front().first->get_orientation() : false;
     }
+
+    constexpr bool empty() const { return data_.empty(); }
+
+    constexpr void clear() { data_.clear(); }
 
     std::vector<std::pair<const Anchor*, size_t>> data_;
     score_t score_;
@@ -267,9 +279,14 @@ void chain_anchors(const DBGAlignerConfig &config,
             std::tie(score, last, dist) = chain_scores[last - anchors_begin];
             chain.emplace_back(last_anchor, to_traverse);
             scores.emplace_back(score);
+            if (used[last_anchor - anchors_begin]) {
+                chain.clear();
+                scores.clear();
+                break;
+            }
         }
 
-        if (start_backtrack(chain, scores)) {
+        if (chain.size() && start_backtrack(chain, scores)) {
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - anchors_begin] = true;
             }
