@@ -178,7 +178,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(1ull, path.size());
+    ASSERT_EQ(1ull, path.size());
     EXPECT_EQ("CAT", path.get_sequence());
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("3=", path.get_cigar().to_string());
@@ -204,7 +204,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
