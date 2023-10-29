@@ -36,12 +36,12 @@ template <class Seeder, class Extender, class AlignmentCompare>
 DBGAligner<Seeder, Extender, AlignmentCompare>
 ::DBGAligner(const DeBruijnGraph &graph,
              const DBGAlignerConfig &config,
-             std::shared_ptr<const GraphTopology> topology)
+             std::shared_ptr<const GraphSeqAnnotator> seq_annotator)
       : graph_(graph), config_(config),
-        topology_(topology
-            ? topology
-            : std::shared_ptr<const GraphTopology>(std::shared_ptr<const GraphTopology>{},
-                                                   graph_.get_extension_threadsafe<GraphTopology>())) {
+        seq_annotator_(seq_annotator
+            ? seq_annotator
+            : std::shared_ptr<const GraphSeqAnnotator>(std::shared_ptr<const GraphSeqAnnotator>{},
+                                                       graph_.get_extension_threadsafe<GraphSeqAnnotator>())) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
 
@@ -862,7 +862,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     });
 
-    if (!get_topology()) {
+    if (!get_seq_annotator()) {
         std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
             return a.get_query_view().begin() < b.get_query_view().begin();
         });

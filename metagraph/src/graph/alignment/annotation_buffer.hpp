@@ -122,6 +122,11 @@ class AnnotationBuffer {
         assert(std::is_sorted(it->begin(), it->end()));
         return it - column_sets.begin();
     }
+
+    // Get the annotations and coordinates of a node if they have been fetched.
+    // The returned pointers are valid until next fetch_queued_annotations().
+    std::pair<const Columns*, const CoordinateSet*>
+    get_labels_and_coords_unchecked(node_index node) const;
 };
 
 } // namespace align

@@ -59,30 +59,31 @@ get_primary_contigs(size_t k, const std::vector<std::string> &sequences) {
     return contigs;
 }
 
-std::shared_ptr<graph::GraphTopology>
+std::shared_ptr<graph::GraphSeqAnnotator>
 make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     std::vector<std::string> unitigs;
-    size_t last_cluster_id = 0;
+    // size_t last_cluster_id = 0;
 
-    auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
+    // auto cluster_anno = std::make_shared<annot::ColumnCompressed<>>(graph->max_index() + 1);
 
     size_t coord = 0;
-    assemble_superbubbles(*graph, [&](const std::string &unitig, size_t cluster_id) {
+    // assemble_superbubbles(*graph, [&](const std::string &unitig, size_t cluster_id) {
+    assemble_min_path_cover(*graph, [&](const std::string &unitig) {
         unitigs.emplace_back(unitig);
 
-        if (last_cluster_id != cluster_id) {
-            cluster_anno->add_labels({ coord - 1 }, { std::string("") });
-            last_cluster_id = cluster_id;
-        }
+        // if (last_cluster_id != cluster_id) {
+        //     cluster_anno->add_labels({ coord - 1 }, { std::string("") });
+        //     last_cluster_id = cluster_id;
+        // }
 
-        assert(coord <= graph->num_nodes());
+        // assert(coord <= graph->num_nodes());
         coord += unitig.size() - graph->get_k() + 1;
     });
 
     if (unitigs.empty())
         return {};
 
-    cluster_anno->add_labels({ coord - 1 }, { std::string("") });
+    // cluster_anno->add_labels({ coord - 1 }, { std::string("") });
 
     std::vector<std::string> unitig_labels(unitigs.size(), "");
     auto coord_anno = build_anno_graph<annot::ColumnCompressed<>>(
@@ -97,9 +98,9 @@ make_topology(std::shared_ptr<graph::DeBruijnGraph> graph) {
     assert(coord_indexed->get_indexes()[0]->num_labels() == 1);
     assert(coord_indexed->get_indexes()[0]->num_objects() == coord);
 
-    const_cast<IndexedAnnotator&>(*coord_indexed).add_index(cluster_anno);
+    // const_cast<IndexedAnnotator&>(*coord_indexed).add_index(cluster_anno);
 
-    return std::make_shared<graph::GraphTopology>(*graph, coord_indexed);
+    return std::make_shared<graph::GraphSeqAnnotator>(*graph, coord_indexed);
 }
 
 template <class Graph>

@@ -345,6 +345,8 @@ Config::Config(int argc, char *argv[]) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--superbubbles")) {
             superbubbles = true;
+        } else if (!strcmp(argv[i], "--path-cover")) {
+            path_cover = true;
         } else if (!strcmp(argv[i], "--adj-rc")) {
             adjrc = true;
         } else if (!strcmp(argv[i], "--compacted")) {

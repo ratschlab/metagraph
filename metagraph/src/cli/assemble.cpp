@@ -280,7 +280,14 @@ int assemble(Config *config) {
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
 
-    if (config->unitigs || config->min_tip_size > 1) {
+    if (config->path_cover) {
+        assemble_min_path_cover(*graph,
+                                [&](const auto &path) {
+                                    std::lock_guard<std::mutex> lock(write_mutex);
+                                    writer.write(path);
+                                },
+                                get_num_threads());
+    } else if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) {
                                 std::lock_guard<std::mutex> lock(write_mutex);
                                 writer.write(unitig);

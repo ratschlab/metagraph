@@ -614,6 +614,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     decompress_bitmap(col) |= *column;
                 }
             } else {
+                logger->error("Column: {} error: num rows {} != {}",
+                              label, column->size(), num_rows_);
                 no_errors = false;
             }
         },
@@ -623,7 +625,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     if (merge_successful && no_errors) {
         logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
         return true;
+    } else if (merge_successful) {
+        logger->error("Columns in annotation are inconsistent ({} columns)", bitmatrix_.size());
+        return false;
     } else {
+        logger->error("Failed to finish loading annotation ({} columns so far)", bitmatrix_.size());
         return false;
     }
 }

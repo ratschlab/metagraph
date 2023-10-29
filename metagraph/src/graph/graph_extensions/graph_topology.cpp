@@ -11,7 +11,6 @@ namespace mtg::graph {
 using namespace mtg::annot::matrix;
 using node_index = DeBruijnGraph::node_index;
 using Tuple = MultiIntMatrix::Tuple;
-using RowTuples = MultiIntMatrix::RowTuples;
 
 using RowColumnFlatMap = std::vector<std::pair<GraphTopology::Row,
                                                Vector<GraphTopology::Column>>>;
@@ -19,18 +18,22 @@ using RowColumnFlatMap = std::vector<std::pair<GraphTopology::Row,
 static_assert(std::is_same_v<GraphTopology::Column, BinaryMatrix::Column>);
 static_assert(std::is_same_v<GraphTopology::Row, BinaryMatrix::Row>);
 
+GraphSeqAnnotator::GraphSeqAnnotator(const graph::DeBruijnGraph &graph,
+                                     std::shared_ptr<const annot::SeqIndexedAnnotator<Label>> annotator)
+      : graph_(graph), annotator_(annotator),
+        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)) {}
+
 GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
                              std::shared_ptr<const annot::SeqIndexedAnnotator<Label>> annotator)
-      : graph_(graph), annotator_(annotator),
-        buffer_(std::make_shared<align::AnnotationBuffer>(graph_, *annotator_, false)) {
+      : GraphSeqAnnotator(graph, annotator) {
     if (annotator_->get_indexes().size() != 2) {
         common::logger->error("Invalid annotator loaded as graph topology");
         exit(1);
     }
 }
 
-GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
-                             std::shared_ptr<align::AnnotationBuffer> buffer)
+GraphSeqAnnotator::GraphSeqAnnotator(const graph::DeBruijnGraph &graph,
+                                     std::shared_ptr<align::AnnotationBuffer> buffer)
       : graph_(graph), buffer_(buffer) {
     assert(buffer_);
 
@@ -43,20 +46,30 @@ GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
         common::logger->error("Annotator does not support graph topology.");
         exit(1);
     }
+}
 
+GraphTopology::GraphTopology(const graph::DeBruijnGraph &graph,
+                             std::shared_ptr<align::AnnotationBuffer> buffer)
+      : GraphSeqAnnotator(graph, buffer) {
     if (annotator_->get_indexes().size() != 2) {
         common::logger->error("Invalid annotator loaded as graph topology");
         exit(1);
     }
 }
 
-auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
-        -> std::vector<Coords> {
+auto GraphSeqAnnotator
+::get_seq_ids(const std::vector<graph::DeBruijnGraph::node_index> &nodes) const
+        -> std::pair<std::vector<SeqIds>, std::vector<RowTuples>> {
     assert(annotator_);
-    buffer_->queue_path(std::vector<node_index>(nodes));
+    for (node_index node : nodes) {
+        buffer_->queue_path(std::vector<node_index>(1, node));
+    }
+
     buffer_->fetch_queued_annotations();
 
-    std::vector<RowTuples> tuples;
+    std::pair<std::vector<SeqIds>, std::vector<RowTuples>> result;
+    auto &[seq_ids, tuples] = result;
+
     tuples.reserve(nodes.size());
     for (node_index node : nodes) {
         auto &row_tuple = tuples.emplace_back();
@@ -76,9 +89,18 @@ auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
     }
     assert(tuples.size() == nodes.size());
 
-    std::vector<Coords> result(tuples.size());
-    auto row_seq_ids = annotator_->get_seq_ids(tuples);
+    seq_ids = annotator_->get_seq_ids(tuples);
+
+    return result;
+}
+
+auto GraphTopology::get_coords(const std::vector<node_index> &nodes) const
+        -> std::vector<Coords> {
+    auto [row_seq_ids, tuples] = get_seq_ids(nodes);
     assert(row_seq_ids.size() == nodes.size());
+    assert(tuples.size() == nodes.size());
+
+    std::vector<Coords> result(tuples.size());
 
     for (size_t i = 0; i < row_seq_ids.size(); ++i) {
         assert(row_seq_ids[i].size() == tuples[i].size());

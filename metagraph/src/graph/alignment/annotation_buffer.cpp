@@ -98,6 +98,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
 
     std::function<void(node_index, node_index)> queue_node
         = [](node_index, node_index) {};
+
     if (canonical_) {
         queue_node = [&](node_index node, node_index base_node) {
             assert(base_node);
@@ -240,6 +241,12 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
             }
 
             if (!num_sentinels_left) {
+                if (dbg_succ->get_mode() == DeBruijnGraph::CANONICAL) {
+                    // TODO: avoid this
+                    std::string spelling = dbg_succ->get_node_sequence(cur_node);
+                    cur_base_node = map_to_nodes(*dbg_succ, spelling)[0];
+                }
+
                 queue_node(cur_node, cur_base_node);
                 assert(node_to_cols.count(cur_base_node));
                 annotated_nodes.emplace(cur_node);
@@ -315,7 +322,11 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
             assert(row_it != queued_rows.end());
             assert(!dbg_succ || dbg_succ->get_mask()
                 || !dbg_succ->get_boss().is_dummy(AnnotatedDBG::anno_to_graph_index(*row_it)));
-            assert(row_tuples.size());
+            if (row_tuples.empty()) {
+                logger->error("Coordinates missing for k-mer {}",
+                              graph_.get_node_sequence(AnnotatedDBG::anno_to_graph_index(*row_it)));
+                exit(1);
+            }
             std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
             Columns labels;
             CoordinateSet coords;
@@ -410,14 +421,12 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                 node_index base_node = canonical_ ? canonical_->get_base_node(prev) : prev;
                 assert(canonical_ || node_to_cols.count(prev));
                 assert(node_to_cols.count(base_node));
-                auto [prev_labels, prev_coords] = get_labels_and_coords(prev);
+                auto [prev_labels, prev_coords] = get_labels_and_coords_unchecked(prev);
 
-                // Only define coordinates for dummy k-mers of we have a global
-                // coordinate system. Otherwise, they are undefined.
                 CoordinateSet merged_prev_coords;
 
                 if (!prev_labels) {
-                    if (has_coordinates()) {
+                    if (has_local_coordinates()) {
                         assert(coords);
                         merged_prev_coords.reserve(coords->size());
                         for (auto &tuple : *coords) {
@@ -427,8 +436,6 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                 prev_tuple.emplace_back(c - 1);
                             }
                         }
-                    } else {
-                        merged_prev_coords.resize(labels->size());
                     }
 
                     push_node_labels(prev,
@@ -437,7 +444,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                      merged_prev_coords);
                 } else {
                     Columns merged_columns;
-                    if (has_coordinates()) {
+                    if (has_local_coordinates()) {
                         assert(coords);
                         assert(prev_coords);
                         utils::match_indexed_values(labels->begin(), labels->end(),
@@ -456,9 +463,6 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                         std::set_union(labels->begin(), labels->end(),
                                        prev_labels->begin(), prev_labels->end(),
                                        std::back_inserter(merged_columns));
-
-                        if (has_local_coordinates())
-                            merged_prev_coords.resize(merged_columns.size());
                     }
 
                     push_node_labels(prev,
@@ -483,7 +487,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
 
 }
 
-auto AnnotationBuffer::get_labels_and_coords(node_index node) const
+auto AnnotationBuffer::get_labels_and_coords_unchecked(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
     if (!node) {
@@ -500,6 +504,34 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     // been fetched, return nothing
     if (it == node_to_cols_.end() || it->second == nannot)
         return ret_val;
+
+    ret_val.first = &column_sets_.data()[it->second];
+
+    if (has_local_coordinates()) {
+        assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
+        ret_val.second = &label_coords_[it - node_to_cols_.begin()];
+    }
+
+    return ret_val;
+}
+
+auto AnnotationBuffer::get_labels_and_coords(node_index node) const
+        -> std::pair<const Columns*, const CoordinateSet*> {
+    std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
+    if (!node) {
+        ret_val.first = &column_sets_.data()[0];
+        return ret_val;
+    }
+
+    if (canonical_)
+        node = canonical_->get_base_node(node);
+
+    auto it = node_to_cols_.find(node);
+    if (it == node_to_cols_.end() || it->second == nannot) {
+        logger->error("Annotations for {} have not been fetched",
+                      graph_.get_node_sequence(node));
+        exit(1);
+    }
 
     ret_val.first = &column_sets_.data()[it->second];
 

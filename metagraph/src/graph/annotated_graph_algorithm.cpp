@@ -8,6 +8,7 @@
 #include "graph/representation/masked_graph.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/succinct/boss.hpp"
+#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -440,6 +441,323 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                   kept_unitigs, total_unitigs,
                   static_cast<double>(num_kept_nodes + kept_unitigs * (masked_graph.get_k() - 1))
                       / kept_unitigs);
+}
+
+void assemble_min_path_cover(const StringGenerator &generate,
+                             size_t k,
+                             const std::function<void(const std::string&)> &callback,
+                             DeBruijnGraph::Mode mode,
+                             size_t num_threads) {
+    // assemble graph
+    if (mode == DeBruijnGraph::PRIMARY)
+        mode = DeBruijnGraph::CANONICAL;
+
+    DBGHashFast dbg(k, mode);
+    generate([&dbg](std::string_view seq) { dbg.add_sequence(seq); });
+    assemble_min_path_cover(dbg, callback, num_threads);
+}
+
+using unitig_index = node_index;
+template <class T>
+void traverse(node_index v,
+              const T &adjacent_outgoing_unitigs,
+              std::vector<size_t> &component,
+              std::vector<size_t> &preorder,
+              std::vector<std::vector<unitig_index>> &sccs,
+              size_t &C,
+              std::vector<unitig_index> &S,
+              std::vector<unitig_index> &P) {
+    preorder[v] = C++;
+    S.push_back(v);
+    P.push_back(v);
+    adjacent_outgoing_unitigs(v, [&](unitig_index w) {
+        if (preorder[w] == component.size()) {
+            traverse(w, adjacent_outgoing_unitigs, component, preorder, sccs, C, S, P);
+        } else if (component[w] == component.size()) {
+            assert(P.size());
+            while (preorder[P.back()] > preorder[w]) {
+                P.pop_back();
+                assert(P.size());
+            }
+        }
+    });
+
+    assert(P.size());
+    if (P.back() == v) {
+        assert(S.size());
+        size_t cur_component = sccs.size();
+        std::vector<unitig_index> &scc = sccs.emplace_back();
+        while (S.back() != v) {
+            component[S.back()] = cur_component;
+            scc.emplace_back(S.back());
+            S.pop_back();
+            assert(S.size());
+        }
+        component[v] = cur_component;
+        scc.emplace_back(v);
+        S.pop_back();
+        P.pop_back();
+    }
+}
+
+void assemble_min_path_cover(const DeBruijnGraph &dbg,
+                             const std::function<void(const std::string&)> &callback,
+                             size_t num_threads) {
+    // assemble unitigs
+    std::vector<std::tuple<node_index, node_index, size_t, std::string>> unitigs;
+    std::atomic<unitig_index> num_unitigs { 0 };
+    std::vector<unitig_index> node_to_unitig(dbg.max_index() + 1);
+
+    std::mutex mu;
+
+    dbg.call_unitigs([&](const std::string &seq, const auto &path) {
+        unitig_index unitig_id = num_unitigs.fetch_add(1, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(mu);
+        node_to_unitig[path.front()] = unitig_id;
+        node_to_unitig[path.back()] = unitig_id;
+        unitigs.emplace_back(path.front(), path.back(), path.size(), seq);
+    }, num_threads);
+
+    logger->trace("Topologically sorting {} unitigs", unitigs.size());
+
+    auto adjacent_incoming_unitigs = [&](unitig_index i,
+                                         const auto &callback) {
+        const auto &[front, back, size, seq] = unitigs[i];
+        dbg.call_incoming_kmers(front, [&](node_index prev, char c) {
+            if (c != boss::BOSS::kSentinel)
+                callback(node_to_unitig[prev]);
+        });
+    };
+
+    auto adjacent_outgoing_unitigs = [&](unitig_index i,
+                                         const auto &callback) {
+        const auto &[front, back, size, seq] = unitigs[i];
+        dbg.call_outgoing_kmers(back, [&](node_index next, char c) {
+            if (c != boss::BOSS::kSentinel)
+                callback(node_to_unitig[next]);
+        });
+    };
+
+    // find strongly-connected components
+    std::vector<size_t> component(unitigs.size(), unitigs.size());
+    std::vector<std::vector<unitig_index>> sccs;
+    {
+        std::vector<size_t> preorder(unitigs.size(), unitigs.size());
+        std::vector<unitig_index> S;
+        std::vector<unitig_index> P;
+        size_t C = 0;
+        for (size_t i = 0; i < unitigs.size(); ++i) {
+            if (component[i] == unitigs.size())
+                traverse(i, adjacent_outgoing_unitigs, component, preorder, sccs, C, S, P);
+        }
+    }
+
+    logger->trace("Found {} connected components", sccs.size());
+
+    logger->trace("Discarding back edges");
+    tsl::hopscotch_map<unitig_index, tsl::hopscotch_set<unitig_index>> discarded_edges;
+    size_t num_discarded = 0;
+    for (const auto &scc : sccs) {
+        std::vector<unitig_index> stack;
+        tsl::hopscotch_set<unitig_index> visited;
+        stack.emplace_back(scc[0]);
+        while (stack.size()) {
+            unitig_index v = stack.back();
+            stack.pop_back();
+            visited.emplace(v);
+            adjacent_outgoing_unitigs(v, [&](unitig_index w) {
+                if (visited.count(w)) {
+                    discarded_edges[v].emplace(w);
+                    ++num_discarded;
+                } else {
+                    stack.emplace_back(w);
+                }
+            });
+        }
+    }
+
+    logger->trace("Discarded {} edges", num_discarded);
+
+    auto adjacent_outgoing_unitigs_dag = [&](unitig_index i, const auto &callback) {
+        auto find = discarded_edges.find(i);
+        if (find == discarded_edges.end()) {
+            adjacent_outgoing_unitigs(i, callback);
+        } else {
+            adjacent_outgoing_unitigs(i, [&](unitig_index j) {
+                if (!find->second.count(j))
+                    callback(j);
+            });
+        }
+    };
+
+    auto adjacent_incoming_unitigs_dag = [&](unitig_index j, const auto &callback) {
+        adjacent_incoming_unitigs(j, [&](unitig_index i) {
+            auto find = discarded_edges.find(i);
+            if (find == discarded_edges.end() || !find->second.count(j))
+                callback(i);
+        });
+    };
+
+    logger->trace("Topologically sorting unitigs");
+    std::vector<unitig_index> s;
+
+    for (unitig_index i = 0; i < unitigs.size(); ++i) {
+        size_t num_incoming = 0;
+        adjacent_incoming_unitigs_dag(i, [&](unitig_index) { ++num_incoming; });
+        if (!num_incoming)
+            s.emplace_back(i);
+    }
+
+    VectorMap<unitig_index, tsl::hopscotch_map<unitig_index, bool>> seen;
+    while (s.size()) {
+        unitig_index n = s.back();
+        s.pop_back();
+
+        auto &seen_bucket = seen[n];
+
+        adjacent_outgoing_unitigs_dag(n, [&](unitig_index next) {
+            seen_bucket.emplace(next, false);
+            bool all_visited = true;
+
+            adjacent_incoming_unitigs_dag(next, [&](unitig_index sibling) {
+                if (!all_visited)
+                    return;
+
+                auto find = seen.find(sibling);
+                // TODO: simplify this
+                if (find != seen.end()) {
+                    if (!find->second.count(next)) {
+                        all_visited = false;
+                    }
+                } else {
+                    all_visited = false;
+                }
+            });
+
+            if (all_visited)
+                s.emplace_back(next);
+        });
+    }
+
+    if (seen.size() != unitigs.size()) {
+        logger->error("Found a cycle, since {} != {}", seen.size(), unitigs.size());
+        exit(1);
+    }
+
+    logger->trace("Finding min path cover");
+
+    sdsl::bit_vector m(unitigs.size(), false);
+
+    size_t npaths = 0;
+
+#ifndef NDEBUG
+    sdsl::bit_vector output(unitigs.size(), false);
+#endif
+
+    auto make_paths = [&](unitig_index start_node, auto &edges) {
+        if (m[start_node])
+            return false;
+
+        unitig_index n = start_node;
+        std::string spelling = std::get<3>(unitigs[n]);
+#ifndef NDEBUG
+        output[n] = true;
+#endif
+        while (n != m.size()) {
+            size_t old_n = n;
+            auto find = edges.find(n);
+            n = m.size();
+            bool found = false;
+            if (find != edges.end()) {
+                for (auto it = find.value().begin(); it != find.value().end(); ++it) {
+                    if (!it.value()) {
+                        found = true;
+                        it.value() = true;
+                        n = it->first;
+
+                        spelling += std::get<3>(unitigs[n]).substr(dbg.get_k() - 1);
+#ifndef NDEBUG
+                        output[n] = true;
+#endif
+
+                        break;
+                    }
+                }
+            }
+
+            if (!found)
+                m[old_n] = true;
+        }
+
+        callback(spelling);
+        ++npaths;
+        return true;
+    };
+
+    logger->trace("Outputting paths");
+    bool added = true;
+    while (added) {
+        added = false;
+        for (const auto &[start_node, edges] : seen) {
+            added |= make_paths(start_node, seen);
+        }
+    }
+
+    logger->trace("Found {} paths", npaths);
+
+    logger->trace("Outputting discarded edges as extra paths");
+    sdsl::util::set_to_value(m, false);
+    VectorMap<unitig_index, tsl::hopscotch_map<unitig_index, bool>> rest_edges;
+    for (const auto &[j, edges] : discarded_edges) {
+        size_t num_incoming = 0;
+        adjacent_incoming_unitigs(j, [&](unitig_index i) {
+            auto find = discarded_edges.find(i);
+            if (find != discarded_edges.end() && find->second.count(j))
+                ++num_incoming;
+        });
+
+        if (!num_incoming) {
+            for (unitig_index k : edges) {
+                rest_edges[j].emplace(k, false);
+            }
+        }
+    }
+
+    for (const auto &[j, edges] : discarded_edges) {
+        for (unitig_index k : edges) {
+            rest_edges[j].try_emplace(k, false);
+        }
+    }
+
+    added = true;
+    while (added) {
+        added = false;
+        for (const auto &[start_node, edges] : rest_edges) {
+            added |= make_paths(start_node, rest_edges);
+        }
+    }
+
+    assert(std::find(output.begin(), output.end(), false) == output.end());
+
+    for (const auto &[i, edges] : seen) {
+        for (const auto &[j, used] : edges) {
+            if (!used) {
+                logger->error("Not all DAG edges covered");
+                exit(1);
+            }
+        }
+    }
+
+    for (const auto &[i, edges] : rest_edges) {
+        for (const auto &[j, used] : edges) {
+            if (!used) {
+                logger->error("Not all back edges covered");
+                exit(1);
+            }
+        }
+    }
+
+    logger->trace("Found {} paths in total", npaths);
 }
 
 void assemble_superbubbles(const StringGenerator &generate,

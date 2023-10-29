@@ -858,8 +858,9 @@ int transform_annotation(Config *config) {
         }
 
         if (files.size() && config->anno_type != Config::RowDiff
-                && std::filesystem::exists(utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
-                                                        + ColumnCompressed<>::kSeqExtension)) {
+                && std::any_of(files.begin(), files.end(), [](const auto &file) {
+                                return std::filesystem::exists(utils::remove_suffix(file, ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kSeqExtension); })) {
             logger->trace("Loading sequence delimiters");
             load_seq_delimiters(label_encoder, files).serialize(
                 config->outfbase + graph::GraphTopology::seq_extension()

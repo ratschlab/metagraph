@@ -17,6 +17,7 @@ namespace mtg {
 namespace graph {
 
 class GraphTopology;
+class GraphSeqAnnotator;
 
 namespace align {
 
@@ -43,7 +44,7 @@ class IDBGAligner {
 
     virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const = 0;
 
-    virtual const GraphTopology* get_topology() const = 0;
+    virtual const GraphSeqAnnotator* get_seq_annotator() const = 0;
 };
 
 
@@ -54,7 +55,7 @@ class DBGAligner : public IDBGAligner {
   public:
     DBGAligner(const DeBruijnGraph &graph,
                const DBGAlignerConfig &config,
-               std::shared_ptr<const GraphTopology> topology = {});
+               std::shared_ptr<const GraphSeqAnnotator> seq_annotator = {});
 
     virtual ~DBGAligner() {}
 
@@ -71,7 +72,7 @@ class DBGAligner : public IDBGAligner {
         return std::make_shared<Extender>(*this, query);
     }
 
-    virtual const GraphTopology* get_topology() const override final { return topology_.get(); }
+    virtual const GraphSeqAnnotator* get_seq_annotator() const override final { return seq_annotator_.get(); }
 
   protected:
     typedef typename Seeder::node_index node_index;
@@ -80,7 +81,7 @@ class DBGAligner : public IDBGAligner {
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
 
-    std::shared_ptr<const GraphTopology> topology_;
+    std::shared_ptr<const GraphSeqAnnotator> seq_annotator_;
 
     typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 

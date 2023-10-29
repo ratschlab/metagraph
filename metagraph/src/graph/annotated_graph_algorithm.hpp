@@ -71,6 +71,19 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                            size_t num_threads = 1,
                            bool ignore_nested_superbubbles = true);
 
+using StringGenerator = std::function<void(const std::function<void(std::string_view)>)>;
+void assemble_min_path_cover(const StringGenerator &generate,
+                             size_t k,
+                             const std::function<void(const std::string&)> &callback,
+                             DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+                             size_t num_threads = 1);
+
+void assemble_min_path_cover(const DeBruijnGraph &dbg,
+                             const std::function<void(const std::string&)> &callback,
+                             size_t num_threads = 1);
+
+
+
 } // namespace graph
 } // namespace mtg
 

@@ -88,17 +88,19 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
     std::vector<std::string> unitigs;
     std::vector<std::string> unitig_labels;
-    std::vector<size_t> cluster_ids;
+    // std::vector<size_t> cluster_ids;
     for (const auto &[label, sequences] : label_sets) {
-        assemble_superbubbles(
+        // assemble_superbubbles(
+        assemble_min_path_cover(
             [&](const auto &callback) {
                 std::for_each(sequences.begin(), sequences.end(), callback);
             },
             k,
-            [&](const std::string &unitig, size_t cluster_id) {
+            // [&](const std::string &unitig, size_t cluster_id) {
+            [&](const std::string &unitig) {
                 unitigs.emplace_back(unitig);
                 unitig_labels.emplace_back(label);
-                cluster_ids.emplace_back(cluster_id);
+                // cluster_ids.emplace_back(cluster_id);
             },
             mode
         );
@@ -112,7 +114,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         ))
     );
     assert(seq_index_anno);
-    make_topology(graph, seq_index_anno, unitigs, cluster_ids, unitig_labels);
+    // make_topology(graph, seq_index_anno, unitigs, cluster_ids, unitig_labels);
 
     return anno_graph;
 }

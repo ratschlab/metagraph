@@ -370,12 +370,12 @@ int align_to_graph(Config *config) {
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-            auto *topology = graph->template get_extension_threadsafe<GraphTopology>();
+            auto *seq_annotator = graph->template get_extension_threadsafe<GraphSeqAnnotator>();
             graph = std::make_shared<CanonicalDBG>(graph);
 
-            if (topology) {
-                graph->add_extension(std::shared_ptr<GraphTopology>(
-                    std::shared_ptr<GraphTopology>{}, topology
+            if (seq_annotator) {
+                graph->add_extension(std::shared_ptr<GraphSeqAnnotator>(
+                    std::shared_ptr<GraphSeqAnnotator>{}, seq_annotator
                 ));
             }
 
@@ -454,7 +454,8 @@ int align_to_graph(Config *config) {
 
                 if (anno_dbg) {
                     aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
-                                                                 anno_dbg->get_annotator());
+                                                                 anno_dbg->get_annotator(),
+                                                                 !config->path_cover);
                 } else {
                     aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }

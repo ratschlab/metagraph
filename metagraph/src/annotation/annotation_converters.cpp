@@ -1729,8 +1729,13 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                                                     + ColumnCompressed<>::kSeqExtension;
         auto fin = utils::open_ifstream(fname);
         if (!fin->good()) {
-            logger->error("Failed to open file {}", fname);
-            exit(1);
+            if (ColumnCompressed<std::string>::read_num_labels(file)) {
+                logger->error("Failed to open file {}", fname);
+                exit(1);
+            } else {
+                logger->warn("Skipping delimiters for empty column {}", file);
+                continue;
+            }
         }
 
         num_columns += load_number(*fin);
@@ -1753,8 +1758,13 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
                                                     + ColumnCompressed<>::kSeqExtension;
         auto fin = utils::open_ifstream(fname);
         if (!fin->good()) {
-            logger->error("Failed to open file {}", fname);
-            exit(1);
+            if (ColumnCompressed<std::string>::read_num_labels(file)) {
+                logger->error("Failed to open file {}", fname);
+                exit(1);
+            } else {
+                logger->warn("Skipping delimiters for empty column {}", file);
+                continue;
+            }
         }
 
         size_t num_cur_columns = load_number(*fin);

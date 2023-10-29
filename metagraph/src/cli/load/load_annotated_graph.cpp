@@ -8,7 +8,6 @@
 #include "annotation/representation/seq_indexed/seq_indexed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/graph_extensions/graph_topology.hpp"
 #include "common/logger.hpp"
 #include "cli/config/config.hpp"
 #include "load_graph.hpp"

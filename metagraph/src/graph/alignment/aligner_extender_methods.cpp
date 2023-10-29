@@ -67,22 +67,7 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     if (seed.empty())
         return false;
 
-    const auto &cigar = seed.get_cigar();
-    if (cigar.size() > 1) {
-        auto it = cigar.data().begin();
-        if (it->first == Cigar::CLIPPED)
-            ++it;
-
-        if (it->first != Cigar::MATCH)
-            return true;
-
-        ++it;
-        if (it != cigar.data().end() && it->first != Cigar::CLIPPED)
-            return true;
-    }
-
     assert(seed.get_nodes().back());
-    assert(cigar.size());
 
     node_index node = seed.get_nodes().back();
     if (dynamic_cast<const RCDBG*>(graph_))
@@ -129,13 +114,14 @@ score_t SeedFilteringExtender::update_seed_filter(node_index node,
     auto it = conv_checker_.find(node);
 
     if (it == conv_checker_.end()) {
-        conv_checker_.emplace(node, ScoreVec(query_start, { s_begin, s_end }));
+        conv_checker_.emplace(node, ScoreVec(query_start, AlignedVector<score_t>(s_begin, s_end)));
         return *std::max_element(s_begin, s_end);
     }
 
     auto &[start, vec] = it.value();
     if (query_start + size <= start) {
         vec.insert(vec.begin(), start - query_start, ninf);
+        assert(s_end - s_begin <= vec.end() - vec.begin());
         std::copy(s_begin, s_end, vec.begin());
         start = query_start;
         return *std::max_element(s_begin, s_end);
@@ -159,6 +145,7 @@ score_t SeedFilteringExtender::update_seed_filter(node_index node,
 
     score_t max_changed_value = ninf;
     score_t *v = vec.data() + query_start - start;
+    assert(query_start - start + size <= vec.size());
     for (size_t j = 0; j < size; ++j) {
         if (s_begin[j] > v[j] * config_.rel_score_cutoff) {
             v[j] = std::max(v[j], s_begin[j]);

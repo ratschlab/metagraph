@@ -79,7 +79,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     DBGAlignerConfig config;
     config.max_seed_length = std::numeric_limits<size_t>::max();
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("GCAATGCTT"), {{ { std::string("B"), std::string("AATGCTT") }, // 2S7=
@@ -127,7 +127,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") }, // 1S8=
@@ -399,7 +399,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
         DBGAlignerConfig config;
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
         config.min_seed_length = 6;
-        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
         auto alignments = aligner.align(query);
         EXPECT_LE(1u, alignments.size());
@@ -441,7 +441,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     config.min_seed_length = 2;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
-    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{
@@ -504,7 +504,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
 
         DBGAlignerConfig config;
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
             // r.c. TTTGAACTAA

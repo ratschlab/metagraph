@@ -64,6 +64,7 @@ class Config {
     bool coordinates = false;
     bool advanced = false;
     bool superbubbles = false;
+    bool path_cover = false;
 
     unsigned int k = 3;
 
