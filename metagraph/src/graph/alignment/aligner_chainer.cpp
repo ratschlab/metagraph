@@ -703,6 +703,9 @@ void cluster_seeds(const IDBGAligner &aligner,
 
                                     update_score(score, &a_j, coord_dist);
 
+                                    if (min_diff == 0)
+                                        break;
+
                                     ++it;
                                 }
                             }
