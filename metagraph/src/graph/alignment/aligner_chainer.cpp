@@ -1631,7 +1631,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     auto [score_j, last, last_dist] = *chain_scores;
                     if (last == anchor_it) {
                         assert(last_dist == std::numeric_limits<size_t>::max());
-                        last_dist = -a_j.spelling_length;
+                        last_dist = a_j.spelling_length;
                     }
 
                     if (a_i.col != a_j.col && (!allow_label_change || a_i.index == a_j.index))
@@ -1646,11 +1646,11 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         size_t added_length = a_i.spelling_length - a_j.spelling_length;
                         update_score(score_j + a_i.score - a_j.score,
-                                     &a_j, last_dist - added_length);
+                                     &a_j, last_dist + added_length);
                         return;
                     }
 
-                    if (-last_dist < graph.get_k())
+                    if (last_dist < graph.get_k())
                         return;
 
                     const auto &[score_i, last_j, last_dist_i] = *chain_scores_i;
@@ -1683,7 +1683,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         updated_score += get_label_change_score(anno_buffer, a_last.col, a_j.col);
 
                         update_score(updated_score, &a_j,
-                                     -seed_size - (a_i.spelling_length - a_last.spelling_length));
+                                     seed_size + (a_i.spelling_length - a_last.spelling_length));
                     } else if (full_query_i.end() <= full_query_j.begin()
                             && a_j.clipping == full_j.get_clipping()
                             && a_i.spelling_length >= graph.get_k()) {
@@ -1701,7 +1701,7 @@ void chain_alignments(const IDBGAligner &aligner,
                             return;
 
                         base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
-                        update_score(base_updated_score, &a_j, -a_i.spelling_length);
+                        update_score(base_updated_score, &a_j, a_i.spelling_length);
                     }
                 });
             },
@@ -1720,7 +1720,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
                 if (chain.size() > 1) {
-                    if (-chain[1].second < graph.get_k())
+                    if (chain[1].second < graph.get_k())
                         return false;
 
                     if (std::all_of(chain.begin() + 1, chain.end(),
@@ -1739,7 +1739,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 size_t aln_size = 0;
                 for (const auto &[ptr, d] : chain) {
-                    aln_size += -d;
+                    aln_size += d;
                 }
 
                 if (start_backtrack(chain[0].first->col, aln_size, full_score)) {
@@ -1804,7 +1804,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
                 std::ignore = dist;
-                assert(-dist >= graph.get_k());
+                assert(dist >= graph.get_k());
 
                 DEBUG_LOG("\t\taln: {}", alignment);
                 DEBUG_LOG("\t\tcur: {}", cur);
@@ -1813,7 +1813,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (last_overlap_i == std::numeric_limits<size_t>::max()) {
                     // no overlap
                     assert(alignment.get_query_view().end() <= cur.get_query_view().begin());
-                    assert(dist == -first->spelling_length);
+                    assert(dist == first->spelling_length);
                     assert(last_anchor->begin == cur.get_query_view().begin());
                     cur.insert_gap_prefix(
                         cur.get_query_view().begin() - alignment.get_query_view().end(),
@@ -1821,7 +1821,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     );
                     assert(cur.size());
                 } else {
-                    assert(-dist > seed_size);
+                    assert(dist > seed_size);
                     const Anchor &a_o = anchors[last_overlap_i];
 
                     assert(last_anchor->end == a_o.end);
