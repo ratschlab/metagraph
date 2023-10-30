@@ -27,8 +27,9 @@ auto SeqIndexedAnnotator<Label>
         VectorMap<Row, Vector<Column>> cur_row_coords;
 
         for (const auto &[c, tuple] : row_tuple) {
-            for (auto coord : tuple) {
-                if (coord)
+            static_assert(std::is_same_v<matrix::MultiIntMatrix::Tuple::value_type, uint64_t>);
+            for (int64_t coord : tuple) {
+                if (coord > 0)
                     cur_row_coords[coord - 1].emplace_back(c);
             }
         }
@@ -52,8 +53,9 @@ auto SeqIndexedAnnotator<Label>
             assert(std::is_sorted(cur_matrix_ranks[i].begin(),
                                   cur_matrix_ranks[i].end()));
             for (const auto &[c, tuple] : row_tuples[i]) {
-                for (auto coord : tuple) {
-                    if (coord) {
+                static_assert(std::is_same_v<matrix::MultiIntMatrix::Tuple::value_type, uint64_t>);
+                for (int64_t coord : tuple) {
+                    if (coord > 0) {
                         assert(it != cur_matrix_ranks[i].end());
                         assert(c == it->first);
                         cur_merged_row.emplace_back(c, it->second);

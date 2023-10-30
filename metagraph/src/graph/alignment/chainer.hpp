@@ -24,6 +24,7 @@ using AnchorConnector = std::function<void(const Anchor&, // start anchor
 
 template <typename Anchor>
 using AnchorExtender = std::function<void(const Anchor*, // first ptr,
+                                          const Anchor*, // prev ptr
                                           Alignment&&,   // target,
                                           size_t,        // distance,
                                           score_t,       // chain score up to this point
@@ -113,7 +114,7 @@ void extend_chain(const AnchorChain<Anchor> &chain,
                   const std::function<bool()> &terminate = []() { return false; }) {
     auto jt = score_traceback.rbegin();
     std::vector<Alignment> alns;
-    anchor_extender(chain.back().first, Alignment(), 0, *jt,
+    anchor_extender(chain.back().first, nullptr, Alignment(), 0, *jt,
                     [&](Alignment&& aln) { alns.emplace_back(aln); });
     ++jt;
 
@@ -121,7 +122,7 @@ void extend_chain(const AnchorChain<Anchor> &chain,
         assert(jt != score_traceback.rend());
         std::vector<Alignment> next_alns;
         for (auto&& aln : alns) {
-            anchor_extender((it + 1)->first, std::move(aln), it->second, *jt,
+            anchor_extender((it + 1)->first, it->first, std::move(aln), it->second, *jt,
                 [&](Alignment&& next_aln) {
                     next_alns.emplace_back(std::move(next_aln));
                 }
@@ -150,6 +151,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                    bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
                        = [](const Anchor*,
+                            const Anchor*,
                             Alignment&&,
                             size_t,
                             score_t,
@@ -291,10 +293,8 @@ void chain_anchors(const DBGAlignerConfig &config,
                 used[a_ptr - anchors_begin] = true;
             }
 
-            if (extend_anchors) {
-                extend_chain<Anchor>(chain, scores, anchor_extender,
-                                     callback, terminate);
-            }
+            if (extend_anchors)
+                extend_chain<Anchor>(chain, scores, anchor_extender, callback, terminate);
         }
     }
 }

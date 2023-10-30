@@ -71,7 +71,9 @@ bool AnnotationBuffer
             for (auto c : diff) {
                 diff_labels.emplace_back(label_encoder.decode(c));
             }
-            logger->error("Node {} does not have labels: {}", node, fmt::join(diff_labels, ";"));
+            logger->error("Node {} ({}) does not have labels: {}",
+                          node, graph_.get_node_sequence(node),
+                          fmt::join(diff_labels, ";"));
             return false;
         }
     }
@@ -291,6 +293,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
         node_index base_node = AnnotatedDBG::anno_to_graph_index(row);
         auto find_base = node_to_cols.find(base_node);
         assert(find_base != node_to_cols.end());
+        assert(std::is_sorted(labels.begin(), labels.end()));
         size_t labels_i = cache_column_set_impl(column_sets, std::move(labels));
         do_push(find_base, labels_i);
 

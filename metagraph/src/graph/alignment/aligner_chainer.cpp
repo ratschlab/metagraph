@@ -514,14 +514,16 @@ chain_seeds(const DBGAlignerConfig &config,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-void cluster_seeds(const IDBGAligner &aligner,
-                   std::string_view forward,
-                   std::string_view reverse,
-                   const DBGAlignerConfig &config,
-                   std::vector<Seed>&& fwd_seeds,
-                   std::vector<Seed>&& bwd_seeds,
-                   const std::function<void(Alignment&&)> &callback,
-                   const std::function<bool(Alignment::Column)> &skip_column) {
+std::pair<size_t, size_t>
+cluster_seeds(const IDBGAligner &aligner,
+              std::string_view forward,
+              std::string_view reverse,
+              const DBGAlignerConfig &config,
+              std::vector<Seed>&& fwd_seeds,
+              std::vector<Seed>&& bwd_seeds,
+              const std::function<void(Alignment&&)> &callback,
+              const std::function<void(Seed&&)> &discarded_seed_callback,
+              const std::function<bool(Alignment::Column)> &skip_column) {
     const auto *seq_annotator = aligner.get_seq_annotator();
     if (!seq_annotator) {
         for (const auto &seed : fwd_seeds) {
@@ -532,7 +534,7 @@ void cluster_seeds(const IDBGAligner &aligner,
             callback(Alignment(seed, config));
         }
 
-        return;
+        return std::make_pair(0, 0);
     }
 
     const auto &graph = aligner.get_graph();
@@ -554,7 +556,7 @@ void cluster_seeds(const IDBGAligner &aligner,
     const auto *topology = dynamic_cast<const GraphTopology*>(seq_annotator);
     if (!topology) {
         struct Anchor {
-            Anchor(const Seed &seed) : seed(seed) {}
+            Anchor(const Seed &seed) : seed(seed), used(false) {}
 
             score_t get_score(const DBGAlignerConfig &config) const {
                 return seed.get_score(config);
@@ -567,6 +569,7 @@ void cluster_seeds(const IDBGAligner &aligner,
 
             Seed seed;
             std::vector<std::pair<size_t, int64_t>> coords;
+            mutable bool used;
         };
 
         std::vector<tsl::hopscotch_map<Alignment::Column, std::vector<Anchor>>> clustered_seed_maps(2);
@@ -627,7 +630,7 @@ void cluster_seeds(const IDBGAligner &aligner,
                 callback(Alignment(seed, config));
             }
 
-            return;
+            return std::make_pair(0, 0);
         }
 
         // for each orientation
@@ -739,9 +742,10 @@ void cluster_seeds(const IDBGAligner &aligner,
                 );
             }
         }
+
         if (best_chains.empty()) {
             logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
-            return;
+            return std::make_pair(0, 0);
         }
 
         struct AnchorChainHash {
@@ -801,11 +805,16 @@ void cluster_seeds(const IDBGAligner &aligner,
             }
 
             std::vector<std::tuple<Alignment::Column, AnchorChain<Anchor>, std::vector<score_t>>> merged_best_chains;
-            for (const auto &[chain, cols] : chain_map) {
+            for (auto it = chain_map.begin(); it != chain_map.end(); ++it) {
+                auto &chain = it->first;
+                auto &cols = it.value();
+                std::sort(cols.begin(), cols.end());
+
+                size_t size = chain.size();
                 merged_best_chains.emplace_back(
                     anno_buffer->cache_column_set(cols.begin(), cols.end()),
-                    chain,
-                    std::vector<score_t>(chain.size(), 0)
+                    std::move(chain),
+                    std::vector<score_t>(size, 0)
                 );
             }
 
@@ -819,14 +828,17 @@ void cluster_seeds(const IDBGAligner &aligner,
                     > std::make_tuple(chain_b.get_score(), chain_a.get_clipping(), chain_a.get_orientation());
         });
 
+        size_t num_extensions = 0;
+        size_t num_explored_nodes = 0;
+
         for (const auto &[col, chain, score_traceback] : best_chains) {
-            const Anchor *last = nullptr;
             extend_chain<Anchor>(chain, score_traceback,
-                [&](const Anchor *next, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
+                [&](const Anchor *next, const Anchor*, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
                     if (cur.empty()) {
-                        last = next;
+                        next->used = true;
                         cur = Alignment(next->seed, config);
                         cur.label_columns = col;
+                        assert(cur.is_valid(graph, &config));
                         continue_callback(std::move(cur));
                         return;
                     }
@@ -834,16 +846,11 @@ void cluster_seeds(const IDBGAligner &aligner,
                     std::string_view query = !next->get_orientation() ? forward : reverse;
 
                     Alignment next_aln(next->seed, config);
-                    next_aln.label_columns = col;
+                    next_aln.label_columns = cur.label_columns;
+                    assert(next_aln.is_valid(graph, &config));
 
-                    const auto &cur_nodes = cur.get_nodes();
-                    auto it = std::find_if(cur_nodes.begin(), cur_nodes.end(),
-                                            [](node_index node) -> bool { return node; });
-                    assert(it != cur_nodes.end());
-                    node_index target_node = *it;
-                    assert(last);
-                    assert(target_node == last->seed.get_nodes().front());
-                    size_t cur_prefix = it - cur_nodes.begin() + graph.get_k() - cur.get_offset();
+                    node_index target_node = cur.get_nodes().front();
+                    size_t cur_prefix = graph.get_k() - cur.get_offset();
                     size_t target_end_clipping = cur.get_end_clipping() + cur.get_query_view().size() - cur_prefix;
 
                     auto extender = aligner.build_extender(query);
@@ -857,11 +864,15 @@ void cluster_seeds(const IDBGAligner &aligner,
                         target_end_clipping
                     );
 
+                    ++num_extensions;
+                    num_explored_nodes += extender->num_explored_nodes();
+
                     if (extensions.empty()) {
                         cur.trim_offset();
                         ++seed_count;
                         callback(std::move(cur));
                     } else {
+                        next->used = true;
                         Alignment start_cur;
                         if (cur_prefix != cur.get_query_view().size()) {
                             start_cur = std::move(cur);
@@ -870,17 +881,25 @@ void cluster_seeds(const IDBGAligner &aligner,
                         }
 
                         for (auto&& ext : extensions) {
-                            if (ext.get_end_clipping() == target_end_clipping && ext.get_nodes().back() == target_node) {
+                            assert(ext.get_offset() == next->seed.get_offset());
+                            assert(ext.get_nodes().front() == next->seed.get_nodes().front());
+                            if (ext.get_end_clipping() == target_end_clipping
+                                    && ext.get_clipping() == next->get_clipping()
+                                    && ext.get_nodes().back() == target_node) {
                                 if (start_cur.size()) {
-                                    ext.splice(Alignment(start_cur));
+                                    Alignment start_cur_next = start_cur;
+                                    start_cur_next.label_columns = ext.label_columns;
+                                    assert(start_cur_next.is_valid(graph, &config));
+                                    ext.splice(std::move(start_cur_next));
                                     assert(ext.size());
+                                    assert(ext.is_valid(graph, &config));
                                 }
+                                assert(ext.get_offset() == next->seed.get_offset());
+                                assert(ext.get_nodes().front() == next->seed.get_nodes().front());
                                 continue_callback(std::move(ext));
                             }
                         }
                     }
-
-                    last = next;
                 },
                 [&](Alignment&& aln) {
                     aln.trim_offset();
@@ -892,7 +911,16 @@ void cluster_seeds(const IDBGAligner &aligner,
 
         logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
 
-        return;
+        for (auto &clustered_seeds : clustered_seed_maps) {
+            for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
+                for (auto &anchor : it.value()) {
+                    if (!anchor.used)
+                        discarded_seed_callback(std::move(anchor.seed));
+                }
+            }
+        }
+
+        return std::make_pair(num_extensions, num_explored_nodes);
     }
 
     auto coords = topology->get_coords(nodes);
@@ -961,7 +989,7 @@ void cluster_seeds(const IDBGAligner &aligner,
             callback(Alignment(seed, config));
         }
 
-        return;
+        return std::make_pair(0, 0);
     }
 
     // for each orientation
@@ -1135,7 +1163,7 @@ void cluster_seeds(const IDBGAligner &aligner,
     }
     if (best_chains.empty()) {
         logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
-        return;
+        return std::make_pair(0, 0);
     }
 
     struct AnchorChainHash {
@@ -1232,12 +1260,12 @@ void cluster_seeds(const IDBGAligner &aligner,
         best_chains.erase(it, best_chains.end());
     }
 
+    size_t num_explored_nodes = 0;
+    size_t num_extensions = 0;
     for (const auto &[col, chain, score_traceback] : best_chains) {
-        const Anchor *last = nullptr;
         extend_chain<Anchor>(chain, score_traceback,
-            [&](const Anchor *next, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
+            [&](const Anchor *next, const Anchor *last, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
                 if (cur.empty()) {
-                    last = next;
                     cur = Alignment(next->seed, config);
                     cur.label_columns = col;
                     continue_callback(std::move(cur));
@@ -1271,6 +1299,9 @@ void cluster_seeds(const IDBGAligner &aligner,
                     target_end_clipping
                 );
 
+                ++num_extensions;
+                num_explored_nodes += extender->num_explored_nodes();
+
                 Alignment start_cur;
                 if (cur_prefix != cur.get_query_view().size()) {
                     start_cur = std::move(cur);
@@ -1286,8 +1317,6 @@ void cluster_seeds(const IDBGAligner &aligner,
                         continue_callback(std::move(ext));
                     }
                 }
-
-                last = next;
             },
             [&](Alignment&& aln) {
                 aln.trim_offset();
@@ -1299,6 +1328,8 @@ void cluster_seeds(const IDBGAligner &aligner,
     }
 
     logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
+
+    return std::make_pair(num_extensions, num_explored_nodes);
 }
 
 
@@ -1571,7 +1602,6 @@ void chain_alignments(const IDBGAligner &aligner,
             ++anchor_it;
         }
 
-        const Anchor *last_anchor;
         score_t chain_score = 0;
         AnchorChain<Anchor> last_chain(0);
         Alignment::Columns col_idx = 0;
@@ -1716,10 +1746,9 @@ void chain_alignments(const IDBGAligner &aligner,
                     last_chain = chain;
                     chain_score = score;
                     DEBUG_LOG("Chain: {}", score);
-                    last_anchor = chain.back().first;
                     if (labeled_aligner) {
                         assert(anno_buffer);
-                        col_idx = anno_buffer->cache_column_set(1, last_anchor->col);
+                        col_idx = anno_buffer->cache_column_set(1, chain.back().first->col);
                     }
 
                     return true;
@@ -1729,13 +1758,14 @@ void chain_alignments(const IDBGAligner &aligner,
             },
             true /* extend_anchors */,
             [&](const Anchor *first,
+                const Anchor *last_anchor,
                 Alignment&& cur,
                 size_t dist,
                 score_t score_up_to_now,
                 const auto &callback) {
 
                 Alignment alignment = alignments[first->index];
-                if (first->col != last_anchor->col) {
+                if (last_anchor && first->col != last_anchor->col) {
                     assert(anno_buffer);
                     DEBUG_LOG("\tSwitching {} -> {}",
                               anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
@@ -1758,16 +1788,16 @@ void chain_alignments(const IDBGAligner &aligner,
 #endif
 
                 if (cur.empty()) {
-                    assert(first == last_anchor);
+                    assert(!last_anchor);
                     DEBUG_LOG("\tStarting: {}\tfrom {}", alignment, alignments[first->index]);
                     assert(check_aln(alignment));
                     callback(std::move(alignment));
                     return;
                 }
 
+                assert(last_anchor);
                 if (first->index == last_anchor->index) {
                     assert(first->col == last_anchor->col);
-                    last_anchor = first;
                     assert(check_aln(cur));
                     callback(std::move(cur));
                     return;
@@ -1844,8 +1874,6 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 assert(first->col == last_anchor->col ||
                         label_change_score != DBGAlignerConfig::ninf);
-
-                last_anchor = first;
 
                 alignment.splice(std::move(cur), label_change_score);
                 DEBUG_LOG("\tCurrent: {}", alignment);

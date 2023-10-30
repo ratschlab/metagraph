@@ -407,7 +407,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
         for (size_t i = 0; i < 2; ++i) {
-            if (discarded_alignments[i].empty() || config_.chain_alignments)
+            if (discarded_alignments[i].empty() || config_.chain_alignments || config_.post_chain_alignments)
                 continue;
 
             DEBUG_LOG("Merging discarded seeds into MEMs per label");
@@ -852,15 +852,23 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     std::vector<Alignment> fwd_seeds;
     std::vector<Alignment> bwd_seeds;
 
-    cluster_seeds(*this, forward, reverse, config_, forward_seeder.get_seeds(),
+    auto [cluster_num_extensions, cluster_num_explored_nodes] =
+        cluster_seeds(*this, forward, reverse, config_, forward_seeder.get_seeds(),
                   reverse_seeder ? reverse_seeder->get_seeds() : std::vector<Seed>{},
-                  [&](Alignment&& aln) {
-        if (!aln.get_orientation()) {
-            fwd_seeds.emplace_back(std::move(aln));
-        } else {
-            bwd_seeds.emplace_back(std::move(aln));
-        }
-    });
+            [&](Alignment&& aln) {
+                if (!aln.get_orientation()) {
+                    fwd_seeds.emplace_back(std::move(aln));
+                } else {
+                    bwd_seeds.emplace_back(std::move(aln));
+                }
+            },
+            [&](Seed&& discarded_seed) {
+                callback_discarded(Alignment(std::move(discarded_seed), config_));
+            }
+        );
+
+    num_explored_nodes += cluster_num_explored_nodes;
+    num_extensions += cluster_num_extensions;
 
     if (!get_seq_annotator()) {
         std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
