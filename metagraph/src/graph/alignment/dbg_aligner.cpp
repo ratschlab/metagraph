@@ -480,7 +480,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             tsl::hopscotch_map<Alignment::Column, size_t> best_label_counts;
             std::vector<Alignment> rest;
             for (const auto &a : alns) {
-                if (a.get_clipping() || a.get_end_clipping()) {
+                if (!a.get_offset() && (a.get_clipping() || a.get_end_clipping())) {
                     rest.emplace_back(a);
 
                     for (auto c : a.get_columns()) {
@@ -512,7 +512,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     assert(alignment.get_score() >= config_.min_path_score);
                     best_score = std::max(best_score, alignment.get_score());
                     query_coverage = std::max(query_coverage,
-                                              alignment.get_query_view().size());
+                                              alignment.get_cigar().get_coverage());
                     if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
                         chains.erase(merge_alignments_by_label(chains.begin() + last_size,
                                                                chains.end()),

@@ -94,6 +94,8 @@ class Cigar {
         });
     }
 
+    size_t get_coverage() const;
+
     // Return true if the cigar is valid
     bool is_valid(std::string_view reference, std::string_view query) const;
 

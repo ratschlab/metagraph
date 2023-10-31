@@ -113,6 +113,29 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
+size_t Cigar::get_coverage() const {
+    size_t coverage = 0;
+    for (size_t i = 0; i < cigar_.size(); ++i) {
+        const auto &op = cigar_[i];
+        switch (op.first) {
+            case MATCH:
+            case MISMATCH: {
+                coverage += op.second;
+                break;
+            }
+            case INSERTION: {
+                if (i + 1 == cigar_.size() || cigar_[i + 1].first != NODE_INSERTION)
+                    coverage += op.second;
+
+                break;
+            }
+            default: {}
+        }
+    }
+
+    return coverage;
+}
+
 bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
