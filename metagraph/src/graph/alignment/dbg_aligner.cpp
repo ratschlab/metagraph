@@ -407,7 +407,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
         for (size_t i = 0; i < 2; ++i) {
-            if (discarded_alignments[i].empty() || config_.chain_alignments || config_.post_chain_alignments)
+            if (discarded_alignments[i].empty() || config_.chain_alignments)
                 continue;
 
             DEBUG_LOG("Merging discarded seeds into MEMs per label");
@@ -465,6 +465,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alns = aggregator.get_alignments();
+        assert(std::is_sorted(alns.rbegin(), alns.rend(), AlignmentCompare()));
 
         for (const auto &aln : alns) {
             best_score = std::max(best_score, aln.get_score());
@@ -490,51 +491,58 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 }
             }
 
-            assert(rest.size());
-            std::vector<Alignment> chains;
-            size_t last_size = 0;
-            chain_alignments(*this, std::move(rest),
-                [&](Alignment::Column col, size_t aln_size, score_t score) {
-                    if (score < config_.min_path_score)
-                        return false;
+            if (rest.size()) {
+                std::vector<Alignment> chains;
+                size_t last_size = 0;
+                chain_alignments(*this, std::move(rest),
+                    [&](Alignment::Column col, size_t aln_size, score_t score) {
+                        if (score < config_.min_path_score)
+                            return false;
 
-                    auto it = best_label_counts.find(col);
-                    assert(it != best_label_counts.end());
-                    if (aln_size > it.value()) {
-                        it.value() = aln_size;
-                        return true;
+                        auto it = best_label_counts.find(col);
+                        assert(it != best_label_counts.end());
+                        if (aln_size > it.value()) {
+                            it.value() = aln_size;
+                            return true;
+                        }
+
+                        return score >= best_score;
+                    },
+                    [&](auto&& alignment) {
+                        assert(alignment.is_valid(graph_, &config_));
+                        assert(alignment.get_score() >= config_.min_path_score);
+                        best_score = std::max(best_score, alignment.get_score());
+                        query_coverage = std::max(query_coverage,
+                                                alignment.get_cigar().get_coverage());
+                        if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
+                            chains.erase(merge_alignments_by_label(chains.begin() + last_size,
+                                                                chains.end()),
+                                        chains.end());
+                            assert(std::all_of(chains.begin() + last_size, chains.end(),
+                                            [this](const auto &a) {
+                                                return a.is_valid(graph_, &config_);
+                                            }));
+                            last_size = chains.size();
+                        }
+
+                        chains.emplace_back(std::move(alignment));
                     }
+                );
 
-                    return score >= best_score;
-                },
-                [&](auto&& alignment) {
-                    assert(alignment.is_valid(graph_, &config_));
-                    assert(alignment.get_score() >= config_.min_path_score);
-                    best_score = std::max(best_score, alignment.get_score());
-                    query_coverage = std::max(query_coverage,
-                                              alignment.get_cigar().get_coverage());
-                    if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
-                        chains.erase(merge_alignments_by_label(chains.begin() + last_size,
-                                                               chains.end()),
-                                     chains.end());
-                        assert(std::all_of(chains.begin() + last_size, chains.end(),
-                                           [this](const auto &a) {
-                                               return a.is_valid(graph_, &config_);
-                                           }));
-                        last_size = chains.size();
-                    }
+                assert(std::is_sorted(chains.rbegin(), chains.rend(), AlignmentCompare()));
 
-                    chains.emplace_back(std::move(alignment));
+                if (chains.size()) {
+                    std::vector<Alignment> merged_alns;
+                    merged_alns.reserve(chains.size() + alns.size());
+                    std::merge(std::make_move_iterator(chains.begin()),
+                               std::make_move_iterator(chains.end()),
+                               std::make_move_iterator(alns.begin()),
+                               std::make_move_iterator(alns.end()),
+                               std::back_inserter(merged_alns),
+                               std::not_fn(AlignmentCompare()));
+
+                    std::swap(alns, merged_alns);
                 }
-            );
-
-            if (chains.size()) {
-                chains.insert(chains.end(),
-                              std::make_move_iterator(alns.begin()),
-                              std::make_move_iterator(alns.end()));
-                std::sort(chains.begin(), chains.end(), AlignmentCompare());
-                std::reverse(chains.begin(), chains.end());
-                std::swap(chains, alns);
             }
         }
 
