@@ -637,7 +637,9 @@ cluster_seeds(const IDBGAligner &aligner,
     }
 
     // for each orientation
+    logger->trace("Chaining anchors");
     score_t best_score = 0;
+    bool finish = false;
     std::vector<std::tuple<Alignment::Column,
                         AnchorChain<Anchor>,
                         std::vector<score_t>>> best_chains;
@@ -727,19 +729,17 @@ cluster_seeds(const IDBGAligner &aligner,
                 [&](const AnchorChain<Anchor> &chain, const std::vector<score_t> &score_traceback) {
                     if (best_chains.empty() || score_traceback[0] >= best_score * config.rel_score_cutoff) {
                         best_chains.emplace_back(col, chain, score_traceback);
-                        // logger->info("Chain: {}\t{} {}",
-                            // chain[0].first->seed.label_encoder->get_annotator().get_label_encoder().decode(col),
-                            // chain.get_score(), chain.size());
-                        // for (const auto &[anchor, dist] : chain) {
-                            // logger->info("\t{}\t{}->\t", Alignment(anchor->seed, config), dist);
-                        // }
                         best_score = std::max(best_score, score_traceback[0]);
                         return true;
                     }
 
+                    finish = true;
                     return false;
                 },
-                false
+                false,
+                [](const auto*, const auto*, auto&&, auto, auto, const auto&) {},
+                [](auto&&) {},
+                [&]() { return finish; }
             );
         }
     }
@@ -937,11 +937,13 @@ cluster_seeds(const IDBGAligner &aligner,
 
     logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
 
-    for (auto &clustered_seeds : clustered_seed_maps) {
-        for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
-            for (auto &anchor : it.value()) {
-                if (!anchor.used)
-                    discarded_seed_callback(std::move(anchor.seed));
+    if (!config.ignore_discarded_seeds) {
+        for (auto &clustered_seeds : clustered_seed_maps) {
+            for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
+                for (auto &anchor : it.value()) {
+                    if (!anchor.used)
+                        discarded_seed_callback(std::move(anchor.seed));
+                }
             }
         }
     }
