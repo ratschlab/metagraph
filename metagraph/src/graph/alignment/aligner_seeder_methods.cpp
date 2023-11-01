@@ -627,22 +627,9 @@ It merge_into_mums(const DeBruijnGraph &graph,
 
     if constexpr(std::is_same_v<seed_t, Alignment>) {
         // first, move all inexact matches to the front and ignore them
-        begin = std::partition(begin, end, [](const auto &a) {
-            const auto &cigar = a.get_cigar().data();
-            auto c_begin = cigar.begin();
-            auto c_end = cigar.end();
-            assert(c_begin != c_end);
-
-            if (c_begin->first == Cigar::CLIPPED)
-                ++c_begin;
-
-            assert(c_begin != c_end);
-
-            if ((c_end - 1)->first == Cigar::CLIPPED)
-                --c_end;
-
-            return c_end != c_begin + 1 || c_begin->first != Cigar::MATCH;
-        });
+        begin = std::partition(
+            begin, end, [](const auto &a) { return !a.get_cigar().is_only_matches(); }
+        );
 
         if (begin == end)
             return end;

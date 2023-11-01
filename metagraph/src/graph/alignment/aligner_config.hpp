@@ -58,6 +58,7 @@ struct DBGAlignerConfig {
     bool no_backtrack = false;
     bool seed_complexity_filter = true;
     bool all_suffix_matches = false;
+    bool ignore_discarded_seeds = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;

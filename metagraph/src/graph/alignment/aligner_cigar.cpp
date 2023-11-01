@@ -113,6 +113,21 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
+bool Cigar::is_only_matches() const {
+    if (cigar_.empty())
+        return false;
+
+    auto it = cigar_.begin();
+    if (it->first == CLIPPED)
+        ++it;
+
+    if (it == cigar_.end() || it->first != MATCH)
+        return false;
+
+    ++it;
+    return it == cigar_.end() || it->first == CLIPPED;
+}
+
 size_t Cigar::get_coverage() const {
     size_t coverage = 0;
     for (size_t i = 0; i < cigar_.size(); ++i) {

@@ -103,6 +103,8 @@ class Cigar {
         return cigar_.size() == 1 && cigar_.front() == value_type{ MATCH, query_size };
     }
 
+    bool is_only_matches() const;
+
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:

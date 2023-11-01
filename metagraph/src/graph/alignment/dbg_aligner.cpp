@@ -307,6 +307,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     auto seeders = build_seeders(seq_batch, paths, discarded_seeds);
     assert(seeders.size() == seq_batch.size());
 
+
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query] = seq_batch[i];
         auto &[seeder, seeder_rc] = seeders[i];
@@ -324,6 +325,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         std::vector<Alignment> discarded_alignments[2];
         auto add_discarded = [&](Alignment&& alignment) {
+            if (config_.ignore_discarded_seeds)
+                return;
+
             assert(alignment.get_nodes().size());
             bool orientation = alignment.get_orientation();
             discarded_alignments[orientation].emplace_back(std::move(alignment));
@@ -407,54 +411,70 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
         for (size_t i = 0; i < 2; ++i) {
-            if (discarded_alignments[i].empty() || config_.chain_alignments)
+            if (config_.ignore_discarded_seeds
+                    || discarded_alignments[i].empty() || config_.chain_alignments) {
                 continue;
+            }
 
-            DEBUG_LOG("Merging discarded seeds into MEMs per label");
-            std::vector<Alignment> split_seeds;
+            logger->trace("Merging discarded seeds into MEMs per label");
+
+            auto *label_encoder = discarded_alignments[i][0].label_encoder;
+
+            tsl::hopscotch_map<Alignment::Column, std::vector<Alignment>> seed_buckets;
             for (auto &a : discarded_alignments[i]) {
-                if (!a.has_annotation()) {
-                    split_seeds.emplace_back(std::move(a));
+                if (a.get_offset()) {
+                    add_alignment(std::move(a));
+                } else if (!a.has_annotation()) {
+                    auto &seed = seed_buckets[std::numeric_limits<Alignment::Column>::max()].emplace_back(
+                        std::move(a)
+                    );
+                    seed.label_columns = 0;
+                    seed.label_encoder = nullptr;
                 } else {
                     for (auto c : a.get_columns()) {
-                        auto &seed = split_seeds.emplace_back(a);
-                        seed.set_columns(Vector<Alignment::Column>(1, c));
+                        auto &seed = seed_buckets[c].emplace_back(a);
+                        seed.label_columns = 0;
+                        seed.label_encoder = nullptr;
                     }
                 }
             }
             discarded_alignments[i].clear();
 
-            std::sort(split_seeds.begin(), split_seeds.end(), [](const auto &a, const auto &b) {
-                return a.label_columns < b.label_columns;
-            });
+            DEBUG_LOG("Merging seed in buckets in buckets");
+            for (auto it = seed_buckets.begin(); it != seed_buckets.end(); ++it) {
+                auto &bucket = it.value();
+                merge_into_mums(graph_, config_, bucket.begin(), bucket.end(), config_.min_seed_length);
+                auto end = std::remove_if(bucket.begin(), bucket.end(),
+                                          [](const auto &a) { return a.empty(); });
+                bucket.erase(end, bucket.end());
+            }
 
-            auto last_it = split_seeds.begin();
-            while (last_it != split_seeds.end()) {
-                auto cur_it = last_it + 1;
-                while (cur_it != split_seeds.end() && cur_it->label_columns == last_it->label_columns) {
-                    ++cur_it;
+            if (!label_encoder) {
+                assert(seed_buckets.size() == 1);
+                std::for_each(std::make_move_iterator(seed_buckets.begin().value().begin()),
+                              std::make_move_iterator(seed_buckets.begin().value().end()),
+                              add_alignment);
+            } else {
+                DEBUG_LOG("Merging MEMs by label");
+                std::vector<Alignment> split_seeds;
+                for (auto it = seed_buckets.begin(); it != seed_buckets.end(); ++it) {
+                    auto c = it->first;
+                    for (auto &seed : it.value()) {
+                        auto &cur = split_seeds.emplace_back(std::move(seed));
+                        cur.label_encoder = label_encoder;
+                        cur.set_columns(Vector<Alignment::Column>(1, c));
+                    }
                 }
 
-                merge_into_mums(graph_, config_, last_it, cur_it, config_.min_seed_length);
+                auto end = merge_alignments_by_label(split_seeds.begin(), split_seeds.end());
+                assert(std::all_of(split_seeds.begin(), end,
+                                   [this](const auto &a) { return a.is_valid(graph_, &config_); }));
 
-                last_it = cur_it;
+                DEBUG_LOG("Done merging");
+                std::for_each(std::make_move_iterator(split_seeds.begin()),
+                              std::make_move_iterator(end),
+                              add_alignment);
             }
-
-            auto end = std::remove_if(split_seeds.begin(), split_seeds.end(),
-                                      [](const auto &a) { return a.empty(); });
-
-            DEBUG_LOG("Merging MEMs by label");
-            if (end != split_seeds.end() && split_seeds[0].has_annotation()) {
-                end = merge_alignments_by_label(split_seeds.begin(), end);
-                assert(std::all_of(split_seeds.begin(), end, [this](const auto &a) {
-                    return a.is_valid(graph_, &config_);
-                }));
-            }
-
-            DEBUG_LOG("Done merging");
-            std::for_each(std::make_move_iterator(split_seeds.begin()),
-                          std::make_move_iterator(end),
-                          add_alignment);
         }
 
         num_explored_nodes += extender.num_explored_nodes();

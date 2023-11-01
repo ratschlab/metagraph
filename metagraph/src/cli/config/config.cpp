@@ -241,6 +241,8 @@ Config::Config(int argc, char *argv[]) {
             align_only_forwards = true;
         } else if (!strcmp(argv[i], "--align-all-suffix-matches")) {
             alignment_all_suffix_matches = true;
+        } else if (!strcmp(argv[i], "--align-ignore-discarded-seeds")) {
+            alignment_ignore_discarded_seeds = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
