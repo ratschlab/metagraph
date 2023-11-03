@@ -1047,7 +1047,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
             if (it->first == Cigar::DELETION) {
                 cur.trim_reference_prefix(it->second, graph.get_k() - 1, config, false);
-                assert(cur.size());
+                if (cur.empty())
+                    continue;
+
                 it = cur.get_cigar().data().begin();
                 assert(it != cur.get_cigar().data().end());
                 if (it->first == Cigar::CLIPPED) {
