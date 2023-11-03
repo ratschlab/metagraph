@@ -884,6 +884,64 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
     return true;
 }
 
+bool BOSS::is_dummy(edge_index x) const {
+    CHECK_INDEX(x);
+#ifndef NDEBUG
+    edge_index orig_x = x;
+#endif
+
+    if (!get_W(x))
+        return true;
+
+    size_t i = k_;
+
+    // TODO: benchmark for short suffixes where select0 might actually be slower
+    if (indexed_suffix_length_) {
+        while (i > indexed_suffix_length_) {
+            CHECK_INDEX(x);
+
+            if (get_node_last_value(x) == kSentinelCode) {
+                assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
+                return true;
+            }
+
+            x = bwd(x);
+            --i;
+        }
+
+        // find end of range
+        // 0001001000010100011...
+        //    [  ]    [ ]   []
+        uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
+
+        // check if the index is in an indexed range (k-mer without dummy characters)
+        if (index % 2) {
+            assert(get_node_str(orig_x).find(kSentinel) == std::string::npos);
+            return false;
+        }
+    }
+
+    --i;
+    if (get_node_last_value(x) == kSentinelCode) {
+        assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
+        return true;
+    }
+
+    while (i > 0) {
+        CHECK_INDEX(x);
+
+        x = bwd(x);
+        if (get_node_last_value(x) == kSentinelCode) {
+            assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
+            return true;
+        }
+        --i;
+    }
+
+    assert(get_node_str(orig_x).find(kSentinel) == std::string::npos);
+    return false;
+}
+
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node.

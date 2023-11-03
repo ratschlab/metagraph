@@ -15,7 +15,6 @@ namespace {
 using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::align;
-using namespace mtg::test;
 using namespace mtg::kmer;
 
 

@@ -43,7 +43,7 @@ class LabeledExtender : public DefaultColumnExtender {
         );
 
         for (Alignment &alignment : alignments) {
-            alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+            alignment.label_encoder = &annotation_buffer_;
         }
 
         return alignments;
@@ -52,7 +52,8 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual bool set_seed(const Alignment &seed) override final;
 
     // overrides for backtracking helpers
-    virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final {
+    virtual bool terminate_backtrack_start(score_t,
+                                           const std::vector<Alignment> &) const override final {
         // we are done with backtracking if all seed labels have been accounted for
         return !remaining_labels_i_;
     }
@@ -71,6 +72,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> &trace,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -149,10 +151,12 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     BatchSeeders
     virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                          const std::vector<AlignmentResults> &wrapped_seqs) const override final;
+                          const std::vector<AlignmentResults> &wrapped_seqs,
+                          std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const override final;
 
     // helper for the build_seeders method
-    size_t filter_seeds(std::vector<Seed> &seeds) const;
+    void filter_seeds(std::vector<Seed> &seeds,
+                      std::vector<Seed> &discarded_seeds) const;
 };
 
 } // namespace align

@@ -25,6 +25,9 @@ struct DBGAlignerConfig {
     size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
+    size_t max_dist_between_seeds = 400;
+    size_t max_gap_shrinking_factor = 4;
+
     // Lowest possible score. 100 is added to prevent underflow during operations.
     // For this to work, all penalties should be less than 100.
     // This is checked whenever an aligner is initialized.
@@ -52,11 +55,14 @@ struct DBGAlignerConfig {
     bool allow_left_trim = true;
     bool no_backtrack = false;
     bool seed_complexity_filter = true;
+    bool all_suffix_matches = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;
     int8_t alignment_mm_transition_score;
     int8_t alignment_mm_transversion_score;
+
+    int8_t node_insertion_penalty = std::numeric_limits<int8_t>::min();
 
     ScoreMatrix score_matrix;
 
@@ -80,6 +86,11 @@ struct DBGAlignerConfig {
     bool check_config_scores() const;
 
     void set_scoring_matrix();
+
+    void set_node_insertion_penalty(size_t graph_k) {
+        node_insertion_penalty
+            = (graph_k - std::min(graph_k - 1, min_seed_length)) * gap_extension_penalty;
+    }
 
     // Protein matrices
     static const ScoreMatrix score_matrix_blosum62;

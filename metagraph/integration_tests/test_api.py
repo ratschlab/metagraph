@@ -336,18 +336,19 @@ class TestAPIClient(TestAPIBase):
         # but here it turns out to be the case
         self.assertEqual(len(align_res), repetitions *  alignment_cnt)
 
-    def test_api_align_df_too_divergent(self):
-        repetitions = 4
-        alignment_cnt = 3
-        seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
-        ret = self.graph_client.align(seq * repetitions, parallel=False,
-                                      max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
+    # TODO: since all seed matches are now returned as alignments, this test is invalid
+    # def test_api_align_df_too_divergent(self):
+    #     repetitions = 4
+    #     alignment_cnt = 3
+    #     seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
+    #     ret = self.graph_client.align(seq * repetitions, parallel=False,
+    #                                   max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
 
-        align_res = ret[self.graph_name]
-        self.assertIn('cigar', align_res.columns)
-        self.assertIn('max_score', align_res.columns)
-        self.assertIn('orientation', align_res.columns)
-        self.assertEqual(len(align_res), 0)
+    #     align_res = ret[self.graph_name]
+    #     self.assertIn('cigar', align_res.columns)
+    #     self.assertIn('max_score', align_res.columns)
+    #     self.assertIn('orientation', align_res.columns)
+    #     self.assertEqual(len(align_res), 0)
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):

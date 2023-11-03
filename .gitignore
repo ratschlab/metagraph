@@ -29,3 +29,4 @@ metagraph/**/build*
 tags
 **/cmake-build-debug
 .idea
+.vscode
