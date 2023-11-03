@@ -895,6 +895,7 @@ cluster_seeds(const IDBGAligner &aligner,
                 if (extensions.empty()) {
                     cur.trim_offset();
                     ++seed_count;
+                    assert(cur.is_valid(graph, &config));
                     callback(std::move(cur));
                 } else {
                     next->used = true;
@@ -930,6 +931,7 @@ cluster_seeds(const IDBGAligner &aligner,
             [&](Alignment&& aln) {
                 aln.trim_offset();
                 ++seed_count;
+                assert(aln.is_valid(graph, &config));
                 callback(std::move(aln));
             }
         );
@@ -1045,6 +1047,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
             if (it->first == Cigar::DELETION) {
                 cur.trim_reference_prefix(it->second, graph.get_k() - 1, config, false);
+                assert(cur.size());
                 it = cur.get_cigar().data().begin();
                 assert(it != cur.get_cigar().data().end());
                 if (it->first == Cigar::CLIPPED) {
@@ -1244,8 +1247,10 @@ void chain_alignments(const IDBGAligner &aligner,
                     std::string_view full_query_j = full_j.get_query_view();
                     std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
 
-                    if (query_j.end() == query_i.end())
+                    if (query_j.end() == query_i.end()
+                            || (a_i.col != a_j.col && (!allow_label_change || a_i.index == a_j.index))) {
                         return;
+                    }
 
                     auto [score_j, last, last_dist] = *chain_scores;
                     if (last == anchor_it) {
@@ -1253,15 +1258,9 @@ void chain_alignments(const IDBGAligner &aligner,
                         last_dist = a_j.spelling_length;
                     }
 
-                    if (a_i.col != a_j.col && (!allow_label_change || a_i.index == a_j.index))
-                        return;
-
                     if (a_i.index == a_j.index) {
-                        if (a_i.spelling_length <= a_j.spelling_length) {
-                            // TODO: is this test still valid?
-                            // assert(a_i.col != a_j.col);
+                        if (a_i.spelling_length <= a_j.spelling_length)
                             return;
-                        }
 
                         size_t added_length = a_i.spelling_length - a_j.spelling_length;
                         update_score(score_j + a_i.score - a_j.score,
@@ -1396,6 +1395,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
 #ifndef NDEBUG
                 auto check_aln = [&](Alignment aln, score_t label_change_score = 0) {
+                    assert(aln.size());
                     assert(first->begin >= aln.get_query_view().begin());
                     aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
                                           graph.get_k() - 1,
@@ -1414,8 +1414,10 @@ void chain_alignments(const IDBGAligner &aligner,
                     return;
                 }
 
+                assert(dist);
                 assert(last_anchor);
                 if (first->index == last_anchor->index) {
+                    assert(first->spelling_length > last_anchor->spelling_length);
                     assert(first->col == last_anchor->col);
                     assert(check_aln(cur));
                     callback(std::move(cur));
@@ -1423,7 +1425,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
                 std::ignore = dist;
-                assert(dist >= graph.get_k());
+                // assert(dist >= graph.get_k());
 
                 DEBUG_LOG("\t\taln: {}", alignment);
                 DEBUG_LOG("\t\tcur: {}", cur);

@@ -450,10 +450,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             if (!label_encoder) {
-                assert(seed_buckets.size() == 1);
-                std::for_each(std::make_move_iterator(seed_buckets.begin().value().begin()),
-                              std::make_move_iterator(seed_buckets.begin().value().end()),
-                              add_alignment);
+                assert(seed_buckets.size() <= 1);
+                if (seed_buckets.size()) {
+                    std::for_each(std::make_move_iterator(seed_buckets.begin().value().begin()),
+                                  std::make_move_iterator(seed_buckets.begin().value().end()),
+                                  add_alignment);
+                }
             } else {
                 DEBUG_LOG("Merging MEMs by label");
                 std::vector<Alignment> split_seeds;
@@ -549,7 +551,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
                 );
 
-                assert(std::is_sorted(chains.rbegin(), chains.rend(), AlignmentCompare()));
+                std::sort(chains.begin(), chains.end(), std::not_fn(AlignmentCompare()));
 
                 if (chains.size()) {
                     std::vector<Alignment> merged_alns;

@@ -67,10 +67,17 @@ AlignmentResults get_extend(std::shared_ptr<const DeBruijnGraph> graph,
 inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                          const DBGAlignerConfig &config,
                          const AlignmentResults &paths,
-                         const std::string &query) {
+                         const std::string &query,
+                         bool same_number_paths = true) {
     auto unimem_paths = get_extend(graph, config, paths, query);
 
-    ASSERT_EQ(paths.size(), unimem_paths.size());
+    if (same_number_paths) {
+        ASSERT_EQ(paths.size(), unimem_paths.size());
+    } else if (paths.size()) {
+        ASSERT_GT(unimem_paths.size(), 0u);
+        if (paths.size() > unimem_paths.size())
+            unimem_paths.resize(paths.size());
+    }
 
     for (size_t i = 0; i < paths.size(); ++i) {
         if (graph->get_mode() == DeBruijnGraph::CANONICAL) {

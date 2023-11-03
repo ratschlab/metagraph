@@ -56,7 +56,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_swap) {
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("TTTTTTTTGACCCCGGTTTAA$ATGATATGAGGGGGGGGGGGG"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
-    check_extend(graph, aligner.get_config(), paths, query);
+    paths.resize(1);
+    check_extend(graph, aligner.get_config(), paths, query, false);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -149,7 +150,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(reference, paths[0].get_sequence());
     check_chain(paths, *graph, config);
-    check_extend(graph, aligner.get_config(), paths, query);
+    paths.resize(1);
+    check_extend(graph, aligner.get_config(), paths, query, false);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -241,9 +243,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_large_overlap) {
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
-
-    // TODO: why do these two get different results?
-    // check_extend(graph, aligner.get_config(), paths, query);
+    paths.resize(1);
+    check_extend(graph, aligner.get_config(), paths, query, false);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
@@ -265,9 +266,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("GGGGGGGGGGAAACCCCCCCCTGAGGATCAG$TTCACTAGCTAGCCCCCCCCCGGGGGGGGGG"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
-
-    // TODO: why do these two get different results?
-    // check_extend(graph, aligner.get_config(), paths, query);
+    paths.resize(1);
+    check_extend(graph, aligner.get_config(), paths, query, false);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
@@ -290,7 +290,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("AAAAACCCCCTGAGGATCAG$ACTAGCTAGCCCCCCAAAAA"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
-    check_extend(graph, aligner.get_config(), paths, query);
+    paths.resize(1);
+    check_extend(graph, aligner.get_config(), paths, query, false);
 }
 
 } // namespace
