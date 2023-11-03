@@ -1,6 +1,7 @@
 #include "binary_matrix.hpp"
 
 #include <ips4o.hpp>
+#include <progress_bar.hpp>
 
 #include "common/vectors/bitmap.hpp"
 #include "common/serialization.hpp"
@@ -57,11 +58,14 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
-                                const std::function<void(size_t, const bitmap&)> &callback,
+                                const std::function<void(size_t, const bitmap_generator&)> &callback,
                                 size_t num_threads) const {
+    ProgressBar progress_bar(column_ids.size(), "Parsing columns",
+                             std::cerr, !common::get_verbose());
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t k = 0; k < column_ids.size(); ++k) {
         callback(k, bitmap_generator(get_column(column_ids[k]), num_rows()));
+        ++progress_bar;
     }
 }
 

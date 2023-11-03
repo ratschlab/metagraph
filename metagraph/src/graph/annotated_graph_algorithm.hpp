@@ -1,8 +1,6 @@
 #ifndef __ANNOTATED_GRAPH_ALGORITHM_HPP__
 #define __ANNOTATED_GRAPH_ALGORITHM_HPP__
 
-#include <vector>
-
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
@@ -57,7 +55,17 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in_round2,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
-                    size_t num_threads = 1);
+                    size_t num_threads = 1,
+                    size_t num_parallel_files = std::numeric_limits<size_t>::max());
+
+std::shared_ptr<MaskedDeBruijnGraph>
+mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                    const std::vector<std::string> &files,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads = 1,
+                    size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
 } // namespace graph
 } // namespace mtg

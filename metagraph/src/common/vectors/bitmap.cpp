@@ -356,6 +356,13 @@ uint64_t bitmap_lazy::num_set_bits() const {
     return num_set_bits_;
 }
 
+std::optional<uint64_t> bitmap_lazy::try_get_num_set_bits() const {
+    if (num_set_bits_ == static_cast<size_t>(-1))
+        return std::nullopt;
+
+    return num_set_bits_;
+}
+
 void bitmap_lazy::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());

@@ -11,6 +11,7 @@
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotation.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
@@ -41,10 +42,8 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
         exit(1);
 }
 
-DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
-                                                const DeBruijnGraph &graph) {
+DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.add_complement = graph.get_mode() == DeBruijnGraph::CANONICAL;
     diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
     diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
@@ -81,16 +80,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     Json::Value diff_json;
     fin >> diff_json;
 
-    tsl::hopscotch_set<std::string> foreground_labels;
-    tsl::hopscotch_set<std::string> background_labels;
-    tsl::hopscotch_set<std::string> shared_foreground_labels;
-    tsl::hopscotch_set<std::string> shared_background_labels;
-
     for (const Json::Value &group : diff_json["groups"]) {
-        if (group["shared_labels"]) {
-            shared_foreground_labels.clear();
-            shared_background_labels.clear();
+        tsl::hopscotch_set<std::string> shared_foreground_labels;
+        tsl::hopscotch_set<std::string> shared_background_labels;
 
+        if (group["shared_labels"]) {
             for (const Json::Value &in_label : group["shared_labels"]["in"]) {
                 shared_foreground_labels.emplace(in_label.asString());
             }
@@ -107,12 +101,13 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             throw std::runtime_error("Missing experiments in group");
 
         for (const Json::Value &experiment : group["experiments"]) {
-            DifferentialAssemblyConfig diff_config = diff_assembly_config(
-                experiment, anno_graph.get_graph()
-            );
+            tsl::hopscotch_set<std::string> foreground_labels;
+            tsl::hopscotch_set<std::string> background_labels;
 
-            foreground_labels.clear();
-            background_labels.clear();
+            DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
+
+            std::string exp_name = experiment["name"].asString()
+                                    + (config->enumerate_out_sequences ? "." : "");
 
             for (const Json::Value &in_label : experiment["in"]) {
                 foreground_labels.emplace(in_label.asString());
@@ -125,9 +120,6 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             check_labels(foreground_labels, anno_graph);
             check_labels(background_labels, anno_graph);
 
-            std::string exp_name = experiment["name"].asString()
-                                    + (config->enumerate_out_sequences ? "." : "");
-
             logger->trace("Running assembly: {}", exp_name);
 
             callback(*mask_nodes_by_label(anno_graph,
@@ -135,7 +127,65 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                                           background_labels,
                                           shared_foreground_labels,
                                           shared_background_labels,
-                                          diff_config, num_threads), exp_name);
+                                          diff_config, num_threads,
+                                          config->parallel_nodes), exp_name);
+        }
+    }
+}
+
+void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                        Config *config,
+                        const CallMaskedGraphHeader &callback) {
+    assert(!config->assembly_config_file.empty());
+
+    std::ifstream fin(config->assembly_config_file);
+    if (!fin.good())
+        throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
+
+    for (const auto &name : config->fnames) {
+        if (parse_annotation_type(name) != Config::ColumnCompressed) {
+            throw std::runtime_error("Multiple annotation files must be ColumnCompressed");
+        }
+    }
+
+    size_t num_threads = std::max(1u, get_num_threads());
+
+    Json::Value diff_json;
+    fin >> diff_json;
+
+    for (const Json::Value &group : diff_json["groups"]) {
+        if (group["shared_labels"]) {
+            throw std::runtime_error("Shared labels not supported with multiple annotation files");
+        }
+
+        if (!group["experiments"])
+            throw std::runtime_error("Missing experiments in group");
+
+        for (const Json::Value &experiment : group["experiments"]) {
+            tsl::hopscotch_set<std::string> foreground_labels;
+            tsl::hopscotch_set<std::string> background_labels;
+
+            DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
+
+            std::string exp_name = experiment["name"].asString()
+                                    + (config->enumerate_out_sequences ? "." : "");
+
+            for (const Json::Value &in_label : experiment["in"]) {
+                foreground_labels.emplace(in_label.asString());
+            }
+
+            for (const Json::Value &out_label : experiment["out"]) {
+                background_labels.emplace(out_label.asString());
+            }
+
+            logger->trace("Running assembly: {}", exp_name);
+
+            callback(*mask_nodes_by_label(graph_ptr,
+                                          config->fnames,
+                                          foreground_labels,
+                                          background_labels,
+                                          diff_config, num_threads,
+                                          config->parallel_nodes), exp_name);
         }
     }
 }
@@ -143,9 +193,17 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 int assemble(Config *config) {
     assert(config);
 
+    if (config->infbase_annotators.size()) {
+        assert(config->assembly_config_file.size());
+        if (!std::filesystem::exists(config->assembly_config_file)) {
+            logger->error("Differential assembly config does not exist\n{}",
+                          config->assembly_config_file);
+            exit(1);
+        }
+    }
+
     const auto &files = config->fnames;
 
-    assert(files.size() == 1);
     assert(config->outfbase.size());
 
     Timer timer;
@@ -156,47 +214,48 @@ int assemble(Config *config) {
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
     if (config->infbase_annotators.size()) {
-        config->infbase = files.at(0);
-
-        assert(config->assembly_config_file.size());
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
-
         logger->trace("Generating masked graphs...");
+        std::mutex write_mutex;
+        size_t num_threads = std::max(1u, get_num_threads());
 
         std::filesystem::remove(
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
-        std::mutex write_mutex;
+        auto graph_callback = [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
+            seq_io::FastaWriter writer(config->outfbase, header,
+                                       config->enumerate_out_sequences,
+                                       num_threads > 1, /* async write */
+                                       "a" /* append mode */);
 
-        size_t num_threads = std::max(1u, get_num_threads());
-
-        call_masked_graphs(*anno_graph, config,
-            [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
-                seq_io::FastaWriter writer(config->outfbase, header,
-                                           config->enumerate_out_sequences,
-                                           num_threads > 1, /* async write */
-                                           "a" /* append mode */);
-
-                if (config->unitigs || config->min_tip_size > 1) {
-                    graph.call_unitigs([&](const std::string &unitig, auto&&) {
-                                           std::lock_guard<std::mutex> lock(write_mutex);
-                                           writer.write(unitig);
-                                       },
-                                       num_threads, config->min_tip_size,
-                                       config->kmers_in_single_form);
-                } else {
-                    graph.call_sequences([&](const std::string &seq, auto&&) {
-                                             std::lock_guard<std::mutex> lock(write_mutex);
-                                             writer.write(seq);
-                                         },
-                                         num_threads, config->kmers_in_single_form);
-                }
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph.call_unitigs([&](const std::string &unitig, auto&&) {
+                                       std::lock_guard<std::mutex> lock(write_mutex);
+                                       writer.write(unitig);
+                                   },
+                                   num_threads, config->min_tip_size,
+                                   config->kmers_in_single_form);
+            } else {
+                graph.call_sequences([&](const std::string &seq, auto&&) {
+                                         std::lock_guard<std::mutex> lock(write_mutex);
+                                         writer.write(seq);
+                                     },
+                                     num_threads, config->kmers_in_single_form);
             }
-        );
+        };
 
+        if (files.size() > 1) {
+            config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
+            call_masked_graphs(graph, config, graph_callback);
+        } else {
+            config->infbase = files.at(0);
+            auto anno_graph = initialize_annotated_dbg(graph, *config);
+            call_masked_graphs(*anno_graph, config, graph_callback);
+        }
         return 0;
     }
+
+    assert(files.size() == 1);
 
     logger->trace("Extracting sequences from graph...");
 
