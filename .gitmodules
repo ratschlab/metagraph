@@ -68,3 +68,6 @@
 [submodule "metagraph/external-libraries/htslib"]
 	path = metagraph/external-libraries/htslib
 	url = https://github.com/samtools/htslib
+[submodule "metagraph/external-libraries/pthash"]
+	path = metagraph/external-libraries/pthash
+	url = https://github.com/jermp/pthash.git
