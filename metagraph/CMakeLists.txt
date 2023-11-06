@@ -270,6 +270,7 @@ include_directories(
   external-libraries/zlib
   external-libraries/sdust
   external-libraries/simde-no-tests
+  external-libraries/pthash/include
   ${PROJECT_SOURCE_DIR}/src
 )
 

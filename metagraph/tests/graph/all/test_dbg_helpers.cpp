@@ -39,6 +39,9 @@ template<> size_t max_test_k<DBGHashFast>() {
 template<> size_t max_test_k<DBGHashString>() {
     return 100;
 }
+template<> size_t max_test_k<DBGSSHash>() {
+    return 100;
+}
 
 template <class Graph>
 std::vector<std::string>
@@ -92,6 +95,24 @@ build_graph<DBGHashString>(uint64_t k,
                            std::vector<std::string> sequences,
                            DeBruijnGraph::Mode) {
     auto graph = std::make_shared<DBGHashString>(k);
+
+    uint64_t max_index = graph->max_index();
+
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++max_index); });
+    }
+
+    [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSSHash>(uint64_t k,
+                       std::vector<std::string> sequences,
+                       DeBruijnGraph::Mode) {
+    auto graph = std::make_shared<DBGSSHash>(k);
 
     uint64_t max_index = graph->max_index();
 
@@ -282,6 +303,10 @@ build_graph_batch<DBGHashFast>(uint64_t, std::vector<std::string>, DeBruijnGraph
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashString>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSSHash>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -488,6 +513,7 @@ template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, b
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashString>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSSHash>(const std::string &, DeBruijnGraph::Mode, bool);
 
 } // namespace test
 } // namespace mtg
