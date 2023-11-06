@@ -269,6 +269,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
+  external-libraries/pthash/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
