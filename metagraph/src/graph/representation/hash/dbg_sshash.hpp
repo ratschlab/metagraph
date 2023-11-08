@@ -2,7 +2,7 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
-#include <pthash.hpp>
+#include <dictionary.hpp>
 #include <tsl/ordered_set.h>
 
 #include "graph/representation/base/sequence_graph.hpp"
