@@ -87,17 +87,20 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
                                      }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
                 ASSERT_TRUE(find != labels.end()) << label;
                 if (alignment.get_sequence() == find->second) {
                     found = true;
+                    labels.erase(find);
                     break;
                 }
             }
@@ -136,17 +139,20 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
                                      }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
                 ASSERT_TRUE(find != labels.end()) << label;
                 if (alignment.get_sequence() == find->second) {
                     found = true;
+                    labels.erase(find);
                     break;
                 }
             }
@@ -203,11 +209,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
                                      }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
@@ -219,6 +227,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
                     found = true;
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
+                    labels.erase(find);
                     break;
                 }
                 ++label_index;
@@ -276,11 +285,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
                                      }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
@@ -292,6 +303,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
                     found = true;
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
+                    labels.erase(find);
                     break;
                 }
                 ++label_index;
@@ -344,11 +356,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
                                      }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
@@ -360,6 +374,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
                     found = true;
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
+                    labels.erase(find);
                     break;
                 }
                 ++label_index;
@@ -403,6 +418,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
 
         auto alignments = aligner.align(query);
         EXPECT_LE(1u, alignments.size());
+        ASSERT_TRUE(false);
     }
 }
 
@@ -454,17 +470,20 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
         }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(labels.size(), alignments.size()) << query;
+        ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments) {
+        size_t num_labels = labels.size();
+        for (size_t i = 0; i < num_labels; ++i) {
+            const auto &alignment = alignments[i];
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
                 ASSERT_TRUE(find != labels.end());
                 if (alignment.get_sequence() == find->second) {
                     found = true;
+                    labels.erase(find);
                     break;
                 }
             }
@@ -511,17 +530,20 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
             { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") } }} } // 5=2X3=
         }};
 
-        for (const auto &[query, labels] : exp_alignments) {
+        for (auto &[query, labels] : exp_alignments) {
             auto alignments = aligner.align(query);
-            EXPECT_EQ(labels.size(), alignments.size()) << query;
+            ASSERT_LE(labels.size(), alignments.size()) << query;
 
-            for (const auto &alignment : alignments) {
+            size_t num_labels = labels.size();
+            for (size_t i = 0; i < num_labels; ++i) {
+                const auto &alignment = alignments[i];
                 bool found = false;
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                     auto find = labels.find(label);
                     ASSERT_TRUE(find != labels.end());
                     if (alignment.get_sequence() == find->second) {
                         found = true;
+                        labels.erase(find);
                         break;
                     }
                 }

@@ -57,7 +57,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_swap) {
     EXPECT_EQ(std::string("TTTTTTTTGACCCCGGTTTAA$ATGATATGAGGGGGGGGGGGG"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
     paths.resize(1);
-    check_extend(graph, aligner.get_config(), paths, query, false);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -151,7 +151,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage
     EXPECT_EQ(reference, paths[0].get_sequence());
     check_chain(paths, *graph, config);
     paths.resize(1);
-    check_extend(graph, aligner.get_config(), paths, query, false);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -244,7 +244,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_large_overlap) {
     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
     paths.resize(1);
-    check_extend(graph, aligner.get_config(), paths, query, false);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
@@ -267,7 +267,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
     EXPECT_EQ(std::string("GGGGGGGGGGAAACCCCCCCCTGAGGATCAG$TTCACTAGCTAGCCCCCCCCCGGGGGGGGGG"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
     paths.resize(1);
-    check_extend(graph, aligner.get_config(), paths, query, false);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
@@ -291,7 +291,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     EXPECT_EQ(std::string("AAAAACCCCCTGAGGATCAG$ACTAGCTAGCCCCCCAAAAA"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
     paths.resize(1);
-    check_extend(graph, aligner.get_config(), paths, query, false);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 } // namespace

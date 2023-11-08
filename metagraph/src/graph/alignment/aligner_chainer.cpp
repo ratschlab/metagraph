@@ -542,24 +542,22 @@ cluster_seeds(const IDBGAligner &aligner,
     std::vector<node_index> nodes;
     nodes.reserve(fwd_seeds.size() + bwd_seeds.size());
     for (auto &fwd_seed : fwd_seeds) {
-        assert(fwd_seed.get_nodes().front());
-        nodes.emplace_back(fwd_seed.get_nodes().front());
+        assert(fwd_seed.get_nodes().back());
+        nodes.emplace_back(fwd_seed.get_nodes().back());
     }
     for (auto &bwd_seed : bwd_seeds) {
-        assert(bwd_seed.get_nodes().front());
-        nodes.emplace_back(bwd_seed.get_nodes().front());
+        assert(bwd_seed.get_nodes().back());
+        nodes.emplace_back(bwd_seed.get_nodes().back());
     }
     assert(nodes.size() == fwd_seeds.size() + bwd_seeds.size());
 
     size_t seed_count = 0;
 
     struct Anchor {
-        Anchor(const Seed &seed, size_t tuple_id)
-            : seed(seed), tuple_id(tuple_id), used(false) {}
+        Anchor(const Seed &seed, size_t tuple_id, const DBGAlignerConfig &config)
+            : seed(seed), tuple_id(tuple_id), used(false), score_(seed.get_score(config)) {}
 
-        score_t get_score(const DBGAlignerConfig &config) const {
-            return seed.get_score(config);
-        }
+        score_t get_score(const DBGAlignerConfig &) const { return score_; }
 
         size_t get_clipping() const { return seed.get_clipping(); }
         size_t get_end_clipping() const { return seed.get_end_clipping(); }
@@ -570,6 +568,7 @@ cluster_seeds(const IDBGAligner &aligner,
         size_t tuple_id;
         std::vector<std::pair<size_t, int64_t>> coords;
         mutable bool used;
+        score_t score_;
     };
 
     tsl::hopscotch_map<Alignment::Column, std::vector<Anchor>> clustered_seed_map;
@@ -599,11 +598,11 @@ cluster_seeds(const IDBGAligner &aligner,
                     const auto &coords = (*jt)[i].second;
                     assert(seqs.size() == coords.size());
 
-                    auto &cur = clustered_seed_map[col].emplace_back(seed, tuple_id).coords;
+                    auto &cur = clustered_seed_map[col].emplace_back(seed, tuple_id, config).coords;
 
                     cur.reserve(coords.size());
                     for (size_t j = 0; j < coords.size(); ++j) {
-                        cur.emplace_back(seqs[j], coords[j] + seed.get_offset());
+                        cur.emplace_back(seqs[j], coords[j]);
                     }
                 }
                 ++it;
@@ -617,8 +616,8 @@ cluster_seeds(const IDBGAligner &aligner,
         for (auto it = clustered_seed_map.begin(); it != clustered_seed_map.end(); ++it) {
             auto &cluster = it.value();
             std::sort(cluster.begin(), cluster.end(), [&](const auto &a, const auto &b) {
-                return std::make_pair(b.get_orientation(), a.seed.get_query_view().end())
-                        > std::make_pair(a.get_orientation(), b.seed.get_query_view().end());
+                return std::make_pair(a.get_orientation(), a.seed.get_query_view().end())
+                        < std::make_pair(b.get_orientation(), b.seed.get_query_view().end());
             });
         }
 
@@ -723,17 +722,17 @@ cluster_seeds(const IDBGAligner &aligner,
         score_t last_score = std::numeric_limits<score_t>::max();
 
         chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
-            [&config,&graph](const Anchor &a_i,
+            [&config](const Anchor &a_j,
                             ssize_t,
                             const Anchor *begin,
                             const Anchor *end,
                             auto *chain_scores,
                             const auto &update_score) {
-                std::string_view query_i = a_i.get_query_view();
-                std::for_each(begin, end, [&](const Anchor &a_j) {
-                    // logger->info("Try: {} -> {}",
-                    //  Alignment(a_i.seed, config),Alignment(a_j.seed, config));
-                    std::string_view query_j = a_j.get_query_view();
+                std::string_view query_j = a_j.get_query_view();
+                const score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
+
+                std::for_each(begin, end, [&](const Anchor &a_i) {
+                    std::string_view query_i = a_i.get_query_view();
 
                     score_t dist = query_j.end() - query_i.end();
 
@@ -745,26 +744,24 @@ cluster_seeds(const IDBGAligner &aligner,
                     score_t base_score = std::get<0>(*chain_scores);
 
                     if (query_i.end() <= query_j.begin()) {
-                        base_score += a_i.get_score(config);
+                        base_score += a_j.get_score(config);
                     } else {
-                        std::string_view ext(query_i.data(),
-                                            query_j.begin() - query_i.begin());
+                        std::string_view ext(query_i.data() + query_i.size(),
+                                             query_j.end() - query_i.end());
                         base_score += config.match_score(ext);
 
-                        if (!a_i.get_clipping())
-                            base_score += config.left_end_bonus;
+                        if (!a_j.get_end_clipping())
+                            base_score += config.right_end_bonus;
                     }
 
-                    const score_t &score_i = std::get<0>(*(chain_scores - (&a_j - &a_i)));
-                    if (base_score <= score_i) {
+
+                    if (base_score <= score_j) {
                         ++chain_scores;
                         return;
                     }
 
                     auto it = a_i.coords.begin();
                     auto jt = a_j.coords.begin();
-                    int64_t coord_offset = static_cast<int64_t>(query_j.size())
-                                            - query_i.size();
 
                     score_t min_diff = std::numeric_limits<score_t>::max();
                     while (it != a_i.coords.end() && jt != a_j.coords.end()) {
@@ -772,12 +769,12 @@ cluster_seeds(const IDBGAligner &aligner,
                         const auto &[s_j, c_j] = *jt;
                         if (s_i < s_j) {
                             ++it;
-                        } else if (s_i > s_j || c_i >= c_j + coord_offset) {
+                        } else if (s_i > s_j || c_i >= c_j) {
                             ++jt;
                         } else {
                             // this coordinate pair works
                             score_t score = base_score;
-                            score_t coord_dist = coord_offset + c_j - c_i;
+                            score_t coord_dist = c_j - c_i;
 
                             if (coord_dist != dist) {
                                 score_t diff = std::abs(coord_dist - dist);
@@ -788,7 +785,7 @@ cluster_seeds(const IDBGAligner &aligner,
                                 min_diff = 0;
                             }
 
-                            update_score(score, &a_j, coord_dist);
+                            update_score(score, &a_i, coord_dist);
 
                             if (min_diff == 0)
                                 break;
@@ -801,14 +798,14 @@ cluster_seeds(const IDBGAligner &aligner,
                 });
             },
             [&](const AnchorChain<Anchor> &chain, const std::vector<score_t> &score_traceback) {
-                if (score_traceback[0] < last_score) {
+                if (score_traceback.back() < last_score) {
                     if (++count > max_num_seeds) {
                         assert(last_score != std::numeric_limits<score_t>::max());
                         best_last_score = std::max(best_last_score, last_score);
-                        last_score = score_traceback[0];
+                        last_score = score_traceback.back();
                         return false;
                     } else {
-                        last_score = score_traceback[0];
+                        last_score = score_traceback.back();
                     }
                 }
 
@@ -943,13 +940,16 @@ cluster_seeds(const IDBGAligner &aligner,
     for (const auto &[col, chain, score_traceback] : best_chains) {
         extend_chain<Anchor>(chain, score_traceback,
             [&](const Anchor *next,
-                const Anchor*,
+                const Anchor *last_anchor,
                 Alignment&& cur,
                 size_t coord_dist,
                 score_t,
                 const auto &continue_callback) {
 
                 if (cur.empty()) {
+                    assert(!coord_dist);
+                    assert(!last_anchor);
+
                     next->used = true;
                     cur = Alignment(next->seed, config);
                     cur.label_columns = col;
@@ -958,50 +958,100 @@ cluster_seeds(const IDBGAligner &aligner,
                     return;
                 }
 
+                assert(coord_dist);
                 std::string_view query = !next->get_orientation() ? forward : reverse;
 
-                Alignment next_aln(next->seed, config);
-                const auto &next_columns = cur.get_columns();
-                Vector<Alignment::Column> intersect_columns;
-                next_aln.label_coordinates.clear();
-                next_aln.label_coordinates.reserve(next_columns.size());
-                const auto &anchor_coords = coords[next->tuple_id];
-                auto it = next_columns.begin();
-                auto jt = anchor_coords.begin();
-                while (it != next_columns.end() && jt != anchor_coords.end()) {
-                    if (*it < jt->first) {
-                        ++it;
-                    } else if (*it > jt->first) {
-                        ++jt;
-                    } else {
-                        intersect_columns.emplace_back(*it);
-                        auto &coords = next_aln.label_coordinates.emplace_back();
-                        coords.reserve(jt->second.size());
-                        for (int64_t coord : jt->second) {
-                            coords.emplace_back(coord + next->seed.get_offset());
+                Vector<Alignment::Column> inter_columns;
+                Alignment::CoordinateSet inter_coords;
+                const auto &last_coords = coords[last_anchor->tuple_id];
+                const auto &next_coords = coords[next->tuple_id];
+                {
+                    auto it = last_coords.begin();
+                    auto jt = next_coords.begin();
+                    while (it != last_coords.end() && jt != next_coords.end()) {
+                        if (it->first < jt->first) {
+                            ++it;
+                        } else if (it->first > jt->first) {
+                            ++jt;
+                        } else {
+                            inter_columns.emplace_back(it->first);
+                            auto &coords = inter_coords.emplace_back();
+                            auto iit = it->second.begin();
+                            auto jjt = jt->second.begin();
+                            while (iit != it->second.end() && jjt != jt->second.end()) {
+                                if (*iit + coord_dist < *jjt) {
+                                    ++iit;
+                                } else if (*iit + coord_dist > *jjt) {
+                                    ++jjt;
+                                } else {
+                                    coords.emplace_back(*iit);
+                                    ++iit;
+                                    ++jjt;
+                                }
+                            }
+
+                            if (coords.empty()) {
+                                inter_columns.pop_back();
+                                inter_coords.pop_back();
+                            }
+
+                            ++it;
+                            ++jt;
                         }
-                        ++it;
-                        ++jt;
                     }
                 }
-                next_aln.set_columns(std::move(intersect_columns));
+                assert(inter_columns.size());
 
-                assert(next_aln.is_valid(graph, &config));
+                Vector<Alignment::Column> start_columns;
+                start_columns.reserve(inter_columns.size());
+                {
+                    const auto &cur_columns = cur.get_columns();
+                    ssize_t coord_offset = graph.get_k() - cur.get_sequence().size();
+                    cur.label_coordinates.clear();
+                    auto it = cur_columns.begin();
+                    auto jt = inter_columns.begin();
+                    auto jjt = inter_coords.begin();
+                    while (it != cur_columns.end() && jt != inter_columns.end()) {
+                        if (*it < *jt) {
+                            ++it;
+                        } else if (*it > *jt) {
+                            ++jt;
+                            ++jjt;
+                        } else {
+                            start_columns.emplace_back(*it);
+                            auto &coords = cur.label_coordinates.emplace_back();
+                            coords.reserve(jjt->size());
+                            for (int64_t coord : *jjt) {
+                                coords.emplace_back(coord + coord_offset);
+                            }
+                            ++it;
+                            ++jt;
+                            ++jjt;
+                        }
+                    }
+                }
 
-                node_index target_node = cur.get_nodes().front();
-                size_t cur_prefix = graph.get_k() - cur.get_offset();
-                size_t target_end_clipping = cur.get_end_clipping()
-                                                + cur.get_query_view().size() - cur_prefix;
+                if (start_columns.empty()) {
+                    cur.trim_offset();
+                    ++seed_count;
+                    assert(cur.is_valid(graph, &config));
+                    callback(std::move(cur));
+                    return;
+                }
+
+                cur.set_columns(std::move(start_columns));
+                auto [first, seed] = split_seed(graph, config, cur);
 
                 auto extender = aligner.build_extender(query);
+
                 auto extensions = extender->get_extensions(
-                    std::move(next_aln),
+                    seed,
                     config.ninf,
                     true,
-                    coord_dist + next->get_query_view().size(),
-                    target_node,
+                    coord_dist + seed.get_sequence().size(),
+                    next->seed.get_nodes().back(),
                     false,
-                    target_end_clipping,
+                    next->get_end_clipping(),
                     std::max(config.xdrop, 100) - config.xdrop
                 );
 
@@ -1014,31 +1064,22 @@ cluster_seeds(const IDBGAligner &aligner,
                     assert(cur.is_valid(graph, &config));
                     callback(std::move(cur));
                 } else {
-                    next->used = true;
-                    Alignment start_cur;
-                    if (cur_prefix != cur.get_query_view().size()) {
-                        start_cur = std::move(cur);
-                        start_cur.trim_query_prefix(cur_prefix, graph.get_k() - 1, config, false);
-                        assert(start_cur.get_offset() == graph.get_k() - 1);
-                    }
-
                     for (auto&& ext : extensions) {
-                        assert(ext.get_offset() == next->seed.get_offset());
-                        assert(ext.get_nodes().front() == next->seed.get_nodes().front());
-                        if (ext.get_end_clipping() == target_end_clipping
-                                && ext.get_clipping() == next->get_clipping()
-                                && ext.get_nodes().back() == target_node) {
-                            ext.label_coordinates.clear();
-                            if (start_cur.size()) {
-                                Alignment start_cur_next = start_cur;
-                                start_cur_next.label_columns = ext.label_columns;
-                                assert(start_cur_next.is_valid(graph, &config));
-                                ext.splice(std::move(start_cur_next));
-                                assert(ext.size());
-                                assert(ext.is_valid(graph, &config));
+                        if (ext.get_end_clipping() == next->get_end_clipping()
+                                && ext.get_clipping() == seed.get_clipping()
+                                && ext.get_nodes().back() == next->seed.get_nodes().back()) {
+                            next->used = true;
+                            if (first.size()) {
+                                Alignment cur_first = first;
+                                cur_first.label_columns = ext.label_columns;
+                                assert(cur_first.is_valid(graph, &config));
+                                cur_first.splice(std::move(ext));
+                                assert(cur_first.size());
+                                assert(cur_first.is_valid(graph, &config));
+                                std::swap(cur_first, ext);
                             }
-                            assert(ext.get_offset() == next->seed.get_offset());
-                            assert(ext.get_nodes().front() == next->seed.get_nodes().front());
+
+                            ext.label_coordinates.clear();
                             continue_callback(std::move(ext));
                         }
                     }

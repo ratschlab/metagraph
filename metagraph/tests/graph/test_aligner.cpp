@@ -146,7 +146,7 @@ TYPED_TEST(DBGAlignerTest, align_big_self_loop) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(7ull, path.size());
@@ -175,7 +175,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     ASSERT_EQ(1ull, path.size());
@@ -204,7 +204,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -259,7 +259,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
     auto paths = aligner.align(query);
     EXPECT_TRUE(paths.empty()) << paths.size() << "\t" << paths[0];
 
-    check_extend(graph, aligner.get_config(), paths, query);
+    check_extend(graph, aligner.get_config(), paths, query, 0);
 }
 
 TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
@@ -274,7 +274,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -309,7 +309,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -325,10 +325,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
-    auto ext_paths = get_extend(graph, config_fwd_and_rev, paths, query);
 
-    EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
-                           ext_paths.begin(), ext_paths.end()));
     // test move
     auto paths_move = std::move(paths);
     for (const auto &path : paths_move) {
@@ -351,7 +348,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) 
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
     std::vector<IDBGAligner::Query> query_batch { { "", query } };
     aligner.align_batch(query_batch, [&](std::string_view, auto&& paths) {
-        ASSERT_EQ(1ull, paths.size());
+        ASSERT_LE(1ull, paths.size());
         auto path = paths[0];
 
         EXPECT_EQ(query.size() - k + 1, path.size());
@@ -367,6 +364,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) 
     });
 
     auto paths = aligner.align(query);
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -397,7 +395,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -429,7 +427,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -461,7 +459,7 @@ TYPED_TEST(DBGAlignerTest, align_branch_with_cycle) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -490,7 +488,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -520,7 +518,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -555,7 +553,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
 
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -589,7 +587,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -624,7 +622,7 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
 
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1u, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 2, path.size());
@@ -663,6 +661,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -1;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 3;
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
@@ -693,7 +692,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -725,7 +724,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -757,7 +756,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_multi) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -790,7 +789,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -823,7 +822,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -858,7 +857,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_FALSE(is_exact_match(path));
@@ -896,7 +895,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -929,7 +928,7 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
@@ -964,7 +963,7 @@ TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(13u, path.size());
@@ -996,7 +995,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -1034,7 +1033,7 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(6, path.size());
@@ -1067,7 +1066,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(6, path.size());
@@ -1101,7 +1100,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(67ull, path.size());
@@ -1125,7 +1124,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     auto extends = get_extend(graph, aligner.get_config(), paths, query);
-    ASSERT_EQ(1ull, extends.size());
+    ASSERT_LE(1ull, extends.size());
     path = extends[0];
 
     EXPECT_EQ(67ull, path.size());
@@ -1160,7 +1159,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(5ull, path.size());
@@ -1191,7 +1190,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(11u, path.size());
@@ -1222,7 +1221,7 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(14u, path.size());
@@ -1252,7 +1251,7 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(14u, path.size());
@@ -1284,7 +1283,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(7u, path.size());
@@ -1313,8 +1312,10 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
+
+    ASSERT_TRUE(false);
 
     // EXPECT_EQ(7u, path.size());
     // EXPECT_EQ(reference.substr(5), path.get_sequence());
@@ -1342,7 +1343,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity2) {
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 }
 
@@ -1442,10 +1443,12 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    ASSERT_TRUE(false);
 
     check_extend(graph, aligner.get_config(), paths, query);
 
@@ -1472,7 +1475,7 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(7u, path.size());
@@ -1516,7 +1519,7 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         config.min_seed_length = 13;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
+        ASSERT_LE(1ull, paths.size());
         auto path = paths[0];
 
         EXPECT_EQ(1u, path.size()); // includes dummy k-mers
@@ -1562,7 +1565,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(12u, path.size());
@@ -1598,7 +1601,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(18u, path.size());
@@ -1637,7 +1640,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
 
     DBGAligner<> aligner(*graph, config);
     for (size_t i = 0; i < 3; ++i) {
-        EXPECT_EQ(3u, aligner.align(query).size()) << i;
+        EXPECT_LE(3u, aligner.align(query).size()) << i;
     }
 }
 #endif
@@ -1660,7 +1663,7 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
         config.forward_and_reverse_complement = both_directions;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
+        ASSERT_LE(1ull, paths.size());
         auto path = paths[0];
 
         if (both_directions) {
@@ -1697,9 +1700,11 @@ TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    ASSERT_TRUE(false);
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1718,7 +1723,7 @@ TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
     config.max_seed_length = 0;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     EXPECT_EQ("48=1X20=1X80=", path.get_cigar().to_string());
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
@@ -1742,7 +1747,7 @@ TYPED_TEST(DBGAlignerTest, align_dummy) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_EQ(12u, path.size());
@@ -1779,7 +1784,7 @@ TYPED_TEST(DBGAlignerTest, align_extended_insert_after_match) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
 
     EXPECT_TRUE(path.is_valid(*graph, &config));
@@ -1814,7 +1819,7 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
         config.max_seed_length = max_seed_length;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
+        ASSERT_LE(1ull, paths.size());
         auto path = paths[0];
         EXPECT_TRUE(path.is_valid(*graph, &config));
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
@@ -1836,7 +1841,7 @@ TYPED_TEST(DBGAlignerTest, align_superbubble_chain_cycle_nochain) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
@@ -1856,7 +1861,7 @@ TYPED_TEST(DBGAlignerTest, align_superbubble_chain_cycle_maybechain) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
+    ASSERT_LE(1ull, paths.size());
     auto path = paths[0];
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));

@@ -284,6 +284,10 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-num-seeds-per-locus")) {
             alignment_max_num_seeds_per_locus = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-dist-between-seeds")) {
+            alignment_max_dist_between_seeds = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-gap-shrinking-factor")) {
+            alignment_gap_shrinking_factor = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-nodes-per-seq-char")) {
             alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-exact-match")) {
