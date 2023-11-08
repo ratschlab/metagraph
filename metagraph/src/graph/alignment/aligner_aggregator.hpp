@@ -38,9 +38,7 @@ class AlignmentAggregator {
     typedef Alignment::Column Column;
     typedef PriorityDeque<value_type, std::vector<value_type>, ValCmp> PathQueue;
 
-    explicit AlignmentAggregator(const DBGAlignerConfig &config) : config_(config) {
-        assert(config_.num_alternative_paths);
-    }
+    explicit AlignmentAggregator(const DBGAlignerConfig &config) : config_(config) {}
 
     bool add_alignment(Alignment&& alignment);
 
@@ -106,17 +104,11 @@ inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignme
     }
 
     std::vector<value_type> alignment_ptrs;
-    size_t max_num_alignments = config_.post_chain_alignments
-        ? std::numeric_limits<size_t>::max()
-        : config_.num_alternative_paths;
-
     for (auto it = path_queue_.begin(); it != path_queue_.end(); ++it) {
         auto &queue = it.value();
-        size_t added = 0;
-        while (queue.size() && added < max_num_alignments) {
+        while (queue.size()) {
             alignment_ptrs.emplace_back(queue.maximum());
             queue.pop_maximum();
-            ++added;
         }
     }
 

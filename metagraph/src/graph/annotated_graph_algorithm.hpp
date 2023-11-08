@@ -71,6 +71,10 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
                            size_t num_threads = 1,
                            bool ignore_nested_superbubbles = true);
 
+void paths_from_superbubble(const std::vector<std::string> &seqs,
+                            size_t k,
+                            const std::function<void(std::string&&)> &callback);
+
 using StringGenerator = std::function<void(const std::function<void(std::string_view)>)>;
 void assemble_min_path_cover(const StringGenerator &generate,
                              size_t k,

@@ -17,6 +17,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/graph_extensions/graph_topology.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 
 namespace mtg {
@@ -228,20 +229,20 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (config.coordinates || config.superbubbles) {
         size_t last_cluster_id = 0;
         std::vector<std::string> last_labels;
-        uint64_t last_coord = 0;
-        std::unique_ptr<annot::MultiLabelAnnotation<std::string>> cluster_annot;
-        std::mutex cluster_mu;
+        std::vector<std::string> last_cluster;
+        // std::unique_ptr<annot::MultiLabelAnnotation<std::string>> cluster_annot;
+        // std::mutex cluster_mu;
         if (config.superbubbles) {
             if (config.annotate_sequence_headers) {
                 logger->error("Annotating headers with superbubbles not supported");
                 exit(1);
             }
 
-            cluster_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
-                                                  config.sparse, graph->max_index() + 1,
-                                                  config.tmp_dir, config.memory_available,
-                                                  config.count_width, num_chunks_open,
-                                                  config.RA_ivbuffer_size);
+        //     cluster_annot = initialize_annotation(config.anno_type, config.num_columns_cached,
+        //                                           config.sparse, graph->max_index() + 1,
+        //                                           config.tmp_dir, config.memory_available,
+        //                                           config.count_width, num_chunks_open,
+        //                                           config.RA_ivbuffer_size);
         }
 
         for (const auto &file : files) {
@@ -294,21 +295,23 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                             size_t cluster_id = std::atoll(labels.back().c_str());
                             labels.pop_back();
                             if (last_cluster_id != cluster_id) {
-                                thread_pool.enqueue([&](size_t last_coord, auto last_labels) {
-                                    std::lock_guard<std::mutex> lock(cluster_mu);
-                                    cluster_annot->add_labels({ last_coord }, std::move(last_labels));
-                                }, last_coord, std::move(last_labels));
+                                graph::paths_from_superbubble(last_cluster, k, [&](std::string&& seq) {
+                                    size_t size = seq.size();
+                                    batcher.push_and_pay(size, std::move(seq), last_labels, coord);
+                                    coord += size - k + 1;
+                                });
+                                last_cluster.clear();
                             }
 
                             last_cluster_id = cluster_id;
                             last_labels = labels;
-                            last_coord = coord + num_kmers - 1;
+                            last_cluster.emplace_back(sequence);
+                        } else {
+                            batcher.push_and_pay(sequence.size(),
+                                                std::move(sequence), std::move(labels), coord);
+                            if (!config.annotate_sequence_headers)
+                                coord += num_kmers;
                         }
-
-                        batcher.push_and_pay(sequence.size(),
-                                             std::move(sequence), std::move(labels), coord);
-                        if (!config.annotate_sequence_headers)
-                            coord += num_kmers;
                     } else if (config.superbubbles) {
                         logger->error("Invalid sequence detected in file {}", file);
                         exit(1);
@@ -316,11 +319,12 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
 
-            if (config.superbubbles && last_coord) {
-                thread_pool.enqueue([&](size_t last_coord, auto last_labels) {
-                    std::lock_guard<std::mutex> lock(cluster_mu);
-                    cluster_annot->add_labels({ last_coord }, std::move(last_labels));
-                }, last_coord, std::move(last_labels));
+            if (last_cluster.size()) {
+                graph::paths_from_superbubble(last_cluster, k, [&](std::string&& seq) {
+                    size_t size = seq.size();
+                    batcher.push_and_pay(size, std::move(seq), last_labels, coord);
+                    coord += size - k + 1;
+                });
             }
         }
 
@@ -328,10 +332,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         anno_graph->get_annotator().serialize(annotator_filename);
 
-        if (cluster_annot) {
-            cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
-            logger->info("Number of clusters: {}", last_cluster_id);
-        }
+        // if (cluster_annot) {
+        //     cluster_annot->serialize(annotator_filename + graph::GraphTopology::cluster_extension());
+        //     logger->info("Number of clusters: {}", last_cluster_id);
+        // }
 
         return;
     } else if (config.annotate_sequence_ends) {

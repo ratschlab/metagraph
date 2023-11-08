@@ -536,13 +536,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                         best_score = std::max(best_score, alignment.get_score());
                         query_coverage = std::max(query_coverage,
                                                 alignment.get_cigar().get_coverage());
+                        assert(chains.empty() || last_size < chains.size());
                         if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
                             chains.erase(merge_alignments_by_label(chains.begin() + last_size,
                                                                 chains.end()),
                                         chains.end());
                             assert(std::all_of(chains.begin() + last_size, chains.end(),
                                             [this](const auto &a) {
-                                                return a.is_valid(graph_, &config_);
+                                                return a.size() && a.is_valid(graph_, &config_);
                                             }));
                             last_size = chains.size();
                         }
@@ -551,17 +552,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
                 );
 
-                std::sort(chains.begin(), chains.end(), std::not_fn(AlignmentCompare()));
-
                 if (chains.size()) {
+                    std::sort(chains.begin(), chains.end(), AlignmentCompare());
                     std::vector<Alignment> merged_alns;
                     merged_alns.reserve(chains.size() + alns.size());
                     std::merge(std::make_move_iterator(chains.begin()),
                                std::make_move_iterator(chains.end()),
-                               std::make_move_iterator(alns.begin()),
-                               std::make_move_iterator(alns.end()),
+                               std::make_move_iterator(alns.rbegin()),
+                               std::make_move_iterator(alns.rend()),
                                std::back_inserter(merged_alns),
-                               std::not_fn(AlignmentCompare()));
+                               AlignmentCompare());
+                    std::reverse(merged_alns.begin(), merged_alns.end());
 
                     std::swap(alns, merged_alns);
                 }

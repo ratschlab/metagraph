@@ -1097,5 +1097,48 @@ void assemble_superbubbles(const DeBruijnGraph &dbg,
     logger->trace("Found {} unitig clusters", cluster_id);
 }
 
+void paths_from_superbubble(const std::vector<std::string> &seqs,
+                            size_t k,
+                            const std::function<void(std::string&&)> &callback) {
+    if (seqs.empty())
+        return;
+
+    std::vector<std::pair<node_index, std::string>> traversal;
+    traversal.emplace_back(0, seqs[0].substr(0, k));
+
+    std::string last_kmer = seqs.back().substr(seqs.back().size() - k);
+
+    DBGHashFast dbg(k);
+    for (const auto &seq : seqs) {
+        dbg.add_sequence(seq);
+    }
+
+    traversal.back().first = map_to_nodes_sequentially(dbg, traversal.back().second)[0];
+    if (traversal.back().first == DeBruijnGraph::npos) {
+        logger->error("First k-mer {} not mapped", traversal.back().second);
+        exit(1);
+    }
+
+    node_index last_node = map_to_nodes_sequentially(dbg, last_kmer)[0];
+    if (last_node == DeBruijnGraph::npos) {
+        logger->error("Last k-mer {} not mapped", last_kmer);
+        exit(1);
+    }
+
+    while (traversal.size()) {
+        auto [node, seq] = std::move(traversal.back());
+        traversal.pop_back();
+
+        if (node == last_node) {
+            callback(std::move(seq));
+            continue;
+        }
+
+        dbg.call_outgoing_kmers(node, [&](node_index next, char c) {
+            traversal.emplace_back(next, seq + c);
+        });
+    }
+}
+
 } // namespace graph
 } // namespace mtg

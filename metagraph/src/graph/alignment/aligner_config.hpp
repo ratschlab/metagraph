@@ -43,7 +43,7 @@ struct DBGAlignerConfig {
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
     double max_ram_per_alignment = std::numeric_limits<double>::max();
     double rel_score_cutoff = 0.0;
-    double chaining_algorithm_switch_cutoff = 1.0;
+    double chaining_algorithm_switch_cutoff = 2.0;
 
     int8_t gap_opening_penalty = -5;
     int8_t gap_extension_penalty = -2;

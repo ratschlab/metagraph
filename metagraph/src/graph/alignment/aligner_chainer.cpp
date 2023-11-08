@@ -636,13 +636,108 @@ cluster_seeds(const IDBGAligner &aligner,
         return std::make_pair(0, 0);
     }
 
+    // size_t max_num_seeds = std::ceil(0.002 * forward.size());
+    size_t max_num_seeds = config.num_alternative_paths;
+    // logger->trace("Allowing at most {} seed groups", max_num_seeds);
+
+    // logger->trace("Clustering anchors");
+    // for (auto &clustered_seeds : clustered_seed_maps) {
+    //     for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
+    //         Alignment::Column col = it->first;
+    //         if (skip_column(col))
+    //             continue;
+
+    //         tsl::hopscotch_map<size_t, std::vector<Anchor>> pre_clustered_anchors;
+    //         tsl::hopscotch_map<size_t, size_t> occ;
+    //         size_t max_occ = 0;
+    //         for (auto &anchor : it.value()) {
+    //             max_occ = std::max(max_occ, ++occ[anchor.get_end_clipping()]);
+    //             for (const auto &[cluster, coord] : anchor.coords) {
+    //                 auto &cur = pre_clustered_anchors[cluster].emplace_back(anchor);
+    //                 cur.coords.assign(1, std::make_pair(cluster, cur.get_clipping() - coord));
+    //             }
+    //         }
+
+    //         for (auto jt = pre_clustered_anchors.begin(); jt != pre_clustered_anchors.end(); ++jt) {
+    //             auto &anchors = jt.value();
+    //             for (auto &anchor : anchors) {
+    //                 anchor.coords[0].first = max_occ - occ[anchor.get_end_clipping()];
+    //             }
+
+    //             std::sort(anchors.begin(), anchors.end(), [&](const auto &a, const auto &b) {
+    //                 return a.coords[0].second < b.coords[0].second;
+    //             });
+
+    //             std::vector<std::pair<std::vector<Anchor>, sdsl::bit_vector>> clusters;
+    //             auto *cur_cluster = &clusters.emplace_back(std::make_pair(
+    //                 std::vector<Anchor>{},
+    //                 sdsl::bit_vector(forward.size(), false)
+    //             )).first;
+    //             std::fill(clusters.back().second.begin() + anchors.front().get_clipping(),
+    //                       clusters.back().second.begin() + anchors.front().get_clipping() + anchors.front().get_query_view().size(),
+    //                       true);
+    //             cur_cluster->emplace_back(std::move(anchors.front()));
+    //             for (auto kt = anchors.begin() + 1; kt != anchors.end(); ++kt) {
+    //                 if (kt->coords[0].second - cur_cluster->back().coords[0].second > 100) {
+    //                     cur_cluster = &clusters.emplace_back(std::make_pair(
+    //                         std::vector<Anchor>{},
+    //                         sdsl::bit_vector(forward.size(), false)
+    //                     )).first;
+    //                 }
+
+    //                 std::fill(clusters.back().second.begin() + kt->get_clipping(),
+    //                       clusters.back().second.begin() + kt->get_clipping() + kt->get_query_view().size(),
+    //                       true);
+
+    //                 cur_cluster->emplace_back(std::move(*kt));
+    //             }
+
+    //             std::vector<Anchor> final_anchors;
+    //             final_anchors.reserve(anchors.size());
+    //             for (auto &[cluster, cov_map] : clusters) {
+    //                 size_t coverage = sdsl::util::cnt_one_bits(cov_map);
+    //                 for (auto &anchor : cluster) {
+    //                     anchor.coords[0].first += coverage;
+    //                     final_anchors.emplace_back(std::move(anchor));
+    //                 }
+    //             }
+
+    //             std::sort(final_anchors.begin(), final_anchors.end(), [&](const auto &a, const auto &b) {
+    //                 return a.coords[0].first > b.coords[0].first;
+    //             });
+
+    //             size_t seed_counter = 0;
+    //             size_t last_score = 0;
+    //             for (auto &anchor : final_anchors) {
+    //                 if (seed_counter > max_num_seeds)
+    //                     break;
+
+    //                 Alignment aln(anchor.seed, config);
+    //                 aln.set_columns(Vector<Alignment::Column>(1, col));
+    //                 callback(std::move(aln));
+    //                 ++seed_count;
+
+    //                 if (anchor.coords[0].first != last_score) {
+    //                     ++seed_counter;
+    //                     last_score = anchor.coords[0].first;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    // logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
+    // return std::make_pair(0, 0);
+
     // for each orientation
-    logger->trace("Chaining anchors");
-    score_t best_score = 0;
-    bool finish = false;
+    logger->trace("Chaining anchors from {} labels",
+                  clustered_seed_maps[0].size() + clustered_seed_maps[1].size());
+
     std::vector<std::tuple<Alignment::Column,
                         AnchorChain<Anchor>,
                         std::vector<score_t>>> best_chains;
+
+    // score_t best_last_score = 0;
     for (auto &clustered_seeds : clustered_seed_maps) {
         for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
             Alignment::Column col = it->first;
@@ -650,6 +745,17 @@ cluster_seeds(const IDBGAligner &aligner,
                 continue;
 
             auto &anchors = it.value();
+            // score_t score_sum = std::accumulate(
+            //     anchors.begin(), anchors.end(), score_t(0),
+            //     [&config](score_t cur, const Anchor &a) { return cur + a.get_score(config); }
+            // );
+
+            // if (score_sum < best_last_score)
+            //     continue;
+
+            size_t count = 0;
+            score_t last_score = std::numeric_limits<score_t>::max();
+
             chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
                 [&config,&graph](const Anchor &a_i,
                                 ssize_t,
@@ -727,20 +833,28 @@ cluster_seeds(const IDBGAligner &aligner,
                     });
                 },
                 [&](const AnchorChain<Anchor> &chain, const std::vector<score_t> &score_traceback) {
-                    if (best_chains.empty() || score_traceback[0] >= best_score * config.rel_score_cutoff) {
-                        best_chains.emplace_back(col, chain, score_traceback);
-                        best_score = std::max(best_score, score_traceback[0]);
-                        return true;
+                    if (chain.get_query_view().size() < graph.get_k())
+                        return false;
+
+                    if (score_traceback[0] < last_score) {
+                        last_score = score_traceback[0];
+                        if (++count > max_num_seeds)
+                            return false;
                     }
 
-                    finish = true;
-                    return false;
+                    best_chains.emplace_back(col, chain, score_traceback);
+                    return true;
                 },
                 false,
                 [](const auto*, const auto*, auto&&, auto, auto, const auto&) {},
                 [](auto&&) {},
-                [&]() { return finish; }
+                [&]() { return count > max_num_seeds; }
             );
+
+            // if (count) {
+            //     assert(last_score < std::numeric_limits<score_t>::max());
+            //     best_last_score = std::max(best_last_score, last_score);
+            // }
         }
     }
 
@@ -780,10 +894,9 @@ cluster_seeds(const IDBGAligner &aligner,
         }
     };
 
-    logger->trace("Found {} chains with scores up to {}", best_chains.size(), best_score);
-
     assert(reverse.empty() || reverse.size() == forward.size());
-    if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    if (labeled_aligner) {
         auto *anno_buffer = &labeled_aligner->get_annotation_buffer();
         tsl::hopscotch_map<AnchorChain<Anchor>, Vector<Alignment::Column>,
                             AnchorChainHash, AnchorChainEqual> chain_map;
@@ -828,6 +941,26 @@ cluster_seeds(const IDBGAligner &aligner,
         return std::make_tuple(chain_a.get_score(), chain_b.get_clipping(), chain_b.get_orientation())
                 > std::make_tuple(chain_b.get_score(), chain_a.get_clipping(), chain_a.get_orientation());
     });
+
+    if (best_chains.size() > max_num_seeds) {
+        size_t count = 0;
+        for (auto it = best_chains.begin() + 1; it != best_chains.end(); ++it) {
+            score_t score_a = std::get<1>(*(it - 1)).get_score();
+            score_t score_b = std::get<1>(*it).get_score();
+            if (score_a > score_b) {
+                ++count;
+                if (count == max_num_seeds) {
+                    best_chains.erase(it, best_chains.end());
+                    break;
+                }
+            }
+        }
+    }
+
+    logger->trace("Found {} chains with scores from {} to {}",
+                  best_chains.size(),
+                  std::get<1>(best_chains.front()).get_score(),
+                  std::get<1>(best_chains.back()).get_score());
 
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
@@ -886,7 +1019,8 @@ cluster_seeds(const IDBGAligner &aligner,
                     coord_dist + next->get_query_view().size(),
                     target_node,
                     false,
-                    target_end_clipping
+                    target_end_clipping,
+                    std::max(config.xdrop, 100) - config.xdrop
                 );
 
                 ++num_extensions;
@@ -1510,8 +1644,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 aln.trim_offset();
 
                 DEBUG_LOG("\tFinal: {}\tfull_score: {}\t{}", chain_score, full_score, aln);
+                assert(aln.size());
                 assert(aln.get_score() == full_score);
-
                 callback(std::move(aln));
             },
             terminate
