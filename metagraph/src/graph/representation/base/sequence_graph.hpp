@@ -42,7 +42,8 @@ class SequenceGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
@@ -159,14 +160,6 @@ class DeBruijnGraph : public SequenceGraph {
     virtual node_index traverse(node_index node, char next_char) const = 0;
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Given a starting node and a sequence of edge labels, traverse the graph
     // forward. The traversal is terminated once terminate() returns true or
