@@ -270,7 +270,6 @@ include_directories(
   external-libraries/zlib
   external-libraries/sdust
   external-libraries/simde-no-tests
-  external-libraries/pthash/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -320,6 +319,8 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+add_subdirectory(external-libraries/sshash)
+target_include_directories(sshash_static PUBLIC external-libraries/sshash/include)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
@@ -410,6 +411,7 @@ set(METALIBS ${METALIBS}
   mersenne_twister
   sdust
   spdlog::spdlog
+  sshash_static
   XXSDS_DYNAMIC
   ips4o
   caches
