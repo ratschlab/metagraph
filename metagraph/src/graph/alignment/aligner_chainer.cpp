@@ -636,98 +636,7 @@ cluster_seeds(const IDBGAligner &aligner,
         return std::make_pair(0, 0);
     }
 
-    // size_t max_num_seeds = std::ceil(0.002 * forward.size());
     size_t max_num_seeds = config.num_alternative_paths;
-    // logger->trace("Allowing at most {} seed groups", max_num_seeds);
-
-    // logger->trace("Clustering anchors");
-    // for (auto &clustered_seeds : clustered_seed_maps) {
-    //     for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
-    //         Alignment::Column col = it->first;
-    //         if (skip_column(col))
-    //             continue;
-
-    //         tsl::hopscotch_map<size_t, std::vector<Anchor>> pre_clustered_anchors;
-    //         tsl::hopscotch_map<size_t, size_t> occ;
-    //         size_t max_occ = 0;
-    //         for (auto &anchor : it.value()) {
-    //             max_occ = std::max(max_occ, ++occ[anchor.get_end_clipping()]);
-    //             for (const auto &[cluster, coord] : anchor.coords) {
-    //                 auto &cur = pre_clustered_anchors[cluster].emplace_back(anchor);
-    //                 cur.coords.assign(1, std::make_pair(cluster, cur.get_clipping() - coord));
-    //             }
-    //         }
-
-    //         for (auto jt = pre_clustered_anchors.begin(); jt != pre_clustered_anchors.end(); ++jt) {
-    //             auto &anchors = jt.value();
-    //             for (auto &anchor : anchors) {
-    //                 anchor.coords[0].first = max_occ - occ[anchor.get_end_clipping()];
-    //             }
-
-    //             std::sort(anchors.begin(), anchors.end(), [&](const auto &a, const auto &b) {
-    //                 return a.coords[0].second < b.coords[0].second;
-    //             });
-
-    //             std::vector<std::pair<std::vector<Anchor>, sdsl::bit_vector>> clusters;
-    //             auto *cur_cluster = &clusters.emplace_back(std::make_pair(
-    //                 std::vector<Anchor>{},
-    //                 sdsl::bit_vector(forward.size(), false)
-    //             )).first;
-    //             std::fill(clusters.back().second.begin() + anchors.front().get_clipping(),
-    //                       clusters.back().second.begin() + anchors.front().get_clipping() + anchors.front().get_query_view().size(),
-    //                       true);
-    //             cur_cluster->emplace_back(std::move(anchors.front()));
-    //             for (auto kt = anchors.begin() + 1; kt != anchors.end(); ++kt) {
-    //                 if (kt->coords[0].second - cur_cluster->back().coords[0].second > 100) {
-    //                     cur_cluster = &clusters.emplace_back(std::make_pair(
-    //                         std::vector<Anchor>{},
-    //                         sdsl::bit_vector(forward.size(), false)
-    //                     )).first;
-    //                 }
-
-    //                 std::fill(clusters.back().second.begin() + kt->get_clipping(),
-    //                       clusters.back().second.begin() + kt->get_clipping() + kt->get_query_view().size(),
-    //                       true);
-
-    //                 cur_cluster->emplace_back(std::move(*kt));
-    //             }
-
-    //             std::vector<Anchor> final_anchors;
-    //             final_anchors.reserve(anchors.size());
-    //             for (auto &[cluster, cov_map] : clusters) {
-    //                 size_t coverage = sdsl::util::cnt_one_bits(cov_map);
-    //                 for (auto &anchor : cluster) {
-    //                     anchor.coords[0].first += coverage;
-    //                     final_anchors.emplace_back(std::move(anchor));
-    //                 }
-    //             }
-
-    //             std::sort(final_anchors.begin(), final_anchors.end(), [&](const auto &a, const auto &b) {
-    //                 return a.coords[0].first > b.coords[0].first;
-    //             });
-
-    //             size_t seed_counter = 0;
-    //             size_t last_score = 0;
-    //             for (auto &anchor : final_anchors) {
-    //                 if (seed_counter > max_num_seeds)
-    //                     break;
-
-    //                 Alignment aln(anchor.seed, config);
-    //                 aln.set_columns(Vector<Alignment::Column>(1, col));
-    //                 callback(std::move(aln));
-    //                 ++seed_count;
-
-    //                 if (anchor.coords[0].first != last_score) {
-    //                     ++seed_counter;
-    //                     last_score = anchor.coords[0].first;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // logger->trace("Reduced {} seeds down to {}", fwd_seeds.size() + bwd_seeds.size(), seed_count);
-    // return std::make_pair(0, 0);
 
     // for each orientation
     logger->trace("Chaining anchors from {} labels",
@@ -737,7 +646,6 @@ cluster_seeds(const IDBGAligner &aligner,
                         AnchorChain<Anchor>,
                         std::vector<score_t>>> best_chains;
 
-    // score_t best_last_score = 0;
     for (auto &clustered_seeds : clustered_seed_maps) {
         for (auto it = clustered_seeds.begin(); it != clustered_seeds.end(); ++it) {
             Alignment::Column col = it->first;
@@ -745,13 +653,6 @@ cluster_seeds(const IDBGAligner &aligner,
                 continue;
 
             auto &anchors = it.value();
-            // score_t score_sum = std::accumulate(
-            //     anchors.begin(), anchors.end(), score_t(0),
-            //     [&config](score_t cur, const Anchor &a) { return cur + a.get_score(config); }
-            // );
-
-            // if (score_sum < best_last_score)
-            //     continue;
 
             size_t count = 0;
             score_t last_score = std::numeric_limits<score_t>::max();
@@ -850,11 +751,6 @@ cluster_seeds(const IDBGAligner &aligner,
                 [](auto&&) {},
                 [&]() { return count > max_num_seeds; }
             );
-
-            // if (count) {
-            //     assert(last_score < std::numeric_limits<score_t>::max());
-            //     best_last_score = std::max(best_last_score, last_score);
-            // }
         }
     }
 
