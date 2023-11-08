@@ -698,7 +698,8 @@ cluster_seeds(const IDBGAligner &aligner,
 
                         auto it = a_i.coords.begin();
                         auto jt = a_j.coords.begin();
-                        int64_t coord_offset = static_cast<int64_t>(query_j.size()) - query_i.size();
+                        int64_t coord_offset = static_cast<int64_t>(query_j.size())
+                                                - query_i.size();
 
                         score_t min_diff = std::numeric_limits<score_t>::max();
                         while (it != a_i.coords.end() && jt != a_j.coords.end()) {
@@ -716,7 +717,8 @@ cluster_seeds(const IDBGAligner &aligner,
                                 if (coord_dist != dist) {
                                     score_t diff = std::abs(coord_dist - dist);
                                     min_diff = std::min(min_diff, diff);
-                                    score += config.gap_opening_penalty + (diff - 1) * config.gap_extension_penalty;
+                                    score += config.gap_opening_penalty
+                                            + (diff - 1) * config.gap_extension_penalty;
                                 } else {
                                     min_diff = 0;
                                 }
@@ -839,6 +841,10 @@ cluster_seeds(const IDBGAligner &aligner,
     });
 
     if (best_chains.size() > max_num_seeds) {
+        logger->trace("Found {} initial chains with scores from {} to {}",
+                        best_chains.size(),
+                        std::get<1>(best_chains.front()).get_score(),
+                        std::get<1>(best_chains.back()).get_score());
         size_t count = 0;
         for (auto it = best_chains.begin() + 1; it != best_chains.end(); ++it) {
             score_t score_a = std::get<1>(*(it - 1)).get_score();
@@ -863,7 +869,13 @@ cluster_seeds(const IDBGAligner &aligner,
 
     for (const auto &[col, chain, score_traceback] : best_chains) {
         extend_chain<Anchor>(chain, score_traceback,
-            [&](const Anchor *next, const Anchor*, Alignment&& cur, size_t coord_dist, score_t, const auto &continue_callback) {
+            [&](const Anchor *next,
+                const Anchor*,
+                Alignment&& cur,
+                size_t coord_dist,
+                score_t,
+                const auto &continue_callback) {
+
                 if (cur.empty()) {
                     next->used = true;
                     cur = Alignment(next->seed, config);
@@ -905,7 +917,8 @@ cluster_seeds(const IDBGAligner &aligner,
 
                 node_index target_node = cur.get_nodes().front();
                 size_t cur_prefix = graph.get_k() - cur.get_offset();
-                size_t target_end_clipping = cur.get_end_clipping() + cur.get_query_view().size() - cur_prefix;
+                size_t target_end_clipping = cur.get_end_clipping()
+                                                + cur.get_query_view().size() - cur_prefix;
 
                 auto extender = aligner.build_extender(query);
                 auto extensions = extender->get_extensions(
