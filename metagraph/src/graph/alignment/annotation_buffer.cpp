@@ -279,7 +279,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
         auto do_push = [&](auto find, size_t labels_i) {
             find.value() = labels_i;
             if (has_local_coordinates()) {
-                assert(coords.size());
+                assert(coords.size() == labels.size());
                 size_t coord_idx = find - node_to_cols.begin();
                 if (coord_idx == label_coords.size()) {
                     label_coords.emplace_back(coords);
@@ -429,21 +429,40 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                 CoordinateSet merged_prev_coords;
 
                 if (!prev_labels) {
+                    Vector<Column> picked_labels;
                     if (has_local_coordinates()) {
                         assert(coords);
                         merged_prev_coords.reserve(coords->size());
+                        picked_labels.reserve(labels->size());
+                        auto it = labels->begin();
                         for (auto &tuple : *coords) {
+                            assert(it != labels->end());
                             auto &prev_tuple = merged_prev_coords.emplace_back();
                             prev_tuple.reserve(tuple.size());
                             for (auto c : tuple) {
-                                prev_tuple.emplace_back(c - 1);
+                                // coordinates for dummy source k-mers are undefined
+                                // unless they are derived from the first sequence
+                                // in the set
+                                if (c <= 0)
+                                    prev_tuple.emplace_back(c - 1);
                             }
+
+                            if (prev_tuple.size()) {
+                                picked_labels.emplace_back(*it);
+                            } else {
+                                merged_prev_coords.pop_back();
+                            }
+
+                            ++it;
                         }
+                        assert(it == labels->end());
+                    } else {
+                        picked_labels = *labels;
                     }
 
                     push_node_labels(prev,
                                      AnnotatedDBG::graph_to_anno_index(base_node),
-                                     decltype(*labels)(*labels),
+                                     std::move(picked_labels),
                                      merged_prev_coords);
                 } else {
                     Columns merged_columns;
