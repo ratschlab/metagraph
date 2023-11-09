@@ -1269,44 +1269,41 @@ void chain_alignments(const IDBGAligner &aligner,
         }
     }
 
-    // auto preprocess_range = [&](auto begin, auto end) {
-    //     if (begin == end)
-    //         return;
+    auto preprocess_range = [&](auto begin, auto end) {
+        if (begin == end)
+            return;
 
-    //     std::sort(begin, end, [](const Anchor &a, const Anchor &b) {
-    //         return std::tie(b.col, a.end, a.begin) > std::tie(a.col, b.end, b.begin);
-    //     });
+        std::sort(begin, end, [](const Anchor &a, const Anchor &b) { return a.col < b.col; });
 
-    //     auto last_it = begin;
-    //     std::vector<tsl::hopscotch_set<size_t>> end_counters(query.size() + 1);
+        std::vector<tsl::hopscotch_set<size_t>> end_counters(query.size() + 1);
 
-    //     while (last_it != end) {
-    //         auto it = last_it + 1;
-    //         while (it != end && it->col == last_it->col) {
-    //             ++it;
-    //         }
+        auto last_it = begin;
+        while (last_it != end) {
+            auto it = std::find_if(last_it, end, [&](const Anchor &a) {
+                return a.col != last_it->col;
+            });
 
-    //         for (auto &c : end_counters) {
-    //             c.clear();
-    //         }
+            for (auto &c : end_counters) {
+                c.clear();
+            }
 
-    //         std::for_each(last_it, it, [&](const Anchor &a) {
-    //             end_counters[a.end_clipping].emplace(a.index);
-    //         });
+            std::for_each(last_it, it, [&](const Anchor &a) {
+                end_counters[a.end_clipping + 1].emplace(a.index);
+            });
 
-    //         std::for_each(last_it, it, [&](Anchor &a) {
-    //             if (end_counters[a.end_clipping].size() == 1
-    //                     && end_counters[a.end_clipping + 1].count(a.index)) {
-    //                 a.index = std::numeric_limits<uint64_t>::max();
-    //             }
-    //         });
+            std::for_each(last_it, it, [&](Anchor &a) {
+                if (end_counters[a.end_clipping + 1].size() == 1
+                        && end_counters[a.end_clipping].count(a.index)) {
+                    a.index = std::numeric_limits<size_t>::max();
+                }
+            });
 
-    //         last_it = it;
-    //     }
-    // };
+            last_it = it;
+        }
+    };
 
-    // preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
-    // preprocess_range(anchors.begin() + orientation_change, anchors.end());
+    preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
+    preprocess_range(anchors.begin() + orientation_change, anchors.end());
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     AnnotationBuffer *anno_buffer = nullptr;
@@ -1318,7 +1315,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
         std::vector<Anchor> split_anchors;
         for (auto &a : anchors) {
-            if (a.index != std::numeric_limits<uint64_t>::max()) {
+            if (a.index != std::numeric_limits<size_t>::max()) {
                 assert(alignments[a.index].label_columns);
                 assert(alignments[a.index].label_column_diffs.empty());
                 for (auto c : alignments[a.index].get_columns()) {
@@ -1382,10 +1379,12 @@ void chain_alignments(const IDBGAligner &aligner,
 
     auto last_anchor_it = anchors.data();
     while (!terminate() && last_anchor_it != anchors.data() + anchors.size()) {
-        auto anchor_it = last_anchor_it + 1;
-        while (anchor_it != anchors.data() + anchors.size()
-                && (allow_label_change || anchor_it->col == last_anchor_it->col)) {
-            ++anchor_it;
+        auto anchor_it = anchors.data() + anchors.size();
+
+        if (!allow_label_change) {
+            anchor_it = std::find_if(last_anchor_it, anchor_it, [&](const Anchor &a) {
+                return a.col != last_anchor_it->col;
+            });
         }
 
         score_t chain_score = 0;
@@ -1431,8 +1430,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     if (a_i.index == a_j.index) {
                         assert(a_j.spelling_length > a_i.spelling_length);
                         size_t added_length = a_j.spelling_length - a_i.spelling_length;
-                        // logger->info("\t<-{}\t{}S{}={}S: {}\t{} vs. {}", a_i.index,
-                        //          a_i.clipping,query_i.size(),a_i.end_clipping,query_i);
                         update_score(score_i + a_j.score - a_i.score, &a_i,
                                      last_dist_i + added_length);
                         return;
