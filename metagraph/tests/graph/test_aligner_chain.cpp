@@ -17,7 +17,7 @@ using namespace mtg::kmer;
 template <typename Graph>
 class DBGAlignerTestPostChain : public DeBruijnGraphTest<Graph> {};
 
-typedef ::testing::Types<DBGSuccinct, DBGSuccinctTopology> ChainGraphTypes;
+typedef ::testing::Types<DBGSuccinct, DBGSuccinctCached, DBGSuccinctTopology> ChainGraphTypes;
 TYPED_TEST_SUITE(DBGAlignerTestPostChain, ChainGraphTypes);
 
 inline void check_chain(const AlignmentResults &paths,
@@ -46,6 +46,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_swap) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.post_chain_alignments = true;
     config.min_seed_length = k;
     config.seed_complexity_filter = false;
@@ -71,6 +72,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_2) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.post_chain_alignments = true;
     config.min_seed_length = 7;
     config.max_seed_length = 7;
@@ -94,6 +96,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_mismatch) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.post_chain_alignments = true;
     config.forward_and_reverse_complement = true;
     config.min_seed_length = 5;
@@ -118,6 +121,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_g
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2, reference3 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.num_alternative_paths = 3;
     config.post_chain_alignments = true;
     config.min_seed_length = 7;
     config.max_seed_length = 7;
@@ -141,6 +145,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.post_chain_alignments = true;
     config.min_seed_length = k;
     config.set_node_insertion_penalty(k);
@@ -166,6 +171,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_mismatch) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.post_chain_alignments = true;
     config.min_seed_length = 6;
     config.max_seed_length = 6;
@@ -192,6 +198,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_with_insert) {
     config.min_seed_length = 6;
     config.max_seed_length = 6;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
+    config.num_alternative_paths = 3;
     config.set_node_insertion_penalty(k);
 
     DBGAligner<> aligner(*graph, config);
@@ -212,6 +219,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_deletion_in_overlapping_node) {
     DBGAlignerConfig config;
     config.post_chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.min_seed_length = 5;
     config.max_seed_length = 5;
     config.set_node_insertion_penalty(k);
@@ -257,6 +265,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
     DBGAlignerConfig config;
     config.post_chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.num_alternative_paths = 2;
     config.min_seed_length = k;
     config.seed_complexity_filter = false;
     config.set_node_insertion_penalty(k);
@@ -282,6 +291,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
+    config.num_alternative_paths = 2;
     config.min_seed_length = k;
     config.set_node_insertion_penalty(k);
 
