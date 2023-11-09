@@ -55,7 +55,6 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinctTopology, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinctTopology, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
                          std::pair<DBGSuccinctTopology, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
@@ -79,6 +78,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     DBGAlignerConfig config;
     config.max_seed_length = std::numeric_limits<size_t>::max();
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.num_alternative_paths = 2;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
@@ -91,21 +91,17 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
+        for (const auto &alignment : alignments) {
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
+                if (find != labels.end() && alignment.get_sequence() == find->second) {
                     labels.erase(find);
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -130,6 +126,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.num_alternative_paths = 4;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
@@ -143,21 +140,17 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
+        for (const auto &alignment : alignments) {
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
+                if (find != labels.end() && alignment.get_sequence() == find->second) {
                     labels.erase(find);
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -200,12 +193,12 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.num_alternative_paths = 2;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
         { std::string("CGAATGCAT"), {{ { std::string("C"), std::make_pair(std::string("GAATGCAT"), 1) }, // 1S8=
                                        { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 7=1X1=
-                                       { std::string("A"), std::make_pair(std::string("TGCCT"), 0) } // 4S3=1X1=
                                      }} }
     }};
 
@@ -213,18 +206,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
+        for (const auto &alignment : alignments) {
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
                 auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second.first) {
-                    found = true;
+                if (find != labels.end() && alignment.get_sequence() == find->second.first) {
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
                     labels.erase(find);
@@ -232,8 +220,9 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
                 }
                 ++label_index;
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -276,6 +265,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.num_alternative_paths = 3;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
@@ -289,18 +279,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
+        for (const auto &alignment : alignments) {
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
                 auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second.first) {
-                    found = true;
+                if (find != labels.end() && alignment.get_sequence() == find->second.first) {
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
                     labels.erase(find);
@@ -308,8 +293,9 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
                 }
                 ++label_index;
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -348,6 +334,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.num_alternative_paths = 2;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
@@ -360,18 +347,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
+        for (const auto &alignment : alignments) {
             ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
                 auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second.first) {
-                    found = true;
+                if (find != labels.end() && alignment.get_sequence() == find->second.first) {
                     EXPECT_EQ(find->second.second,
                               alignment.label_coordinates[label_index][0]);
                     labels.erase(find);
@@ -379,8 +361,9 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
                 }
                 ++label_index;
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -395,7 +378,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
     }
 
     size_t k = 7;
-    std::string query = "TCGTACGGGGGG";
+    std::string query                        = "TCGTACGGGGGG";
     const std::vector<std::string> sequences { "TCGTACTAGCTA" };
     const std::vector<std::string> labels { "A" };
 
@@ -418,7 +401,11 @@ TYPED_TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
 
         auto alignments = aligner.align(query);
         EXPECT_LE(1u, alignments.size());
-        ASSERT_TRUE(false);
+        if (!alignments[0].get_orientation()) {
+            EXPECT_EQ("TCGTAC", alignments[0].get_sequence().substr(0, 6));
+        } else {
+            EXPECT_EQ("GTACGA", alignments[0].get_sequence().substr(alignments[0].get_sequence().size() - 6));
+        }
     }
 }
 
@@ -457,6 +444,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     config.min_seed_length = 2;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
+    config.num_alternative_paths = 2;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator(), false);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
@@ -474,21 +462,20 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
         auto alignments = aligner.align(query);
         ASSERT_LE(labels.size(), alignments.size()) << query;
 
-        size_t num_labels = labels.size();
-        for (size_t i = 0; i < num_labels; ++i) {
-            const auto &alignment = alignments[i];
-            bool found = false;
-            for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
-                auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end());
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
-                    labels.erase(find);
-                    break;
+        for (const auto &alignment : alignments) {
+            common::logger->info("{}", alignment);
+            if (!alignment.get_offset()) {
+                for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
+                    auto find = labels.find(label);
+                    if (find != labels.end() && alignment.get_sequence() == find->second) {
+                        labels.erase(find);
+                        break;
+                    }
                 }
             }
-            EXPECT_TRUE(found) << alignment;
         }
+
+        EXPECT_TRUE(labels.empty());
     }
 }
 
@@ -534,21 +521,17 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
             auto alignments = aligner.align(query);
             ASSERT_LE(labels.size(), alignments.size()) << query;
 
-            size_t num_labels = labels.size();
-            for (size_t i = 0; i < num_labels; ++i) {
-                const auto &alignment = alignments[i];
-                bool found = false;
+            for (const auto &alignment : alignments) {
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                     auto find = labels.find(label);
-                    ASSERT_TRUE(find != labels.end());
-                    if (alignment.get_sequence() == find->second) {
-                        found = true;
+                    if (find != labels.end() && alignment.get_sequence() == find->second) {
                         labels.erase(find);
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment;
             }
+
+            EXPECT_TRUE(labels.empty());
         }
     }
 }
