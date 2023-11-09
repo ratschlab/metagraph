@@ -221,9 +221,9 @@ void chain_anchors(const DBGAlignerConfig &config,
             do {
                 const Anchor *j = anchors_begin;
                 for (const Anchor *i = anchors_begin; i != anchors_end; ++i) {
-                    while (j < anchors_end && i->get_query_view().end() - j->get_query_view().end() > b) {
-                        ++j;
-                    }
+                    j = std::find_if(j, anchors_end, [&](const Anchor &a) {
+                        return i->get_query_view().end() - a.get_query_view().end() <= b;
+                    });
 
                     // align anchors [j, i) to i
                     anchor_connector(*i, b, j, i, chain_scores + (j - anchors_begin),
