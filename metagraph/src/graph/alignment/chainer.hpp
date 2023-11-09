@@ -210,8 +210,8 @@ void chain_anchors(const DBGAlignerConfig &config,
             };
         };
 
-        // if (static_cast<double>(anchors_end - anchors_begin) / query_size
-        //         <= config.chaining_algorithm_switch_cutoff) {
+        if (static_cast<double>(anchors_end - anchors_begin) / query_size
+                <= config.chaining_algorithm_switch_cutoff) {
             // if there are fewer seeds, this algorithm is faster
             ssize_t b = max_gap_between_anchors;
             ssize_t b_last;
@@ -225,7 +225,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                         ++j;
                     }
 
-                    // align anchor i forwards
+                    // align anchors [j, i) to i
                     anchor_connector(*i, b, j, i, chain_scores + (j - anchors_begin),
                                      make_anchor_connector(i));
                     best_score = std::max(best_score, std::get<0>(chain_scores[i - anchors_begin]));
@@ -240,15 +240,15 @@ void chain_anchors(const DBGAlignerConfig &config,
                 // if we assume that match_spelling_size == query_size
                 best_cost = 2*(query_size - best_score/match_score);
             } while (best_cost > b_last);
-        // } else {
-        //     // otherwise, use this algorithm
-        //     for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
-        //         const Anchor *j = std::max(i - config.chaining_bandwidth, anchors_begin);
-        //         anchor_connector(*i, std::numeric_limits<ssize_t>::max(), j, i,
-        //                          chain_scores + (j - anchors_begin),
-        //                          make_anchor_connector(i));
-        //     }
-        // }
+        } else {
+            // otherwise, use this algorithm
+            for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
+                const Anchor *j = i - std::min(static_cast<size_t>(i - anchors_begin), config.chaining_bandwidth);
+                anchor_connector(*i, std::numeric_limits<ssize_t>::max(), j, i,
+                                 chain_scores + (j - anchors_begin),
+                                 make_anchor_connector(i));
+            }
+        }
     };
 
     size_t num_forward = orientation_change - anchors_begin;
