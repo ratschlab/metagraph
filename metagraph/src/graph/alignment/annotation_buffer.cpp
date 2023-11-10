@@ -277,6 +277,7 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                 auto&& labels,
                                 const CoordinateSet coords = {}) {
         size_t num_labels = labels.size();
+        std::ignore = num_labels;
         auto do_push = [&](auto find, size_t labels_i) {
             find.value() = labels_i;
             if (has_local_coordinates()) {

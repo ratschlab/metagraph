@@ -1452,12 +1452,19 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         // calculate score of jumping from a_i -> a_last
                         // if a_i and a_last are not the same node, add a node insertion
+                        size_t overlap = seed_size;
                         if (a_last->node_idx < 0
                                 || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx]) {
-                            size_t new_nodes = full_j.get_sequence().size() - a_last->spelling_length;
+                            auto rbegin_i = full_i.get_sequence().rbegin() + (full_i.get_sequence().size() - a_i.spelling_length);
+                            auto rend_i = rbegin_i + std::min(graph.get_k(), static_cast<size_t>(full_i.get_sequence().rend() - rbegin_i));
+
+                            auto rbegin_last = full_j.get_sequence().rbegin() + (full_j.get_sequence().size() - a_last->spelling_length);
+                            auto rend_last = rbegin_last + std::min(graph.get_k(), static_cast<size_t>(full_j.get_sequence().rend() - rbegin_last));
+
+                            overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
 
                             // if there is not enough sequence left in the alignment, we can't connect them
-                            if (new_nodes + seed_size < graph.get_k())
+                            if (full_j.get_sequence().size() - a_last->spelling_length + overlap < graph.get_k())
                                 return;
 
                             updated_score += node_insert;
@@ -1466,7 +1473,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         if (updated_score > score_j) {
                             updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col);
                             update_score(updated_score, &a_i,
-                                        seed_size + (a_j.spelling_length - a_last->spelling_length));
+                                        overlap + (a_j.spelling_length - a_last->spelling_length));
                         }
                     } else if (full_query_i.end() <= full_query_j.begin()) {
                         // completely disjoint and a_i is at the end of full_i
@@ -1607,6 +1614,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(dist > seed_size);
                     assert(last_anchor->end == a_o->end);
                     assert(next->col == a_o->col);
+
                     cur.trim_query_suffix(cur.get_query_view().end() - a_o->end, config);
                     assert(cur.size());
                     assert(cur.is_valid(graph, &config));
@@ -1621,7 +1629,15 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(alignment.is_valid(graph, &config));
 
                     if (a_o->node_idx < 0 || cur.get_nodes().back() != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
-                        alignment.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
+                        auto rbegin_i = alignments[last_anchor->index].get_sequence().rbegin() + (alignments[last_anchor->index].get_sequence().size() - last_anchor->spelling_length);
+                        auto rend_i = rbegin_i + std::min(graph.get_k(), static_cast<size_t>(alignments[last_anchor->index].get_sequence().rend() - rbegin_i));
+
+                        auto rbegin_last = alignments[next->index].get_sequence().rbegin() + (alignments[next->index].get_sequence().size() - a_o->spelling_length);
+                        auto rend_last = rbegin_last + std::min(graph.get_k(), static_cast<size_t>(alignments[next->index].get_sequence().rend() - rbegin_last));
+
+                        ssize_t overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+
+                        alignment.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
                         assert(alignment.size());
                     }
                 } else {
