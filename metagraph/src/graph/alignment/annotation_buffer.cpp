@@ -276,10 +276,11 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
                                 auto row,
                                 auto&& labels,
                                 const CoordinateSet coords = {}) {
+        size_t num_labels = labels.size();
         auto do_push = [&](auto find, size_t labels_i) {
             find.value() = labels_i;
             if (has_local_coordinates()) {
-                assert(coords.size() == labels.size());
+                assert(coords.size() == num_labels);
                 size_t coord_idx = find - node_to_cols.begin();
                 if (coord_idx == label_coords.size()) {
                     label_coords.emplace_back(coords);
@@ -418,7 +419,6 @@ void AnnotationBuffer::fetch_annotations(const std::vector<std::vector<node_inde
 
             auto [labels, coords] = get_labels_and_coords(node);
             assert(labels);
-            assert(labels->size());
 
             for (node_index prev : parents[node]) {
                 node_index base_node = canonical_ ? canonical_->get_base_node(prev) : prev;

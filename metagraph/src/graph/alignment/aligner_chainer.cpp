@@ -1191,16 +1191,17 @@ void chain_alignments(const IDBGAligner &aligner,
                 case Cigar::INSERTION:
                 case Cigar::MISMATCH: {
                     if (it->first == Cigar::MISMATCH && it->second >= cur.size()) {
-                        cur.trim_query_suffix(cur.size() - 1, config);
+                        cur.trim_query_suffix(cur.size() - 1, config, false);
                     } else {
-                        cur.trim_query_suffix(it->second, config);
+                        cur.trim_query_suffix(it->second, config, false);
                     }
+                    assert(cur.size());
                 } break;
                 case Cigar::DELETION:
                 case Cigar::MATCH: {
                     size_t num_to_trim = it->second;
                     if (it->first == Cigar::MATCH && it->second >= seed_size) {
-                        for (size_t num_matches = it->second; num_matches >= seed_size && cur.size() > 1; --num_matches, --num_to_trim, cur.trim_query_suffix(1, config)) {
+                        for (size_t num_matches = it->second; num_matches >= seed_size && cur.size() > 1; --num_matches, --num_to_trim, cur.trim_query_suffix(1, config, false)) {
                             DEBUG_LOG("Anchor from: {}\t{}\t{}", i, cur.get_nodes().size() - 1, cur);
                             orientation_change += is_fwd_orientation;
                             auto end = cur.get_query_view().end();
@@ -1225,10 +1226,12 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
 
                     if (num_to_trim >= cur.size()) {
-                        cur.trim_query_suffix(cur.size() - 1, config);
+                        cur.trim_reference_suffix(cur.size() - 1, config, false);
                     } else {
-                        cur.trim_query_suffix(num_to_trim, config);
+                        cur.trim_reference_suffix(num_to_trim, config, false);
                     }
+
+                    assert(cur.size());
                 } break;
                 case Cigar::NODE_INSERTION:
                 case Cigar::CLIPPED: {
@@ -1450,8 +1453,15 @@ void chain_alignments(const IDBGAligner &aligner,
                         // calculate score of jumping from a_i -> a_last
                         // if a_i and a_last are not the same node, add a node insertion
                         if (a_last->node_idx < 0
-                                || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx])
+                                || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx]) {
+                            size_t new_nodes = full_j.get_sequence().size() - a_last->spelling_length;
+
+                            // if there is not enough sequence left in the alignment, we can't connect them
+                            if (new_nodes + seed_size < graph.get_k())
+                                return;
+
                             updated_score += node_insert;
+                        }
 
                         if (updated_score > score_j) {
                             updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col);
@@ -1603,11 +1613,11 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     alignment.trim_query_prefix(a_o->end - alignment.get_query_view().begin(),
                                                 graph.get_k() - 1, config, false);
+                    assert(alignment.size());
                     alignment.extend_offset(std::vector<node_index>(
                         alignment.get_sequence().size() - alignment.size(),
                         DeBruijnGraph::npos
                     ));
-                    assert(alignment.size());
                     assert(alignment.is_valid(graph, &config));
 
                     if (a_o->node_idx < 0 || cur.get_nodes().back() != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
