@@ -1414,10 +1414,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     // try to connect a_i -> a_j
                     ++chain_scores;
 
-                    const Alignment &full_i = alignments[a_i.index];
-                    std::string_view full_query_i = full_i.get_query_view();
-                    std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
-
                     auto [score_i, last_i, last_dist_i] = *chain_scores;
                     if (last_i == anchor_it) {
                         assert(!last_dist_i);
@@ -1434,6 +1430,10 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     if (last_dist_i < graph.get_k())
                         return;
+
+                    const Alignment &full_i = alignments[a_i.index];
+                    std::string_view full_query_i = full_i.get_query_view();
+                    std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
 
                     if (const Anchor *a_last = get_overlapping_prev(a_j, a_i)) {
                         // we want to connect a_i -> a_last(on j) -> a_j
