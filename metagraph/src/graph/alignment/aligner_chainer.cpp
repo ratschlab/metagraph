@@ -1369,14 +1369,14 @@ void chain_alignments(const IDBGAligner &aligner,
     assert(gap_ext >= gap_open);
     assert(node_insert < 0);
 
-    auto get_overlapping_prev = [&](const Anchor &a_i, const Anchor &a_j) -> const Anchor* {
-        // when we want to connect a_j -> a_i
-        // check if there is a previous seed a_last from in a_i.index s.t. a_last.end == a_j.end
-        auto find_last = coord_map[a_i.index].find(a_j.end);
-        if (find_last == coord_map[a_i.index].end())
+    auto get_overlapping_prev = [&](const Anchor &a_j, const Anchor &a_i) -> const Anchor* {
+        // when we want to connect a_i -> a_j
+        // check if there is a previous seed a_last from in a_j.index s.t. a_last.end == a_i.end
+        auto find_last = coord_map[a_j.index].find(a_i.end);
+        if (find_last == coord_map[a_j.index].end())
             return nullptr;
 
-        auto find_last_col = find_last->second.find(a_i.col);
+        auto find_last_col = find_last->second.find(a_j.col);
         return find_last_col != find_last->second.end() ? find_last_col->second : nullptr;
     };
 
