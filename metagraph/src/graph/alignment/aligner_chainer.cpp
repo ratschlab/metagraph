@@ -1412,17 +1412,11 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 std::for_each(begin, end, [&](const Anchor &a_i) {
                     // try to connect a_i -> a_j
-                    assert(&a_i != &a_j);
                     ++chain_scores;
 
                     const Alignment &full_i = alignments[a_i.index];
                     std::string_view full_query_i = full_i.get_query_view();
                     std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
-
-                    if (query_j.end() == query_i.end()
-                            || (a_i.col != a_j.col && (!allow_label_change || a_i.index == a_j.index))) {
-                        return;
-                    }
 
                     auto [score_i, last_i, last_dist_i] = *chain_scores;
                     if (last_i == anchor_it) {
@@ -1456,10 +1450,10 @@ void chain_alignments(const IDBGAligner &aligner,
                         if (a_last->node_idx < 0
                                 || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx]) {
                             auto rbegin_i = full_i.get_sequence().rbegin() + (full_i.get_sequence().size() - a_i.spelling_length);
-                            auto rend_i = rbegin_i + std::min(graph.get_k(), static_cast<size_t>(full_i.get_sequence().rend() - rbegin_i));
+                            auto rend_i = rbegin_i + std::min(graph.get_k() - 1, static_cast<size_t>(full_i.get_sequence().rend() - rbegin_i));
 
                             auto rbegin_last = full_j.get_sequence().rbegin() + (full_j.get_sequence().size() - a_last->spelling_length);
-                            auto rend_last = rbegin_last + std::min(graph.get_k(), static_cast<size_t>(full_j.get_sequence().rend() - rbegin_last));
+                            auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(full_j.get_sequence().rend() - rbegin_last));
 
                             overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
 
@@ -1630,10 +1624,10 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     if (a_o->node_idx < 0 || cur.get_nodes().back() != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
                         auto rbegin_i = alignments[last_anchor->index].get_sequence().rbegin() + (alignments[last_anchor->index].get_sequence().size() - last_anchor->spelling_length);
-                        auto rend_i = rbegin_i + std::min(graph.get_k(), static_cast<size_t>(alignments[last_anchor->index].get_sequence().rend() - rbegin_i));
+                        auto rend_i = rbegin_i + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[last_anchor->index].get_sequence().rend() - rbegin_i));
 
                         auto rbegin_last = alignments[next->index].get_sequence().rbegin() + (alignments[next->index].get_sequence().size() - a_o->spelling_length);
-                        auto rend_last = rbegin_last + std::min(graph.get_k(), static_cast<size_t>(alignments[next->index].get_sequence().rend() - rbegin_last));
+                        auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[next->index].get_sequence().rend() - rbegin_last));
 
                         ssize_t overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
 
