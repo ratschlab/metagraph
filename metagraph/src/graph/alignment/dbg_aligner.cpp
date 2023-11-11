@@ -514,8 +514,10 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             if (rest.size()) {
+                score_t best_nonmla_score = best_score;
                 std::vector<Alignment> chains;
                 size_t last_size = 0;
+                bool terminate = false;
                 chain_alignments(*this, std::move(rest),
                     [&](Alignment::Column col, size_t aln_size, score_t score) {
                         if (score < config_.min_path_score)
@@ -533,6 +535,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     [&](auto&& alignment) {
                         assert(alignment.is_valid(graph_, &config_));
                         assert(alignment.get_score() >= config_.min_path_score);
+                        if (alignment.get_score() < best_nonmla_score) {
+                            terminate = true;
+                            return;
+                        }
+
                         best_score = std::max(best_score, alignment.get_score());
                         query_coverage = std::max(query_coverage,
                                                 alignment.get_cigar().get_coverage());
@@ -546,11 +553,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                 return a.size() && a.is_valid(graph_, &config_);
                                             }));
                             last_size = chains.size();
+                            if (last_size > config_.num_alternative_paths) {
+                                terminate = true;
+                                return;
+                            }
                         }
 
                         chains.emplace_back(std::move(alignment));
-                    }
+                    },
+                    [&]() { return terminate; }
                 );
+
+                logger->trace("Assembled {} chains", chains.size());
 
                 if (chains.size()) {
                     std::sort(chains.begin(), chains.end(), AlignmentCompare());

@@ -1204,12 +1204,18 @@ void chain_alignments(const IDBGAligner &aligner,
                         for (size_t num_matches = it->second; num_matches >= seed_size && cur.size() > 1; --num_matches, --num_to_trim, cur.trim_query_suffix(1, config, false)) {
                             DEBUG_LOG("Anchor from: {}\t{}\t{}", i, cur.get_nodes().size() - 1, cur);
                             orientation_change += is_fwd_orientation;
+
                             auto end = cur.get_query_view().end();
+                            assert(anchors.empty() || anchors.back().index != i || anchors.back().end > end);
+
+                            size_t spelling_length = cur.get_sequence().size();
+                            assert(anchors.empty() || anchors.back().index != i || anchors.back().spelling_length > spelling_length);
+
                             const auto &a_i = anchors.emplace_back(Anchor{
                                 .end = end,
                                 .begin = end - seed_size,
                                 .index = i,
-                                .spelling_length = cur.get_sequence().size(),
+                                .spelling_length = spelling_length,
                                 .orientation = alignment.get_orientation(),
                                 .clipping = static_cast<size_t>(end - full_query_begin) - seed_size,
                                 .end_clipping = cur.get_end_clipping(),
@@ -1255,12 +1261,18 @@ void chain_alignments(const IDBGAligner &aligner,
                 ssize_t node_idx = static_cast<ssize_t>(cur.get_sequence().size()) - spelling_size;
                 DEBUG_LOG("Anchor from: {}\t{}\t{}", i, node_idx, cur);
                 orientation_change += is_fwd_orientation;
+
                 auto end = cur.get_query_view().end();
+                assert(anchors.empty() || anchors.back().index != i || anchors.back().end > end);
+
+                size_t spelling_length = cur.get_sequence().size();
+                assert(anchors.empty() || anchors.back().index != i || anchors.back().spelling_length > spelling_length);
+
                 anchors.emplace_back(Anchor{
                     .end = end,
                     .begin = end - seed_size,
                     .index = i,
-                    .spelling_length = cur.get_sequence().size(),
+                    .spelling_length = spelling_length,
                     .orientation = alignment.get_orientation(),
                     .clipping = static_cast<size_t>(end - full_query_begin) - seed_size,
                     .end_clipping = cur.get_end_clipping(),
@@ -1349,12 +1361,12 @@ void chain_alignments(const IDBGAligner &aligner,
     }
 
     // construct index to seed map
-    std::vector<tsl::hopscotch_map<std::string_view::const_iterator,
-                                   tsl::hopscotch_map<Alignment::Column, const Anchor*>>> coord_map(alignments.size());
+    using EndMap = tsl::hopscotch_map<std::string_view::const_iterator, const Anchor*>;
+    std::vector<tsl::hopscotch_map<Alignment::Column, EndMap>> coord_map(alignments.size());
     for (const auto &a : anchors) {
-        auto &bucket = coord_map[a.index][a.end];
-        assert(bucket.find(a.col) == bucket.end());
-        bucket[a.col] = &a;
+        auto &bucket = coord_map[a.index][a.col];
+        assert(bucket.find(a.end) == bucket.end());
+        bucket[a.end] = &a;
     }
 
     logger->trace("Chaining alignments using {} anchors for a query of length {}",
@@ -1369,15 +1381,18 @@ void chain_alignments(const IDBGAligner &aligner,
     assert(gap_ext >= gap_open);
     assert(node_insert < 0);
 
+    auto get_overlapping_prev_bucket = [&](const EndMap &bucket, const Anchor &a_i) -> const Anchor* {
+        // when we want to connect a_i -> a_j
+        // check if there is a previous seed a_last from in a_j.index s.t. a_last.end == a_i.end
+        auto find_last_col = bucket.find(a_i.end);
+        return find_last_col != bucket.end() ? find_last_col->second : nullptr;
+    };
+
     auto get_overlapping_prev = [&](const Anchor &a_j, const Anchor &a_i) -> const Anchor* {
         // when we want to connect a_i -> a_j
         // check if there is a previous seed a_last from in a_j.index s.t. a_last.end == a_i.end
-        auto find_last = coord_map[a_j.index].find(a_i.end);
-        if (find_last == coord_map[a_j.index].end())
-            return nullptr;
-
-        auto find_last_col = find_last->second.find(a_j.col);
-        return find_last_col != find_last->second.end() ? find_last_col->second : nullptr;
+        assert(coord_map[a_j.index].count(a_j.col));
+        return get_overlapping_prev_bucket(coord_map[a_j.index].find(a_j.col)->second, a_i);
     };
 
     auto last_anchor_it = anchors.data();
@@ -1407,12 +1422,16 @@ void chain_alignments(const IDBGAligner &aligner,
                 const Alignment &full_j = alignments[a_j.index];
                 std::string_view full_query_j = full_j.get_query_view();
                 std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
+                const EndMap *bucket = nullptr;
 
                 --chain_scores;
 
                 std::for_each(begin, end, [&](const Anchor &a_i) {
                     // try to connect a_i -> a_j
                     ++chain_scores;
+                    assert(a_i.end <= a_j.end);
+                    if (a_i.end == a_j.end)
+                        return;
 
                     auto [score_i, last_i, last_dist_i] = *chain_scores;
                     if (last_i == anchor_it) {
@@ -1431,12 +1450,17 @@ void chain_alignments(const IDBGAligner &aligner,
                     if (last_dist_i < graph.get_k())
                         return;
 
+                    assert(a_i.node_idx >= 0);
+
                     const Alignment &full_i = alignments[a_i.index];
                     std::string_view full_query_i = full_i.get_query_view();
                     std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
+                    if (!bucket)
+                        bucket = &coord_map[a_j.index].find(a_j.col)->second;
 
-                    if (const Anchor *a_last = get_overlapping_prev(a_j, a_i)) {
+                    if (const Anchor *a_last = get_overlapping_prev_bucket(*bucket, a_i)) {
                         // we want to connect a_i -> a_last(on j) -> a_j
+                        assert(a_last != &a_j);
                         assert(a_last->index == a_j.index);
                         assert(a_last->spelling_length < a_j.spelling_length);
                         assert(a_last->end == a_i.end);
@@ -1447,6 +1471,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         // calculate score of jumping from a_i -> a_last
                         // if a_i and a_last are not the same node, add a node insertion
                         size_t overlap = seed_size;
+
                         if (a_last->node_idx < 0
                                 || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx]) {
                             auto rbegin_i = full_i.get_sequence().rbegin() + (full_i.get_sequence().size() - a_i.spelling_length);
@@ -1462,6 +1487,8 @@ void chain_alignments(const IDBGAligner &aligner,
                                 return;
 
                             updated_score += node_insert;
+                        } else {
+                            overlap = graph.get_k();
                         }
 
                         if (updated_score > score_j) {
@@ -1623,15 +1650,20 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(alignment.is_valid(graph, &config));
 
                     if (a_o->node_idx < 0 || cur.get_nodes().back() != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
+#ifndef NDEBUG
                         auto rbegin_i = alignments[last_anchor->index].get_sequence().rbegin() + (alignments[last_anchor->index].get_sequence().size() - last_anchor->spelling_length);
                         auto rend_i = rbegin_i + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[last_anchor->index].get_sequence().rend() - rbegin_i));
 
                         auto rbegin_last = alignments[next->index].get_sequence().rbegin() + (alignments[next->index].get_sequence().size() - a_o->spelling_length);
                         auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[next->index].get_sequence().rend() - rbegin_last));
-
-                        ssize_t overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
-
-                        alignment.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+                        ssize_t test_overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+                        assert(dist == test_overlap + (next->spelling_length - a_o->spelling_length));
+#endif
+                        // dist == overlap + (next->spelling_length - a_o->spelling_length)
+                        alignment.insert_gap_prefix(
+                            static_cast<ssize_t>(next->spelling_length - a_o->spelling_length) - dist,
+                            graph.get_k() - 1, config
+                        );
                         assert(alignment.size());
                     }
                 } else {
