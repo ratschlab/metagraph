@@ -1423,8 +1423,6 @@ void chain_alignments(const IDBGAligner &aligner,
         Alignment::Columns col_idx = 0;
         score_t full_score = 0;
 
-        score_t switch_penalty = -1;
-
         chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
             [&](const Anchor &a_j,
                 ssize_t,
@@ -1481,7 +1479,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         assert(a_last->end == a_i.end);
 
                         // previous score, plus score of a_last -> a_j
-                        score_t updated_score = score_i + a_j.score - a_last->score + switch_penalty;
+                        score_t updated_score = score_i + a_j.score - a_last->score;
 
                         // calculate score of jumping from a_i -> a_last
                         // if a_i and a_last are not the same node, add a node insertion
@@ -1520,7 +1518,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         assert(gap_cost < 0);
 
-                        score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score + switch_penalty;
+                        score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score;
 
                         if (updated_score > score_j) {
                             updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
@@ -1632,7 +1630,6 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 Alignment alignment = alignments[next->index];
                 alignment.label_columns = col_idx;
-                full_score -= switch_penalty;
 
                 DEBUG_LOG("\t\tcur: {}", cur);
                 DEBUG_LOG("\t\tnxt: {}", alignment);
