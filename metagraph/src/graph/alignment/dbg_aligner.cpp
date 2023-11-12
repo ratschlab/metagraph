@@ -513,7 +513,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 }
             }
 
-            if (rest.size()) {
+            if (rest.size() > 1) {
                 score_t best_nonmla_score = best_score;
                 std::vector<Alignment> chains;
                 size_t last_size = 0;

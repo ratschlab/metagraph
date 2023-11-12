@@ -1221,7 +1221,7 @@ void chain_alignments(const IDBGAligner &aligner,
                                 .end_clipping = cur.get_end_clipping(),
                                 .node_idx = static_cast<ssize_t>(cur.get_nodes().size()) - 1,
                                 .score = cur.get_score(),
-                                .col = std::numeric_limits<Alignment::Column>::max()
+                                .col = alignment.label_columns
                             });
                             std::ignore = a_i;
 
@@ -1278,7 +1278,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     .end_clipping = cur.get_end_clipping(),
                     .node_idx = node_idx,
                     .score = cur.get_score(),
-                    .col = std::numeric_limits<Alignment::Column>::max()
+                    .col = alignment.label_columns
                 });
             }
         }
@@ -1288,27 +1288,39 @@ void chain_alignments(const IDBGAligner &aligner,
         if (begin == end)
             return;
 
-        std::sort(begin, end, [](const Anchor &a, const Anchor &b) { return a.col < b.col; });
-
         std::vector<tsl::hopscotch_set<size_t>> end_counters(query.size() + 1);
+        std::vector<tsl::hopscotch_set<node_index>> end_node_counters(query.size() + 1);
+        std::vector<tsl::hopscotch_set<Alignment::Columns>> end_col_counters(query.size() + 1);
 
         auto last_it = begin;
         while (last_it != end) {
-            auto it = std::find_if(last_it, end, [&](const Anchor &a) {
-                return a.col != last_it->col;
-            });
-
+            auto it = end;
             for (auto &c : end_counters) {
                 c.clear();
             }
 
             std::for_each(last_it, it, [&](const Anchor &a) {
                 end_counters[a.end_clipping + 1].emplace(a.index);
+                end_col_counters[a.end_clipping + 1].emplace(a.col);
+                if (a.node_idx >= 0)
+                    end_node_counters[a.end_clipping + 1].emplace(alignments[a.index].get_nodes()[a.node_idx]);
             });
 
             std::for_each(last_it, it, [&](Anchor &a) {
                 if (end_counters[a.end_clipping + 1].size() == 1
                         && end_counters[a.end_clipping].count(a.index)) {
+                    a.index = std::numeric_limits<size_t>::max();
+                    return;
+                }
+
+                if (end_node_counters[a.end_clipping + 1].size() == 1
+                        && end_node_counters[a.end_clipping].size() == 1
+                        && end_col_counters[a.end_clipping + 1].size() == 1
+                        && end_col_counters[a.end_clipping].size() == 1
+                        && *end_col_counters[a.end_clipping + 1].begin()
+                            == *end_col_counters[a.end_clipping].begin()
+                        && end_counters[a.end_clipping + 1]
+                            == end_counters[a.end_clipping]) {
                     a.index = std::numeric_limits<size_t>::max();
                 }
             });
@@ -1332,6 +1344,7 @@ void chain_alignments(const IDBGAligner &aligner,
         for (auto &a : anchors) {
             if (a.index != std::numeric_limits<size_t>::max()) {
                 assert(alignments[a.index].label_columns);
+                assert(alignments[a.index].label_columns == a.col);
                 assert(alignments[a.index].label_column_diffs.empty());
                 for (auto c : alignments[a.index].get_columns()) {
                     assert(c != std::numeric_limits<Alignment::Column>::max());
@@ -1410,6 +1423,8 @@ void chain_alignments(const IDBGAligner &aligner,
         Alignment::Columns col_idx = 0;
         score_t full_score = 0;
 
+        score_t switch_penalty = -1;
+
         chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
             [&](const Anchor &a_j,
                 ssize_t,
@@ -1466,7 +1481,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         assert(a_last->end == a_i.end);
 
                         // previous score, plus score of a_last -> a_j
-                        score_t updated_score = score_i + a_j.score - a_last->score;
+                        score_t updated_score = score_i + a_j.score - a_last->score + switch_penalty;
 
                         // calculate score of jumping from a_i -> a_last
                         // if a_i and a_last are not the same node, add a node insertion
@@ -1505,7 +1520,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         assert(gap_cost < 0);
 
-                        score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score;
+                        score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score + switch_penalty;
 
                         if (updated_score > score_j) {
                             updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
@@ -1515,6 +1530,9 @@ void chain_alignments(const IDBGAligner &aligner,
                 });
             },
             [&](const AnchorChain<Anchor> &chain, const std::vector<score_t> &score_traceback) {
+                if (chain.size() <= 1)
+                    return false;
+
                 assert(chain.size());
                 assert(score_traceback.size());
 
@@ -1545,7 +1563,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     return false;
                 }
 
-                if (chain.size() > 1 && std::all_of(chain.begin() + 1, chain.end(),
+                if (std::all_of(chain.begin() + 1, chain.end(),
                         [&](const auto &a) {
                             return a.first->index == chain.front().first->index;
                         })) {
@@ -1588,17 +1606,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     col_idx = anno_buffer->cache_column_set(1, next->col);
                 }
 
-#ifndef NDEBUG
-                auto check_aln = [&](Alignment aln, score_t label_change_score = DBGAlignerConfig::ninf) {
-                    assert(aln.size());
-                    assert(next->end <= aln.get_query_view().end());
-                    aln.trim_query_suffix(aln.get_query_view().end() - next->end, config);
-                    DEBUG_LOG("\tScore to now: {}\tChain: {}\tNode insertion penalty: {}\tLabel change score: {}",
-                              score_up_to_now, aln, node_insert, label_change_score);
-                    return aln.get_score() == score_up_to_now;
-                };
-#endif
-
                 if (cur.empty()) {
                     assert(!last_anchor);
                     Alignment alignment = alignments[next->index];
@@ -1608,7 +1615,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     alignment.extend_offset(std::vector<node_index>(added, DeBruijnGraph::npos));
 
                     DEBUG_LOG("\tStarting: {}\tfrom {}", alignment, alignments[next->index]);
-                    assert(check_aln(alignment));
                     callback(std::move(alignment));
                     return;
                 }
@@ -1618,7 +1624,6 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (next->index == last_anchor->index) {
                     assert(next->spelling_length > last_anchor->spelling_length);
                     assert(next->col == last_anchor->col);
-                    assert(check_aln(cur));
                     callback(std::move(cur));
                     return;
                 }
@@ -1627,6 +1632,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 Alignment alignment = alignments[next->index];
                 alignment.label_columns = col_idx;
+                full_score -= switch_penalty;
 
                 DEBUG_LOG("\t\tcur: {}", cur);
                 DEBUG_LOG("\t\tnxt: {}", alignment);
@@ -1701,7 +1707,6 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
                 assert(cur.get_end_clipping() == alignments[next->index].get_end_clipping());
-                assert(check_aln(cur, label_change_score));
                 callback(std::move(cur));
             },
             [&](Alignment&& aln) {
