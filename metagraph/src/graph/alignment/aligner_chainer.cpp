@@ -1500,7 +1500,7 @@ void chain_alignments(const IDBGAligner &aligner,
                             auto rbegin_last = full_j.get_sequence().rbegin() + (full_j.get_sequence().size() - a_last->spelling_length);
                             auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(full_j.get_sequence().rend() - rbegin_last));
 
-                            overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+                            overlap = std::mismatch(rbegin_i + seed_size, rend_i, rbegin_last + seed_size, rend_last).first - rbegin_i;
                             assert(overlap < graph.get_k());
 
                             // if there is not enough sequence left in the alignment until the next anchor, we can't connect them
