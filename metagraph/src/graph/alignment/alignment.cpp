@@ -436,12 +436,7 @@ size_t Alignment::trim_query_prefix(size_t n,
     auto s_it = sequence_.begin();
     auto node_it = nodes_.begin();
 
-    while (n || (trim_excess_deletions && it->first == Cigar::DELETION)) {
-        if (it == cigar_.data().end()) {
-            *this = Alignment();
-            return 0;
-        }
-
+    while (it != cigar_.data().end() && (n || (trim_excess_deletions && it->first == Cigar::DELETION))) {
         switch (it->first) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
@@ -482,9 +477,13 @@ size_t Alignment::trim_query_prefix(size_t n,
                     return 0;
                 }
             } break;
-            case Cigar::CLIPPED:
+            case Cigar::CLIPPED: {
+                assert(it + 1 == cigar_.data().end());
+                *this = Alignment();
+                return 0;
+            } break;
             case Cigar::NODE_INSERTION: {
-                assert(false && "trimming chains not supported");
+                assert(false && "should not have reached node insertion");
             } break;
         }
 
@@ -493,6 +492,11 @@ size_t Alignment::trim_query_prefix(size_t n,
             ++it;
             cigar_offset = 0;
         }
+    }
+
+    if (it == cigar_.data().end()) {
+        *this = Alignment();
+        return 0;
     }
 
     size_t seq_trim = s_it - sequence_.begin();
@@ -544,20 +548,25 @@ size_t Alignment::trim_query_suffix(size_t n,
 
     auto consume_ref = [&]() {
         assert(s_it != sequence_.rend());
+
         ++s_it;
         if (node_it + 1 < nodes_.rend()) {
+            if (!*node_it) {
+                auto it_p = std::find_if(it + 1, cigar_.data().rend(), [&](const auto &op) {
+                    return op.first == Cigar::NODE_INSERTION;
+                });
+
+                if (it_p != cigar_.data().rend())
+                    --(it_p->second);
+            }
+
             ++node_it;
         } else {
             *this = Alignment();
         }
     };
 
-    while (n || (trim_excess_deletions && it->first == Cigar::DELETION)) {
-        if (it == cigar_.data().rend()) {
-            *this = Alignment();
-            return 0;
-        }
-
+    while (it != cigar_.data().rend() && (n || (trim_excess_deletions && it->first == Cigar::DELETION))) {
         switch (it->first) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
@@ -584,17 +593,30 @@ size_t Alignment::trim_query_suffix(size_t n,
                 if (empty())
                     return 0;
             } break;
-            case Cigar::CLIPPED:
+            case Cigar::CLIPPED: {
+                assert(it + 1 == cigar_.data().rend());
+                *this = Alignment();
+                return 0;
+            } break;
             case Cigar::NODE_INSERTION: {
-                assert(false && "trimming chains not supported");
+                assert(false && "should not have reached node insertion");
             } break;
         }
 
         ++cigar_offset;
         if (cigar_offset == it->second) {
             ++it;
+            if (it != cigar_.data().rend() && !it->second) {
+                assert(it->first == Cigar::NODE_INSERTION);
+                ++it;
+            }
             cigar_offset = 0;
         }
+    }
+
+    if (it == cigar_.data().rend()) {
+        *this = Alignment();
+        return 0;
     }
 
     if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
@@ -656,12 +678,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
         }
     };
 
-    while (n || (trim_excess_insertions && it->first == Cigar::INSERTION)) {
-        if (it == cigar_.data().end()) {
-            *this = Alignment();
-            return 0;
-        }
-
+    while (it != cigar_.data().end() && (n || (trim_excess_insertions && it->first == Cigar::INSERTION))) {
         switch (it->first) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
@@ -686,9 +703,13 @@ size_t Alignment::trim_reference_prefix(size_t n,
                 if (empty())
                     return 0;
             } break;
-            case Cigar::NODE_INSERTION: {} break;
             case Cigar::CLIPPED: {
-                assert(false && "this should not happen");
+                assert(it + 1 == cigar_.data().end());
+                *this = Alignment();
+                return 0;
+            } break;
+            case Cigar::NODE_INSERTION: {
+                assert(false && "should not have reached node insertion");
             } break;
         }
 
@@ -697,6 +718,11 @@ size_t Alignment::trim_reference_prefix(size_t n,
             ++it;
             cigar_offset = 0;
         }
+    }
+
+    if (it == cigar_.data().end()) {
+        *this = Alignment();
+        return 0;
     }
 
     for (auto &coords : label_coordinates) {
@@ -751,18 +777,22 @@ size_t Alignment::trim_reference_suffix(size_t n,
         assert(s_it != sequence_.rend());
         ++s_it;
         if (node_it + 1 < nodes_.rend()) {
+            if (!*node_it) {
+                auto it_p = std::find_if(it + 1, cigar_.data().rend(), [&](const auto &op) {
+                    return op.first == Cigar::NODE_INSERTION;
+                });
+
+                if (it_p != cigar_.data().rend())
+                    --(it_p->second);
+            }
+
             ++node_it;
         } else {
             *this = Alignment();
         }
     };
 
-    while (n || (trim_excess_insertions && it->first == Cigar::INSERTION)) {
-        if (it == cigar_.data().rend()) {
-            *this = Alignment();
-            return 0;
-        }
-
+    while (it != cigar_.data().rend() && (n || (trim_excess_insertions && it->first == Cigar::INSERTION))) {
         switch (it->first) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
@@ -787,17 +817,30 @@ size_t Alignment::trim_reference_suffix(size_t n,
                 if (empty())
                     return 0;
             } break;
-            case Cigar::CLIPPED:
+            case Cigar::CLIPPED: {
+                assert(it + 1 == cigar_.data().rend());
+                *this = Alignment();
+                return 0;
+            } break;
             case Cigar::NODE_INSERTION: {
-                assert(false && "trimming chains not supported");
+                assert(false && "should not have reached node insertion");
             } break;
         }
 
         ++cigar_offset;
         if (cigar_offset == it->second) {
             ++it;
+            if (it != cigar_.data().rend() && !it->second) {
+                assert(it->first == Cigar::NODE_INSERTION);
+                ++it;
+            }
             cigar_offset = 0;
         }
+    }
+
+    if (it == cigar_.data().rend()) {
+        *this = Alignment();
+        return 0;
     }
 
     if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))

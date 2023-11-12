@@ -1195,6 +1195,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 case Cigar::INSERTION:
                 case Cigar::MISMATCH: {
                     if (it->first == Cigar::MISMATCH && it->second >= cur.size()) {
+                        assert(cur.size());
                         cur.trim_query_suffix(cur.size() - 1, config, false);
                     } else {
                         cur.trim_query_suffix(it->second, config, false);
@@ -1236,6 +1237,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
 
                     if (num_to_trim >= cur.size()) {
+                        assert(cur.size());
                         cur.trim_reference_suffix(cur.size() - 1, config, false);
                     } else {
                         cur.trim_reference_suffix(num_to_trim, config, false);
@@ -1467,6 +1469,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     assert(a_i.node_idx >= 0);
 
+                    if (a_j.node_idx < 0)
+                        return;
+
                     const Alignment &full_i = alignments[a_i.index];
                     std::string_view full_query_i = full_i.get_query_view();
                     std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
@@ -1496,9 +1501,10 @@ void chain_alignments(const IDBGAligner &aligner,
                             auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(full_j.get_sequence().rend() - rbegin_last));
 
                             overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+                            assert(overlap < graph.get_k());
 
-                            // if there is not enough sequence left in the alignment, we can't connect them
-                            if (full_j.get_sequence().size() - a_last->spelling_length + overlap < graph.get_k())
+                            // if there is not enough sequence left in the alignment until the next anchor, we can't connect them
+                            if (overlap + (a_j.spelling_length - a_last->spelling_length) < graph.get_k())
                                 return;
 
                             updated_score += node_insert;
@@ -1624,11 +1630,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (next->index == last_anchor->index) {
                     assert(next->spelling_length > last_anchor->spelling_length);
                     assert(next->col == last_anchor->col);
+                    assert(next->node_idx < 0 || alignments[next->index].get_nodes()[next->node_idx] == cur.get_nodes()[cur.get_nodes().size() - 1 - (alignments[next->index].get_sequence().size() - next->spelling_length)]);
                     callback(std::move(cur));
                     return;
                 }
-
-                std::ignore = dist;
 
                 Alignment alignment = alignments[next->index];
                 alignment.label_columns = col_idx;
@@ -1639,11 +1644,11 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (const Anchor *a_o = get_overlapping_prev(*next, *last_anchor)) {
                     assert(dist > seed_size);
                     assert(last_anchor->end == a_o->end);
+                    assert(last_anchor->node_idx >= 0);
                     assert(next->col == a_o->col);
 
                     cur.trim_query_suffix(cur.get_query_view().end() - a_o->end, config);
                     assert(cur.size());
-                    assert(cur.is_valid(graph, &config));
 
                     alignment.trim_query_prefix(a_o->end - alignment.get_query_view().begin(),
                                                 graph.get_k() - 1, config, false);
@@ -1654,22 +1659,27 @@ void chain_alignments(const IDBGAligner &aligner,
                     ));
                     assert(alignment.is_valid(graph, &config));
 
-                    if (a_o->node_idx < 0 || cur.get_nodes().back() != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
+                    if (a_o->node_idx < 0 || alignments[last_anchor->index].get_nodes()[last_anchor->node_idx] != alignments[a_o->index].get_nodes()[a_o->node_idx]) {
+                        assert(alignments[next->index].get_sequence().size() + dist - next->spelling_length >= graph.get_k());
 #ifndef NDEBUG
                         auto rbegin_i = alignments[last_anchor->index].get_sequence().rbegin() + (alignments[last_anchor->index].get_sequence().size() - last_anchor->spelling_length);
                         auto rend_i = rbegin_i + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[last_anchor->index].get_sequence().rend() - rbegin_i));
 
                         auto rbegin_last = alignments[next->index].get_sequence().rbegin() + (alignments[next->index].get_sequence().size() - a_o->spelling_length);
                         auto rend_last = rbegin_last + std::min(graph.get_k() - 1, static_cast<size_t>(alignments[next->index].get_sequence().rend() - rbegin_last));
-                        ssize_t test_overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+                        size_t test_overlap = std::mismatch(rbegin_i, rend_i, rbegin_last, rend_last).first - rbegin_i;
+                        assert(test_overlap < graph.get_k());
                         assert(dist == test_overlap + (next->spelling_length - a_o->spelling_length));
 #endif
+
                         // dist == overlap + (next->spelling_length - a_o->spelling_length)
                         alignment.insert_gap_prefix(
                             static_cast<ssize_t>(next->spelling_length - a_o->spelling_length) - dist,
                             graph.get_k() - 1, config
                         );
                         assert(alignment.size());
+                    } else {
+                        assert(dist == graph.get_k() + next->spelling_length - a_o->spelling_length);
                     }
                 } else {
                     // no overlap
@@ -1706,6 +1716,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
                 assert(cur.get_end_clipping() == alignments[next->index].get_end_clipping());
+                assert(next->node_idx >= 0);
+                assert(alignments[next->index].get_nodes()[next->node_idx] == cur.get_nodes()[cur.get_nodes().size() - 1 - (alignments[next->index].get_sequence().size() - next->spelling_length)]);
                 callback(std::move(cur));
             },
             [&](Alignment&& aln) {
