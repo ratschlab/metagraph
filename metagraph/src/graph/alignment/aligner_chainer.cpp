@@ -1174,6 +1174,10 @@ void chain_alignments(const IDBGAligner &aligner,
     size_t orientation_change = 0;
     std::vector<Anchor> anchors;
 
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    AnnotationBuffer *anno_buffer = nullptr;
+    bool allow_label_change = false;
+
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
         bool is_fwd_orientation = !alignment.get_orientation();
@@ -1221,7 +1225,7 @@ void chain_alignments(const IDBGAligner &aligner,
                                 .end_clipping = cur.get_end_clipping(),
                                 .node_idx = static_cast<ssize_t>(cur.get_nodes().size()) - 1,
                                 .score = cur.get_score(),
-                                .col = alignment.label_columns
+                                .col = labeled_aligner ? alignment.label_columns : std::numeric_limits<Seed::Column>::max()
                             });
                             std::ignore = a_i;
 
@@ -1278,7 +1282,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     .end_clipping = cur.get_end_clipping(),
                     .node_idx = node_idx,
                     .score = cur.get_score(),
-                    .col = alignment.label_columns
+                    .col = labeled_aligner ? alignment.label_columns : std::numeric_limits<Seed::Column>::max()
                 });
             }
         }
@@ -1331,10 +1335,6 @@ void chain_alignments(const IDBGAligner &aligner,
 
     preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
     preprocess_range(anchors.begin() + orientation_change, anchors.end());
-
-    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    AnnotationBuffer *anno_buffer = nullptr;
-    bool allow_label_change = false;
 
     if (labeled_aligner) {
         anno_buffer = &labeled_aligner->get_annotation_buffer();
@@ -1453,10 +1453,12 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
 
                     if (a_i.index == a_j.index) {
-                        assert(a_j.spelling_length > a_i.spelling_length);
-                        size_t added_length = a_j.spelling_length - a_i.spelling_length;
-                        update_score(score_i + a_j.score - a_i.score, &a_i,
-                                     last_dist_i + added_length);
+                        if (a_i.col == a_j.col) {
+                            assert(a_j.spelling_length > a_i.spelling_length);
+                            size_t added_length = a_j.spelling_length - a_i.spelling_length;
+                            update_score(score_i + a_j.score - a_i.score, &a_i,
+                                        last_dist_i + added_length);
+                        }
                         return;
                     }
 
