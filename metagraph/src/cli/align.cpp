@@ -439,7 +439,7 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
+            auto run_batch = [&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -470,7 +470,13 @@ int align_to_graph(Config *config) {
                         *out << res;
                     }
                 );
-            });
+            };
+
+            if (get_num_threads() > 1) {
+                thread_pool.enqueue(std::move(run_batch));
+            } else {
+                run_batch();
+            }
 
             num_bp += num_bytes_read;
         };

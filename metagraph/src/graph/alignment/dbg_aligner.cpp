@@ -262,11 +262,11 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             nodes.resize(this_query.size() - graph_.get_k() + 1);
         }
 
-        std::shared_ptr<ISeeder> seeder
-            = std::make_shared<Seeder>(graph_, this_query, false,
+        std::unique_ptr<ISeeder> seeder
+            = std::make_unique<Seeder>(graph_, this_query, false,
                                        std::vector<node_index>(nodes), config_);
 
-        std::shared_ptr<ISeeder> seeder_rc;
+        std::unique_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
@@ -283,7 +283,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             std::string_view reverse = wrapped_seqs[i].get_query(true);
 
-            seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
+            seeder_rc = std::make_unique<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
         }
 #endif
@@ -357,7 +357,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             for (auto &seed : seeder->get_seeds()) {
                 add_discarded(Alignment(seed, config_));
             }
-            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+            seeder = std::make_unique<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 
 #if ! _PROTEIN_GRAPH
@@ -365,7 +365,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             for (auto &seed : seeder_rc->get_seeds()) {
                 add_discarded(Alignment(seed, config_));
             }
-            seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+            seeder_rc = std::make_unique<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
 
@@ -792,7 +792,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_both_directions(std::string_view forward,
                         std::string_view reverse,
                         const ISeeder &forward_seeder,
-                        std::shared_ptr<ISeeder> reverse_seeder,
+                        const std::unique_ptr<ISeeder> &reverse_seeder,
                         Extender &forward_extender,
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,

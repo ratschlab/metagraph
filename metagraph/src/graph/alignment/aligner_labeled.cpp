@@ -584,7 +584,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
             num_seeds_left += seeds.size();
         }
 
-        seeder = make_shared<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
+        seeder = make_unique<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
 
 #if ! _PROTEIN_GRAPH
         if (has_rc[i]) {
@@ -597,7 +597,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
                 num_seeds_rc_left += seeds.size();
             }
 
-            seeder_rc = make_shared<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
+            seeder_rc = make_unique<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
         }
 #endif
 

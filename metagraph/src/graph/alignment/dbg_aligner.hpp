@@ -42,7 +42,7 @@ class IDBGAligner {
     virtual bool has_coordinates() const = 0;
     virtual bool has_local_coordinates() const = 0;
 
-    virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const = 0;
+    virtual std::unique_ptr<SeedFilteringExtender> build_extender(std::string_view query) const = 0;
 
     virtual const GraphSeqAnnotator* get_seq_annotator() const = 0;
 };
@@ -68,8 +68,8 @@ class DBGAligner : public IDBGAligner {
     virtual bool has_coordinates() const override { return false; }
     virtual bool has_local_coordinates() const override { return false; }
 
-    virtual std::shared_ptr<SeedFilteringExtender> build_extender(std::string_view query) const {
-        return std::make_shared<Extender>(*this, query);
+    virtual std::unique_ptr<SeedFilteringExtender> build_extender(std::string_view query) const {
+        return std::make_unique<Extender>(*this, query);
     }
 
     virtual const GraphSeqAnnotator* get_seq_annotator() const override final { return seq_annotator_.get(); }
@@ -83,7 +83,7 @@ class DBGAligner : public IDBGAligner {
 
     std::shared_ptr<const GraphSeqAnnotator> seq_annotator_;
 
-    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
+    typedef std::vector<std::pair<std::unique_ptr<ISeeder>, std::unique_ptr<ISeeder>>> BatchSeeders;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
                                        const std::vector<AlignmentResults> &wrapped_seqs,
@@ -102,7 +102,7 @@ class DBGAligner : public IDBGAligner {
     align_both_directions(std::string_view forward,
                           std::string_view reverse,
                           const ISeeder &forward_seeder,
-                          std::shared_ptr<ISeeder> reverse_seeder,
+                          const std::unique_ptr<ISeeder> &reverse_seeder,
                           Extender &forward_extender,
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
