@@ -180,6 +180,136 @@ cd ..
 
 find ~/metagenome/data/BIGSI/annotation/columns_primary/ -name "*.column.annodbg" > columns_primary.txt
 
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph;
+DIR=~/metagenome/data/BIGSI/build;
+mkdir $DIR/logs;
+
+sbatch -J "BIGSI_build" \
+     -o $DIR/logs/build_graph.slog \
+     -t 00-120 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=8G \
+    --wrap="find ${DIR}/../data -name \"*.unitigs.fasta.gz\" \
+        | /usr/bin/time -v $METAGRAPH build -v \
+            -k 31 \
+            --inplace \
+            --mode canonical \
+            --mem-cap-gb 50 \
+            --disk-swap ~/metagenome/scratch/nobackup \
+            -p 34 \
+            -o $DIR/graph; \
+    /usr/bin/time -v $METAGRAPH transform -v \
+            --to-fasta \
+            --primary-kmers \
+            -p 34 \
+            -o $DIR/primary_contigs \
+            $DIR/graph.dbg && \
+    rm $DIR/graph.dbg; \
+    /usr/bin/time -v $METAGRAPH build -v \
+            -k 31 \
+            --mode primary \
+            --mem-cap-gb 50 \
+            --disk-swap ~/metagenome/scratch/nobackup \
+            -p 34 \
+            -o $DIR/graph_primary \
+            $DIR/primary_contigs.fasta.gz; \
+    /usr/bin/time -v $METAGRAPH transform -v \
+            --state small \
+            -p 34 \
+            -o $DIR/graph_primary_small \
+            $DIR/graph_primary.dbg;"
+
+
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph;
+DIR=~/metagenome/data/BIGSI/annotation;
+mkdir ${DIR}/rd;
+ln -s $DIR/../graph_primary.dbg $DIR/rd/graph.dbg;
+
+mkdir ${DIR}/rd/rd_columns
+
+sbatch -J "BIGSI_rd_0" \
+     -o $DIR/../logs/rd_0.slog \
+     -t 7-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=20G \
+     --exclude compute-biomed-10 \
+    --wrap="cat $DIR/columns_primary.txt \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 0 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            --mem-cap-gb 500 \
+            -p 34"
+
+sbatch -J "BIGSI_rd_1" \
+     -d afterok:$(get_jobid BIGSI_rd_0) \
+     -o $DIR/../logs/rd_1.slog \
+     -t 7-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=20G \
+     --exclude compute-biomed-10 \
+    --wrap="cat $DIR/columns_primary.txt \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 1 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            --mem-cap-gb 500 \
+            -p 34 && \
+        rm ${DIR}/rd/rd_columns/*.row_count"
+
+sbatch -J "BIGSI_rd_2" \
+     -d afterok:$(get_jobid BIGSI_rd_1) \
+     -o $DIR/../logs/rd_2.slog \
+     -t 7-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=20G \
+     --exclude compute-biomed-10 \
+    --wrap="cat $DIR/columns_primary.txt \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 2 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            --mem-cap-gb 500 \
+            -p 34 && \
+        rm ${DIR}/rd/rd_columns/*.row_reduction && \
+        rm ${DIR}/rd/graph.dbg.pred* && \
+        rm ${DIR}/rd/graph.dbg.succ*"
+
+
+sed 's/annotation\/columns_primary/annotation\/rd\/rd_columns/' $DIR/columns_primary.txt \
+    | sed 's/.column.annodbg/.row_diff.annodbg/' > $DIR/rd/columns_rd.txt
+
+
+sbatch -J "BIGSI_rd_brwt" \
+     -d afterok:$(get_jobid BIGSI_rd_2) \
+     -o $DIR/../logs/rd_brwt.slog \
+     -t 5-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=18G \
+    --wrap="cat $DIR/rd/columns_rd.txt \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff_brwt \
+            --linkage-file $DIR/linkage_BIGSI_primary.csv \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/annotation \
+            -p 34 --parallel-nodes 10"
+
+sbatch -J "BIGSI_rd_brwt_relax" \
+     -d afterok:$(get_jobid BIGSI_rd_brwt) \
+     -o $DIR/../logs/rd_brwt_relax.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=18G \
+    --wrap="/usr/bin/time -v $METAGRAPH relax_brwt -v \
+        -p 34 \
+        --relax-arity 32 \
+        -o ${DIR}/annotation.relaxed \
+        ${DIR}/annotation.row_diff_brwt.annodbg"
+
+
 # bsub -J "build_rbbrwt_relax20_primary" \
 #      -oo ~/metagenome/data/BIGSI/logs/build_rbbrwt_primary.lsf \
 #      -W 120:00 \
@@ -409,20 +539,20 @@ tail -n +3 ~/metagenome/data/BIGSI/subsets/rename_columns.txt > ~/metagenome/dat
 for x in $(cat ~/metagenome/data/BIGSI/subsets/rename_columns_.txt); do echo "$x $(basename ${x%.unitigs.fasta.gz})"; done > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
 rm ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
 
-extension="_primary.rb_brwt.annodbg";
+extension="_primary.row_diff_sparse.annodbg";
 for i in {33..1}; do
     N=$((750 * i));
     annotation=~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}${extension};
-    old="${annotation%$extension}.path_labels${extension}";
-    mv $annotation $old;
+    new="${annotation%$extension}.new${extension}";
     bsub -J "rename_columns_${N}" \
          -oo /dev/null \
          -W 1:00 \
          -n 1 -R "rusage[mem=$((N * 6))] span[hosts=1]" \
         "~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno \
             --rename-cols ~/metagenome/data/BIGSI/subsets/rename_columns.txt \
-            -o $annotation \
-            $old && rm $old"; \
+            -o $new \
+            $annotation \
+            && mv $new $annotation"; \
 done
 ```
 
@@ -435,7 +565,7 @@ for i in {33..1}; do
          -W 24:00 \
          -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
         "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph_DNA transform_anno -v \
                 --anno-type row \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
@@ -443,9 +573,10 @@ for i in {33..1}; do
 done
 
 
-for i in {33..1}; do
+for i in {1,5,10,33}; do
     N=$((750 * i));
     bsub -J "to_flat_${N}" \
+         -w "to_row_${N}" \
          -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_flat_${N}_primary.lsf \
          -W 24:00 \
          -n 1 -R "rusage[mem=$((N * 10 + 15000))] span[hosts=1]" \
@@ -465,6 +596,21 @@ for i in {33..1}; do
          -n 1 -R "rusage[mem=$((N * 17))] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type rbfish \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
+                2>&1"; \
+done
+
+
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test2/metagraph_DNA;
+for i in {1,5,10,33}; do
+    N=$((750 * i));
+    bsub -J "to_row_sparse_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_row_sparse_${N}_primary.lsf \
+         -W 20:00 \
+         -n 1 -R "rusage[mem=$((N * 17))] span[hosts=1]" \
+        "/usr/bin/time -v $METAGRAPH transform_anno -v \
+                --anno-type row_sparse \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
                 2>&1"; \
@@ -513,37 +659,107 @@ for i in {33..1}; do
                 --parallel 20 \
                 2>&1"; \
 done
+
+
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph_DNA;
+for i in {33..1}; do
+    N=$((750 * i));
+    DIR=~/metagenome/data/BIGSI/subsets/annotation/rd_${N};
+    mkdir $DIR;
+    mkdir $DIR/rd_columns;
+    ln -s ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary.dbg $DIR/graph.dbg;
+    sbatch -J "to_rd_0_${N}" \
+         -o ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rd_0_${N}_primary.slog \
+         -t 00-24 \
+         --cpus-per-task 10 \
+         --mem-per-cpu=12G \
+        --wrap="find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
+            | /usr/bin/time -v $METAGRAPH transform_anno -v \
+                --anno-type row_diff \
+                --row-diff-stage 0 \
+                --mem-cap-gb 100 \
+                --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+                -i $DIR/graph.dbg \
+                -o $DIR/rd_columns/out \
+                -p 20"; \
+    sbatch -J "to_rd_1_${N}" \
+         -d afterok:$(get_jobid to_rd_0_${N}) \
+         -o ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rd_1_${N}_primary.slog \
+         -t 00-24 \
+         --cpus-per-task 10 \
+         --mem-per-cpu=12G \
+        --wrap="find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
+            | /usr/bin/time -v $METAGRAPH transform_anno -v \
+                --anno-type row_diff \
+                --row-diff-stage 1 \
+                --mem-cap-gb 100 \
+                --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+                -i $DIR/graph.dbg \
+                -o $DIR/rd_columns/out \
+                -p 20"; \
+    sbatch -J "to_rd_2_${N}" \
+         -d afterok:$(get_jobid to_rd_1_${N}) \
+         -o ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rd_2_${N}_primary.slog \
+         -t 00-24 \
+         --cpus-per-task 10 \
+         --mem-per-cpu=12G \
+        --wrap="find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
+            | /usr/bin/time -v $METAGRAPH transform_anno -v \
+                --anno-type row_diff \
+                --row-diff-stage 2 \
+                --mem-cap-gb 100 \
+                --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+                -i $DIR/graph.dbg \
+                -o $DIR/rd_columns/out \
+                -p 20"; \
+    sbatch -J "to_rd_flat_${N}" \
+         -d afterok:$(get_jobid to_rd_2_${N}) \
+         -o ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rd_flat_${N}_primary.slog \
+         -t 00-24 \
+         --cpus-per-task 10 \
+         --mem-per-cpu=12G \
+        --wrap="find ${DIR}/rd_columns -name \"*.annodbg\" \
+            | /usr/bin/time -v $METAGRAPH transform_anno -v \
+                --anno-type row_diff_flat \
+                --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+                -i ${DIR}/graph.dbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                -p 20"; \
+done
 ```
 
 ## Query graph
 ```bash
-METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_master/metagraph
 
 # file to query
 for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta \
+                ~/metagenome/data/BIGSI/subsets/query/samples/SRR322873.fastq.gz \
                 ~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta; do
-    NAME=metagraph.primary.small.rd_brwt
+    NAME=metagraph.rd_brwt.align_labeled
     # name of the output folder
     OUTDIR=~/metagenome/data/BIGSI/subsets/query_results/$(basename $QUERY)/${NAME}
+    rm -rf $OUTDIR
     mkdir -p $OUTDIR
 
     for num_columns in $(seq 750 3000 24750); do
-        run="$METAGRAPH query -v --min-kmers-fraction-label 0.0 --query-mode matches \
+        # run="$METAGRAPH query -v --min-kmers-fraction-label 0.0 --query-mode matches \
+        run="$METAGRAPH align -v \
                 -i \${TMPDIR}/graph.dbg \
                 -a \${TMPDIR}/graph.row_diff_brwt.annodbg \
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \
-            -W 3:50 \
+            -W 24:00 \
             -n 36 -R "rusage[mem=4000] span[hosts=1] select[model==XeonGold_6140]" \
             -oo ${OUTDIR}/${num_columns}.lsf \
             " \
-                TMPDIR=/dev/shm/$NAME_$num_columns_\${LSB_JOBID};
-                mkdir \${TMPDIR};
-                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}_primary.small.dbg \
+                TMPDIR=/dev/shm/$NAME_$num_columns_\${LSB_JOBID}; \
+                mkdir \${TMPDIR}; \
+                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}_primary.dbg \
                     \${TMPDIR}/graph.dbg; \
-                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}_primary.rd_100.row_diff_brwt.annodbg \
+                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}_primary.relaxed.row_diff_brwt.annodbg \
                     \${TMPDIR}/graph.row_diff_brwt.annodbg; \
                 /usr/bin/time -v $run > /dev/null 2> /dev/null; \
                 for i in {1..3}; do \
