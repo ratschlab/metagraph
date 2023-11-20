@@ -698,7 +698,8 @@ cluster_seeds(const IDBGAligner &aligner,
         clustered_seeds.emplace_back(it->first, std::move(it.value()));
     }
 
-    size_t max_num_seeds = config.num_alternative_paths;
+    size_t max_num_seeds = std::min(config.num_alternative_paths,
+                                    forward.size() * config.chains_per_char);
 
     logger->trace("Chaining anchors from {} labels", clustered_seed_map.size());
 
@@ -1113,12 +1114,13 @@ cluster_seeds(const IDBGAligner &aligner,
 
 Alignment::score_t get_label_change_score(const AnnotationBuffer *anno_buffer,
                                           Alignment::Column col_a,
-                                          Alignment::Column col_b) {
-    if (col_a == col_b)
+                                          Alignment::Column col_b,
+                                          score_t label_change_scale_factor) {
+    if (col_a == col_b || label_change_scale_factor == 0)
         return 0;
 
     assert(anno_buffer);
-    return anno_buffer->get_label_change_score(col_a, col_b);
+    return anno_buffer->get_label_change_score(col_a, col_b) * label_change_scale_factor;
 };
 
 void chain_alignments(const IDBGAligner &aligner,
@@ -1513,7 +1515,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         }
 
                         if (updated_score > score_j) {
-                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col);
+                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col, config.label_change_scale_factor);
                             update_score(updated_score, &a_i,
                                         overlap + (a_j.spelling_length - a_last->spelling_length));
                         }
@@ -1529,7 +1531,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score;
 
                         if (updated_score > score_j) {
-                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
+                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col, config.label_change_scale_factor);
                             update_score(updated_score, &a_i, a_j.spelling_length);
                         }
                     }
@@ -1701,7 +1703,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (next->col != last_anchor->col) {
                     assert(anno_buffer);
                     assert(allow_label_change);
-                    label_change_score = get_label_change_score(anno_buffer, last_anchor->col, next->col);
+                    label_change_score = get_label_change_score(anno_buffer, last_anchor->col, next->col, config.label_change_scale_factor);
                     DEBUG_LOG("\t\t\tLabel change: {} ({}) -> {} ({})\t{}",
                         last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
                         next->col, anno_buffer->get_annotator().get_label_encoder().decode(next->col),

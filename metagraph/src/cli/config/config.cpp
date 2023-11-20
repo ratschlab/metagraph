@@ -267,6 +267,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_mm_transversion_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-open-penalty")) {
             alignment_gap_opening_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-label-change-scale-factor")) {
+            alignment_label_change_scale_factor = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
             alignment_gap_extension_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-end-bonus")) {
@@ -292,6 +294,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-exact-match")) {
             alignment_min_exact_match = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-chains-per-char")) {
+            alignment_chains_per_char = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--max-hull-forks")) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
