@@ -6,7 +6,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
-
+#include <cassert>
 
 namespace mtg {
 namespace test {
@@ -107,23 +107,7 @@ build_graph<DBGHashString>(uint64_t k,
     return graph;
 }
 
-template <>
-std::shared_ptr<DeBruijnGraph>
-build_graph<DBGSSHash>(uint64_t k,
-                       std::vector<std::string> sequences,
-                       DeBruijnGraph::Mode) {
-    auto graph = std::make_shared<DBGSSHash>(k);
 
-    uint64_t max_index = graph->max_index();
-
-    for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++max_index); });
-    }
-
-    [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
-
-    return graph;
-}
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -144,6 +128,54 @@ build_graph<DBGBitmap>(uint64_t k,
         return std::make_shared<CanonicalDBG>(
                 std::static_pointer_cast<DeBruijnGraph>(graph), 2 /* cache size */);
 
+    return graph;
+}
+
+void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
+    std::ofstream fastaFile(outputFilename);
+    
+    if (!fastaFile.is_open()) {
+        std::cerr << "Error: Unable to open the output file." << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < sequences.size(); ++i) {
+        //fastaFile << ">Sequence_" << (i + 1) << "\n" << sequences[i] << "\n";
+        fastaFile << ">" << i << "\n" << sequences[i] << "\n";
+    }
+
+    fastaFile.close();
+}
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSSHash>(uint64_t k,
+                       std::vector<std::string> sequences,
+                       DeBruijnGraph::Mode) {
+    auto graph = std::make_shared<DBGSSHash>(k);
+
+    // use DBGHashString to build SSHash DBG
+    auto string_graph = std::make_shared<DBGHashString>(k);
+    uint64_t string_max_index = string_graph->max_index();
+
+    for (const auto &sequence : sequences) {
+        string_graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++string_max_index); });
+    }
+    [&]() { ASSERT_EQ(string_max_index, string_graph->max_index()); }();
+    //string_graph->serialize(dump_path);// dumps dbg but sequences are needed
+
+    std::string dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/dump.fa";
+    // not working: serialize primary mode tree
+    //auto db_graph = build_graph<DBGBitmap>(k, sequences, DeBruijnGraph::PRIMARY);
+    //db_graph->serialize(dump_path);
+    //new approach: 
+    if(sequences.size() == 0){
+        throw std::invalid_argument( "empty graph" );
+    }
+    sequences = get_primary_contigs<DBGBitmap>(k, sequences);
+    writeFastaFile(sequences, dump_path);
+    graph->load(dump_path);
+    
+    
     return graph;
 }
 
