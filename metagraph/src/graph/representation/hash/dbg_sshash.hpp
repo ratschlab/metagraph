@@ -13,7 +13,8 @@ namespace graph {
 
 class DBGSSHash : public DeBruijnGraph {
   public:
-    explicit DBGSSHash(size_t k) {}
+    explicit DBGSSHash(size_t k):k_(k) {}
+    DBGSSHash(std::string const& input_filename, size_t k);
 
 // SequenceGraph overrides
     void add_sequence(
@@ -36,7 +37,7 @@ class DBGSSHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)> &callback) const override;
 
-    uint64_t num_nodes() const override { return 0; }
+    uint64_t num_nodes() const override { return dict_.size(); }
 
     bool load(std::istream &in);
     bool load(const std::string &filename) override;
@@ -83,6 +84,8 @@ class DBGSSHash : public DeBruijnGraph {
 
   private:
     static const std::string alphabet_;
+    sshash::dictionary dict_;
+    size_t k_;
 };
 
 } // namespace graph
