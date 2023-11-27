@@ -698,8 +698,10 @@ cluster_seeds(const IDBGAligner &aligner,
         clustered_seeds.emplace_back(it->first, std::move(it.value()));
     }
 
-    size_t max_num_seeds = std::min(config.num_alternative_paths,
-                                    forward.size() * config.chains_per_char);
+    size_t max_num_seeds = std::max(
+        config.num_alternative_paths,
+        static_cast<size_t>(forward.size() * config.chains_per_char)
+    );
 
     logger->trace("Chaining anchors from {} labels", clustered_seed_map.size());
 
