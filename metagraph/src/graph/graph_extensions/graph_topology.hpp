@@ -5,6 +5,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "annotation/representation/seq_indexed/seq_indexed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 namespace mtg::graph {
 
@@ -16,7 +17,7 @@ class GraphSeqAnnotator : public SequenceGraph::GraphExtension {
   public:
     using Annotator = AnnotatedDBG::Annotator;
     using Label = Annotator::Label;
-    using Column = size_t;
+    using Column = annot::matrix::BinaryMatrix::Column;
     using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
     using SeqIds = typename annot::SeqIndexedAnnotator<Label>::SeqIds;
 
