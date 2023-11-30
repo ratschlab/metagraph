@@ -141,7 +141,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
 
     for (size_t i = 0; i < sequences.size(); ++i) {
         //fastaFile << ">Sequence_" << (i + 1) << "\n" << sequences[i] << "\n";
-        fastaFile << ">" << i << "\n" << sequences[i] << "\n";
+        fastaFile << ">"<< "\n" << sequences[i] << "\n";
     }
 
     fastaFile.close();
@@ -150,32 +150,28 @@ template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSSHash>(uint64_t k,
                        std::vector<std::string> sequences,
-                       DeBruijnGraph::Mode) {
+                       DeBruijnGraph::Mode mode) {
+
     auto graph = std::make_shared<DBGSSHash>(k);
 
-    // use DBGHashString to build SSHash DBG
-    auto string_graph = std::make_shared<DBGHashString>(k);
-    uint64_t string_max_index = string_graph->max_index();
-
-    for (const auto &sequence : sequences) {
-        string_graph->add_sequence(sequence, [&](auto i) { ASSERT_TRUE(i <= ++string_max_index); });
-    }
-    [&]() { ASSERT_EQ(string_max_index, string_graph->max_index()); }();
-    //string_graph->serialize(dump_path);// dumps dbg but sequences are needed
-
-    std::string dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/dump.fa";
-    // not working: serialize primary mode tree
-    //auto db_graph = build_graph<DBGBitmap>(k, sequences, DeBruijnGraph::PRIMARY);
-    //db_graph->serialize(dump_path);
-    //new approach: 
     if(sequences.size() == 0){
         throw std::invalid_argument( "empty graph" );
     }
-    sequences = get_primary_contigs<DBGBitmap>(k, sequences);
-    writeFastaFile(sequences, dump_path);
+    //std::string seq_dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/seq_dump.fa";
+    //writeFastaFile(sequences, seq_dump_path);
+    // use DBGHashString to get contigs for SSHash 
+    auto string_graph = build_graph<DBGHashString>(k, sequences,
+                           mode);
+
+    std::vector<std::string> contigs;
+    string_graph->call_sequences([&](const std::string &contig, const auto &) {
+        contigs.push_back(contig);
+    }, 1, false);
+    std::string dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/dump.fa";
+    //std::string expl_file = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/external-libraries/sshash/data/unitigs_stitched/ecoli4.fasta.unitigs.fa.ust.fa";
+    writeFastaFile(contigs, dump_path);
     graph->load(dump_path);
-    
-    
+
     return graph;
 }
 
