@@ -51,7 +51,7 @@ class DBGSSHash : public DeBruijnGraph {
     std::string get_node_sequence(node_index node) const override;
 
 // DeBruijnGraph overrides
-    size_t get_k() const override { return 0; }
+    size_t get_k() const override { return k_; }
 
     // TODO: add the support for the canonical mode
     Mode get_mode() const override { return BASIC; }
