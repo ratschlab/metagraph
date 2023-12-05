@@ -1035,6 +1035,7 @@ cluster_seeds(const IDBGAligner &aligner,
                 }
 
                 if (start_columns.empty()) {
+                    cur.label_coordinates.clear();
                     cur.trim_offset();
                     ++seed_count;
                     assert(cur.is_valid(graph, &config));
@@ -1062,6 +1063,7 @@ cluster_seeds(const IDBGAligner &aligner,
                 num_explored_nodes += extender->num_explored_nodes();
 
                 if (extensions.empty()) {
+                    cur.label_coordinates.clear();
                     cur.trim_offset();
                     ++seed_count;
                     assert(cur.is_valid(graph, &config));
@@ -1089,6 +1091,7 @@ cluster_seeds(const IDBGAligner &aligner,
                 }
             },
             [&](Alignment&& aln) {
+                aln.label_coordinates.clear();
                 aln.trim_offset();
                 ++seed_count;
                 assert(aln.is_valid(graph, &config));
