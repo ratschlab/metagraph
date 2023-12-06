@@ -2,19 +2,22 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
-#include <dictionary.hpp>
 #include <tsl/ordered_set.h>
 
 #include "graph/representation/base/sequence_graph.hpp"
 
-
+namespace sshash{
+class dictionary;
+}
 namespace mtg {
 namespace graph {
 
 class DBGSSHash : public DeBruijnGraph {
   public:
-    explicit DBGSSHash(size_t k):k_(k) {}
+    explicit DBGSSHash(size_t k);
     DBGSSHash(std::string const& input_filename, size_t k);
+
+    ~DBGSSHash();
 
 // SequenceGraph overrides
     void add_sequence(
@@ -37,7 +40,7 @@ class DBGSSHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)> &callback) const override;
 
-    uint64_t num_nodes() const override { return dict_.size(); }
+    uint64_t num_nodes() const override;
 
     bool load(std::istream &in);
     bool load(const std::string &filename) override;
@@ -46,15 +49,15 @@ class DBGSSHash : public DeBruijnGraph {
     void serialize(const std::string &filename) const override;
 
     static constexpr auto kExtension = ".sshashdbg";
-    std::string file_extension() const override { return kExtension; }
+    std::string file_extension() const override;
 
     std::string get_node_sequence(node_index node) const override;
 
 // DeBruijnGraph overrides
-    size_t get_k() const override { return k_; }
+    size_t get_k() const override ;
 
     // TODO: add the support for the canonical mode
-    Mode get_mode() const override { return BASIC; }
+    Mode get_mode() const override;
     
     node_index traverse(node_index node, char next_char) const override;
     node_index traverse_back(node_index node, char prev_char) const override;
@@ -84,7 +87,7 @@ class DBGSSHash : public DeBruijnGraph {
 
   private:
     static const std::string alphabet_;
-    sshash::dictionary dict_;
+    std::unique_ptr<sshash::dictionary> dict_;
     size_t k_;
 };
 
