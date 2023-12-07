@@ -172,7 +172,7 @@ void DBGSSHash::call_kmers(
 }
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
-    uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
+    uint64_t ssh_idx = dict_->lookup(kmer.begin(), false);
     return ssh_idx + 1;
 }
 
@@ -189,17 +189,46 @@ void DBGSSHash::serialize(std::ostream &out) const {
     throw std::runtime_error("serialize to stream not implemented");
 }
 
+void write_k_to_file(const std::string &filename, uint64_t k){
+    std::string k_file_name = filename + "_k.txt";
+    std::ofstream k_File(k_file_name);
+    if (!k_File.is_open()) {
+        std::cerr << "Error: Unable to open the k-output file." << std::endl;
+        return;
+    }
+    k_File << k;
+    k_File.close();
+}
 void DBGSSHash::serialize(const std::string &filename) const {
     dict_->dump(filename);
+    write_k_to_file(filename, k_);
 }
 
 bool DBGSSHash::load(std::istream &in) {
     throw std::runtime_error("load from stream not implemented");
     return false;
 }
+uint64_t load_k_from_file(const std::string &filename){
+    // Open the file in input mode
+    std::string k_file_name = filename + "_k.txt";
+    std::ifstream inputFile(k_file_name);
+
+    if (!inputFile.is_open()) {
+        std::cerr << "Error opening the file." << std::endl;
+        return 1;
+    }
+
+    // Read first line
+    std::string firstLine;
+    std::getline(inputFile, firstLine);
+    uint64_t k = std::stoi(firstLine);
+
+    return k;
+}
 
 bool DBGSSHash::load(const std::string &filename) {
     sshash::build_configuration build_config;
+    k_ = load_k_from_file(filename);
     build_config.k = k_;
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_+1)/2;

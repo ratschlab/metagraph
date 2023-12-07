@@ -40,7 +40,7 @@ template<> size_t max_test_k<DBGHashString>() {
     return 100;
 }
 template<> size_t max_test_k<DBGSSHash>() {
-    return 100;
+    return 31;
 }
 
 template <class Graph>
@@ -131,7 +131,7 @@ build_graph<DBGBitmap>(uint64_t k,
     return graph;
 }
 
-void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
+void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename, const uint64_t k) {
     std::ofstream fastaFile(outputFilename);
     
     if (!fastaFile.is_open()) {
@@ -139,12 +139,21 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
         return;
     }
 
+    std::string k_file_name = outputFilename + "_k.txt";
+    std::ofstream k_File(k_file_name);
+    if (!k_File.is_open()) {
+        std::cerr << "Error: Unable to open the k-output file." << std::endl;
+        return;
+    }
+    k_File << k;
+
     for (size_t i = 0; i < sequences.size(); ++i) {
         //fastaFile << ">Sequence_" << (i + 1) << "\n" << sequences[i] << "\n";
         fastaFile << ">"<< "\n" << sequences[i] << "\n";
     }
 
     fastaFile.close();
+    k_File.close();
 }
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -170,8 +179,8 @@ build_graph<DBGSSHash>(uint64_t k,
     std::string dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/dump.fa";
     //std::string expl_file = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/external-libraries/sshash/data/unitigs_stitched/ecoli4.fasta.unitigs.fa.ust.fa";
     std::string exp_seq = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/experiment_sequences.fa";
-    writeFastaFile(contigs, dump_path);
-    graph->load(exp_seq);
+    writeFastaFile(contigs, dump_path, k);
+    graph->load(dump_path);
 
     return graph;
 }
