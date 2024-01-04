@@ -7,7 +7,6 @@
 #include "differential_tests.hpp"
 #include "lookup_table_chisqrd_cdf.cpp"
 
-
 // https://github.com/tlemane/kmdiff/blob/6a56ce6f20abbf63928a19ebbfecb1968efd4cd3/include/kmdiff/log_factorial_table.hpp
 // cpp https://github.com/tlemane/kmdiff/blob/6a56ce6f20abbf63928a19ebbfecb1968efd4cd3/src/log_factorial_table.cpp
 namespace mtg{
@@ -118,7 +117,8 @@ double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold
 // adapted code from kmdiff.
 // previous is equivalent to mean_control,  mean_case, latter is equivalent to m_sum_controls, m_sum_cases
 std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, double out_sum)
-{
+{   
+    std::cout << "TEST";
     double mean = (out_sum + in_sum) / static_cast<double>(out_total_kmers + in_total_kmers);
 
     double alt_hypothesis = poisson_prob(out_sum, out_sum) +
@@ -128,13 +128,14 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
             poisson_prob(in_sum, mean * in_total_kmers);
 
     double likelihood_ratio = alt_hypothesis - null_hypothesis;
+    std::cout << "threshold " << likelihood_ratio << "ratio " << likelihood_ratio << "\n";
 
     double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
     bool sign = false;
     if (out_sum_normalized < in_sum) sign = true;
     if (out_sum_normalized >= in_sum // This checks if the rate for the foreground group is higher compared to the background.
         and likelihood_ratio > likelihood_ratio_threshold)
-        std::cout << sign;
+        // std::cout << sign;
     if (out_sum_normalized < in_sum // This checks if the rate for the foreground group is higher compared to the background.
         and likelihood_ratio > likelihood_ratio_threshold)
         return std::make_tuple(true, likelihood_ratio);

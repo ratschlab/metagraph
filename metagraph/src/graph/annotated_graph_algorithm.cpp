@@ -430,6 +430,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     // check all other labels and round 2 labels
     if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) {
+        logger->trace("1");
+
         sdsl::bit_vector union_mask
                 = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
@@ -480,8 +482,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
+    logger->trace("hello");
     if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
+        logger->trace("I'm here");
 
         if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included. // TODO change to test_by_unitig
             auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
@@ -490,23 +494,25 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                       in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
             // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
             const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+            logger->trace("AAAAAAAAAAAAA1");
             sdsl::bit_vector mask = in_mask;
             size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
             call_ones(in_mask, [&](node_index node) {
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
+                // logger->trace("in_sum {} out_sum {} ", in_sum, out_sum);
                 if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
                     ++kept_nodes;
                 else
                     mask[node] = false;
             });
-
             masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
             logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
         } else {
+            logger->trace("AAAAAAAAAAAAA2");
             masked_graph->likelihood_ratios.resize(counts.size()/2+1);
             std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
             std::atomic<uint64_t> total_unitigs(0);
