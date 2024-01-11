@@ -7,6 +7,7 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -249,7 +250,15 @@ int build_graph(Config *config) {
                                                              get_verbose()));
         }
 
-    } else {
+    } else if (config->graph_type == Config::GraphType::SSHASH){
+
+        graph.reset(new DBGSSHash(files.at(0), config->k));
+        if(files.size() > 1){
+            logger->error("Only one file for SSHash");
+            exit(1);
+        }
+        
+    }else {
         //slower method
         switch (config->graph_type) {
 
@@ -284,6 +293,10 @@ int build_graph(Config *config) {
                               " in dynamic regime is not supported");
                 exit(1);
 
+            case Config::GraphType::SSHASH:
+            logger->error("SSHash-graph construction"
+                              " in dynamic regime is not supported");
+                exit(1);
             case Config::GraphType::INVALID:
                 assert(false);
         }
