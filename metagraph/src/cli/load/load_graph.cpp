@@ -7,6 +7,7 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "cli/config/config.hpp"
@@ -36,6 +37,9 @@ Config::GraphType parse_graph_type(const std::string &filename) {
     } else if (utils::ends_with(filename, graph::DBGBitmap::kExtension)) {
         return Config::GraphType::BITMAP;
 
+    } else if (utils::ends_with(filename, graph::DBGSSHash::kExtension)) {
+        return Config::GraphType::SSHASH;
+
     } else {
         return Config::GraphType::INVALID;
     }
@@ -58,10 +62,10 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH_FAST:
             return load_critical_graph_from_file<DBGHashFast>(filename);
-
         case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<graph::DBGBitmap>(filename);
-
+        case Config::GraphType::SSHASH:
+            return load_critical_graph_from_file<graph::DBGSSHash>(filename);
         case Config::GraphType::INVALID:
             logger->error("Cannot load graph from file '{}', needs a valid file extension",
                           filename);

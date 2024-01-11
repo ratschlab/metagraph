@@ -224,6 +224,7 @@ class Config {
         HASH_PACKED,
         HASH_STR,
         HASH_FAST,
+        SSHASH,
         BITMAP,
     };
 

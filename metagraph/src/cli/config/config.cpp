@@ -817,7 +817,10 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
 
-    } else {
+    } else if (string == "sshash"){
+        return GraphType::SSHASH;
+    }
+     else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
     }
@@ -958,7 +961,7 @@ if (advanced) {
             fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct] / sshash\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
