@@ -9,10 +9,13 @@ DBGSSHash::~DBGSSHash() {}
 DBGSSHash::DBGSSHash(size_t k):k_(k) {
     dict_ = std::make_unique<sshash::dictionary>();
 }
-// replace this function by just using other constructor and load?
+
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k):k_(k){
     sshash::build_configuration build_config;
     build_config.k = k;//
+    // quick fix for value of m... k/2 but odd
+    build_config.m = (k_+1)/2;
+    if(build_config.m % 2 == 0) build_config.m++;
     dict_ = std::make_unique<sshash::dictionary>();
     dict_->build(input_filename, build_config);
 }
@@ -200,7 +203,8 @@ void write_k_to_file(const std::string &filename, uint64_t k){
     k_File.close();
 }
 void DBGSSHash::serialize(const std::string &filename) const {
-    dict_->dump(filename);
+    std::string suffixed_filename = utils::make_suffix(filename, kExtension);
+    dict_->dump(suffixed_filename);
     write_k_to_file(filename, k_);
 }
 
@@ -227,14 +231,20 @@ uint64_t load_k_from_file(const std::string &filename){
 }
 
 bool DBGSSHash::load(const std::string &filename) {
+    // remove file extension...
+    std::string filename_no_ext = filename;
+    if(utils::ends_with(filename, kExtension)){
+        size_t pos = filename.rfind(kExtension);
+        filename_no_ext = filename.substr(0, pos);
+    }
+    k_ = load_k_from_file(filename_no_ext);
     sshash::build_configuration build_config;
-    k_ = load_k_from_file(filename);
     build_config.k = k_;
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_+1)/2;
     if(build_config.m % 2 == 0) build_config.m++;
-    //build_config.tmp_dirname = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences";
-    dict_->build(filename, build_config);
+    std::string suffixed_filename = utils::make_suffix(filename_no_ext, kExtension);
+    dict_->build(suffixed_filename, build_config);
     return true;
 }
 

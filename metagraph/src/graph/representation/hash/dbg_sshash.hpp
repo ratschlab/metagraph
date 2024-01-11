@@ -3,7 +3,7 @@
 
 #include <iostream>
 #include <tsl/ordered_set.h>
-
+#include "common/utils/string_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 namespace sshash{
