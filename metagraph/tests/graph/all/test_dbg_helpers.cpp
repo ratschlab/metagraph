@@ -176,9 +176,9 @@ build_graph<DBGSSHash>(uint64_t k,
     string_graph->call_sequences([&](const std::string &contig, const auto &) {
         contigs.push_back(contig);
     }, 1, false);
-    std::string dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/dump.fa";
+    std::string dump_path = "../tests/data/sshash_sequences/dump.fa";
     //std::string expl_file = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/external-libraries/sshash/data/unitigs_stitched/ecoli4.fasta.unitigs.fa.ust.fa";
-    std::string exp_seq = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/experiment_sequences.fa";
+    //std::string exp_seq = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/experiment_sequences.fa";
     writeFastaFile(contigs, dump_path, k);
     graph->load(dump_path);
 
