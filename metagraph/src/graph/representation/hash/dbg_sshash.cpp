@@ -192,59 +192,30 @@ void DBGSSHash::serialize(std::ostream &out) const {
     throw std::runtime_error("serialize to stream not implemented");
 }
 
-void write_k_to_file(const std::string &filename, uint64_t k){
-    std::string k_file_name = filename + "_k.txt";
-    std::ofstream k_File(k_file_name);
-    if (!k_File.is_open()) {
-        std::cerr << "Error: Unable to open the k-output file." << std::endl;
-        return;
-    }
-    k_File << k;
-    k_File.close();
-}
 void DBGSSHash::serialize(const std::string &filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    dict_->dump(suffixed_filename);
-    write_k_to_file(filename, k_);
+    
+    essentials::logger("saving data structure to disk...");
+    essentials::save(*dict_, suffixed_filename.c_str());
+    essentials::logger("DONE");
 }
 
 bool DBGSSHash::load(std::istream &in) {
     throw std::runtime_error("load from stream not implemented");
     return false;
 }
-uint64_t load_k_from_file(const std::string &filename){
-    // Open the file in input mode
-    std::string k_file_name = filename + "_k.txt";
-    std::ifstream inputFile(k_file_name);
-
-    if (!inputFile.is_open()) {
-        std::cerr << "Error opening the file." << std::endl;
-        return 1;
-    }
-
-    // Read first line
-    std::string firstLine;
-    std::getline(inputFile, firstLine);
-    uint64_t k = std::stoi(firstLine);
-
-    return k;
-}
 
 bool DBGSSHash::load(const std::string &filename) {
-    // remove file extension...
-    std::string filename_no_ext = filename;
-    if(utils::ends_with(filename, kExtension)){
-        size_t pos = filename.rfind(kExtension);
-        filename_no_ext = filename.substr(0, pos);
+
+    uint64_t num_bytes_read = essentials::load(*dict_, filename.c_str());
+    bool verbose = true; // temp
+    if (verbose) {
+        std::cout << "index size: " << essentials::convert(num_bytes_read, essentials::MB)
+                  << " [MB] (" << (num_bytes_read * 8.0) / dict_->size() << " [bits/kmer])"
+                  << std::endl;
+        dict_->print_info();
     }
-    k_ = load_k_from_file(filename_no_ext);
-    sshash::build_configuration build_config;
-    build_config.k = k_;
-    // quick fix for value of m... k/2 but odd
-    build_config.m = (k_+1)/2;
-    if(build_config.m % 2 == 0) build_config.m++;
-    std::string suffixed_filename = utils::make_suffix(filename_no_ext, kExtension);
-    dict_->build(suffixed_filename, build_config);
+    k_ = dict_->k();
     return true;
 }
 
