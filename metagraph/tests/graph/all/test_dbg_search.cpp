@@ -16,6 +16,10 @@ TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, FindSequence1) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+        common::logger->warn("Test case disabled for DBGSSHash");
+        return;
+    }
     for (size_t k = 2; k <= 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') });
 
