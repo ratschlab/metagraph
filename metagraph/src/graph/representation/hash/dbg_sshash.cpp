@@ -206,8 +206,8 @@ bool DBGSSHash::load(std::istream &in) {
 }
 
 bool DBGSSHash::load(const std::string &filename) {
-
-    uint64_t num_bytes_read = essentials::load(*dict_, filename.c_str());
+    std::string suffixed_filename = utils::make_suffix(filename, kExtension);
+    uint64_t num_bytes_read = essentials::load(*dict_, suffixed_filename.c_str());
     bool verbose = true; // temp
     if (verbose) {
         std::cout << "index size: " << essentials::convert(num_bytes_read, essentials::MB)

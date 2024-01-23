@@ -131,7 +131,7 @@ build_graph<DBGBitmap>(uint64_t k,
     return graph;
 }
 
-void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename, const uint64_t k) {
+void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
     std::ofstream fastaFile(outputFilename);
     
     if (!fastaFile.is_open()) {
@@ -139,21 +139,11 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
         return;
     }
 
-    std::string k_file_name = outputFilename + "_k.txt";
-    std::ofstream k_File(k_file_name);
-    if (!k_File.is_open()) {
-        std::cerr << "Error: Unable to open the k-output file." << std::endl;
-        return;
-    }
-    k_File << k;
-
     for (size_t i = 0; i < sequences.size(); ++i) {
-        //fastaFile << ">Sequence_" << (i + 1) << "\n" << sequences[i] << "\n";
         fastaFile << ">"<< "\n" << sequences[i] << "\n";
     }
 
     fastaFile.close();
-    k_File.close();
 }
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -161,13 +151,12 @@ build_graph<DBGSSHash>(uint64_t k,
                        std::vector<std::string> sequences,
                        DeBruijnGraph::Mode mode) {
 
-    auto graph = std::make_shared<DBGSSHash>(k);
-
+    
+    
     if(sequences.size() == 0){
         throw std::invalid_argument( "empty graph" );
     }
-    //std::string seq_dump_path = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/seq_dump.fa";
-    //writeFastaFile(sequences, seq_dump_path);
+    
     // use DBGHashString to get contigs for SSHash 
     auto string_graph = build_graph<DBGHashString>(k, sequences,
                            mode);
@@ -176,11 +165,9 @@ build_graph<DBGSSHash>(uint64_t k,
     string_graph->call_sequences([&](const std::string &contig, const auto &) {
         contigs.push_back(contig);
     }, 1, false);
-    std::string dump_path = "../tests/data/sshash_sequences/dump.fa";
-    //std::string expl_file = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/external-libraries/sshash/data/unitigs_stitched/ecoli4.fasta.unitigs.fa.ust.fa";
-    //std::string exp_seq = "/home/marianna/Documents/Masterthesis/metagraph/metagraph/tests/data/sshash_sequences/experiment_sequences.fa";
-    writeFastaFile(contigs, dump_path, k);
-    graph->load(dump_path);
+    std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
+    writeFastaFile(contigs, dump_path);
+    auto graph = std::make_shared<DBGSSHash>(dump_path, k);
 
     return graph;
 }
