@@ -40,6 +40,7 @@ bool DifferentialTest::bonferroni_correction(double& pvalue)
 // using chi squared cdf??
 double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold on the liklihood ratio test 
     double corrected_pvalue = family_wise_error_rate/total_hypotheses; // Take into account the Bonferonni multiple testing correction
+    std::cout << "total_hypotheses " << total_hypotheses << "\n";
     if (family_wise_error_rate ==1)// Myrthe: ugly temporair method to put multiple testing off, and simply use a pvalue of 1 instead.
         return (double) 3840 / 1000 / 2;//corrected_pvalue = 0.05;
     Chi2PLookup lookup;
@@ -62,8 +63,11 @@ double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold
 std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, double out_sum)
 {
     double mean = (out_sum + in_sum) / static_cast<double>(out_total_kmers + in_total_kmers);
-    // std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << mean << std::endl;
-
+    std::cout << "out sum " << out_sum << "\n";
+    std::cout << "in sum " << in_sum << "\n";
+    std::cout << "mean " << mean << "\n";
+    std::cout << "out_total_kmers " << out_total_kmers << "\n";
+    std::cout << "in_total_kmers " << in_total_kmers << "\n";
     double alt_hypothesis = poisson_prob(out_sum, out_sum) +
             poisson_prob(in_sum, in_sum); // K2 equals N2Theta2 because Theta2 = K2/N2 (?). Shouldn't Theta2 be = K2/|background labels| ?
 
@@ -74,16 +78,15 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
     // std::cout << "threshold " << likelihood_ratio_threshold << "ratio " << likelihood_ratio << "\n"; 
     double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
     //std::cout << "out_sum_normalizes " << out_sum_normalized << "in_sum " << in_sum << "\n";
-    bool sign = false;
-    if (out_sum_normalized < in_sum) sign = true;
-    if ((out_sum_normalized >= in_sum) // This checks if the rate for the foreground group is higher compared to the background.
-        && (likelihood_ratio > likelihood_ratio_threshold)){
-        int lol = 1;
-        lol = 2;}
-    std::cout << (out_sum_normalized < in_sum) << "\n";
-    std::cout << (likelihood_ratio > likelihood_ratio_threshold) << "\n";    
+    // bool sign = false;
+    // if (out_sum_normalized < in_sum) sign = true;
+    // if ((out_sum_normalized >= in_sum) // This checks if the rate for the foreground group is higher compared to the background.
+    //     && (likelihood_ratio > likelihood_ratio_threshold)){
+    //     int lol = 1;
+    //     lol = 2;}
+    // // std::cout << (out_sum_normalized < in_sum) << "\n";
+    // // std::cout << (likelihood_ratio > likelihood_ratio_threshold) << "\n";    
     if ((out_sum_normalized < in_sum) && (likelihood_ratio > likelihood_ratio_threshold)){
-        std::cout<<"TRUE"<<"\n";
         return std::make_tuple(true, likelihood_ratio);
     }
     return std::make_tuple(false, likelihood_ratio);

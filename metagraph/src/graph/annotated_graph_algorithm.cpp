@@ -245,24 +245,30 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
 
 
-    auto count_vector = construct_diff_label_count_vector(
+    auto count_vector = construct_diff_label_count_vector( // called for each group (in and out)
             [&](const ColumnCallback &column_callback) {
             if (config.count_kmers) {
                 assert(files.size() > 0);
                 annot::ColumnCompressed<>::load_columns_and_values(files,
-                    [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
+                    [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { // goes through all files in a group
+                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0);
+                        int normalization_constant = 1e9;   //(int) 2**16 / width * column_values_sum
+                        logger->trace("OOOOOOOOOO total_kmers {}", total_kmers);
+                        auto normalization_factor = normalization_constant / total_kmers;
+                        int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
+                            logger->trace("OOOOOOOOOOO inside count_kmers column_values.size {}", column_values.size());
+                            logger->trace("OOOOOOOOOO column size {}", column->size());
+                            logger->trace("OOOOOOOOOO 0s {}", column->size()-column->num_set_bits());
                             assert(column->num_set_bits() > 0);
                             assert(column->num_set_bits() == column_values.size());
+                            logger->trace("OOOOOOOOOOO inside count_kmers column->num_set_bits() {}", column->num_set_bits());
                             //Normalization. normalize_coverage(column); This constant should be the same for every column. Calculate it from  the max width column. with the max value over all columns being the width of that column devidied by its column_values_sum
-                            int normalization_constant = 1e9;   //(int) 2**16 / width * column_values_sum;
-                            auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0);
-                            auto normalization_factor = normalization_constant / total_kmers;
-                            int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
                             call_ones(*column, [&](uint64_t i) {
                                 auto column_value = column_values[column->rank1(i)-1];
                                 column_value = std::min((int) std::ceil(column_value*normalization_factor), min_col_width); // normalize value
+                                // logger->trace("OOOOOOOOOO column_value {}", column_value);
                                 value_callback(i, column_value);
                             });
                         });
@@ -286,9 +292,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         add_complement
     );
 
-
     auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
-
+/*
     if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
 
         logger->trace("Evaluate confusion table");
@@ -316,10 +321,11 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         std::cout << std::accumulate(counts.begin(), counts.end(), 0) << std::flush;
         assert(true_positive + false_negative + false_positive == std::accumulate(counts.begin(), counts.end(), 0));
     } // in mask probably only has sequences
-
+*/
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     if (check_other && sdsl::util::cnt_one_bits(other_labels)) {
+        logger->trace("OOOOOOOOOOO Checking other labels");
         bool parallel = num_parallel_files > 1;
         size_t j = 0;
         std::atomic_thread_fence(std::memory_order_release);
@@ -345,7 +351,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 
-
+/*
     if (config.family_wise_error_rate == 0){  // Temporary code to make k-mer distribution
         logger->trace("K-mer distribution");
 
@@ -377,7 +383,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         );
         std::exit(EXIT_SUCCESS);
     }
-
+*/
     return mask_nodes_by_label(graph_ptr, nullptr,
                                std::move(counts), std::move(init_mask),
                                std::move(other_mask),
@@ -430,7 +436,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     // check all other labels and round 2 labels
     if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) {
-        logger->trace("1");
+        logger->trace("========= 1");
 
         sdsl::bit_vector union_mask
                 = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
@@ -482,7 +488,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
-    logger->trace("hello");
     if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
         logger->trace("I'm here");
@@ -494,7 +499,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                       in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
             // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
             const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
-            logger->trace("AAAAAAAAAAAAA1");
+            logger->trace("test_by_unitig == false");
             sdsl::bit_vector mask = in_mask;
             size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
@@ -502,6 +507,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
                 // logger->trace("in_sum {} out_sum {} ", in_sum, out_sum);
+                // logger->trace(std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)));
                 if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
                     ++kept_nodes;
                 else
@@ -817,12 +823,16 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
 
     logger->trace("Populating count matrix");
     generate_columns([&](uint64_t offset, const Label &label, const ValueGenerator &value_generator) {
+        logger->trace("OOOOOOOOOOOOOOOOOOO inside generate_columns");
         std::ignore = offset;// to overcome the error that 'offset' is set but not used.
         uint8_t col_indicator = static_cast<bool>(labels_in.count(label));
+        std::cout << "col_indicator: " << std::to_string(col_indicator) << std::endl;
         if (labels_out.count(label))
             col_indicator |= 2;
 
         ValueCallback add_in = [&](Column i, uint64_t value) {
+            std::cout << "i: " << std::to_string(i) << std::endl;
+            std::cout << "value: " << std::to_string(value) << std::endl;
             count_matrix[i * 2].push_back(value);
         };
 
