@@ -1501,6 +1501,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         if (a_last->node_idx < 0
                                 || full_j.get_nodes()[a_last->node_idx] != full_i.get_nodes()[a_i.node_idx]) {
+                            if (config.fixed_haplotype != 0)
+                                return;
+
                             auto rbegin_i = full_i.get_sequence().rbegin() + (full_i.get_sequence().size() - a_i.spelling_length);
                             auto rend_i = rbegin_i + std::min(graph.get_k() - 1, static_cast<size_t>(full_i.get_sequence().rend() - rbegin_i));
 
@@ -1520,12 +1523,19 @@ void chain_alignments(const IDBGAligner &aligner,
                         }
 
                         if (updated_score > score_j) {
-                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col, config.label_change_scale_factor);
+                            if (config.fixed_haplotype < 0 && a_i.col != a_last->col) {
+                                updated_score += config.fixed_haplotype;
+                            } else {
+                                updated_score += get_label_change_score(anno_buffer, a_i.col, a_last->col, config.label_change_scale_factor);
+                            }
                             update_score(updated_score, &a_i,
                                         overlap + (a_j.spelling_length - a_last->spelling_length));
                         }
                     } else if (full_query_i.end() <= full_query_j.begin()) {
                         // completely disjoint and a_i is at the end of full_i
+                        if (config.fixed_haplotype != 0)
+                            return;
+
                         score_t gap = full_query_j.begin() - full_query_i.end();
                         score_t gap_cost = node_insert + gap_open;
                         if (gap > 0)
@@ -1536,7 +1546,11 @@ void chain_alignments(const IDBGAligner &aligner,
                         score_t updated_score = score_i + full_i.get_score() - a_i.score + gap_cost + a_j.score;
 
                         if (updated_score > score_j) {
-                            updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col, config.label_change_scale_factor);
+                            if (config.fixed_haplotype < 0 && a_i.col != a_j.col) {
+                                updated_score += config.fixed_haplotype;
+                            } else {
+                                updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col, config.label_change_scale_factor);
+                            }
                             update_score(updated_score, &a_i, a_j.spelling_length);
                         }
                     }
@@ -1708,7 +1722,11 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (next->col != last_anchor->col) {
                     assert(anno_buffer);
                     assert(allow_label_change);
-                    label_change_score = get_label_change_score(anno_buffer, last_anchor->col, next->col, config.label_change_scale_factor);
+                    if (config.fixed_haplotype < 0 && last_anchor->col != next->col) {
+                        label_change_score = config.fixed_haplotype;
+                    } else {
+                        label_change_score = get_label_change_score(anno_buffer, last_anchor->col, next->col, config.label_change_scale_factor);
+                    }
                     DEBUG_LOG("\t\t\tLabel change: {} ({}) -> {} ({})\t{}",
                         last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
                         next->col, anno_buffer->get_annotator().get_label_encoder().decode(next->col),

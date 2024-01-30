@@ -609,11 +609,13 @@ int transform_annotation(Config *config) {
         return 0;
     }
 
+    /*
     if (config->anno_type == input_anno_type) {
         logger->info("Skipping conversion: same input and target type: {}",
                       Config::annotype_to_string(config->anno_type));
         return 0;
     }
+    */
 
     logger->trace("Converting to {} annotator...",
                   Config::annotype_to_string(config->anno_type));

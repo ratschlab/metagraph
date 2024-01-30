@@ -269,6 +269,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_gap_opening_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-label-change-scale-factor")) {
             alignment_label_change_scale_factor = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-fixed-haplotype")) {
+            alignment_fixed_haplotype = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
             alignment_gap_extension_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-end-bonus")) {

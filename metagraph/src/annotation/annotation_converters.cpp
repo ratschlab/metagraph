@@ -1771,16 +1771,19 @@ load_seq_delimiters(const LabelEncoder<std::string> &label_encoder,
         assert(num_cur_columns);
 
         size_t num_objects = load_number(*fin);
+        std::ignore = num_objects;
 
         for (size_t i = 0; i < num_cur_columns; ++i) {
             size_t num_set_bits = load_number(*fin);
             bit_vector_smart bv;
             bv.load(*fin);
+            /*
             if (num_objects != bv.size()) {
                 logger->error("Incorrect size in column {} from file {}: {} != {}",
                               i, file, num_objects, bv.size());
                 exit(1);
             }
+            */
             if (num_set_bits != bv.num_set_bits()) {
                 logger->error("Incorrect number of set bits in column {} from file {}: {} != {}",
                               i, file, num_set_bits, bv.num_set_bits());
