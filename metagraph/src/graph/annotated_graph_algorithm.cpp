@@ -106,7 +106,7 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
                              const DifferentialAssemblyConfig &config,
                              size_t num_threads);  // For kmer distribution.
 
-std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>, size_t, size_t, size_t>
 construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
@@ -115,7 +115,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   size_t max_index,
                                   size_t num_labels,
                                   size_t num_threads,
-                                  bool add_out_labels_to_mask);
+                                  bool add_out_labels_to_mask);                              
 
 // Regions of a graph mask which should be kept (i.e., masked in)
 typedef std::vector<std::pair<size_t, size_t>> Intervals;
@@ -152,7 +152,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const tsl::hopscotch_set<Label> &labels_out_round2,
                     std::tuple<size_t, size_t> total_kmers,
                     const DifferentialAssemblyConfig &config,
-                    size_t num_threads);
+                    size_t num_threads, size_t num_tested_kmers, size_t in_unique_kmers, size_t out_unique_kmers);
 
 std::shared_ptr<MaskedDeBruijnGraph> // This version of mask_nodes_by_label is for when the columns are already loaded.
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
@@ -211,7 +211,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         add_complement
     );
 
-    auto &[counts, init_mask, other_labels, total_kmers] = count_vector; //ERROR  only 3 names provided for structured binding, std::vector<long unsigned int, std::allocator<long unsigned int> > >’ decomposes into 4 elements
+    auto &[counts, init_mask, other_labels, total_kmers, num_tested_kmers, in_unique_kmers, out_unique_kmers] = count_vector; //ERROR  only 3 names provided for structured binding, std::vector<long unsigned int, std::allocator<long unsigned int> > >’ decomposes into 4 elements
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     return mask_nodes_by_label(graph_ptr, &anno_graph,
                                std::move(counts), std::move(init_mask),
@@ -219,7 +219,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                anno_graph.get_annotator().num_labels(),
                                labels_in, labels_out,
                                labels_in_round2, labels_out_round2, total_kmers,
-                               config, num_threads);
+                               config, num_threads, num_tested_kmers, in_unique_kmers, out_unique_kmers);
 }
 
 
@@ -243,32 +243,49 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
     logger->trace("Generating initial mask");
 
-
-
     auto count_vector = construct_diff_label_count_vector( // called for each group (in and out)
             [&](const ColumnCallback &column_callback) {
             if (config.count_kmers) {
                 assert(files.size() > 0);
+                // generate a vector of the total number of kmers per sample for each group (in and out)
+                std::vector<int> all_kmers_per_sample_in;
+                std::vector<int> all_kmers_per_sample_out;
+                annot::ColumnCompressed<>::load_columns_and_values(files,
+                    [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { 
+                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0) + column_values.size();
+                        if (labels_in.find(label) != labels_in.end())
+                        all_kmers_per_sample_in.push_back(total_kmers);
+                        else if (labels_out.find(label) != labels_out.end())
+                        all_kmers_per_sample_out.push_back(total_kmers);
+                        else throw std::runtime_error("Label not found in labels_in or labels_out");
+                    }
+                );
+                int min_kmer_count_in = *min_element(all_kmers_per_sample_in.begin(), all_kmers_per_sample_in.end());
+                int min_kmer_count_out = *min_element(all_kmers_per_sample_out.begin(), all_kmers_per_sample_out.end());
+                bool subsample = true; // subsample or normalize
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { // goes through all files in a group
-                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0);
-                        int normalization_constant = 1e9;   //(int) 2**16 / width * column_values_sum
-                        logger->trace("OOOOOOOOOO total_kmers {}", total_kmers);
+                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0) + column_values.size(); 
+                        int normalization_constant = 1e9;   // const to scale normalized values to save as int
                         auto normalization_factor = normalization_constant / total_kmers;
-                        int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
+                        int max_col_width = std::pow(2, 16); // max value for int16_t
+                        int min_kmer_counts;
+                        if (labels_in.find(label) != labels_in.end())
+                            min_kmer_counts = min_kmer_count_in;
+                        else if (labels_out.find(label) != labels_out.end())
+                            min_kmer_counts = min_kmer_count_out;
+                        else throw std::runtime_error("Label not found in labels_in or labels_out");
+                        double scaling = (double) total_kmers / min_kmer_counts; 
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
-                            assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
-                            logger->trace("OOOOOOOOOOO inside count_kmers column_values.size {}", column_values.size());
-                            logger->trace("OOOOOOOOOO column size {}", column->size());
-                            logger->trace("OOOOOOOOOO 0s {}", column->size()-column->num_set_bits());
-                            assert(column->num_set_bits() > 0);
-                            assert(column->num_set_bits() == column_values.size());
-                            logger->trace("OOOOOOOOOOO inside count_kmers column->num_set_bits() {}", column->num_set_bits());
-                            //Normalization. normalize_coverage(column); This constant should be the same for every column. Calculate it from  the max width column. with the max value over all columns being the width of that column devidied by its column_values_sum
+                            assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0); // at least one kmer in sample
+                            assert(column->num_set_bits() > 0); // at least one kmer present in sample
+                            assert(column->num_set_bits() == column_values.size()); // same number of kmers in column as in column_values
                             call_ones(*column, [&](uint64_t i) {
                                 auto column_value = column_values[column->rank1(i)-1];
-                                column_value = std::min((int) std::ceil(column_value*normalization_factor), min_col_width); // normalize value
-                                // logger->trace("OOOOOOOOOO column_value {}", column_value);
+                                if (subsample == true)
+                                    column_value = std::min((int) std::floor(column_value/scaling), max_col_width); // normalize value
+                                else
+                                    column_value = std::min((int) std::ceil(column_value*normalization_factor), max_col_width); // normalize value
                                 value_callback(i, column_value);
                             });
                         });
@@ -292,7 +309,14 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         add_complement
     );
 
-    auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
+    auto &[counts, init_mask, other_labels, total_kmers, num_tested_kmers, in_unique_kmers, out_unique_kmers] = count_vector; 
+    logger->trace("OOOOOOOOOOO num_tested_kmers {}", num_tested_kmers);
+    // total_kmers: tuple of in_total_kmers and out_total_kmers (number of kmers in foreground and background)
+    // init_mask: bit_vector of length graph_ptr->max_index() indicating which nodes are in the foreground (size = number of unique kmers total)
+    // counts: int_vector of length graph_ptr->max_index() * 2 indicating the number of in and out labels for each node (size = number of unique kmers total * 2)
+    // other_labels: bit_vector of length num_labels indicating which labels are not in or out labels 
+    logger->trace("OOOOOOOOOOO counts {}", counts.size());
+    logger->trace("OOOOOOOOOOO other_labels {}", other_labels);
 /*
     if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
 
@@ -324,7 +348,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 */
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
-    if (check_other && sdsl::util::cnt_one_bits(other_labels)) {
+    if (check_other && sdsl::util::cnt_one_bits(other_labels)) { // currently not used
         logger->trace("OOOOOOOOOOO Checking other labels");
         bool parallel = num_parallel_files > 1;
         size_t j = 0;
@@ -334,7 +358,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
             if (count_ones(other_labels, j, j + num_labels_per_file)) {
                 annot::ColumnCompressed<>::merge_load({ files[i] },
                     [&](size_t offset, const auto &, auto&& column) {
-                        auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
+                        auto &[counts, init_mask, other_labels, total_kmers, num_tested_kmers, in_unique_kmers, out_unique_kmers] = count_vector;
                         if (other_labels[j + offset]) {
                             call_ones(init_mask, [&](size_t i) { // check how many set bits are also in other labels.
                                 if ((*column)[AnnotatedDBG::graph_to_anno_index(i)])
@@ -390,7 +414,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                files.size(),
                                labels_in, labels_out, {}, {},
                                total_kmers,
-                               config, num_threads);
+                               config, num_threads, num_tested_kmers, in_unique_kmers, out_unique_kmers);
 }
 
 std::shared_ptr<MaskedDeBruijnGraph>
@@ -406,8 +430,9 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const tsl::hopscotch_set<Label> &labels_out_round2,
                     std::tuple<size_t, size_t> total_kmers,
                     const DifferentialAssemblyConfig &config,
-                    size_t num_threads) {
+                    size_t num_threads, size_t num_tested_kmers, size_t in_unique_kmers, size_t out_unique_kmers) {
     // in and out counts are stored interleaved in the counts vector
+    logger->trace("aaaaaaaaaaaaaaaaaaaaaA counts {}", counts.size());
     assert(counts.size() == init_mask.size() * 2);
 
     bool parallel = num_threads > 1;
@@ -435,8 +460,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     };
 
     // check all other labels and round 2 labels
-    if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) {
-        logger->trace("========= 1");
+    if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) { // currently not used? only in binary?
 
         sdsl::bit_vector union_mask
                 = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
@@ -456,7 +480,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           }
                       });
                   };
-
         logger->trace("Checking shared and other labels");
         masked_graph->call_sequences(
                 [&](const std::string &contig, const std::vector<node_index> &path) {
@@ -491,23 +514,21 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
         logger->trace("I'm here");
-
-        if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included. // TODO change to test_by_unitig
-            auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
+        logger->trace("AAAAAAAAAAaa in_unique_kmers {}", in_unique_kmers);
+        logger->trace("AAAAAAAAAAAAAAAA out_unique_kmers {}", out_unique_kmers);
+        if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included.
+            auto total_hypotheses = num_tested_kmers; // the total number of hypotheses tested: kmers that are present more in the foreground than in the background.
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
                                                       std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
-                                                      in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
-            // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
+                                                      in_total_kmers, out_total_kmers, in_unique_kmers, out_unique_kmers); 
             const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
             logger->trace("test_by_unitig == false");
             sdsl::bit_vector mask = in_mask;
             size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
-            call_ones(in_mask, [&](node_index node) {
+            call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control: tested inside likelihood_ratio_test 
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
-                // logger->trace("in_sum {} out_sum {} ", in_sum, out_sum);
-                // logger->trace(std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)));
                 if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
                     ++kept_nodes;
                 else
@@ -517,8 +538,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
-        } else {
-            logger->trace("AAAAAAAAAAAAA2");
+        } else { // binary approach
             masked_graph->likelihood_ratios.resize(counts.size()/2+1);
             std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
             std::atomic<uint64_t> total_unitigs(0);
@@ -528,7 +548,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, // total number of hypotheses equals the number of unitigs
                                                std::min((int) std::distance(counts.begin(),
                                                std::max_element(counts.begin(), counts.end())), (int) 100000), // Myrthe: the factorial should increase for the unitig mode.
-                                               in_total_kmers, out_total_kmers);
+                                               in_total_kmers, out_total_kmers, in_unique_kmers, out_unique_kmers); // Myrthe: I don't know what to do with the last two arguments.
             update_masked_graph_by_unitig(*masked_graph, // intitial mask
                 [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // return a set of intervals to keep in the graph
                     int in_kmer_count_unitig = 0;
@@ -702,7 +722,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 }
 
 
-std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>, size_t, size_t, size_t>
 construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
@@ -720,14 +740,14 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     if (config.count_kmers){ // calculate the sum of column widths to derive an upper bound for the required counts vector width.
         assert(labels_in.size() > 0);
         size_t sum_widths_in = 0; size_t sum_widths_out = 0;
-        for (size_t i = 0; i < files.size(); ++i) {
+        for (size_t i = 0; i < files.size(); ++i) { // loopes over files
             const auto &values_fname = utils::remove_suffix(files[i],
                  annot::ColumnCompressed<>::kExtension) + annot::ColumnCompressed<>::kCountExtension;
             sdsl::int_vector_size_type col_size; uint8_t col_width;
             std::ifstream in_stream(values_fname);
             sdsl::int_vector<>::read_header(col_size, col_width, in_stream);
             auto label_encoder = annot::ColumnCompressed<>::read_label_encoder(files[i]);
-            for (size_t c = 0; c < label_encoder.size(); ++c) {
+            for (size_t c = 0; c < label_encoder.size(); ++c) { // loopes over kmers
                 auto label = label_encoder.decode(c);
                 if (labels_in.count(label)) sum_widths_in += std::pow(2, col_width);
                 if (labels_out.count(label)) sum_widths_out += std::pow(2, col_width);
@@ -803,9 +823,19 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     std::atomic_thread_fence(std::memory_order_acquire);
     logger->trace("done");
     assert( std::accumulate(counts.begin(), counts.end(), 0) > 0); // assert that the sum of the count vector is greater than 0
+    size_t num_tested_kmers = 0;
+    size_t in_unique_kmers = 0; 
+    size_t out_unique_kmers = 0;
+    for(size_t i = 0; i < counts.size(); i+=2){
+        if(counts[i]>0) in_unique_kmers += 1;
+        if(counts[i+1]>0) out_unique_kmers += 1;
+        if (counts[i] > counts[i+1])
+        num_tested_kmers += 1;
+    };
 
     return std::make_tuple(std::move(counts), std::move(indicator), std::move(other_labels),
-                           std::make_tuple(std::move(in_total_kmers), std::move(out_total_kmers)));
+                           std::make_tuple(std::move(in_total_kmers), std::move(out_total_kmers)), 
+                           std::move(num_tested_kmers), std::move(in_unique_kmers), std::move(out_unique_kmers));
 }
 
 
