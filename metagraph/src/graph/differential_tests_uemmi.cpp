@@ -13,13 +13,11 @@
 namespace mtg{
 
 DifferentialTest::DifferentialTest(double family_wise_error_rate, size_t total_hypotheses, size_t ,
-                                   size_t in_total_kmers, size_t out_total_kmers, size_t in_unique_kmers, size_t out_unique_kmers): 
+                                   size_t in_total_kmers, size_t out_total_kmers): 
     family_wise_error_rate(family_wise_error_rate),
     total_hypotheses(total_hypotheses),
     in_total_kmers(in_total_kmers),
-    out_total_kmers(out_total_kmers), 
-    in_unique_kmers(in_unique_kmers),
-    out_unique_kmers(out_unique_kmers)
+    out_total_kmers(out_total_kmers)
     {}
 
 // loglikelihood of poisson dist.
@@ -72,8 +70,7 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
     // add pseudocounts
     in_sum += 1;
     out_sum += 1;
-    double mean = (out_sum + in_sum)*(out_total_kmers+in_total_kmers)/ static_cast<double>(out_unique_kmers + in_unique_kmers);
-    // mean = (out_sum + in_sum)/ static_cast<double>(out_total_kmers + in_total_kmers);
+    double mean = (out_sum + in_sum)/ static_cast<double>(out_total_kmers + in_total_kmers);
     // double lambda = (in_sum/in_total_kmers + out_sum/out_total_kmers)/2 * ((out_total_kmers+in_total_kmers)/2);
     std::cout << "out sum " << out_sum << "\n";
     std::cout << "in sum " << in_sum << "\n";

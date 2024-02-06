@@ -22,9 +22,7 @@ class DifferentialTest {
                      size_t total_hypotheses,
                      size_t preload_table_size,
                      size_t in_total_kmers,
-                     size_t out_total_kmers, 
-                     size_t in_unique_kmers, 
-                     size_t out_unique_kmers);
+                     size_t out_total_kmers);
 
     double poisson_prob(int k, double lambda);
 
