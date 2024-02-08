@@ -35,6 +35,12 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 // k = x = number of successes = number kmers in in group
 // needs counts for all samples not just sum or avg
 
+std::tuple<std::vector<int>, std::vector<double>> sorted_pvalues(){
+    std::vector<int> nodes_sorted;
+    std::vector<double> pvalues_sorted;
+
+    return std::make_tuple(nodes_sorted, pvalues_sorted);
+}
 
 // not in use at the moment
 bool DifferentialTest::bonferroni_correction(double& pvalue)
@@ -84,8 +90,8 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
             poisson_prob(in_sum, mean * in_total_kmers);
 
     double likelihood_ratio = alt_hypothesis - null_hypothesis;
-    double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;  
-    if ((out_sum_normalized < in_sum) && (likelihood_ratio > likelihood_ratio_threshold)){
+    // double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;  
+    if (likelihood_ratio > likelihood_ratio_threshold){
         return std::make_tuple(true, likelihood_ratio);
     }
     return std::make_tuple(false, likelihood_ratio);

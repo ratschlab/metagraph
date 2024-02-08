@@ -26,7 +26,7 @@ class DifferentialTest {
 
     double poisson_prob(int k, double lambda);
 
-    double negative_binomial_prob(int k, double lambda);
+    std::tuple<std::vector<int>, std::vector<double>> sorted_pvalues();
 
     bool bonferroni_correction(double &pvalue);
 

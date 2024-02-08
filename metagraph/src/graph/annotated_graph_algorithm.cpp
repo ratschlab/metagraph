@@ -124,6 +124,11 @@ typedef std::vector<std::pair<size_t, size_t>> Intervals;
 // Returns a vector of kept regions given a unitig and its corresponding path
 typedef std::function<Intervals(const std::string&, const std::vector<node_index>&)> GetKeptIntervals;
 
+// Compare the first element of two pairs (used for sorting)
+bool sortByPValue(const std::pair<int, double>& a, const std::pair<int, double>& b) {
+    return a.first < b.first; // Sort in ascending order of p-values
+}
+
 // Assemble unitigs from the masked graph, then use get_kept_intervals to generate
 // regions which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
@@ -524,14 +529,27 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             sdsl::bit_vector mask = in_mask;
             size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
-            call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control: tested inside likelihood_ratio_test 
+            //std::vector<int> nodes;
+            std::vector<std::pair<double,int>> likelihood_ratios_nodes;
+            call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control 
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
-                if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
-                    ++kept_nodes;
+                double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
+                if (in_sum > out_sum_normalized) {
+                    auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
+                    likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
+                    if (keep)
+                        ++kept_nodes;
+                    else
+                        mask[node] = false;
+                }
                 else
-                    mask[node] = false;
+                    mask[node] = false;        
             });
+            std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
+            logger->trace("likelihood_ratios__nodes_elem {}, {}, {}", likelihood_ratios_nodes[0].first, likelihood_ratios_nodes[1].first, likelihood_ratios_nodes[2].first);
+            logger->trace("likelihood_ratios_nodes_size {}", likelihood_ratios_nodes.size());
+            logger->trace("num_tests {}", total_hypotheses);
             masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
             logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
