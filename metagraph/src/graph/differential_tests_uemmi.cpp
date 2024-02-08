@@ -68,6 +68,21 @@ double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold
     return (double)  low / lookup.divisor / 2.0; // Note that 2*LRT is Chi-squared distributed.
 }
 
+int DifferentialTest::benjamini_yekutieli(std::vector<std::pair<double, int>> likelihood_ratios, double lrt_threshold){
+    int m = likelihood_ratios.size();
+    double gamma = 0.5772156649; // euler-mascheroni constant
+    double c = std::log(m)  + gamma + 1/(2*m); // taylor expansion for sum(1/i) from 1 to m
+    int max_i = 0;
+    for (int i = 0; i <= m-1; i++){
+        double pvalue = likelihood_ratios[i].first;
+        double qvalue = lrt_threshold * (i+1) / (m * c);
+        if (pvalue <= qvalue){
+            max_i = i;
+        } 
+    }
+    return max_i;
+}
+
 
 // adapted code from kmdiff.
 // previous is equivalent to mean_control,  mean_case, latter is equivalent to m_sum_controls, m_sum_cases

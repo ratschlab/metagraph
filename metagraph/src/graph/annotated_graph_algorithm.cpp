@@ -538,15 +538,22 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (in_sum > out_sum_normalized) {
                     auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
                     likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
-                    if (keep)
-                        ++kept_nodes;
-                    else
-                        mask[node] = false;
+                    // if (keep)
+                    //     ++kept_nodes;
+                    // else
+                    //     mask[node] = false;
                 }
                 else
                     mask[node] = false;        
             });
+            // get index for benjamini-yekutieli correction
             std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
+            int max_i = statistical_model.benjamini_yekutieli(likelihood_ratios_nodes, statistical_model.lrt_threshold());
+            // reject all hypotheses with index <= max_i
+            for (int i = 0; i <= max_i; i++){
+                mask[likelihood_ratios_nodes[i].second] = false;
+            }
+            logger->trace("max_i {}", max_i);
             logger->trace("likelihood_ratios__nodes_elem {}, {}, {}", likelihood_ratios_nodes[0].first, likelihood_ratios_nodes[1].first, likelihood_ratios_nodes[2].first);
             logger->trace("likelihood_ratios_nodes_size {}", likelihood_ratios_nodes.size());
             logger->trace("num_tests {}", total_hypotheses);

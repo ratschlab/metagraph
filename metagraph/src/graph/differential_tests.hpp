@@ -26,7 +26,7 @@ class DifferentialTest {
 
     double poisson_prob(int k, double lambda);
 
-    std::tuple<std::vector<int>, std::vector<double>> sorted_pvalues();
+    int benjamini_yekutieli(std::vector<std::pair<double, int>> likelihood_ratios, double lrt_threshold);
 
     bool bonferroni_correction(double &pvalue);
 
