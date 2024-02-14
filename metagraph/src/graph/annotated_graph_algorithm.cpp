@@ -8,6 +8,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "differential_tests.hpp"
 #include "timer.hpp"
+#include <sdust.h>
 
 namespace mtg {
 namespace graph {
@@ -127,6 +128,15 @@ typedef std::function<Intervals(const std::string&, const std::vector<node_index
 // Compare the first element of two pairs (used for sorting)
 bool sortByPValue(const std::pair<int, double>& a, const std::pair<int, double>& b) {
     return a.first < b.first; // Sort in ascending order of p-values
+}
+
+inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+    int n;
+    std::unique_ptr<uint64_t, decltype(std::free)*> r {
+        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
+        std::free
+    };
+    return n > 0;
 }
 
 // Assemble unitigs from the masked graph, then use get_kept_intervals to generate
@@ -534,17 +544,23 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control 
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
-                double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
-                if (in_sum > out_sum_normalized) {
-                    auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
-                    likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
-                    // if (keep)
-                    //     ++kept_nodes;
-                    // else
-                    //     mask[node] = false;
-                }
-                else
-                    mask[node] = false;        
+                // filter kmers in samples less noise
+                // if (in_sum + out_sum >= int(total_nodes/20)) { // check for minimum occurance of k-mer
+                    double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
+                    if (in_sum > out_sum_normalized) { // check that kmer occurs more in foreground than in background
+                        // check for high complexity
+                        auto kmer_string = graph_ptr->get_node_sequence(node);
+                        auto complexity_low = is_low_complexity(kmer_string);
+                        logger->trace("kmer_string: {}", kmer_string);
+                        logger->trace("complexity_low: {}", complexity_low);
+                        auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
+                        likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
+                    }
+                    else
+                        mask[node] = false; 
+                // }
+                // else
+                //     mask[node] = false;               
             });
             // get index for benjamini-yekutieli correction
             std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);

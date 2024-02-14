@@ -3,9 +3,11 @@
 #include <numbers>
 #include <iostream>
 #include <cassert>
+#include<algorithm>
 
 #include "differential_tests.hpp"
 #include "lookup_table_chisqrd_cdf.cpp"
+#include "look_up_table_t_dist.cpp"
 
 
 // https://github.com/tlemane/kmdiff/blob/6a56ce6f20abbf63928a19ebbfecb1968efd4cd3/include/kmdiff/log_factorial_table.hpp
@@ -28,12 +30,69 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
     return (-lambda + (k * std::log(lambda))); // One does not need to subtract the factorial of k because it divides away in the likelihood ratio.
 }
 
-// TODO: implement negative binomial 
-// loglikelihood of negative binomial dist.
-// p = succes probability = avg occurance of kmers in sampels (either in and out or both together), 
-// r = number of failures = number of kmers in out group, 
-// k = x = number of successes = number kmers in in group
-// needs counts for all samples not just sum or avg
+double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
+    return t_table.getCriticalValue(alpha, df);
+}
+
+std::vector<double> DifferentialTest::get_midranks(std::vector<int> in_counts, int size_in_counts){
+    std::vector<double> mid_ranks;
+    std::sort(in_counts.begin(), in_counts.end());
+    double curr_value = in_counts[0];
+    int tied = 1;
+    for (int i = 1; i<size_in_counts; i++){
+        if (in_counts[i] == curr_value){
+            tied++;
+        }
+        else{
+            for (int j = i-tied; j<i; j++){
+                mid_ranks.push_back((i-tied) + (tied+1)/2.0);
+            }
+            curr_value = in_counts[i];
+            tied = 1;
+        }
+    }
+    return mid_ranks;
+}
+
+std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<int> in_counts, std::vector<int> out_counts){
+    std::vector<double> mid_ranks_in;
+    std::vector<double> mid_ranks_out;
+    int m = in_counts.size();
+    int n = out_counts.size();
+    int N = m + n;
+    // populate mid_ranks_in and mid_ranks_out
+    mid_ranks_in = get_midranks(in_counts, m);
+    mid_ranks_out = get_midranks(out_counts, n);
+    // get means of midranks
+    double mean_mid_rank_in = std::accumulate(mid_ranks_in.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_in.size();
+    double mean_mid_rank_out = std::accumulate(mid_ranks_out.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_out.size();
+    // get means
+    double mean_in = std::accumulate(in_counts.begin(), in_counts.end(), 0.0) / m;
+    double mean_out = std::accumulate(out_counts.begin(), out_counts.end(), 0.0) / n;
+    // get variances
+    double var_in = 0;
+    for (int i = 0; i < m; i++) 
+        var_in += (in_counts[i] - mean_in) * (in_counts[i] - mean_in);
+    var_in /= m;
+    double var_out = 0;
+    for (int i = 0; i < n; i++) 
+        var_out += (out_counts[i] - mean_out) * (out_counts[i] - mean_out);
+    var_out /= n;               
+    // get test statistic
+    double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
+    // get degrees of freedom with welch-satterthwaite equation
+    double df_approx = (var_in*var_in/m + var_out*var_out/n)*(var_in*var_in/m + var_out*var_out/n) / (((var_in*var_in/m)*(var_in*var_in/m)/(m - 1)) + ((var_out*var_out/n)*(var_out*var_out/n)/(n - 1)));
+    int df = std::floor(df_approx);
+    // get t statistic alpha value
+    double alpha = get_t_test_alpha(df, 0.05);
+    if( std::abs(b) > alpha){
+        return std::tuple(true, b);
+    }
+    else{
+        return std::tuple(false, b);
+    }
+}
+
 
 std::tuple<std::vector<int>, std::vector<double>> sorted_pvalues(){
     std::vector<int> nodes_sorted;
