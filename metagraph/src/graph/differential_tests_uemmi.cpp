@@ -83,9 +83,6 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<int> 
     // get means of midranks
     double mean_mid_rank_in = std::accumulate(mid_ranks_in.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_in.size();
     double mean_mid_rank_out = std::accumulate(mid_ranks_out.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_out.size();
-    // get means
-    double mean_in = std::accumulate(in_counts.begin(), in_counts.end(), 0.0) / m;
-    double mean_out = std::accumulate(out_counts.begin(), out_counts.end(), 0.0) / n;
     // get variances
     double var_in = get_var(in_counts, m);
     double var_out = get_var(out_counts, n);              
