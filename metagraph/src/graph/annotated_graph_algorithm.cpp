@@ -908,6 +908,13 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
         }
     });
 
+    size_t num_tested_kmers = 0;
+    for(size_t i = 0; i < counts.size(); i+=2){
+        if (counts[i] > counts[i+1])
+        num_tested_kmers += 1;
+    };
+    logger->trace("num_tested_kmers: {}", num_tested_kmers);
+
     std::atomic_thread_fence(std::memory_order_acquire);
     logger->trace("done");
     assert( std::accumulate(counts.begin(), counts.end(), 0) > 0); // assert that the sum of the count vector is greater than 0
