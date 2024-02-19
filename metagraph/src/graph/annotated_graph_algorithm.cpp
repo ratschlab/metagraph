@@ -10,6 +10,7 @@
 #include "timer.hpp"
 #include <sdust.h>
 #include "common/vectors/transpose.hpp"
+#include <typeinfo>
 
 namespace mtg {
 namespace graph {
@@ -305,6 +306,24 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
     auto count_vector = construct_diff_label_count_vector( // called for each group (in and out)
             [&](const ColumnCallback &column_callback) {
             if (config.count_kmers) {
+                // brunner munzel test
+                // call kmer matrix per row
+                std::vector<std::unique_ptr<bit_vector>> columns_all;
+                std::vector<std::unique_ptr<sdsl::int_vector<>>> column_values_all;
+                annot::ColumnCompressed<>::load_columns_and_values(files,
+                    [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { 
+                        columns_all.push_back(std::move(column));
+                        column_values_all.push_back(std::make_unique<sdsl::int_vector<>>(std::move(column_values)));
+                    }
+                );
+                utils::call_rows<std::unique_ptr<bit_vector>,
+                                std::unique_ptr<sdsl::int_vector<>>,
+                                std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
+                                    //std::ignore = row;
+                                    //logger->trace("ooooooooooooooo Row1: {}, row2 {}", std::get<0>(row[0]), std::get<1>(row[0]));
+                                    logger->trace("ooooooooooooooo Row1: {}", typeid(std::get<0>(row[0])).name());
+                                    logger->trace("ooooooooooooooo Row2: {}", std::get<1>(row[0]));
+                });
                 assert(files.size() > 0);
                 // generate a vector of the total number of kmers per sample for each group (in and out)
                 Timer t;
