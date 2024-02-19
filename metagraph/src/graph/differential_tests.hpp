@@ -41,5 +41,9 @@ class DifferentialTest {
     std::vector<double> get_midranks(std::vector<int> in_counts, int size_in_counts);
 
     std::tuple<bool, double> likelihood_ratio_test(double in_sum, double out_sum);
+
+    int get_df_approx(std::vector<int> in_counts, std::vector<int> out_counts);
+
+    double get_var(std::vector<int> counts, int n);
 };
 } // namespace mtg

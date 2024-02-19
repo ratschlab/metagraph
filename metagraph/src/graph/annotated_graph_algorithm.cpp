@@ -9,6 +9,7 @@
 #include "differential_tests.hpp"
 #include "timer.hpp"
 #include <sdust.h>
+#include "common/vectors/bit_vector_sdsl.hpp"
 
 namespace mtg {
 namespace graph {
@@ -129,6 +130,48 @@ typedef std::function<Intervals(const std::string&, const std::vector<node_index
 bool sortByPValue(const std::pair<int, double>& a, const std::pair<int, double>& b) {
     return a.first < b.first; // Sort in ascending order of p-values
 }
+
+// Function for calculating 
+// the median 
+double findMedian(sdsl::int_vector<0> a, 
+                  int n) 
+{ 
+    // If size of the arr[] is even 
+    if (n % 2 == 0) { 
+  
+        // Applying nth_element 
+        // on n/2th index 
+        std::nth_element(a.begin(), 
+                    a.begin() + n / 2, 
+                    a.end()); 
+  
+        // Applying nth_element 
+        // on (n-1)/2 th index 
+        std::nth_element(a.begin(), 
+                    a.begin() + (n - 1) / 2, 
+                    a.end()); 
+  
+        // Find the average of value at 
+        // index N/2 and (N-1)/2 
+        return (double)(a[(n - 1) / 2] 
+                        + a[n / 2]) 
+               / 2.0; 
+    } 
+  
+    // If size of the arr[] is odd 
+    else { 
+  
+        // Applying nth_element 
+        // on n/2 
+        std::nth_element(a.begin(), 
+                    a.begin() + n / 2, 
+                    a.end()); 
+  
+        // Value at index (N/2)th 
+        // is the median 
+        return (double)a[n / 2]; 
+    } 
+} 
 
 inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     int n;
@@ -269,7 +312,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 std::vector<int> all_kmers_per_sample_out;
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { 
-                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0) + column_values.size();
+                        auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0) + column_values.size(); // adding pseudocounts
                         if (labels_in.find(label) != labels_in.end())
                         all_kmers_per_sample_in.push_back(total_kmers);
                         else if (labels_out.find(label) != labels_out.end())
@@ -293,15 +336,17 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                         else if (labels_out.find(label) != labels_out.end())
                             min_kmer_counts = min_kmer_count_out;
                         else throw std::runtime_error("Label not found in labels_in or labels_out");
-                        double scaling = (double) total_kmers / min_kmer_counts; 
+                        // double scaling = (double) total_kmers / min_kmer_counts; 
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0); // at least one kmer in sample
                             assert(column->num_set_bits() > 0); // at least one kmer present in sample
                             assert(column->num_set_bits() == column_values.size()); // same number of kmers in column as in column_values
+                            double median = findMedian(column_values, column_values.size());
                             call_ones(*column, [&](uint64_t i) {
                                 auto column_value = column_values[column->rank1(i)-1];
                                 if (subsample == true)
-                                    column_value = std::min((int) std::floor(column_value/scaling), max_col_width); // normalize value
+                                    // column_value = std::min((int) std::floor(column_value/scaling), max_col_width); // normalize value
+                                    column_value = std::min((int) std::ceil(column_value/median), max_col_width); // normalize value
                                 else
                                     column_value = std::min((int) std::ceil(column_value*normalization_factor), max_col_width); // normalize value
                                 value_callback(i, column_value);
@@ -457,8 +502,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             || config.label_mask_out_unitig_fraction != 1.0
             || config.label_mask_other_unitig_fraction != 1.0;
 
-    size_t num_in_labels = labels_in.size() + labels_in_round2.size();
-    size_t num_out_labels = labels_out.size() + labels_out_round2.size();
+    size_t num_in_labels = labels_in.size() + labels_in_round2.size(); // number of in labels before filtering
+    size_t num_out_labels = labels_out.size() + labels_out_round2.size(); // number of out labels before filtering
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
             && (config.add_complement || unitig_mode);
@@ -531,6 +576,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         logger->trace("I'm here");
         if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included.
             auto total_hypotheses = num_tested_kmers; // the total number of hypotheses tested: kmers that are present more in the foreground than in the background.
+            logger->trace("total_hypotheses {}", total_hypotheses);
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
                                                       std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
                                                       in_total_kmers, out_total_kmers); 
@@ -549,10 +595,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
                     if (in_sum > out_sum_normalized) { // check that kmer occurs more in foreground than in background
                         // check for high complexity
-                        auto kmer_string = graph_ptr->get_node_sequence(node);
-                        auto complexity_low = is_low_complexity(kmer_string);
-                        logger->trace("kmer_string: {}", kmer_string);
-                        logger->trace("complexity_low: {}", complexity_low);
+                        // auto kmer_string = graph_ptr->get_node_sequence(node);
+                        // auto complexity_low = is_low_complexity(kmer_string);
+                        // logger->trace("kmer_string: {}", kmer_string);
+                        // logger->trace("complexity_low: {}", complexity_low);
                         auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
                         likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
                     }
@@ -564,6 +610,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             });
             // get index for benjamini-yekutieli correction
             std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
+            // double alpha = statistical_model.get_t_test_alpha(statistical_model.get_df_approx(), 0.05) // 0.05 is the alpha value, TODO: add params.
             int max_i = statistical_model.benjamini_yekutieli(likelihood_ratios_nodes, statistical_model.lrt_threshold());
             // reject all hypotheses with index <= max_i
             for (int i = 0; i <= max_i; i++){
