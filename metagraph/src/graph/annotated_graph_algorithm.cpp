@@ -216,6 +216,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedD
                         // TODO filter for low complexity (make a function)
                         // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
                         if (row.size() == 0) { // if the kmer is not present in any sample
+                            mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
                             row_id++; 
                             return;
                         }
@@ -235,12 +236,6 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedD
                                 in_counts.resize(labels_in.size(), 0);
                             if (out_counts.size() < labels_out.size())
                                 out_counts.resize(labels_out.size(), 0);
-                            for (size_t i = 0; i < in_counts.size(); i++){
-                                logger->trace("in_counts {}", in_counts[i]);
-                            }
-                            for (size_t i = 0; i < out_counts.size(); i++){
-                                logger->trace("out_counts {}", out_counts[i]);
-                            }        
                             // calculate the p-value for the brunner munzel test
                             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);   
                             // run test and adjust masked graph accordingly 
@@ -655,6 +650,9 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
                 total_unitigs.fetch_add(1, MO_RELAXED);
             });
+            if (config.test_type == "brunner_munzel"){
+                logger->trace("Brunner Munzel test");
+            }
             masked_graph = brunner_munzel_test(masked_graph,files,labels_in,labels_out,config,total_unitigs);
             logger->trace("ooooo unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,

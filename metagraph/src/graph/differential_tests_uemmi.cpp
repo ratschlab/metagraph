@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cassert>
 #include<algorithm>
+#include "common/logger.hpp"
 
 #include "differential_tests.hpp"
 #include "lookup_table_chisqrd_cdf.hpp"
@@ -41,13 +42,28 @@ std::vector<double> DifferentialTest::get_midranks(std::vector<int> in_counts, i
     for (int i = 1; i<size_in_counts; i++){
         if (in_counts[i] == curr_value){
             tied++;
+            if (i == size_in_counts-1){
+                i += 1;
+                for (int j = i-tied; j<i; j++){
+                    mid_ranks.push_back((i-tied) + (tied+1)/2.0);
+                }
+            }
         }
         else{
-            for (int j = i-tied; j<i; j++){
-                mid_ranks.push_back((i-tied) + (tied+1)/2.0);
+            if (i == size_in_counts-1){
+                for (int j = i-tied; j<i; j++){
+                    mid_ranks.push_back((i-tied) + (tied+1)/2.0);
+                }
+                mid_ranks.push_back(i+1);
             }
-            curr_value = in_counts[i];
-            tied = 1;
+            else{
+                for (int j = i-tied; j<i; j++){
+                    mid_ranks.push_back((i-tied) + (tied+1)/2.0);
+                }
+                curr_value = in_counts[i];
+                tied = 1;
+            }
+            
         }
     }
     return mid_ranks;
@@ -58,6 +74,9 @@ int DifferentialTest::get_df_approx(std::vector<int> in_counts, std::vector<int>
     int n = out_counts.size();
     double var_in = get_var(in_counts, m);
     double var_out = get_var(out_counts, n);
+    if (var_in == 0 && var_out == 0){
+        return std::min(m, n) - 1;
+    }
     double df_approx = (var_in*var_in/m + var_out*var_out/n)*(var_in*var_in/m + var_out*var_out/n) / (((var_in*var_in/m)*(var_in*var_in/m)/(m - 1)) + ((var_out*var_out/n)*(var_out*var_out/n)/(n - 1)));
     return int(std::floor(df_approx));
 }
@@ -81,11 +100,11 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<int> 
     mid_ranks_in = get_midranks(in_counts, m);
     mid_ranks_out = get_midranks(out_counts, n);
     // get means of midranks
-    double mean_mid_rank_in = std::accumulate(mid_ranks_in.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_in.size();
+    double mean_mid_rank_in = std::accumulate(mid_ranks_in.begin(), mid_ranks_in.end(), 0.0) / mid_ranks_in.size();
     double mean_mid_rank_out = std::accumulate(mid_ranks_out.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_out.size();
     // get variances
     double var_in = get_var(in_counts, m);
-    double var_out = get_var(out_counts, n);              
+    double var_out = get_var(out_counts, n);         
     // get test statistic
     double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
     // get degrees of freedom with welch-satterthwaite equation
