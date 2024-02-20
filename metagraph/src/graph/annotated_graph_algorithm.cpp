@@ -183,6 +183,76 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     return n > 0;
 }
 
+std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedDeBruijnGraph> masked_graph, 
+                                                        const std::vector<std::string> &files, 
+                                                        const tsl::hopscotch_set<Label> &labels_in, 
+                                                        const tsl::hopscotch_set<Label> &labels_out, 
+                                                        const DifferentialAssemblyConfig &config,  
+                                                        size_t total_unitigs) {
+
+    const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+    sdsl::bit_vector mask = in_mask;
+    // brunner munzel test
+    // call kmer matrix per row
+    std::vector<std::unique_ptr<bit_vector>> columns_all;
+    std::vector<std::unique_ptr<sdsl::int_vector<>>> column_values_all;
+    std::vector<bool> column_label;
+    annot::ColumnCompressed<>::load_columns_and_values(files,
+        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { 
+            // TODO: add count filtering here as a function
+            columns_all.push_back(std::move(column));
+            column_values_all.push_back(std::make_unique<sdsl::int_vector<>>(std::move(column_values)));
+            if (labels_in.find(label) != labels_in.end()) // if the label is in the in labels set column_label to 1, else 0
+                column_label.push_back(1);
+            else if (labels_out.find(label) != labels_out.end())
+                column_label.push_back(0);
+            else throw std::runtime_error("Label not found in labels_in or labels_out");
+        }
+    );
+    int row_id = 0;
+    utils::call_rows<std::unique_ptr<bit_vector>,
+                    std::unique_ptr<sdsl::int_vector<>>,
+                    std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
+                        // TODO filter for low complexity (make a function)
+                        // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
+                        if (row.size() == 0) { // if the kmer is not present in any sample
+                            row_id++; 
+                            return;
+                        }
+                        else{
+                            // populate the vector for the brunner munzel test with the kmer counts for each sample
+                            std::vector<int> in_counts;
+                            std::vector<int> out_counts;
+                            for (size_t i = 0; i < row.size(); i++){
+                                if (column_label[row[i].first] == 1)
+                                    in_counts.push_back(row[i].second);
+                                else if (column_label[row[i].first] == 0)
+                                    out_counts.push_back(row[i].second);
+                                else throw std::runtime_error("Label not found in labels_in or labels_out");
+                            }
+                            // add 0 to in_counts and out_counts if the kmer is not present in the sample
+                            if (in_counts.size() < labels_in.size())
+                                in_counts.resize(labels_in.size(), 0);
+                            if (out_counts.size() < labels_out.size())
+                                out_counts.resize(labels_out.size(), 0);
+                            for (size_t i = 0; i < in_counts.size(); i++){
+                                logger->trace("in_counts {}", in_counts[i]);
+                            }
+                            for (size_t i = 0; i < out_counts.size(); i++){
+                                logger->trace("out_counts {}", out_counts[i]);
+                            }        
+                            // calculate the p-value for the brunner munzel test
+                            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);   
+                            // run test and adjust masked graph accordingly 
+                            auto [keep, pvalue] = statistical_model.brunner_munzel_test(in_counts, out_counts);
+                            if (keep == false)
+                                mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
+                            row_id++;
+                        }               
+    });
+    masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+    return masked_graph;
+}    
 // Assemble unitigs from the masked graph, then use get_kept_intervals to generate
 // regions which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
@@ -585,62 +655,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
                 total_unitigs.fetch_add(1, MO_RELAXED);
             });
-            // brunner munzel test
-            // call kmer matrix per row
-            std::vector<std::unique_ptr<bit_vector>> columns_all;
-            std::vector<std::unique_ptr<sdsl::int_vector<>>> column_values_all;
-            std::vector<bool> column_label;
-            annot::ColumnCompressed<>::load_columns_and_values(files,
-                [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) { 
-                    // TODO: add count filtering here as a function
-                    columns_all.push_back(std::move(column));
-                    column_values_all.push_back(std::make_unique<sdsl::int_vector<>>(std::move(column_values)));
-                    if (labels_in.find(label) != labels_in.end()) // if the label is in the in labels set column_label to 1, else 0
-                        column_label.push_back(1);
-                    else if (labels_out.find(label) != labels_out.end())
-                        column_label.push_back(0);
-                    else throw std::runtime_error("Label not found in labels_in or labels_out");
-                }
-            );
-            int row_id = 0;
-            utils::call_rows<std::unique_ptr<bit_vector>,
-                            std::unique_ptr<sdsl::int_vector<>>,
-                            std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
-                                // TODO filter for low complexity (make a function)
-                                // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
-                                if (row.size() == 0) { // if the kmer is not present in any sample
-                                    row_id++; 
-                                    return;
-                                }
-                                else{
-                                    // populate the vector for the brunner munzel test with the kmer counts for each sample
-                                    std::vector<int> in_counts;
-                                    std::vector<int> out_counts;
-                                    for (size_t i = 0; i < row.size(); i++){
-                                        if (column_label[row[i].first] == 1)
-                                            in_counts.push_back(row[i].second);
-                                        else if (column_label[row[i].first] == 0)
-                                            out_counts.push_back(row[i].second);
-                                        else throw std::runtime_error("Label not found in labels_in or labels_out");
-                                    }
-                                    // add 0 to in_counts and out_counts if the kmer is not present in the sample
-                                    if (in_counts.size() < labels_in.size())
-                                        in_counts.resize(labels_in.size(), 0);
-                                    if (out_counts.size() < labels_out.size())
-                                        out_counts.resize(labels_out.size(), 0);
-                                    for (size_t i = 0; i < in_counts.size(); i++){
-                                        logger->trace("in_counts {}", in_counts[i]);
-                                    }
-                                    for (size_t i = 0; i < out_counts.size(); i++){
-                                        logger->trace("out_counts {}", out_counts[i]);
-                                    }        
-                                    // calculate the p-value for the brunner munzel test
-                                    auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
-                                                    std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
-                                                    0, 0);    
-                                    row_id++;
-                                }               
-            });
+            masked_graph = brunner_munzel_test(masked_graph,files,labels_in,labels_out,config,total_unitigs);
             logger->trace("ooooo unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
                                                       std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
