@@ -31,7 +31,16 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 }
 
 double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
-    return t_table.getCriticalValue(alpha, df);
+    alpha = alpha/2; // convert to one sided test
+    alpha = alpha/total_hypotheses; // bonferroni correction
+    if (alpha > 0.01 || alpha < 0.0000000001){
+        common::logger->error("alpha value not supported");
+        return -1;
+    }
+    common::logger->trace("alpha: {}", alpha);
+    std::pair<double,double> out = t_table.getCriticalValue(alpha, df);
+    common::logger->trace("closest alpha: {}", out.second);
+    return out.first;
 }
 
 std::vector<double> DifferentialTest::get_midranks(std::vector<double> in_counts, int size_in_counts){
@@ -108,8 +117,11 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
     // get degrees of freedom with welch-satterthwaite equation
     double df = get_df_approx(in_counts, out_counts);
     // get t statistic alpha value
-    double alpha = get_t_test_alpha(df, 0.05);
-    if( std::abs(b) < alpha){
+    if (alpha_precalc == -1){
+        common::logger->trace("alpha_precalc not set, calculating alpha_precalc");
+        alpha_precalc = get_t_test_alpha(df, 0.05);
+    }
+    if( std::abs(b) < alpha_precalc){
         return std::tuple(true, b);
     }
     else{

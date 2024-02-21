@@ -16,6 +16,7 @@ class DifferentialTest {
     size_t in_unique_kmers;
     size_t out_unique_kmers;
     TDistributionTable t_table;
+    double alpha_precalc = -1;
     const double pi = std::atan(1) * 4;
     double gamma = std::sqrt(pi);
     double likelihood_ratio_threshold = DifferentialTest::lrt_threshold();

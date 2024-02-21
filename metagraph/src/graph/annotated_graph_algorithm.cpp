@@ -224,6 +224,9 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     );
     int row_id = 0;
     int num_tests = 0;
+    int kept_nodes = 0;
+    // calculate the p-value for the brunner munzel test
+    auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0); 
     utils::call_rows<std::unique_ptr<bit_vector>,
                     std::unique_ptr<sdsl::int_vector<>>,
                     std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
@@ -253,13 +256,13 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                                 if (in_counts.size() < labels_in.size())
                                 in_counts.resize(labels_in.size(), 0);
                                 if (out_counts.size() < labels_out.size())
-                                    out_counts.resize(labels_out.size(), 0);  
-                                // calculate the p-value for the brunner munzel test
-                                auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);   
+                                    out_counts.resize(labels_out.size(), 0);    
                                 // run test and adjust masked graph accordingly 
                                 auto [keep, pvalue] = statistical_model.brunner_munzel_test(in_counts, out_counts);
                                 if (keep == false)
                                     mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
+                                else
+                                    kept_nodes++;  
                                 row_id++;
                             }
                             else{
@@ -271,6 +274,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     });
     logger->trace("number of tests: {}", num_tests);
     masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+    logger->trace("number of kept nodes: {}", kept_nodes);
     return masked_graph;
 }    
 // returns true if the kmer passes the filtering criteria
@@ -734,54 +738,56 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             });
             if (config.test_type == "brunner_munzel"){
                 logger->trace("Brunner Munzel test");
+                masked_graph = brunner_munzel_test(graph_ptr, masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
             }
-            masked_graph = brunner_munzel_test(graph_ptr, masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
-            logger->trace("ooooo unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
-            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
-                                                      std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
-                                                      in_total_kmers, out_total_kmers); 
-            const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
-            logger->trace("test_by_unitig == false");
-            sdsl::bit_vector mask = in_mask;
-            size_t total_nodes = masked_graph->num_nodes();
-            size_t kept_nodes = 0;
-            //std::vector<int> nodes;
-            std::vector<std::pair<double,int>> likelihood_ratios_nodes;
-            call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control 
-                uint64_t in_sum = counts[node * 2];
-                uint64_t out_sum = counts[node * 2 + 1];
-                // filter kmers in samples less noise
-                // if (in_sum + out_sum >= int(total_nodes/20)) { // check for minimum occurance of k-mer
-                    double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
-                    if (in_sum > out_sum_normalized) { // check that kmer occurs more in foreground than in background
-                        // check for high complexity
-                        // auto kmer_string = graph_ptr->get_node_sequence(node);
-                        // auto complexity_low = is_low_complexity(kmer_string);
-                        // logger->trace("kmer_string: {}", kmer_string);
-                        // logger->trace("complexity_low: {}", complexity_low);
-                        auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
-                        likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
-                    }
-                    else
-                        mask[node] = false; 
-                // }
-                // else
-                //     mask[node] = false;               
-            });
-            // get index for benjamini-yekutieli correction
-            std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
-            // double alpha = statistical_model.get_t_test_alpha(statistical_model.get_df_approx(), 0.05) // 0.05 is the alpha value, TODO: add params.
-            int max_i = statistical_model.benjamini_yekutieli(likelihood_ratios_nodes, statistical_model.lrt_threshold());
-            // reject all hypotheses with index <= max_i
-            for (int i = 0; i <= max_i; i++){
-                mask[likelihood_ratios_nodes[i].second] = false;
-            }
-            logger->trace("max_i {}", max_i);
-            logger->trace("likelihood_ratios__nodes_elem {}, {}, {}", likelihood_ratios_nodes[0].first, likelihood_ratios_nodes[1].first, likelihood_ratios_nodes[2].first);
-            logger->trace("likelihood_ratios_nodes_size {}", likelihood_ratios_nodes.size());
-            masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+            else{
+                logger->trace("ooooo unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
+                auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
+                                                        std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
+                                                        in_total_kmers, out_total_kmers); 
+                const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+                logger->trace("test_by_unitig == false");
+                sdsl::bit_vector mask = in_mask;
+                size_t total_nodes = masked_graph->num_nodes();
+                size_t kept_nodes = 0;
+                //std::vector<int> nodes;
+                std::vector<std::pair<double,int>> likelihood_ratios_nodes;
+                call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control 
+                    uint64_t in_sum = counts[node * 2];
+                    uint64_t out_sum = counts[node * 2 + 1];
+                    // filter kmers in samples less noise
+                    // if (in_sum + out_sum >= int(total_nodes/20)) { // check for minimum occurance of k-mer
+                        double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
+                        if (in_sum > out_sum_normalized) { // check that kmer occurs more in foreground than in background
+                            // check for high complexity
+                            // auto kmer_string = graph_ptr->get_node_sequence(node);
+                            // auto complexity_low = is_low_complexity(kmer_string);
+                            // logger->trace("kmer_string: {}", kmer_string);
+                            // logger->trace("complexity_low: {}", complexity_low);
+                            auto [keep, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
+                            likelihood_ratios_nodes.push_back(std::make_pair(likelihood_ratio, node));
+                        }
+                        else
+                            mask[node] = false; 
+                    // }
+                    // else
+                    //     mask[node] = false;               
+                });
+                // get index for benjamini-yekutieli correction
+                std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
+                // double alpha = statistical_model.get_t_test_alpha(statistical_model.get_df_approx(), 0.05) // 0.05 is the alpha value, TODO: add params.
+                int max_i = statistical_model.benjamini_yekutieli(likelihood_ratios_nodes, statistical_model.lrt_threshold());
+                // reject all hypotheses with index <= max_i
+                for (int i = 0; i <= max_i; i++){
+                    mask[likelihood_ratios_nodes[i].second] = false;
+                }
+                logger->trace("max_i {}", max_i);
+                logger->trace("likelihood_ratios__nodes_elem {}, {}, {}", likelihood_ratios_nodes[0].first, likelihood_ratios_nodes[1].first, likelihood_ratios_nodes[2].first);
+                logger->trace("likelihood_ratios_nodes_size {}", likelihood_ratios_nodes.size());
+                masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
-            logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
+                logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
+            }
 
         } else { // binary approach
             logger->trace("test_by_unitig == true");
