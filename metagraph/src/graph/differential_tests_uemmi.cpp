@@ -83,10 +83,8 @@ int DifferentialTest::get_df_approx(std::vector<int> in_counts, std::vector<int>
 
 double DifferentialTest::get_var(std::vector<int> counts, int n){
     double mean = std::accumulate(counts.begin(), counts.end(), 0.0) / n;
-    double var = 0;
-    for (int i = 0; i < n; i++) 
-        var += (counts[i] - mean) * (counts[i] - mean);
-    var /= n;
+    double mean_of_sqaures = std::inner_product(counts.begin(), counts.end(), counts.begin(), 0)/n;
+    double var = mean_of_sqaures - mean*mean;
     return var;
 }
 

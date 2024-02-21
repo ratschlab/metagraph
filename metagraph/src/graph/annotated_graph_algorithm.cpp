@@ -225,11 +225,10 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedD
                             std::vector<int> in_counts;
                             std::vector<int> out_counts;
                             for (size_t i = 0; i < row.size(); i++){
-                                if (column_label[row[i].first] == 1)
+                                if (column_label[row[i].first])
                                     in_counts.push_back(row[i].second);
-                                else if (column_label[row[i].first] == 0)
+                                else
                                     out_counts.push_back(row[i].second);
-                                else throw std::runtime_error("Label not found in labels_in or labels_out");
                             }
                             // add 0 to in_counts and out_counts if the kmer is not present in the sample
                             if (in_counts.size() < labels_in.size())
