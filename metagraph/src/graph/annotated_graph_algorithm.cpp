@@ -189,7 +189,13 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     return n > 0;
 }
 
-std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedDeBruijnGraph> masked_graph, 
+bool filtering_row(std::vector<double> in_counts_non_zero,
+                    std::vector<double> out_counts_non_zero,
+                    int total_samples,
+                    std::string kmer_string);
+
+std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                                                        std::shared_ptr<MaskedDeBruijnGraph> masked_graph, 
                                                         const std::vector<std::string> &files, 
                                                         const tsl::hopscotch_set<Label> &labels_in, 
                                                         const tsl::hopscotch_set<Label> &labels_out, 
@@ -217,6 +223,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedD
         }
     );
     int row_id = 0;
+    int num_tests = 0;
     utils::call_rows<std::unique_ptr<bit_vector>,
                     std::unique_ptr<sdsl::int_vector<>>,
                     std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
@@ -240,30 +247,43 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<MaskedD
                                     out_counts.push_back(row[i].second/median);
                             }
                             // add 0 to in_counts and out_counts if the kmer is not present in the sample
-                            if (in_counts.size() < labels_in.size())
+                            std::string kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
+                            if (filtering_row(in_counts, out_counts, files.size(), kmer_string)) {
+                                num_tests++;
+                                if (in_counts.size() < labels_in.size())
                                 in_counts.resize(labels_in.size(), 0);
-                            if (out_counts.size() < labels_out.size())
-                                out_counts.resize(labels_out.size(), 0);
-                            // for (size_t i = 0; i < in_counts.size(); i++){
-                            //     logger->trace("in_counts: {}", in_counts[i]);
-                            //     logger->trace("out_counts: {}", out_counts[i]);
-                            // }    
-                            // calculate the p-value for the brunner munzel test
-                            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);   
-                            // run test and adjust masked graph accordingly 
-                            auto [keep, pvalue] = statistical_model.brunner_munzel_test(in_counts, out_counts);
-                            if (keep == false)
+                                if (out_counts.size() < labels_out.size())
+                                    out_counts.resize(labels_out.size(), 0);  
+                                // calculate the p-value for the brunner munzel test
+                                auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);   
+                                // run test and adjust masked graph accordingly 
+                                auto [keep, pvalue] = statistical_model.brunner_munzel_test(in_counts, out_counts);
+                                if (keep == false)
+                                    mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
+                                row_id++;
+                            }
+                            else{
                                 mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
-                            row_id++;
+                                row_id++;
+                            }
+                            
                         }               
     });
+    logger->trace("number of tests: {}", num_tests);
     masked_graph->set_mask(new bitmap_vector(std::move(mask)));
     return masked_graph;
 }    
-void filtering_row(){
+bool filtering_row(std::vector<double> in_counts_non_zero,
+                    std::vector<double> out_counts_non_zero,
+                    int total_samples,
+                    std::string kmer_string){
     // minimum present in 20% of samples
+    bool is_present_in_20_percent = (in_counts_non_zero.size() + out_counts_non_zero.size()) > 0.2 * double(total_samples);
     // present more in in than out
+    bool is_present_more_in_foreground = in_counts_non_zero.size() > out_counts_non_zero.size();
     // low complexity filter
+    bool high_complexity =  !is_low_complexity(kmer_string);
+    return (is_present_in_20_percent && is_present_more_in_foreground && high_complexity);
 }
 std::vector<double> filtering_column(const std::vector<std::string> &files,
                const tsl::hopscotch_set<Label> &labels_in,
@@ -710,7 +730,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (config.test_type == "brunner_munzel"){
                 logger->trace("Brunner Munzel test");
             }
-            masked_graph = brunner_munzel_test(masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
+            masked_graph = brunner_munzel_test(graph_ptr, masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
             logger->trace("ooooo unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
                                                       std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
