@@ -34,7 +34,7 @@ double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
     return t_table.getCriticalValue(alpha, df);
 }
 
-std::vector<double> DifferentialTest::get_midranks(std::vector<int> in_counts, int size_in_counts){
+std::vector<double> DifferentialTest::get_midranks(std::vector<double> in_counts, int size_in_counts){
     std::vector<double> mid_ranks;
     std::sort(in_counts.begin(), in_counts.end());
     double curr_value = in_counts[0];
@@ -69,7 +69,7 @@ std::vector<double> DifferentialTest::get_midranks(std::vector<int> in_counts, i
     return mid_ranks;
 }
 
-int DifferentialTest::get_df_approx(std::vector<int> in_counts, std::vector<int> out_counts){
+int DifferentialTest::get_df_approx(std::vector<double> in_counts, std::vector<double> out_counts){
     int m = in_counts.size();
     int n = out_counts.size();
     double var_in = get_var(in_counts, m);
@@ -81,14 +81,14 @@ int DifferentialTest::get_df_approx(std::vector<int> in_counts, std::vector<int>
     return int(std::floor(df_approx));
 }
 
-double DifferentialTest::get_var(std::vector<int> counts, int n){
+double DifferentialTest::get_var(std::vector<double> counts, int n){
     double mean = std::accumulate(counts.begin(), counts.end(), 0.0) / n;
     double mean_of_sqaures = std::inner_product(counts.begin(), counts.end(), counts.begin(), 0)/n;
     double var = mean_of_sqaures - mean*mean;
     return var;
 }
 
-std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<int> in_counts, std::vector<int> out_counts){
+std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<double> in_counts, std::vector<double> out_counts){
     std::vector<double> mid_ranks_in;
     std::vector<double> mid_ranks_out;
     int m = in_counts.size();

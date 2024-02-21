@@ -28,7 +28,7 @@ class DifferentialTest {
                      size_t out_total_kmers);
 
     double poisson_prob(int k, double lambda);
-    std::tuple<bool, double> brunner_munzel_test(std::vector<int> in_counts, std::vector<int> out_counts);
+    std::tuple<bool, double> brunner_munzel_test(std::vector<double> in_counts, std::vector<double> out_counts);
 
     int benjamini_yekutieli(std::vector<std::pair<double, int>> likelihood_ratios, double lrt_threshold);
 
@@ -38,12 +38,12 @@ class DifferentialTest {
 
     double get_t_test_alpha(int df, double alpha);
 
-    std::vector<double> get_midranks(std::vector<int> in_counts, int size_in_counts);
+    std::vector<double> get_midranks(std::vector<double> in_counts, int size_in_counts);
 
     std::tuple<bool, double> likelihood_ratio_test(double in_sum, double out_sum);
 
-    int get_df_approx(std::vector<int> in_counts, std::vector<int> out_counts);
+    int get_df_approx(std::vector<double> in_counts, std::vector<double> out_counts);
 
-    double get_var(std::vector<int> counts, int n);
+    double get_var(std::vector<double> counts, int n);
 };
 } // namespace mtg
