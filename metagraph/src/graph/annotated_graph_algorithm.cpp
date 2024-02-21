@@ -273,17 +273,22 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     masked_graph->set_mask(new bitmap_vector(std::move(mask)));
     return masked_graph;
 }    
+// returns true if the kmer passes the filtering criteria
 bool filtering_row(std::vector<double> in_counts_non_zero,
                     std::vector<double> out_counts_non_zero,
                     int total_samples,
                     std::string kmer_string){
     // minimum present in 20% of samples
     bool is_present_in_20_percent = (in_counts_non_zero.size() + out_counts_non_zero.size()) > 0.2 * double(total_samples);
+    if (is_present_in_20_percent == false)
+        return false;
     // present more in in than out
     bool is_present_more_in_foreground = in_counts_non_zero.size() > out_counts_non_zero.size();
     // low complexity filter
+    if (is_present_more_in_foreground == false)
+        return false;
     bool high_complexity =  !is_low_complexity(kmer_string);
-    return (is_present_in_20_percent && is_present_more_in_foreground && high_complexity);
+    return (high_complexity);
 }
 std::vector<double> filtering_column(const std::vector<std::string> &files,
                const tsl::hopscotch_set<Label> &labels_in,
