@@ -17,6 +17,7 @@ class DifferentialTest {
     size_t out_unique_kmers;
     TDistributionTable t_table;
     double alpha_precalc = -1;
+    int df_precalc = -1;
     const double pi = std::atan(1) * 4;
     double gamma = std::sqrt(pi);
     double likelihood_ratio_threshold = DifferentialTest::lrt_threshold();
@@ -44,6 +45,8 @@ class DifferentialTest {
     std::tuple<bool, double> likelihood_ratio_test(double in_sum, double out_sum);
 
     int get_df_approx(std::vector<double> in_counts, std::vector<double> out_counts);
+
+    int get_df_conservative(std::vector<double> in_counts, std::vector<double> out_counts);
 
     double get_var(std::vector<double> counts, int n);
 };

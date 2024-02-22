@@ -33,14 +33,10 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
     alpha = alpha/2; // convert to one sided test
     alpha = alpha/total_hypotheses; // bonferroni correction
-    if (alpha > 0.01 || alpha < 0.0000000001){
-        common::logger->error("alpha value not supported");
-        return -1;
-    }
     common::logger->trace("alpha: {}", alpha);
-    std::pair<double,double> out = t_table.getCriticalValue(alpha, df);
-    common::logger->trace("closest alpha: {}", out.second);
-    return out.first;
+    double critical_value = t_table.getCriticalValue(alpha, df);
+    common::logger->trace("Critical value: {}", critical_value);
+    return critical_value;
 }
 
 std::vector<double> DifferentialTest::get_midranks(std::vector<double> in_counts, int size_in_counts){
@@ -90,6 +86,12 @@ int DifferentialTest::get_df_approx(std::vector<double> in_counts, std::vector<d
     return int(std::floor(df_approx));
 }
 
+int DifferentialTest::get_df_conservative(std::vector<double> in_counts, std::vector<double> out_counts){
+    int m = in_counts.size();
+    int n = out_counts.size();
+    return std::min(m, n) - 1;
+}
+
 double DifferentialTest::get_var(std::vector<double> counts, int n){
     double mean = std::accumulate(counts.begin(), counts.end(), 0.0) / n;
     double mean_of_sqaures = std::inner_product(counts.begin(), counts.end(), counts.begin(), 0)/n;
@@ -114,12 +116,15 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
     double var_out = get_var(out_counts, n);         
     // get test statistic
     double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
-    // get degrees of freedom with welch-satterthwaite equation
-    double df = get_df_approx(in_counts, out_counts);
+    // get degrees of freedom 
+    if (df_precalc == -1){
+        common::logger->trace("df_precalc not set, calculating df_precalc");
+        df_precalc = get_df_conservative(in_counts, out_counts);
+    }
     // get t statistic alpha value
     if (alpha_precalc == -1){
         common::logger->trace("alpha_precalc not set, calculating alpha_precalc");
-        alpha_precalc = get_t_test_alpha(df, 0.05);
+        alpha_precalc = get_t_test_alpha(df_precalc, 0.05);
     }
     if( std::abs(b) < alpha_precalc){
         return std::tuple(true, b);
