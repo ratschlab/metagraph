@@ -735,7 +735,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::atomic<uint64_t> total_unitigs(0);
             masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
                 total_unitigs.fetch_add(1, MO_RELAXED);
-            });
+            }, get_num_threads());
             if (config.test_type == "brunner_munzel"){
                 logger->trace("Brunner Munzel test");
                 masked_graph = brunner_munzel_test(graph_ptr, masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
