@@ -55,6 +55,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
     diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
     diff_config.test_type = experiment.get("test_type", "brunner_munzel").asString();
+    diff_config.filter = experiment.get("filter", true).asBool();
 
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
@@ -66,6 +67,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("Include k-mer counts if preseadd_complementnt in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
     logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
     logger->trace("Test type:\t{}", diff_config.test_type);
+    logger->trace("Filter:\t{}", diff_config.filter);
 
 
     // TODO get the folder with the annotation columns from the .json or command, because it is redundant to have to give all of them as an input.

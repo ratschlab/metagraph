@@ -38,6 +38,7 @@ struct DifferentialAssemblyConfig {
     bool test_by_unitig = false; // Myrthe
     std::string test_type = "brunner_munzel"; // default is "brunner_munzel", alternatives are: "likelihoodratio", "binary"
     bool evaluate_assembly = false; // Myrthe temporary : evaluate an assembly
+    bool filter = true;
 };
 
 /**
