@@ -66,6 +66,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
     logger->trace("Include k-mer counts if preseadd_complementnt in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
     logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
+    logger->trace("count_kmers:\t{}", diff_config.count_kmers);
     logger->trace("Test type:\t{}", diff_config.test_type);
     logger->trace("Filter:\t{}", diff_config.filter);
 

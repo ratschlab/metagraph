@@ -26,7 +26,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY && config.identity != Config::ASSEMBLE) {
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph wrapped into canonical");
     }
