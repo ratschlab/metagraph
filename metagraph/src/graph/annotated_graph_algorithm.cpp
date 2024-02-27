@@ -933,7 +933,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         add_complement
             ? std::make_unique<bitmap_vector>(mask)
             : std::make_unique<bitmap_vector>(std::move(mask)),
-        true
+            true,
+            graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
     );
 
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
