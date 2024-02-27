@@ -387,6 +387,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
         && (config.add_complement || unitig_mode);
+    logger->trace("add_complement: {}", add_complement);    
 
     logger->trace("Generating initial mask");
 
@@ -451,7 +452,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
         && (config.add_complement || unitig_mode);
-
+    logger->trace("add_complement: {}", add_complement);
     logger->trace("Generating initial mask");
     bool filter = config.filter;
     std::vector<double> medians;
@@ -654,7 +655,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
             && (config.add_complement || unitig_mode);
-
+    logger->trace("add_complement: {}", add_complement);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   add_complement, num_threads);
 
