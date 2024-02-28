@@ -113,7 +113,11 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
     double mean_mid_rank_out = std::accumulate(mid_ranks_out.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_out.size();
     // get variances
     double var_in = get_var(in_counts, m);
-    double var_out = get_var(out_counts, n);         
+    double var_out = get_var(out_counts, n);
+    if (var_in == 0 && var_out == 0){
+        var_0++;
+        return std::tuple(false, 0);
+    }         
     // get test statistic
     double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
     // get degrees of freedom 

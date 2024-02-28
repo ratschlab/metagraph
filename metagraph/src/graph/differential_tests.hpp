@@ -23,6 +23,7 @@ class DifferentialTest {
     double likelihood_ratio_threshold = DifferentialTest::lrt_threshold();
 
   public:
+    int64_t var_0 = 0;
     DifferentialTest(double family_wise_error_rate,
                      size_t total_hypotheses,
                      size_t preload_table_size,

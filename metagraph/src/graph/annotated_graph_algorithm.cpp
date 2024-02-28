@@ -222,9 +222,9 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
             else throw std::runtime_error("Label not found in labels_in or labels_out");
         }
     );
-    int row_id = 0;
-    int num_tests = 0;
-    int kept_nodes = 0;
+    int64_t row_id = 0;
+    int64_t num_tests = 0;
+    int64_t kept_nodes = 0;
     // calculate the p-value for the brunner munzel test
     auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0); 
     utils::call_rows<std::unique_ptr<bit_vector>,
@@ -254,7 +254,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                             if (filtering_row(in_counts, out_counts, files.size(), kmer_string)) {
                                 num_tests++;
                                 if (in_counts.size() < labels_in.size())
-                                in_counts.resize(labels_in.size(), 0);
+                                    in_counts.resize(labels_in.size(), 0);
                                 if (out_counts.size() < labels_out.size())
                                     out_counts.resize(labels_out.size(), 0);    
                                 // run test and adjust masked graph accordingly 
@@ -272,6 +272,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                             
                         }               
     });
+    logger->trace("number of tests with 0 var: {}", statistical_model.var_0);
     logger->trace("number of tests: {}", num_tests);
     masked_graph->set_mask(new bitmap_vector(std::move(mask)));
     logger->trace("number of kept nodes: {}", kept_nodes);
@@ -750,6 +751,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     // if (in_sum + out_sum >= int(total_nodes/20)) { // check for minimum occurance of k-mer
                         double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
                         if (in_sum > out_sum_normalized) { // check that kmer occurs more in foreground than in background
+                            logger->trace("testing");
                             // check for high complexity
                             // auto kmer_string = graph_ptr->get_node_sequence(node);
                             // auto complexity_low = is_low_complexity(kmer_string);
