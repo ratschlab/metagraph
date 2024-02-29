@@ -56,6 +56,8 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
     diff_config.test_type = experiment.get("test_type", "brunner_munzel").asString();
     diff_config.filter = experiment.get("filter", true).asBool();
+    diff_config.clean = experiment.get("clean", false).asBool();
+    diff_config.min_count = experiment.get("min_count", 1).asInt();
 
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
@@ -79,7 +81,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     return diff_config;
 }
 
-typedef std::function<void(const graph::MaskedDeBruijnGraph&,
+typedef std::function<void(const graph::DeBruijnGraph&,
                            const std::string& /* header */)> CallMaskedGraphHeader;
 
 void call_masked_graphs(const AnnotatedDBG &anno_graph,
@@ -243,7 +245,7 @@ int assemble(Config *config) {
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
-        auto graph_callback = [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
+        auto graph_callback = [&](const graph::DeBruijnGraph &graph, const std::string &header) {
             seq_io::FastaWriter writer(config->outfbase, header,
                                        config->enumerate_out_sequences,
                                        num_threads > 1, /* async write */

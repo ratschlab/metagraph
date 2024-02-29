@@ -4,7 +4,10 @@
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
+#include "common/vector_map.hpp"
+#include "common/vectors/transpose.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "differential_tests.hpp"
 #include "timer.hpp"
@@ -444,8 +447,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 }
 
 
-// creates the necessary data structures for the differential assembly
-std::shared_ptr<MaskedDeBruijnGraph>
+
+std::shared_ptr<DeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: this version i don't need to change at first
                     const std::vector<std::string> &files,
                     const tsl::hopscotch_set<Label> &labels_in,
@@ -489,33 +492,153 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                     value_callback(i, column_value);
                                 });
                             });
-                            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());    
+                            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());
                         }
                     );
-                }    
+                }
             } else {
-                annot::ColumnCompressed<>::merge_load(files,
-                    [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column) {
-                        column_callback(offset, label, [&](const ValueCallback &value_callback) {
-                            assert(column->num_set_bits() > 0);
-                            call_ones(*column, [&](uint64_t i) {
-                                value_callback(i, 1);
+                if (!config.clean) {
+                    annot::ColumnCompressed<>::merge_load(files,
+                        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column) {
+                            column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                                call_ones(*column, [&](uint64_t i) {
+                                    value_callback(i, 1);
+                                });
                             });
-                        });
-                    }
-                );
+                        }
+                    );
+                } else {
+                    annot::ColumnCompressed<>::load_columns_and_values(files,
+                        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
+                            VectorMap<uint64_t,uint64_t> hist_map;
+                            for (auto c : column_values) {
+                                ++hist_map[c];
+                            }
+                            std::vector<std::pair<uint64_t,uint64_t>> hist(
+                                const_cast<std::vector<std::pair<uint64_t,uint64_t>>&&>(hist_map.values_container())
+                            );
+                            std::sort(hist.begin(), hist.end(), utils::LessFirst());
+                            // common::logger->trace("Min: {}, Max: {}", hist[0].first, hist.back().first);
+
+                            uint64_t max_count = (1llu << column_values.width()) - 1;
+                            if (hist.back().first == max_count)
+                                hist.pop_back();
+
+                            // estimate a zero-truncated poisson from the first touse counts
+                            // (from https://doi.org/10.1016/S0167-9473(99)00111-5)
+                            // set a cutoff that covers 95% of this distribution
+                            uint64_t touse = 3;
+                            size_t max_iter = 1000;
+                            double cdf_cutoff = 0.95;
+
+                            size_t nupto_c = 0;
+                            uint64_t sumupto = 0;
+                            for (const auto &[count,nkmers] : hist) {
+                                if (count > touse)
+                                    break;
+
+                                // common::logger->trace("c: {}; n: {}", count, nkmers);
+                                nupto_c += nkmers;
+                                sumupto += count * nkmers;
+                            }
+
+                            double sum = sumupto;
+                            double nupto = nupto_c;
+                            double mean_est = sum / nupto;
+
+                            for (size_t i = 0; i < max_iter; ++i) {
+                                double last_mean_est = mean_est;
+                                double total_est = nupto/(1.0-exp(-mean_est));
+                                mean_est = sum / total_est;
+                                if (abs(mean_est - last_mean_est)/mean_est < 1e-3) {
+                                    common::logger->trace("Fitted mean {} after {} iterations", mean_est, i + 1);
+                                    break;
+                                }
+                            }
+
+                            double p_num = mean_est * exp(-mean_est);
+                            double p_denom = 1;
+                            double cdf = p_num;
+                            double denom = 1.0 - exp(-mean_est);
+
+                            size_t min_count = 1;
+                            for (size_t i = 0; i < max_iter; ++i) {
+                                if (cdf / denom >= cdf_cutoff)
+                                    break;
+
+                                ++min_count;
+                                p_num *= mean_est;
+                                p_denom *= min_count;
+                                cdf += p_num / p_denom;
+                            }
+                            ++min_count;
+
+                            common::logger->trace("Cleaning threshold: {}; noise CDF: {}", min_count, cdf / denom);
+
+                            auto mask = std::make_unique<bitmap_lazy>([&](node_index node) {
+                                if (!node)
+                                    return false;
+
+                                return (*column)[AnnotatedDBG::graph_to_anno_index(node)];
+                            }, column->size() + 1);
+                            bool is_primary = (graph_ptr->get_mode() == DeBruijnGraph::PRIMARY);
+                            std::shared_ptr<DeBruijnGraph> masked
+                                = std::make_shared<MaskedDeBruijnGraph>(graph_ptr, std::move(mask), true,
+                                                       is_primary
+                                                        ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+
+                            std::shared_ptr<CanonicalDBG> wrapped;
+                            if (is_primary) {
+                                wrapped = std::make_shared<CanonicalDBG>(masked);
+                                masked = wrapped;
+                            }
+                            column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                                assert(column->num_set_bits() == column_values.size());
+                                // call_ones(*column, [&](uint64_t i) {
+                                //     auto val = column_values[column->rank1(i) - 1];
+                                //     if (val >= min_count && val < max_count)
+                                //         value_callback(i, 1);
+                                // });
+                                masked->call_unitigs([&](const std::string&, const auto &path) {
+                                    std::vector<uint64_t> counts;
+                                    std::vector<uint64_t> rows;
+                                    counts.reserve(path.size());
+                                    rows.reserve(path.size());
+                                    for (node_index node : path) {
+                                        auto row = AnnotatedDBG::graph_to_anno_index(
+                                            is_primary ? wrapped->get_base_node(node) : node
+                                        );
+                                        rows.emplace_back(row);
+                                        counts.emplace_back(column_values[column->rank1(row) - 1]);
+                                    }
+                                    std::sort(counts.begin(), counts.end());
+                                    double median = counts[counts.size() / 2];
+
+                                    if (counts.size() % 2 == 1)
+                                        median = (median + counts[counts.size() / 2 - 1])/2;
+
+                                    if (median >= min_count && median < max_count) {
+                                        for (auto row : rows) {
+                                            value_callback(row, 1);
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    );
+                }
             }
         },
         files, labels_in, labels_out, config, graph_ptr->max_index(),
         std::max(labels_in.size(), labels_out.size()), num_parallel_files,
-        add_complement
+        config.test_by_unitig
     );
 
-    auto &[counts, init_mask, other_labels, total_kmers] = count_vector; 
+    auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
     // total_kmers: tuple of in_total_kmers and out_total_kmers (number of kmers in foreground and background)
     // init_mask: bit_vector of length graph_ptr->max_index() indicating which nodes are in the foreground (size = number of unique kmers total)
     // counts: int_vector of length graph_ptr->max_index() * 2 indicating the number of in and out labels for each node (size = number of unique kmers total * 2)
-    // other_labels: bit_vector of length num_labels indicating which labels are not in or out labels 
+    // other_labels: bit_vector of length num_labels indicating which labels are not in or out labels
 /*
     if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
 
@@ -606,7 +729,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         std::exit(EXIT_SUCCESS);
     }
 */
-    return mask_nodes_by_label(graph_ptr, nullptr,
+    auto masked_graph = mask_nodes_by_label(graph_ptr, nullptr,
                                std::move(counts), std::move(init_mask),
                                std::move(other_mask),
                                files.size(),
@@ -823,6 +946,108 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     size_t max_label_out_count = std::floor(config.label_mask_out_kmer_fraction
                                     * num_out_labels);
 
+    if (config.test_by_unitig) {
+        sdsl::bit_vector mask(masked_graph->get_mask().size(), false);
+
+        std::shared_ptr<DeBruijnGraph> test_graph = masked_graph;
+        std::shared_ptr<CanonicalDBG> wrapped;
+        if (masked_graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            wrapped = std::make_shared<CanonicalDBG>(masked_graph);
+            test_graph = wrapped;
+        }
+
+        test_graph->call_unitigs([&](const std::string &, const auto &path) {
+            uint64_t total_in_count = 0;
+            uint64_t total_out_count = 0;
+            auto begin = path.end();
+            auto end = path.begin();
+            for (auto it = path.begin(); it != path.end(); ++it) {
+                node_index node = wrapped ? wrapped->get_base_node(*it) : *it;
+                auto in_count = counts[node * 2];
+                total_in_count += in_count;
+                total_out_count += counts[node * 2 + 1];
+                if (in_count) {
+                    begin = std::min(it, begin);
+                    end = std::max(it, end);
+                }
+            }
+
+            size_t path_size = end - begin;
+            if (total_in_count >= min_label_in_count*path_size && total_out_count <= max_label_out_count*path_size) {
+                std::for_each(begin, end, [&](node_index node) {
+                    mask[wrapped ? wrapped->get_base_node(node) : node] = true;
+                });
+            }
+        });
+
+        /*
+        size_t kept_nodes = 0;
+
+        call_ones(masked_graph->get_mask(), [&](node_index node) {
+            uint64_t in_count = counts[node * 2];
+            uint64_t out_count = counts[node * 2 + 1];
+
+            if (in_count >= min_label_in_count && out_count <= max_label_out_count) {
+                ++kept_nodes;
+            } else {
+                mask[node] = false;
+            }
+        });
+
+        size_t num_filled = 0;
+        masked_graph->call_unitigs([&](const std::string &, const auto &path) {
+            auto in_mask = [&](node_index node) { return mask[node]; };
+            auto begin = std::find_if(path.begin(), path.end(), in_mask);
+            if (begin == path.end())
+                return;
+
+            auto end = std::find_if(path.rbegin(), path.rend(), in_mask).base();
+
+            size_t num_in_mask = std::count_if(begin, end, in_mask);
+
+            if (static_cast<double>(num_in_mask) / path.size() >= 0.8) {
+                std::for_each(path.begin(), path.end(), [&](node_index node) {
+                    if (!mask[node]) {
+                        mask[node] = true;
+                        ++kept_nodes;
+                        ++num_filled;
+                    }
+                });
+                return;
+            }
+
+            if (static_cast<double>(num_in_mask) / (end - begin) >= 0.8) {
+                std::for_each(begin, end, [&](node_index node) {
+                    if (!mask[node]) {
+                        mask[node] = true;
+                        ++kept_nodes;
+                        ++num_filled;
+                    }
+                });
+            }
+
+            for (size_t i = 1; i + 1 < path.size(); ++i) {
+                node_index node = path[i];
+                if (!mask[node]) {
+                    if (mask[path[i - 1]] && mask[path[i + 1]]) {
+                        mask[node] = true;
+                        ++kept_nodes;
+                        ++num_filled;
+                    }
+                }
+            }
+        });
+        */
+
+        masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+
+        // logger->trace("Kept {} out of {} nodes, {} filled", kept_nodes, masked_graph->get_graph().num_nodes(), num_filled);
+        masked_graph->likelihood_ratios.resize(counts.size()/2+1);
+        std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
+
+        return masked_graph;
+    }
+
     if (config.label_mask_in_unitig_fraction == 0.0
             && config.label_mask_out_unitig_fraction == 1.0
             && config.label_mask_other_unitig_fraction == 1.0) {
@@ -844,11 +1069,11 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         });
 
-
-
         masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
         logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
+        masked_graph->likelihood_ratios.resize(counts.size()/2+1);
+        std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
 
         return masked_graph;
     }

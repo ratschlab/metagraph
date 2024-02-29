@@ -64,6 +64,38 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                         &false_pos_ptr, &false_neg_ptr);
 }
 
+std::tuple<int64_t,double,double> estimate_min_kmer_abundance(const bit_vector &idx,
+                                     const sdsl::int_vector<> &values,
+                                     uint64_t num_singleton_kmers,
+                                     bool discard_last_count) {
+    std::vector<uint64_t> hist;
+    idx.call_ones([&](auto i) {
+        uint64_t kmer_count = values[idx.rank1(i) - 1];
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
+        while (kmer_count >= hist.size()) {
+            hist.push_back(0);
+        }
+        hist[kmer_count]++;
+    });
+
+    if (discard_last_count && hist.size() >= 10 && hist.back() > hist[hist.size() - 2])
+        hist.pop_back();
+
+    hist.resize(std::max((uint64_t)hist.size(), (uint64_t)10), 0);
+
+    if (num_singleton_kmers) {
+        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
+                     hist[1], num_singleton_kmers);
+        hist[1] = num_singleton_kmers;
+    }
+
+    double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
+    int64_t threshold = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
+                                        &alpha_est_ptr, &beta_est_ptr,
+                                        &false_pos_ptr, &false_neg_ptr);
+    return std::make_tuple(threshold,alpha_est_ptr,beta_est_ptr);
+}
+
 
 /** The next routines were copied from:
  * https://github.com/mcveanlab/mccortex/blob/97aba198d632ee98ac1aa496db33d1a7a8cb7e51/src/tools/clean_graph.c

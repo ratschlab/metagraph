@@ -34,11 +34,13 @@ struct DifferentialAssemblyConfig {
     double label_mask_other_unitig_fraction = 1.0;
     bool add_complement = false;
     bool count_kmers = false; // Myrthe
+    bool clean = false;
     double family_wise_error_rate = 0.05; //Myrthe: differential assembly statistical tests, or the family wise rate for bonferonni or a p-value
     bool test_by_unitig = false; // Myrthe
     std::string test_type = "brunner_munzel"; // default is "brunner_munzel", alternatives are: "likelihoodratio", "binary"
     bool evaluate_assembly = false; // Myrthe temporary : evaluate an assembly
     bool filter = true;
+    uint64_t min_count = 1;
 };
 
 /**
@@ -65,7 +67,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     size_t num_threads = 1,
                     size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
-std::shared_ptr<MaskedDeBruijnGraph>
+std::shared_ptr<DeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const std::vector<std::string> &files,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,

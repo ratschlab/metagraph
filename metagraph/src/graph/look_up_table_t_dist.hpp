@@ -1,3 +1,6 @@
+#ifndef __TLOOKUP_HPP__
+#define __TLOOKUP_HPP__
+
 #include <iostream>
 #include <cmath>
 #include <vector>
@@ -13,3 +16,5 @@ public:
     double getCriticalValue(double alpha, int df);
 };
 }
+
+#endif // __TLOOKUP_HPP__
