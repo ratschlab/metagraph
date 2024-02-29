@@ -116,7 +116,8 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
     double var_out = get_var(out_counts, n);
     if (var_in == 0 && var_out == 0){
         var_0++;
-        return std::tuple(false, 0);
+        var_in = 1;
+        var_out = 1;
     }         
     // get test statistic
     double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
@@ -196,12 +197,6 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
     in_sum += 1;
     out_sum += 1;
     double mean = (out_sum + in_sum)/ static_cast<double>(out_total_kmers + in_total_kmers);
-    // double lambda = (in_sum/in_total_kmers + out_sum/out_total_kmers)/2 * ((out_total_kmers+in_total_kmers)/2);
-    std::cout << "out sum " << out_sum << "\n";
-    std::cout << "in sum " << in_sum << "\n";
-    std::cout << "mean " << mean << "\n";
-    std::cout << "out_total_kmers " << out_total_kmers << "\n";
-    std::cout << "in_total_kmers " << in_total_kmers << "\n";
     double alt_hypothesis = poisson_prob(out_sum, out_sum) +
             poisson_prob(in_sum, in_sum); // K2 equals N2Theta2 because Theta2 = K2/N2 (?). Shouldn't Theta2 be = K2/|background labels| ?
 

@@ -77,7 +77,7 @@ void call_rows(const std::vector<BitmapPtr> &columns,
 
     num_rows = columns[0]->size();
     std::vector<PairVector> rows;
-
+        
     ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !show_progress);
 
     #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic) private(rows)
