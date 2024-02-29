@@ -1074,6 +1074,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
 
     size_t num_tested_kmers = 0;
     for(size_t i = 0; i < counts.size(); i+=2){
+        logger->trace("counts: {}, {}", counts[i], counts[i+1]);
         if (counts[i] > counts[i+1])
         num_tested_kmers += 1;
     };
