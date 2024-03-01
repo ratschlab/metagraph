@@ -737,6 +737,11 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                labels_in, labels_out, {}, {},
                                total_kmers,
                                config, num_threads, medians);
+
+    if (masked_graph->get_mode() != DeBruijnGraph::PRIMARY)
+        return masked_graph;
+
+    return std::make_shared<CanonicalDBG>(masked_graph);
 }
 
 // does differential testing
