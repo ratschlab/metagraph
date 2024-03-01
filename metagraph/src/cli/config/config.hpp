@@ -62,6 +62,7 @@ class Config {
     bool aggregate_columns = false;
     bool coordinates = false;
     bool advanced = false;
+    bool clean_ztp = false;
 
     unsigned int k = 3;
 

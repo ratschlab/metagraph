@@ -80,8 +80,10 @@ int clean_graph(Config *config) {
                         [&](auto i) { return (*node_weights)[i] > 0; }, true)
                     : graph;
 
-            uint64_t cutoff
-                = estimate_min_kmer_abundance(*_graph, *node_weights,
+            uint64_t cutoff = config->clean_ztp
+                ? estimate_min_kmer_abundance_ztp(*_graph, *node_weights,
+                                                  config->num_singleton_kmers)
+                : estimate_min_kmer_abundance(*_graph, *node_weights,
                                               config->num_singleton_kmers);
 
             if (cutoff != static_cast<uint64_t>(-1)) {

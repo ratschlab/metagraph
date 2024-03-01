@@ -17,6 +17,10 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
                                      uint64_t num_singleton_kmers = 0);
 
+uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
+                                         const NodeWeights &node_weights,
+                                         uint64_t num_singleton_kmers = 0);
+
 std::tuple<int64_t,double,double> estimate_min_kmer_abundance(const bit_vector &idx,
                                      const sdsl::int_vector<> &values,
                                      uint64_t num_singleton_kmers = 0,
