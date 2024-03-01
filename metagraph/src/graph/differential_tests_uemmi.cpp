@@ -33,7 +33,7 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
     alpha = alpha/2; // convert to one sided test
     alpha = alpha/total_hypotheses; // bonferroni correction
-    common::logger->trace("alpha: {}", alpha);
+    common::logger->trace("alpha: {}\tdf:{}", alpha, df);
     double critical_value = t_table.getCriticalValue(alpha, df);
     common::logger->trace("Critical value: {}", critical_value);
     return critical_value;
@@ -140,7 +140,7 @@ int DifferentialTest::get_df_approx(std::vector<double> in_counts, std::vector<d
 int DifferentialTest::get_df_conservative(std::vector<double> in_counts, std::vector<double> out_counts){
     int m = in_counts.size();
     int n = out_counts.size();
-    return std::min(m, n) - 1;
+    return std::max(1,std::min(m, n) - 1);
 }
 
 double DifferentialTest::get_var(std::vector<double> counts, int n){
