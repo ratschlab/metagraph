@@ -138,9 +138,15 @@ double findMedian(sdsl::int_vector_buffer<0> a,
                     int threshold) {   
     logger->trace("non zero kmers: {}", a.size());
     std::vector<double> a_filtered;
-    std::copy_if(a.begin(), a.end(), std::back_inserter(a_filtered), [&](int i) {
-        return (i > threshold);
-    });
+    for (size_t i = 0; i < a.size(); i++){
+        int value = a[i];
+        if (value > threshold){
+            a_filtered.push_back(value);
+        }
+    }
+    // auto it = std::copy_if(a.begin(), a.end(), std::back_inserter(a_filtered), [&](int i) {
+    //     return (i > threshold);
+    // });
     logger->trace("kmers above threshold: {}", a_filtered.size());
     int n = a_filtered.size();
     // If size of the arr[] is even 
@@ -307,6 +313,7 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
     // generate a vector of the total number of kmers per sample for each group (in and out)
     Timer t;
     std::vector<double> medians;
+    logger->trace("filtering_column");
     annot::ColumnCompressed<>::load_columns_and_values(files,
         [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector_buffer<> && column_values) { // goes through all files in a group
             uint64_t max_col_width = std::pow(2, 16); // max value for int16_t
@@ -314,9 +321,6 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
                 assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0); // at least one kmer in sample
                 assert(column->num_set_bits() > 0); // at least one kmer present in sample
                 assert(column->num_set_bits() == column_values.size()); // same number of kmers in column as in column_values
-                double median = findMedian(std::move(column_values), threshold);
-                medians.push_back(median);
-                logger->trace("median: {}", median);
                 call_ones(*column, [&](uint64_t i) {
                     uint64_t column_value = column_values[column->rank1(i)-1];
                     if (column_value > threshold){
@@ -324,6 +328,9 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
                         value_callback(i, column_value);
                     }    
                 });
+                double median = findMedian(std::move(column_values), threshold);
+                medians.push_back(median);
+                logger->trace("median: {}", median);
             });
             logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());    
         }
