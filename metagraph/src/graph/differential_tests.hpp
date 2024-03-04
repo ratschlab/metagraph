@@ -41,6 +41,10 @@ class DifferentialTest {
 
     double get_t_test_alpha(int df, double alpha);
 
+    std::tuple<std::vector<double>, std::vector<double>> get_overall_midrank(std::vector<double> in_counts, std::vector<double> out_counts, int N);
+
+    double get_var_midranks(std::vector<double> mid_ranks_within, std::vector<double> mid_ranks_overall, int m);
+
     std::vector<double> get_midranks(std::vector<double> in_counts, int size_in_counts);
 
     std::tuple<bool, double> likelihood_ratio_test(double in_sum, double out_sum);

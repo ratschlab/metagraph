@@ -74,6 +74,57 @@ std::vector<double> DifferentialTest::get_midranks(std::vector<double> in_counts
     return mid_ranks;
 }
 
+std::tuple<std::vector<double>, std::vector<double>> DifferentialTest::get_overall_midrank(std::vector<double> in_counts, std::vector<double> out_counts, int N){
+    std::vector<std::tuple<double, int>> all_counts;
+    for (int i = 0; i < (int) in_counts.size(); i++){
+        all_counts.push_back(std::make_tuple(in_counts[i], 1));
+    }
+    for (int i = 0; i < (int) out_counts.size(); i++){
+        all_counts.push_back(std::make_tuple(out_counts[i], 0));
+    }
+    std::vector<std::tuple<double, int>> midranks_all;
+    double curr_value = std::get<0>(all_counts[0]);
+    int tied = 1;
+    for (int i = 1; i<N; i++){
+        if (std::get<0>(all_counts[i]) == curr_value){
+            tied++;
+            if (i == N-1){
+                i += 1;
+                for (int j = i-tied; j<i; j++){
+                    midranks_all.push_back(std::make_tuple((i-tied) + (tied+1)/2.0, std::get<1>(all_counts[midranks_all.size()])));
+                }
+            }
+        }
+        else{
+            if (i == N-1){
+                for (int j = i-tied; j<i; j++){
+                    midranks_all.push_back(std::make_tuple((i-tied) + (tied+1)/2.0, std::get<1>(all_counts[midranks_all.size()])));
+                }
+                midranks_all.push_back(std::make_tuple(i+1, std::get<1>(all_counts[midranks_all.size()])));
+            }
+            else{
+                for (int j = i-tied; j<i; j++){
+                    midranks_all.push_back(std::make_tuple((i-tied) + (tied+1)/2.0, std::get<1>(all_counts[midranks_all.size()])));
+                }
+                curr_value = std::get<0>(all_counts[i]);
+                tied = 1;
+            }
+            
+        }
+    }
+    std::vector<double> in_ranks;
+    std::vector<double> out_ranks;
+    for (int i = 0; i<N; i++){
+        if (std::get<1>(midranks_all[i]) == 1){
+            in_ranks.push_back(std::get<0>(midranks_all[i]));
+        }
+        else{
+            out_ranks.push_back(std::get<0>(midranks_all[i]));
+        }
+    }
+    return std::make_tuple(in_ranks, out_ranks);
+}
+
 int DifferentialTest::get_df_approx(std::vector<double> in_counts, std::vector<double> out_counts){
     int m = in_counts.size();
     int n = out_counts.size();
@@ -99,21 +150,31 @@ double DifferentialTest::get_var(std::vector<double> counts, int n){
     return var;
 }
 
+double DifferentialTest::get_var_midranks(std::vector<double> mid_ranks_within, std::vector<double> mid_ranks_overall, int m){
+    double mean_mid_rank = std::accumulate(mid_ranks_overall.begin(), mid_ranks_overall.end(), 0.0) / mid_ranks_overall.size();
+    double var = 0;
+    for (int i = 0; i < m; i++){
+        var = var + (mid_ranks_overall[i] - mid_ranks_within[i] - mean_mid_rank + (m+1)/2) * (mid_ranks_overall[i] - mid_ranks_within[i] - mean_mid_rank + (m+1)/2);
+    }
+    return var/(m-1);
+}
+
+
 std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<double> in_counts, std::vector<double> out_counts){
-    std::vector<double> mid_ranks_in;
-    std::vector<double> mid_ranks_out;
     int m = in_counts.size();
     int n = out_counts.size();
     int N = m + n;
-    // populate mid_ranks_in and mid_ranks_out
-    mid_ranks_in = get_midranks(in_counts, m);
-    mid_ranks_out = get_midranks(out_counts, n);
+    // get overall midranks
+    auto [mid_ranks_in, mid_ranks_out] = get_overall_midrank(in_counts, out_counts, N);
     // get means of midranks
     double mean_mid_rank_in = std::accumulate(mid_ranks_in.begin(), mid_ranks_in.end(), 0.0) / mid_ranks_in.size();
     double mean_mid_rank_out = std::accumulate(mid_ranks_out.begin(), mid_ranks_out.end(), 0.0) / mid_ranks_out.size();
+    // get midranks within groups
+    std::vector<double> in_ranks = get_midranks(in_counts, m);
+    std::vector<double> out_ranks = get_midranks(out_counts, n);
     // get variances
-    double var_in = get_var(in_counts, m);
-    double var_out = get_var(out_counts, n);
+    double var_in = get_var_midranks(in_ranks, mid_ranks_in, m);
+    double var_out = get_var_midranks(out_ranks, mid_ranks_out, n);
     if (var_in == 0 && var_out == 0){
         var_0++;
         var_in = 1;
@@ -131,7 +192,7 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
         common::logger->trace("alpha_precalc not set, calculating alpha_precalc");
         alpha_precalc = get_t_test_alpha(df_precalc, 0.05);
     }
-    if( std::abs(b) < alpha_precalc){
+    if( std::abs(b) > alpha_precalc){
         return std::tuple(true, b);
     }
     else{
