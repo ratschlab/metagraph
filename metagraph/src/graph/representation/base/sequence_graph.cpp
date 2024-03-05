@@ -130,7 +130,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
     std::vector<std::pair<node_index, char>> targets;
     const mtg::graph::MaskedDeBruijnGraph *downcasted_graph = // Create a downcasted graph object, such that the likelihood ratio vector can be accessed.
-            dynamic_cast<const mtg::graph::MaskedDeBruijnGraph*>(&graph);
+            // dynamic_cast<const mtg::graph::MaskedDeBruijnGraph*>(&graph);
+            nullptr;
 
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {

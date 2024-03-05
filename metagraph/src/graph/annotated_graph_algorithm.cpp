@@ -122,7 +122,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   size_t max_index,
                                   size_t num_labels,
                                   size_t num_threads,
-                                  bool add_out_labels_to_mask);                              
+                                  bool add_out_labels_to_mask);
 
 // Regions of a graph mask which should be kept (i.e., masked in)
 typedef std::vector<std::pair<size_t, size_t>> Intervals;
@@ -135,10 +135,10 @@ bool sortByPValue(const std::pair<int, double>& a, const std::pair<int, double>&
     return a.first < b.first; // Sort in ascending order of p-values
 }
 
-// Function for calculating 
-// the median 
-double findMedian(sdsl::int_vector_buffer<0> a, 
-                    int threshold) {   
+// Function for calculating
+// the median
+double findMedian(sdsl::int_vector_buffer<0> a,
+                    int threshold) {
     logger->trace("non zero kmers: {}", a.size());
     std::vector<double> a_filtered;
     for (size_t i = 0; i < a.size(); i++){
@@ -152,42 +152,42 @@ double findMedian(sdsl::int_vector_buffer<0> a,
     // });
     logger->trace("kmers above threshold: {}", a_filtered.size());
     int n = a_filtered.size();
-    // If size of the arr[] is even 
-    if (n % 2 == 0) { 
-  
-        // Applying nth_element 
-        // on n/2th index 
-        std::nth_element(a_filtered.begin(), 
-                    a_filtered.begin() + n / 2, 
-                    a_filtered.end()); 
-  
-        // Applying nth_element 
-        // on (n-1)/2 th index 
-        std::nth_element(a_filtered.begin(), 
-                    a_filtered.begin() + (n - 1) / 2, 
-                    a_filtered.end()); 
-  
-        // Find the average of value at 
-        // index N/2 and (N-1)/2 
-        return (double)(a_filtered[(n - 1) / 2] 
-                        + a_filtered[n / 2]) 
-               / 2.0; 
-    } 
-  
-    // If size of the arr[] is odd 
-    else { 
-  
-        // Applying nth_element 
-        // on n/2 
-        std::nth_element(a_filtered.begin(), 
-                    a_filtered.begin() + n / 2, 
-                    a_filtered.end()); 
-  
-        // Value at index (N/2)th 
-        // is the median 
-        return (double)a_filtered[n / 2]; 
-    } 
-} 
+    // If size of the arr[] is even
+    if (n % 2 == 0) {
+
+        // Applying nth_element
+        // on n/2th index
+        std::nth_element(a_filtered.begin(),
+                    a_filtered.begin() + n / 2,
+                    a_filtered.end());
+
+        // Applying nth_element
+        // on (n-1)/2 th index
+        std::nth_element(a_filtered.begin(),
+                    a_filtered.begin() + (n - 1) / 2,
+                    a_filtered.end());
+
+        // Find the average of value at
+        // index N/2 and (N-1)/2
+        return (double)(a_filtered[(n - 1) / 2]
+                        + a_filtered[n / 2])
+               / 2.0;
+    }
+
+    // If size of the arr[] is odd
+    else {
+
+        // Applying nth_element
+        // on n/2
+        std::nth_element(a_filtered.begin(),
+                    a_filtered.begin() + n / 2,
+                    a_filtered.end());
+
+        // Value at index (N/2)th
+        // is the median
+        return (double)a_filtered[n / 2];
+    }
+}
 
 inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     int n;
@@ -205,11 +205,11 @@ bool filtering_row(std::vector<double> in_counts_non_zero,
                     int64_t row_id);
 
 std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                                                        std::shared_ptr<MaskedDeBruijnGraph> masked_graph, 
-                                                        const std::vector<std::string> &files, 
-                                                        const tsl::hopscotch_set<Label> &labels_in, 
-                                                        const tsl::hopscotch_set<Label> &labels_out, 
-                                                        const DifferentialAssemblyConfig &config,  
+                                                        std::shared_ptr<MaskedDeBruijnGraph> masked_graph,
+                                                        const std::vector<std::string> &files,
+                                                        const tsl::hopscotch_set<Label> &labels_in,
+                                                        const tsl::hopscotch_set<Label> &labels_out,
+                                                        const DifferentialAssemblyConfig &config,
                                                         size_t total_unitigs,
                                                         std::vector<double> medians) {
 
@@ -221,7 +221,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     std::vector<std::unique_ptr<sdsl::int_vector_buffer<>>> column_values_all;
     std::vector<bool> column_label;
     annot::ColumnCompressed<>::load_columns_and_values(files,
-        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector_buffer<> && column_values) { 
+        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector_buffer<> && column_values) {
             columns_all.push_back(std::move(column));
             column_values_all.push_back(std::make_unique<sdsl::int_vector_buffer<>>(std::move(column_values)));
             if (labels_in.find(label) != labels_in.end()) // if the label is in the in labels set column_label to 1, else 0
@@ -235,14 +235,14 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     int64_t num_tests = 0;
     int64_t kept_nodes = 0;
     // calculate the p-value for the brunner munzel test
-    auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0); 
+    auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);
     utils::call_rows<std::unique_ptr<bit_vector>,
                     std::unique_ptr<sdsl::int_vector_buffer<>>,
                     std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
                         // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
                         if (row.size() == 0) { // if the kmer is not present in any sample
                             mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
-                            row_id++; 
+                            row_id++;
                             return;
                         }
                         else{
@@ -251,7 +251,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                             std::vector<double> out_counts;
                             for (size_t i = 0; i < row.size(); i++){
                                 double median = medians[row[i].first];
-                                if (median == 0) median = 1; // if the median is 0, set it to 1 (to avoid division by 0)    
+                                if (median == 0) median = 1; // if the median is 0, set it to 1 (to avoid division by 0)
                                 if (column_label[row[i].first])
                                     in_counts.push_back(row[i].second/median);
                                 else
@@ -263,29 +263,29 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                                 if (in_counts.size() < labels_in.size())
                                     in_counts.resize(labels_in.size(), 0);
                                 if (out_counts.size() < labels_out.size())
-                                    out_counts.resize(labels_out.size(), 0);       
-                                // run test and adjust masked graph accordingly 
+                                    out_counts.resize(labels_out.size(), 0);
+                                // run test and adjust masked graph accordingly
                                 auto [keep, pvalue] = statistical_model.brunner_munzel_test(in_counts, out_counts);
                                 if (keep == false)
                                     mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
                                 else{
-                                    kept_nodes++; 
-                                }     
+                                    kept_nodes++;
+                                }
                                 row_id++;
                             }
                             else{
                                 mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
                                 row_id++;
                             }
-                            
-                        }               
+
+                        }
     });
     logger->trace("number of tests with 0 var: {}", statistical_model.var_0);
     logger->trace("number of tests: {}", num_tests);
     masked_graph->set_mask(new bitmap_vector(std::move(mask)));
     logger->trace("number of kept nodes: {}", kept_nodes);
     return masked_graph;
-}    
+}
 // returns true if the kmer passes the filtering criteria
 bool filtering_row(std::vector<double> in_counts_non_zero,
                     std::vector<double> out_counts_non_zero,
@@ -313,7 +313,7 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
                ) {
     // median normalisation
     // threshold of 2
-    double threshold = 2; // TODO get from config
+    double threshold = config.min_count; // TODO get from config
     assert(files.size() > 0);
     // generate a vector of the total number of kmers per sample for each group (in and out)
     Timer t;
@@ -331,13 +331,13 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
                     if (column_value > threshold){
                         column_value = std::min(column_value, max_col_width); // normalize value
                         value_callback(i, column_value);
-                    }    
+                    }
                 });
                 double median = findMedian(std::move(column_values), threshold);
                 medians.push_back(median);
                 logger->trace("median: {}", median);
             });
-            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());    
+            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());
         }
     );
     return medians;
@@ -399,7 +399,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
         && (config.add_complement || unitig_mode);
-    logger->trace("add_complement: {}", add_complement);    
+    logger->trace("add_complement: {}", add_complement);
 
     logger->trace("Generating initial mask");
 
@@ -489,7 +489,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                 call_ones(*column, [&](uint64_t i) {
                                     uint64_t column_value = column_values[column->rank1(i)-1];
                                     column_value = std::min((int) column_value, max_col_width); // normalize value
-                                    value_callback(i, column_value);
+                                    if (column_value > config.min_count)
+                                        value_callback(i, column_value);
                                 });
                             });
                             logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());
@@ -509,121 +510,65 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                     );
                 } else {
                     annot::ColumnCompressed<>::load_columns_and_values(files,
-                        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
-                            VectorMap<uint64_t,uint64_t> hist_map;
-                            for (auto c : column_values) {
-                                ++hist_map[c];
-                            }
-                            std::vector<std::pair<uint64_t,uint64_t>> hist(
-                                const_cast<std::vector<std::pair<uint64_t,uint64_t>>&&>(hist_map.values_container())
-                            );
-                            std::sort(hist.begin(), hist.end(), utils::LessFirst());
-                            // common::logger->trace("Min: {}, Max: {}", hist[0].first, hist.back().first);
-
-                            uint64_t max_count = (1llu << column_values.width()) - 1;
-                            if (hist.back().first == max_count)
-                                hist.pop_back();
-
-                            // estimate a zero-truncated poisson from the first touse counts
-                            // (from https://doi.org/10.1016/S0167-9473(99)00111-5)
-                            // set a cutoff that covers 95% of this distribution
-                            uint64_t touse = 3;
-                            size_t max_iter = 1000;
-                            double cdf_cutoff = 0.95;
-
-                            size_t nupto_c = 0;
-                            uint64_t sumupto = 0;
-                            for (const auto &[count,nkmers] : hist) {
-                                if (count > touse)
-                                    break;
-
-                                // common::logger->trace("c: {}; n: {}", count, nkmers);
-                                nupto_c += nkmers;
-                                sumupto += count * nkmers;
-                            }
-
-                            double sum = sumupto;
-                            double nupto = nupto_c;
-                            double mean_est = sum / nupto;
-
-                            for (size_t i = 0; i < max_iter; ++i) {
-                                double last_mean_est = mean_est;
-                                double total_est = nupto/(1.0-exp(-mean_est));
-                                mean_est = sum / total_est;
-                                if (abs(mean_est - last_mean_est)/mean_est < 1e-3) {
-                                    common::logger->trace("Fitted mean {} after {} iterations", mean_est, i + 1);
-                                    break;
-                                }
-                            }
-
-                            double p_num = mean_est * exp(-mean_est);
-                            double p_denom = 1;
-                            double cdf = p_num;
-                            double denom = 1.0 - exp(-mean_est);
-
-                            size_t min_count = 1;
-                            for (size_t i = 0; i < max_iter; ++i) {
-                                if (cdf / denom >= cdf_cutoff)
-                                    break;
-
-                                ++min_count;
-                                p_num *= mean_est;
-                                p_denom *= min_count;
-                                cdf += p_num / p_denom;
-                            }
-                            ++min_count;
-
-                            common::logger->trace("Cleaning threshold: {}; noise CDF: {}", min_count, cdf / denom);
-
-                            auto mask = std::make_unique<bitmap_lazy>([&](node_index node) {
-                                if (!node)
-                                    return false;
-
-                                return (*column)[AnnotatedDBG::graph_to_anno_index(node)];
-                            }, column->size() + 1);
-                            bool is_primary = (graph_ptr->get_mode() == DeBruijnGraph::PRIMARY);
-                            std::shared_ptr<DeBruijnGraph> masked
-                                = std::make_shared<MaskedDeBruijnGraph>(graph_ptr, std::move(mask), true,
-                                                       is_primary
-                                                        ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
-
-                            std::shared_ptr<CanonicalDBG> wrapped;
-                            if (is_primary) {
-                                wrapped = std::make_shared<CanonicalDBG>(masked);
-                                masked = wrapped;
-                            }
+                        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector<>&& column_values) {
                             column_callback(offset, label, [&](const ValueCallback &value_callback) {
-                                assert(column->num_set_bits() == column_values.size());
-                                // call_ones(*column, [&](uint64_t i) {
-                                //     auto val = column_values[column->rank1(i) - 1];
-                                //     if (val >= min_count && val < max_count)
-                                //         value_callback(i, 1);
-                                // });
-                                masked->call_unitigs([&](const std::string&, const auto &path) {
-                                    std::vector<uint64_t> counts;
-                                    std::vector<uint64_t> rows;
-                                    counts.reserve(path.size());
-                                    rows.reserve(path.size());
-                                    for (node_index node : path) {
-                                        auto row = AnnotatedDBG::graph_to_anno_index(
-                                            is_primary ? wrapped->get_base_node(node) : node
-                                        );
-                                        rows.emplace_back(row);
-                                        counts.emplace_back(column_values[column->rank1(row) - 1]);
-                                    }
-                                    std::sort(counts.begin(), counts.end());
-                                    double median = counts[counts.size() / 2];
-
-                                    if (counts.size() % 2 == 1)
-                                        median = (median + counts[counts.size() / 2 - 1])/2;
-
-                                    if (median >= min_count && median < max_count) {
-                                        for (auto row : rows) {
-                                            value_callback(row, 1);
-                                        }
-                                    }
+                                call_ones(*column, [&](uint64_t i) {
+                                    auto val = column_values[column->rank1(i) - 1];
+                                    if (val > config.min_count)
+                                        value_callback(i, 1);
                                 });
                             });
+                            // size_t min_count = config.min_count;
+
+                            // auto mask = std::make_unique<bitmap_lazy>([&](node_index node) {
+                            //     if (!node)
+                            //         return false;
+
+                            //     return (*column)[AnnotatedDBG::graph_to_anno_index(node)];
+                            // }, column->size() + 1);
+                            // bool is_primary = (graph_ptr->get_mode() == DeBruijnGraph::PRIMARY);
+                            // std::shared_ptr<DeBruijnGraph> masked
+                            //     = std::make_shared<MaskedDeBruijnGraph>(graph_ptr, std::move(mask), true,
+                            //                            is_primary
+                            //                             ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+
+                            // std::shared_ptr<CanonicalDBG> wrapped;
+                            // if (is_primary) {
+                            //     wrapped = std::make_shared<CanonicalDBG>(masked);
+                            //     masked = wrapped;
+                            // }
+                            // column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                            //     assert(column->num_set_bits() == column_values.size());
+                            //     // call_ones(*column, [&](uint64_t i) {
+                            //     //     auto val = column_values[column->rank1(i) - 1];
+                            //     //     if (val >= min_count && val < max_count)
+                            //     //         value_callback(i, 1);
+                            //     // });
+                            //     masked->call_unitigs([&](const std::string&, const auto &path) {
+                            //         std::vector<uint64_t> counts;
+                            //         std::vector<uint64_t> rows;
+                            //         counts.reserve(path.size());
+                            //         rows.reserve(path.size());
+                            //         for (node_index node : path) {
+                            //             auto row = AnnotatedDBG::graph_to_anno_index(
+                            //                 is_primary ? wrapped->get_base_node(node) : node
+                            //             );
+                            //             rows.emplace_back(row);
+                            //             counts.emplace_back(column_values[column->rank1(row) - 1]);
+                            //         }
+                            //         std::sort(counts.begin(), counts.end());
+                            //         double median = counts[counts.size() / 2];
+
+                            //         if (counts.size() % 2 == 1)
+                            //             median = (median + counts[counts.size() / 2 - 1])/2;
+
+                            //         if (median >= min_count && median < max_count) {
+                            //             for (auto row : rows) {
+                            //                 value_callback(row, 1);
+                            //             }
+                            //         }
+                            //     });
+                            // });
                         }
                     );
                 }
@@ -745,7 +690,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 }
 
 // does differential testing
-std::shared_ptr<MaskedDeBruijnGraph> // TODO add all columns and columns label as param 
+std::shared_ptr<MaskedDeBruijnGraph> // TODO add all columns and columns label as param
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const AnnotatedDBG *anno_graph,
                     sdsl::int_vector<>&& counts,
@@ -846,27 +791,31 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         logger->trace("I'm here");
         if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included.
             std::atomic<uint64_t> total_unitigs(0);
-            masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
-                total_unitigs.fetch_add(1, MO_RELAXED);
-            }, get_num_threads());
             if (config.test_type == "brunner_munzel"){
                 logger->trace("Brunner Munzel test");
+                masked_graph->likelihood_ratios.resize(counts.size()/2+1);
+                masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
+                    ++total_unitigs;
+                    // total_unitigs.fetch_add(1, MO_RELAXED);
+                }, get_num_threads());
                 masked_graph = brunner_munzel_test(graph_ptr, masked_graph,files,labels_in,labels_out,config,total_unitigs, medians);
+                masked_graph->likelihood_ratios.resize(counts.size()/2+1);
             }
             else if (config.test_type == "likelihoodratio"){
+                const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+                total_unitigs = static_cast<const bitmap_vector &>(masked_graph->get_mask()).num_set_bits();
                 logger->trace("Likelihood ratio test");
                 logger->trace("ooooo total unitigs {}", total_unitigs); // the total number of hypotheses tested: number of unitigs, to accounts for dependence
                 auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs,
                                                         std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
-                                                        in_total_kmers, out_total_kmers); 
-                const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+                                                        in_total_kmers, out_total_kmers);
                 logger->trace("test_by_unitig == false");
                 sdsl::bit_vector mask = in_mask;
                 size_t total_nodes = masked_graph->num_nodes();
                 size_t kept_nodes = 0;
                 //std::vector<int> nodes;
                 std::vector<std::pair<double,int>> likelihood_ratios_nodes;
-                call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control 
+                call_ones(in_mask, [&](node_index node) { // only run if counts_case > counts_control
                     uint64_t in_sum = counts[node * 2];
                     uint64_t out_sum = counts[node * 2 + 1];
                     // filter kmers in samples less noise
@@ -888,10 +837,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                 mask[node] = false;
                         }
                         else
-                            mask[node] = false; 
+                            mask[node] = false;
                     // }
                     // else
-                    //     mask[node] = false;               
+                    //     mask[node] = false;
                 });
                 // // get index for benjamini-yekutieli correction
                 // std::sort(likelihood_ratios_nodes.begin(), likelihood_ratios_nodes.end(), sortByPValue);
@@ -905,10 +854,11 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 // logger->trace("likelihood_ratios__nodes_elem {}, {}, {}", likelihood_ratios_nodes[0].first, likelihood_ratios_nodes[1].first, likelihood_ratios_nodes[2].first);
                 // logger->trace("likelihood_ratios_nodes_size {}", likelihood_ratios_nodes.size());
                 masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+                masked_graph->likelihood_ratios.resize(counts.size()/2+1);
                 logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
             }
 
-        } else { 
+        } else {
             logger->trace("test_by_unitig == true");
             masked_graph->likelihood_ratios.resize(counts.size()/2+1);
             std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
@@ -941,7 +891,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 },
             num_threads);
         }
-            //std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0.01); // Myrthe: For testing. temporary    
+            //std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0.01); // Myrthe: For testing. temporary
         return masked_graph;
     }
 
@@ -1270,7 +1220,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
         ValueCallback add_out = [&](Column i, uint64_t value) {
             i = AnnotatedDBG::anno_to_graph_index(i);
             assert(i != DeBruijnGraph::npos);
-            if (add_out_labels_to_mask)
+            if (add_out_labels_to_mask || config.test_type == "likelihoodratio")
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
             atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
             out_total_kmers += value;
