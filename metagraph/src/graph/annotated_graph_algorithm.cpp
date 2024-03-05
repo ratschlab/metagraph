@@ -198,7 +198,8 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
 bool filtering_row(std::vector<double> in_counts_non_zero,
                     std::vector<double> out_counts_non_zero,
                     int total_samples,
-                    std::string kmer_string);
+                    std::shared_ptr<const DeBruijnGraph> graph_ptr, 
+                    int64_t row_id);
 
 std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                         std::shared_ptr<MaskedDeBruijnGraph> masked_graph, 
@@ -254,8 +255,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                                     out_counts.push_back(row[i].second/median);
                             }
                             // add 0 to in_counts and out_counts if the kmer is not present in the sample
-                            std::string kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
-                            if (filtering_row(in_counts, out_counts, files.size(), kmer_string)) {
+                            if (filtering_row(in_counts, out_counts, files.size(), graph_ptr, row_id)) {
                                 num_tests++;
                                 if (in_counts.size() < labels_in.size())
                                     in_counts.resize(labels_in.size(), 0);
@@ -287,7 +287,8 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
 bool filtering_row(std::vector<double> in_counts_non_zero,
                     std::vector<double> out_counts_non_zero,
                     int total_samples,
-                    std::string kmer_string){
+                    std::shared_ptr<const DeBruijnGraph> graph_ptr, 
+                    int64_t row_id){
     // minimum present in 20% of samples
     bool is_present_in_20_percent = (in_counts_non_zero.size() + out_counts_non_zero.size()) > 0.2 * double(total_samples);
     if (is_present_in_20_percent == false)
@@ -297,6 +298,7 @@ bool filtering_row(std::vector<double> in_counts_non_zero,
     // low complexity filter
     if (is_present_more_in_foreground == false)
         return false;
+    std::string kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
     bool high_complexity =  !is_low_complexity(kmer_string);
     return (high_complexity);
 }
