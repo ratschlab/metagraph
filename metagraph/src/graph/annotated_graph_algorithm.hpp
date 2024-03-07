@@ -76,6 +76,15 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     size_t num_threads = 1,
                     size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                         const std::vector<std::string> &files,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads = 1,
+                         size_t num_parallel_files = std::numeric_limits<size_t>::max());
+
 } // namespace graph
 } // namespace mtg
 

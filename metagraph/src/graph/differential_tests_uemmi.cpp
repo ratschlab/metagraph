@@ -15,7 +15,7 @@
 namespace mtg{
 
 DifferentialTest::DifferentialTest(double family_wise_error_rate, size_t total_hypotheses, size_t ,
-                                   size_t in_total_kmers, size_t out_total_kmers): 
+                                   size_t in_total_kmers, size_t out_total_kmers):
     family_wise_error_rate(family_wise_error_rate),
     total_hypotheses(total_hypotheses),
     in_total_kmers(in_total_kmers),
@@ -31,7 +31,7 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 }
 
 double DifferentialTest::get_t_test_alpha(int df, double alpha=0.05){
-    alpha = alpha/2; // convert to one sided test
+    // alpha = alpha/2; // convert to one sided test
     alpha = alpha/total_hypotheses; // bonferroni correction
     common::logger->trace("alpha: {}\tdf:{}", alpha, df);
     double critical_value = t_table.getCriticalValue(alpha, df);
@@ -68,7 +68,7 @@ std::vector<double> DifferentialTest::get_midranks(std::vector<double> in_counts
                 curr_value = in_counts[i];
                 tied = 1;
             }
-            
+
         }
     }
     return mid_ranks;
@@ -109,7 +109,7 @@ std::tuple<std::vector<double>, std::vector<double>> DifferentialTest::get_overa
                 curr_value = std::get<0>(all_counts[i]);
                 tied = 1;
             }
-            
+
         }
     }
     std::vector<double> in_ranks;
@@ -179,10 +179,10 @@ std::tuple<bool, double> DifferentialTest::brunner_munzel_test(std::vector<doubl
         var_0++;
         var_in = 1;
         var_out = 1;
-    }         
+    }
     // get test statistic
     double b = (mean_mid_rank_out - mean_mid_rank_in) / (N * std::sqrt(var_in/(m*n*n) + var_out/(m*m*n)));
-    // get degrees of freedom 
+    // get degrees of freedom
     if (df_precalc == -1){
         common::logger->trace("df_precalc not set, calculating df_precalc");
         df_precalc = get_df_conservative(in_counts, out_counts);
@@ -211,19 +211,19 @@ std::tuple<std::vector<int>, std::vector<double>> sorted_pvalues(){
 // not in use at the moment
 bool DifferentialTest::bonferroni_correction(double& pvalue)
 {
-    return pvalue < (family_wise_error_rate / total_hypotheses); 
+    return pvalue < (family_wise_error_rate / total_hypotheses);
 }
 
 // return likelihood ratio thereshold corresponding to corrected alpha value
-double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold on the liklihood ratio test 
+double DifferentialTest::lrt_threshold(){ // Binary search to find the threshold on the liklihood ratio test
     double corrected_pvalue = family_wise_error_rate/total_hypotheses; // Take into account the Bonferonni multiple testing correction
     std::cout << "total_hypotheses " << total_hypotheses << "\n";
     if (family_wise_error_rate ==1) // TODO: change how to handle turning off mutliple testing correction. currtenly used like a flag, has no statistical meaning
         return (double) 3840 / 1000 / 2; //corrected_pvalue = 0.05;
     Chi2PLookup lookup;
     int low = 0;
-    int high = lookup.divisor * lookup.cutoff[0] - 1; 
-    while (low <= high) { 
+    int high = lookup.divisor * lookup.cutoff[0] - 1;
+    while (low <= high) {
         int mid = (low + high) >> 1; // the mean of low and high
         double current_pvalue = lookup.getPValue(mid / lookup.divisor, 1);
         if (current_pvalue > corrected_pvalue)
@@ -244,7 +244,7 @@ int DifferentialTest::benjamini_yekutieli(std::vector<std::pair<double, int>> li
         double qvalue = lrt_threshold * (i+1) / (m * c);
         if (pvalue <= qvalue){
             max_i = i;
-        } 
+        }
     }
     return max_i;
 }
@@ -265,7 +265,7 @@ std::tuple<bool, double> DifferentialTest::likelihood_ratio_test(double in_sum, 
             poisson_prob(in_sum, mean * in_total_kmers);
 
     double likelihood_ratio = alt_hypothesis - null_hypothesis;
-    // double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;  
+    // double out_sum_normalized = (double) out_sum * in_total_kmers / out_total_kmers;
     if (likelihood_ratio > likelihood_ratio_threshold){
         return std::make_tuple(true, likelihood_ratio);
     }

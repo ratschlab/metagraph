@@ -203,12 +203,14 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto filenames = (config->infbase_annotators.size() > 1) ? config->infbase_annotators : config->fnames;
 
-            callback(*mask_nodes_by_label(graph_ptr,
-                                          filenames,
-                                          foreground_labels,
-                                          background_labels,
-                                          diff_config, num_threads,
-                                          config->parallel_nodes), exp_name);
+            auto [ingraph, outgraph] = mask_nodes_by_label_dual(graph_ptr,
+                                        filenames,
+                                        foreground_labels,
+                                        background_labels,
+                                        diff_config, num_threads,
+                                        config->parallel_nodes);
+            callback(*ingraph, exp_name + "in.");
+            callback(*outgraph, exp_name + "out.");
         }
     }
 }

@@ -68,55 +68,20 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
 uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
                                          const NodeWeights &node_weights,
                                          uint64_t num_singleton_kmers) {
-    std::vector<uint64_t> hist;
-    graph.call_nodes([&](auto i) {
-        uint64_t kmer_count = node_weights[i];
-        assert(kmer_count && "All k-mers in graph must have non-zero counts");
-        while (kmer_count >= hist.size()) {
-            hist.push_back(0);
-        }
-        hist[kmer_count]++;
-    });
-
-    if (num_singleton_kmers) {
-        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
-                     hist[1], num_singleton_kmers);
-        hist[1] = num_singleton_kmers;
-    }
-
-    uint64_t max_size = 1llu << node_weights.get_data().width();
-    if (hist.size() == max_size)
-        hist.pop_back();
-
-    // estimate a zero-truncated poisson from the first touse counts
-    // (from https://doi.org/10.1016/S0167-9473(99)00111-5)
     // set a cutoff that covers 95% of this distribution
-    uint64_t touse = 3;
-    size_t max_iter = 1000;
     double cdf_cutoff = 0.95;
+    size_t max_iter = 1000;
 
-    size_t nupto_c = 0;
-    uint64_t sumupto = 0;
-    for (size_t count = 1; count <= touse; ++count) {
-        uint64_t nkmers = hist[count];
-        nupto_c += nkmers;
-        sumupto += count * nkmers;
-    }
-
-    double sum = sumupto;
-    double nupto = nupto_c;
-    double mean_est = sum / nupto;
-
-    for (size_t i = 0; i < max_iter; ++i) {
-        double last_mean_est = mean_est;
-        double total_est = nupto/(1.0-exp(-mean_est));
-        mean_est = sum / total_est;
-        if (abs(mean_est - last_mean_est)/mean_est < 1e-3) {
-            common::logger->trace("Fitted mean {} after {} iterations", mean_est, i + 1);
-            break;
-        }
-    }
-
+    auto [mean_est, nzeros_est] = estimate_ztp_mean(
+        [&](const auto &callback) {
+            graph.call_nodes([&](DeBruijnGraph::node_index i) {
+                callback(node_weights[i]);
+            });
+        },
+        node_weights.get_data().width(),
+        num_singleton_kmers,
+        3 // estimate from the first 3 counts
+    );
     double p_num = mean_est * exp(-mean_est);
     double p_denom = 1;
     double cdf = p_num;
@@ -133,6 +98,61 @@ uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
         cdf += p_num / p_denom;
     }
     return min_count + 1;
+}
+
+std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t)>&)> &generator,
+                                            uint8_t width,
+                                            uint64_t num_singleton_kmers,
+                                            size_t touse) {
+    std::vector<uint64_t> hist;
+    generator([&](uint64_t kmer_count) {
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
+        while (kmer_count >= hist.size()) {
+            hist.push_back(0);
+        }
+        hist[kmer_count]++;
+    });
+
+    if (num_singleton_kmers) {
+        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
+                     hist[1], num_singleton_kmers);
+        hist[1] = num_singleton_kmers;
+    }
+
+    uint64_t max_size = 1llu << width;
+    if (hist.size() == max_size)
+        hist.pop_back();
+
+    // estimate a zero-truncated poisson from the first touse counts
+    // (from https://doi.org/10.1016/S0167-9473(99)00111-5)
+
+    size_t max_iter = 1000;
+
+    size_t nupto_c = 0;
+    uint64_t sumupto = 0;
+    touse = std::min(touse, hist.size() - 1);
+    for (size_t count = 1; count <= touse; ++count) {
+        uint64_t nkmers = hist[count];
+        nupto_c += nkmers;
+        sumupto += count * nkmers;
+    }
+
+    double sum = sumupto;
+    double nupto = nupto_c;
+    double mean_est = sum / nupto;
+    double total_est = nupto;
+
+    for (size_t i = 0; i < max_iter; ++i) {
+        double last_mean_est = mean_est;
+        total_est = nupto/(1.0-exp(-mean_est));
+        mean_est = sum / total_est;
+        if (abs(mean_est - last_mean_est)/mean_est < 1e-5) {
+            common::logger->trace("Fitted mean {} after {} iterations", mean_est, i + 1);
+            break;
+        }
+    }
+
+    return std::make_pair(mean_est, total_est - nupto);
 }
 
 std::tuple<int64_t,double,double> estimate_min_kmer_abundance(const bit_vector &idx,

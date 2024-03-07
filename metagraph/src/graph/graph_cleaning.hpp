@@ -17,6 +17,11 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
                                      uint64_t num_singleton_kmers = 0);
 
+std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t)>&)> &generator,
+                                            uint8_t width = 64,
+                                            uint64_t num_singleton_kmers = 0,
+                                            size_t touse = std::numeric_limits<size_t>::max());
+
 uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
                                          const NodeWeights &node_weights,
                                          uint64_t num_singleton_kmers = 0);
