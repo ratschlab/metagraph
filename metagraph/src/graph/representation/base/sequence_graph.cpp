@@ -202,7 +202,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                             }
                         }
 
-            double next_likelihood = 0; // start with a likelihood of 0, s.t. only unitigs are added with a better Likelihood Ratio.
+            // double next_likelihood = 0; // start with a likelihood of 0, s.t. only unitigs are added with a better Likelihood Ratio.
             for (const auto &[next, c] : targets) { // If there are multiple descendents.
                 if (!(*visited)[next]){ // the node was not visited yet.
                     if (!(*discovered)[next]) { // The node was not encountered before.
@@ -210,18 +210,19 @@ void call_sequences_from(const DeBruijnGraph &graph,
                         queue.push_back(next); // The queue grows a bit faster compared to the original case.
                         // TODO: make sure that the selected node is not added to the queue --> problems if run on  multiple threads.
                     }
-                    if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
-                        && downcasted_graph // TODO feature is temporary
-                        && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood
-                        next_likelihood = downcasted_graph->likelihood_ratios[next];
-                        next_node = next;
-                        next_c = c;
-                    }
+                    std::ignore = downcasted_graph;
+                    // if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
+                    //     && downcasted_graph // TODO feature is temporary
+                    //     && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood
+                    //     next_likelihood = downcasted_graph->likelihood_ratios[next];
+                    //     next_node = next;
+                    //     next_c = c;
+                    // }
                 }
             }
 
-            if (next_node != next_node_original)
-                std::cout << "different node selected compared to original method " <<std::flush;
+            // if (next_node != next_node_original)
+            //     std::cout << "different node selected compared to original method " <<std::flush;
             if (next_node == DeBruijnGraph::npos)
                 break;
             else {
