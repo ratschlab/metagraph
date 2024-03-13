@@ -627,6 +627,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             size_t nx = in_counts.size();
             size_t ny = out_counts.size();
+            double p2 = 0.0;
 
             std::vector<double> c;
             c.reserve(in_counts.size() + out_counts.size());
@@ -634,22 +635,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
             auto [rankc, countsc] = rankdata(c);
 
-            if (ny == 1) {
-                if (std::all_of(in_counts.begin(), in_counts.end(), [&](double c) { return c > out_counts[0]; })) {
-                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                } else if (std::all_of(in_counts.begin(), in_counts.end(), [&](double c) { return c < out_counts[0]; })) {
-                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                }
-            } else if (nx == 1) {
-                if (std::all_of(out_counts.begin(), out_counts.end(), [&](double c) { return c > in_counts[0]; })) {
-                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                } else if (std::all_of(out_counts.begin(), out_counts.end(), [&](double c) { return c < in_counts[0]; })) {
-                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                }
-            } else {
-                double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-                double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
+            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
+            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
 
+            if (nx > 1 && ny > 1) {
                 auto [rankx, countsx] = rankdata(in_counts);
                 auto [ranky, countsy] = rankdata(out_counts);
                 double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
@@ -671,24 +660,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
                 double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
-                double df = df_numer / df_denom;
 
-                if (df_denom == 0) {
-                    if (*std::min_element(ranky.begin(), ranky.end()) > *std::max_element(rankx.begin(), rankx.end())) {
-                        indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                    } else if (*std::min_element(rankx.begin(), rankx.end()) > *std::max_element(ranky.begin(), ranky.end())) {
-                        indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                    }
-                } else {
+                if (df_denom != 0) {
+                    double df = df_numer / df_denom;
                     boost::math::students_t dist(df);
                     double p = boost::math::cdf(dist, wbfn);
                     double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
-                    double p2 = 2 * std::min(p, p1);
+                    p2 = 2 * std::min(p, p1);
+                }
+            }
 
-                    if (p2 * num_tests < 0.05) {
-                        auto &indicator = rankcy_mean > rankcx_mean ? indicator_in : indicator_out;
-                        indicator[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                    }
+            if (p2 * num_tests < 0.05) {
+                if (rankcy_mean > rankcx_mean) {
+                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
+                } else if (rankcy_mean < rankcx_mean) {
+                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
                 }
             }
 
@@ -822,35 +808,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             size_t nx = in_counts.size();
             size_t ny = out_counts.size();
+            double p2 = 0.0;
 
-            auto add_to = [&](auto &indicator) {
-                for (node_index node : path) {
-                    indicator[node] = true;
-                }
-            };
+            std::vector<double> c;
+            c.reserve(in_counts.size() + out_counts.size());
+            std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
+            std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
+            auto [rankc, countsc] = rankdata(c);
 
-            if (ny == 1) {
-                if (std::all_of(in_counts.begin(), in_counts.end(), [&](double c) { return c > out_counts[0]; })) {
-                    add_to(indicator_in);
-                } else if (std::all_of(in_counts.begin(), in_counts.end(), [&](double c) { return c < out_counts[0]; })) {
-                    add_to(indicator_out);
-                }
-            } else if (nx == 1) {
-                if (std::all_of(out_counts.begin(), out_counts.end(), [&](double c) { return c > in_counts[0]; })) {
-                    add_to(indicator_out);
-                } else if (std::all_of(out_counts.begin(), out_counts.end(), [&](double c) { return c < in_counts[0]; })) {
-                    add_to(indicator_in);
-                }
-            } else {
-                std::vector<double> c;
-                c.reserve(in_counts.size() + out_counts.size());
-                std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
-                std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
-                auto [rankc, countsc] = rankdata(c);
+            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
+            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
 
-                double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-                double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
-
+            if (nx > 1 && ny > 1) {
                 auto [rankx, countsx] = rankdata(in_counts);
                 auto [ranky, countsy] = rankdata(out_counts);
                 double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
@@ -872,22 +841,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
                 double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
-                double df = df_numer / df_denom;
 
-                if (df_denom == 0) {
-                    if (*std::min_element(ranky.begin(), ranky.end()) > *std::max_element(rankx.begin(), rankx.end())) {
-                        add_to(indicator_in);
-                    } else if (*std::min_element(rankx.begin(), rankx.end()) > *std::max_element(ranky.begin(), ranky.end())) {
-                        add_to(indicator_out);
-                    }
-                } else {
+                if (df_denom != 0) {
+                    double df = df_numer / df_denom;
                     boost::math::students_t dist(df);
                     double p = boost::math::cdf(dist, wbfn);
                     double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
-                    double p2 = 2 * std::min(p, p1);
+                    p2 = 2 * std::min(p, p1);
+                }
+            }
 
-                    if (p2 * num_tests < 0.05)
-                        add_to(rankcy_mean > rankcx_mean ? indicator_in : indicator_out);
+            if (p2 * num_tests < 0.05) {
+                auto add_to = [&](auto &indicator) {
+                    for (node_index node : path) {
+                        indicator[node] = true;
+                    }
+                };
+                if (rankcy_mean > rankcx_mean) {
+                    add_to(indicator_in);
+                } else if (rankcy_mean < rankcx_mean) {
+                    add_to(indicator_out);
                 }
             }
         });
