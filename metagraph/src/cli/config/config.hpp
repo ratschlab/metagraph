@@ -151,7 +151,7 @@ class Config {
     double alignment_max_ram = 200;
     // TODO: rename to min_covered_by_seeds
     double alignment_min_exact_match = 0.7;
-    double alignment_chains_per_char = 0.003;
+    double alignment_chains_per_char = 0.01;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     double sketch_precision = 0.0;
