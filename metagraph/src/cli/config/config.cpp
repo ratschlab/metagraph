@@ -114,6 +114,26 @@ Config::Config(int argc, char *argv[]) {
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
+        } else if (!strcmp(argv[i], "--alignment-profile")) {
+            alignment_profile = std::string(get_value(i++));
+            if (alignment_profile == "SCA" || alignment_profile == "MLA") {
+                if (infbase_annotators.size() <= 1) {
+                    std::cerr << "Error: this profile requires a coordinate annotator and a seq.column index" << std::endl;
+                    print_usage_and_exit = true;
+                    break;
+                }
+                alignment_num_alternative_paths = 5;
+                query_batch_size = 10'000;
+                alignment_min_exact_match = 0.0;
+                alignment_rel_score_cutoff = 0.0;
+                alignment_xdrop = 27;
+                path_cover = true;
+                alignment_ignore_discarded_seeds = true;
+            }
+
+            if (alignment_profile == "MLA")
+                alignment_post_chain = true;
+
         } else if (!strcmp(argv[i], "--mmap")) {
             utils::with_mmap(true);
         } else if (!strcmp(argv[i], "--print")) {

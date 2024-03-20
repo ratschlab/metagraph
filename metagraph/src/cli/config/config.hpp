@@ -174,6 +174,7 @@ class Config {
     std::string assembly_config_file;
     std::string linkage_file;
     std::string intersected_columns;
+    std::string alignment_profile;
 
     std::filesystem::path tmp_dir;
 
