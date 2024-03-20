@@ -142,6 +142,8 @@ void DBGAlignerConfig::set_scoring_matrix() {
         #endif
 
         score_matrix = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        gap_opening_penalty = -1;
+        gap_extension_penalty = -1;
         left_end_bonus = 0;
         right_end_bonus = 0;
 
