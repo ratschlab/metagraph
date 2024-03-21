@@ -6,6 +6,9 @@
 namespace mtg {
 namespace graph {
 
+constexpr DeBruijnGraph::node_index hash_to_graph_index(sshash::kmer_t kmer) { return kmer + 1; }
+constexpr sshash::kmer_t graph_index_to_hash(DeBruijnGraph::node_index node) { return node - 1; }
+
 DBGSSHash::DBGSSHash(size_t k):k_(k) {}
 
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode):k_(k), mode_(mode) {
@@ -29,7 +32,13 @@ void DBGSSHash::add_sequence(std::string_view sequence,
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    map_to_nodes_sequentially(sequence, callback, terminate);
+    if (mode_ != CANONICAL) {
+        map_to_nodes_sequentially(sequence, callback, terminate);
+    } else {
+        map_to_nodes_with_rc(sequence, [&](node_index node, bool) {
+            callback(node);
+        }, terminate);
+    }
 }
 
 void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
@@ -41,7 +50,7 @@ void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
     auto uint_kmer = sshash::util::string_to_uint_kmer(sequence.data(), k_ - 1) << 2;
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
         uint_kmer = (uint_kmer >> 2) + (sshash::util::char_to_uint(sequence[i]) << (2 * (k_ - 1)));
-        callback(dict_.lookup_uint(uint_kmer, false) + 1);
+        callback(hash_to_graph_index(dict_.lookup_uint(uint_kmer, false)));
     }
 }
 
@@ -53,7 +62,7 @@ void DBGSSHash ::map_to_nodes_with_rc(std::string_view sequence,
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
         const char *kmer = sequence.data() + i;
         auto res = streamer.lookup_advanced(kmer);
-        callback(res.kmer_id + 1, res.kmer_orientation);
+        callback(hash_to_graph_index(res.kmer_id), res.kmer_orientation);
     }
 }
 
@@ -77,7 +86,7 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
     default:
         break;
     }
-    return ssh_idx + 1;
+    return hash_to_graph_index(ssh_idx);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
@@ -100,7 +109,7 @@ DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) 
     default:
         break;
     }
-    return ssh_idx + 1;
+    return hash_to_graph_index(ssh_idx);
 }
 
 void DBGSSHash ::adjacent_outgoing_nodes(node_index node,
@@ -122,16 +131,16 @@ void DBGSSHash ::call_outgoing_kmers(node_index node,
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
     if (nb.forward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_A.kmer_id + 1, 'A');
+        callback(hash_to_graph_index(nb.forward_A.kmer_id), 'A');
 
     if (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_C.kmer_id + 1, 'C');
+        callback(hash_to_graph_index(nb.forward_C.kmer_id), 'C');
 
     if (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_G.kmer_id + 1, 'G');
+        callback(hash_to_graph_index(nb.forward_G.kmer_id), 'G');
 
     if (nb.forward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_T.kmer_id + 1, 'T');
+        callback(hash_to_graph_index(nb.forward_T.kmer_id), 'T');
 }
 
 
@@ -142,16 +151,16 @@ void DBGSSHash ::call_incoming_kmers(node_index node,
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
     if (nb.backward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_A.kmer_id + 1, 'A');
+        callback(hash_to_graph_index(nb.backward_A.kmer_id), 'A');
 
     if (nb.backward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_C.kmer_id + 1, 'C');
+        callback(hash_to_graph_index(nb.backward_C.kmer_id), 'C');
 
     if (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_G.kmer_id + 1, 'G');
+        callback(hash_to_graph_index(nb.backward_G.kmer_id), 'G');
 
     if (nb.backward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_T.kmer_id + 1, 'T');
+        callback(hash_to_graph_index(nb.backward_T.kmer_id), 'T');
 }
 
 void DBGSSHash ::call_outgoing_kmers_with_rc(node_index node,
@@ -161,16 +170,16 @@ void DBGSSHash ::call_outgoing_kmers_with_rc(node_index node,
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), true);
     if (nb.forward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_A.kmer_id + 1, 'A', nb.forward_A.kmer_orientation);
+        callback(hash_to_graph_index(nb.forward_A.kmer_id), 'A', nb.forward_A.kmer_orientation);
 
     if (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_C.kmer_id + 1, 'C', nb.forward_C.kmer_orientation);
+        callback(hash_to_graph_index(nb.forward_C.kmer_id), 'C', nb.forward_C.kmer_orientation);
 
     if (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_G.kmer_id + 1, 'G', nb.forward_G.kmer_orientation);
+        callback(hash_to_graph_index(nb.forward_G.kmer_id), 'G', nb.forward_G.kmer_orientation);
 
     if (nb.forward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.forward_T.kmer_id + 1, 'T', nb.forward_T.kmer_orientation);
+        callback(hash_to_graph_index(nb.forward_T.kmer_id), 'T', nb.forward_T.kmer_orientation);
 }
 
 
@@ -181,16 +190,16 @@ void DBGSSHash ::call_incoming_kmers_with_rc(node_index node,
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), true);
     if (nb.backward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_A.kmer_id + 1, 'A', nb.backward_A.kmer_orientation);
+        callback(hash_to_graph_index(nb.backward_A.kmer_id), 'A', nb.backward_A.kmer_orientation);
 
     if (nb.backward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_C.kmer_id + 1, 'C', nb.backward_C.kmer_orientation);
+        callback(hash_to_graph_index(nb.backward_C.kmer_id), 'C', nb.backward_C.kmer_orientation);
 
     if (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_G.kmer_id + 1, 'G', nb.backward_G.kmer_orientation);
+        callback(hash_to_graph_index(nb.backward_G.kmer_id), 'G', nb.backward_G.kmer_orientation);
 
     if (nb.backward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(nb.backward_T.kmer_id + 1, 'T', nb.backward_T.kmer_orientation);
+        callback(hash_to_graph_index(nb.backward_T.kmer_id), 'T', nb.backward_T.kmer_orientation);
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
@@ -229,12 +238,12 @@ std::pair<DBGSSHash::node_index, bool> DBGSSHash::kmer_to_node_with_rc(std::stri
         return std::make_pair(npos, false);
 
     auto res = dict_.lookup_advanced(kmer.begin(), true);
-    return std::make_pair(res.kmer_id + 1, res.kmer_orientation);
+    return std::make_pair(hash_to_graph_index(res.kmer_id), res.kmer_orientation);
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
     std::string str_kmer(k_, ' ');
-    uint64_t ssh_idx = node - 1; // switch back to sshash idx!!!
+    uint64_t ssh_idx = graph_index_to_hash(node);
     dict_.access(ssh_idx, str_kmer.data());
     return str_kmer;
 }
