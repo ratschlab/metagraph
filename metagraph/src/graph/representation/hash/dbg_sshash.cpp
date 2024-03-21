@@ -203,14 +203,6 @@ size_t DBGSSHash::outdegree(node_index node) const {
     return out_deg;
 }
 
-bool DBGSSHash::has_single_outgoing(node_index node) const {
-    return DBGSSHash::outdegree(node) == 1;
-}
-
-bool DBGSSHash::has_multiple_outgoing(node_index node) const {
-    return DBGSSHash::outdegree(node) > 1;
-}
-
 size_t DBGSSHash::indegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
@@ -219,14 +211,6 @@ size_t DBGSSHash::indegree(node_index node) const {
                     + (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
                     + (nb.backward_T.kmer_id != sshash::constants::invalid_uint64);
     return in_deg;
-}
-
-bool DBGSSHash::has_no_incoming(node_index node) const {
-    return DBGSSHash::indegree(node) == 0;
-}
-
-bool DBGSSHash::has_single_incoming(node_index node) const {
-    return DBGSSHash::indegree(node) == 1;
 }
 
 void DBGSSHash::call_kmers(
