@@ -65,7 +65,7 @@ void DBGSSHash ::map_to_nodes_with_rc(std::string_view sequence,
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_->kmer_forward_neighbours(&kmer[0], false);
+    sshash::neighbourhood nb = dict_->kmer_forward_neighbours(kmer.c_str(), false);
     uint64_t ssh_idx = -1;
     switch (next_char) {
     case 'A':
@@ -88,7 +88,7 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_->kmer_backward_neighbours(&kmer[0], false);
+    sshash::neighbourhood nb = dict_->kmer_backward_neighbours(kmer.c_str(), false);
     uint64_t ssh_idx = -1;
     switch (prev_char) {
     case 'A':
@@ -201,7 +201,7 @@ void DBGSSHash ::call_incoming_kmers_with_rc(node_index node,
 
 size_t DBGSSHash::outdegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_->kmer_forward_neighbours(&kmer[0], false);
+    sshash::neighbourhood nb = dict_->kmer_forward_neighbours(kmer.c_str(), false);
     size_t out_deg = (nb.forward_A.kmer_id != sshash::constants::invalid_uint64) // change to loop?
                     + (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
                     + (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
