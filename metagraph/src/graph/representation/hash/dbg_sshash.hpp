@@ -16,7 +16,7 @@ namespace graph {
 class DBGSSHash : public DeBruijnGraph {
   public:
     explicit DBGSSHash(size_t k);
-    DBGSSHash(std::string const& input_filename, size_t k);
+    DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
 
     ~DBGSSHash();
 
@@ -34,6 +34,11 @@ class DBGSSHash : public DeBruijnGraph {
             std::string_view sequence,
             const std::function<void(node_index)> &callback,
             const std::function<bool()> &terminate = []() { return false; }) const override;
+
+    void map_to_nodes_with_rc(
+            std::string_view sequence,
+            const std::function<void(node_index, bool)> &callback,
+            const std::function<bool()> &terminate = []() { return false; }) const;
 
     void adjacent_outgoing_nodes(node_index node,
                                  const std::function<void(node_index)> &callback) const override;
@@ -74,22 +79,32 @@ class DBGSSHash : public DeBruijnGraph {
     bool has_single_incoming(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
-    
+    std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
+
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const override;
 
+    void call_outgoing_kmers_with_rc(node_index node,
+                             const std::function<void(node_index, char, bool)> &callback) const;
+
     void call_incoming_kmers(node_index node,
                              const IncomingEdgeCallback &callback) const override;
+
+    void call_incoming_kmers_with_rc(node_index node,
+                             const std::function<void(node_index, char, bool)> &callback) const;
 
 
     bool operator==(const DeBruijnGraph &other) const override;
 
     const std::string &alphabet() const override;
 
+    const sshash::dictionary& data() const { return *dict_; }
+
   private:
     static const std::string alphabet_;
     std::unique_ptr<sshash::dictionary> dict_;
     size_t k_;
+    Mode mode_;
 };
 
 } // namespace graph

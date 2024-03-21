@@ -269,7 +269,8 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/pthash/include
+  external-libraries/sshash/include
+  external-libraries/sshash/external/pthash/external/essentials/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -321,7 +322,6 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
 add_subdirectory(external-libraries/sshash SYSTEM)
-target_include_directories(sshash_static PUBLIC SYSTEM external-libraries/sshash/include)
 target_compile_options(test_alphabet PRIVATE -Wno-strict-aliasing)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)

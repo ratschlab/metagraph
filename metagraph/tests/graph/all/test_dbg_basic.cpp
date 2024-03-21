@@ -33,10 +33,6 @@ TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     auto graph = build_graph<TypeParam>(2);
 
     EXPECT_EQ(0u, graph->num_nodes());
@@ -48,10 +44,6 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     {
         auto graph = build_graph<TypeParam>(12);
         ASSERT_EQ(0u, graph->num_nodes());
@@ -187,16 +179,6 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
-    auto graph1 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
-    auto graph2 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
-
-    EXPECT_EQ(graph1->num_nodes() * 2, graph2->num_nodes());
-
     auto graph = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
                                               "CATGTACTAGCTGATCGTAGCTAGCTAGC" });
@@ -207,6 +189,16 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
     EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
     EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
+
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+        common::logger->warn("Test disabled for DBGSSHash");
+        return;
+    }
+    auto graph1 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+    auto graph2 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
+
+    EXPECT_EQ(graph1->num_nodes() * 2, graph2->num_nodes());
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
@@ -224,10 +216,6 @@ TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, Alphabet) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k <= 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {});
         std::set<char> alphabet(graph->alphabet().begin(), graph->alphabet().end());
@@ -260,10 +248,6 @@ TYPED_TEST(DeBruijnGraphTest, AddSequenceSimplePaths) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     std::vector<std::string> sequences { // cyrillic A and C
                                          "АСАСАСАСАСАСА",
                                          "плохая строка",
@@ -272,31 +256,16 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
         EXPECT_EQ(0u, build_graph<TypeParam>(6, sequences)->num_nodes());
         EXPECT_EQ(0u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
     } else {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            common::logger->warn("Test disabled for DBGSSHash");
+            return;
+        }
         EXPECT_EQ(1u, build_graph<TypeParam>(6, sequences)->num_nodes());
         EXPECT_EQ(1u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
     }
 }
 
 TYPED_TEST(DeBruijnGraphTest, AddSequences) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "CAAC" };
-        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "CAAC", "GAAC" };
-        EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "AACG" };
-        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
     {
         // TODO: add version with N at the ends of these
         std::vector<std::string> sequences { "AGACT", "GACTT", "ACTAT" };
@@ -308,13 +277,28 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
         EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
         EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
     }
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+        common::logger->warn("Test case disabled for DBGSSHash");
+        return;
+    }
+    {
+        std::vector<std::string> sequences { "AAAC", "CAAC", "GAAC" };
+        EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
+    {
+        std::vector<std::string> sequences { "AAAC", "CAAC" };
+        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
+    {
+        std::vector<std::string> sequences { "AAAC", "AACG" };
+        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto empty = build_graph<TypeParam>(k);
 
