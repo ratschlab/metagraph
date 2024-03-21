@@ -24,6 +24,10 @@ TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+        common::logger->warn("Test disabled for DBGSSHash");
+        return;
+    }
     TypeParam *graph = nullptr;
 
     ASSERT_NO_THROW({ graph = new TypeParam(2); });

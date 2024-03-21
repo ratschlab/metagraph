@@ -2,22 +2,20 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
+
 #include <tsl/ordered_set.h>
+#include <dictionary.hpp>
+
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
-namespace sshash{
-class dictionary;
-}
 namespace mtg::graph {
 
 class DBGSSHash : public DeBruijnGraph {
   public:
     explicit DBGSSHash(size_t k);
     DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
-
-    ~DBGSSHash();
 
 // SequenceGraph overrides
     void add_sequence(
@@ -97,11 +95,11 @@ class DBGSSHash : public DeBruijnGraph {
 
     const std::string &alphabet() const override;
 
-    const sshash::dictionary& data() const { return *dict_; }
+    const sshash::dictionary& data() const { return dict_; }
 
   private:
     static const std::string alphabet_;
-    std::unique_ptr<sshash::dictionary> dict_;
+    sshash::dictionary dict_;
     size_t k_;
     Mode mode_;
 };
