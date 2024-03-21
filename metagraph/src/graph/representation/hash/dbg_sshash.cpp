@@ -269,7 +269,7 @@ void DBGSSHash::serialize(std::ostream &out) const {
 void DBGSSHash::serialize(const std::string &filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     
-    essentials::logger("saving data structure to disk...");
+    common::logger->trace("saving data structure to disk...");
     essentials::save(*dict_, suffixed_filename.c_str());
     essentials::logger("DONE");
 }
