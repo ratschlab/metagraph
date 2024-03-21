@@ -269,10 +269,6 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/sshash
-  external-libraries/sshash/include
-  external-libraries/sshash/external/pthash
-  external-libraries/sshash/external/pthash/external/essentials/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -281,6 +277,10 @@ include_directories(
   PUBLIC SYSTEM
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
+  external-libraries/sshash
+  external-libraries/sshash/include
+  external-libraries/sshash/external/pthash
+  external-libraries/sshash/external/pthash/external/essentials/include
 )
 
 add_library(ips4o INTERFACE)
