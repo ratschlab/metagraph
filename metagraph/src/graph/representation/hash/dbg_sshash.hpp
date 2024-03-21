@@ -4,8 +4,8 @@
 #include <iostream>
 #include <tsl/ordered_set.h>
 #include "common/utils/string_utils.hpp"
+#include "common/logger.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
-#include "../external-libraries/sshash/external/pthash/external/essentials/include/essentials.hpp"
 
 namespace sshash{
 class dictionary;

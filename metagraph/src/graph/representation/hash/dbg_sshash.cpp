@@ -1,6 +1,8 @@
 #include "dbg_sshash.hpp"
 #include <dictionary.hpp>
 
+#include <query/streaming_query_regular_parsing.hpp>
+
 
 namespace mtg {
 namespace graph {
@@ -15,7 +17,6 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode):k_(
     build_config.k = k;//
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_+1)/2;
-    build_config.num_threads = get_num_threads();
     if(build_config.m % 2 == 0) build_config.m++;
     dict_ = std::make_unique<sshash::dictionary>();
     dict_->build(input_filename, build_config);
