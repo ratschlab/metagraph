@@ -255,10 +255,9 @@ std::pair<DBGSSHash::node_index, bool> DBGSSHash::kmer_to_node_with_rc(std::stri
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
-    std::string str_kmer = "";
-    str_kmer.append(k_, ' ');
+    std::string str_kmer(k_, ' ');
     uint64_t ssh_idx = node - 1; // switch back to sshash idx!!!
-    dict_->access(ssh_idx, &str_kmer[0]);
+    dict_->access(ssh_idx, str_kmer.data());
     return str_kmer;
 }
 
