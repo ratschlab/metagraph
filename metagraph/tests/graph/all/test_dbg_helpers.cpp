@@ -133,7 +133,7 @@ build_graph<DBGBitmap>(uint64_t k,
 
 void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
     std::ofstream fastaFile(outputFilename);
-    
+
     if (!fastaFile.is_open()) {
         std::cerr << "Error: Unable to open the output file." << std::endl;
         return;
@@ -151,13 +151,11 @@ build_graph<DBGSSHash>(uint64_t k,
                        std::vector<std::string> sequences,
                        DeBruijnGraph::Mode mode) {
 
-    
-    
-    if(sequences.size() == 0){
-        throw std::invalid_argument( "empty graph" );
-    }
-    
-    // use DBGHashString to get contigs for SSHash 
+    if (sequences.empty())
+        return std::make_shared<DBGSSHash>(k);
+
+
+    // use DBGHashString to get contigs for SSHash
     auto string_graph = build_graph<DBGHashString>(k, sequences,
                            mode);
 
@@ -165,6 +163,10 @@ build_graph<DBGSSHash>(uint64_t k,
     string_graph->call_sequences([&](const std::string &contig, const auto &) {
         contigs.push_back(contig);
     }, 1, false);
+
+    if (contigs.empty())
+        return std::make_shared<DBGSSHash>(k);
+
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, dump_path);
     auto graph = std::make_shared<DBGSSHash>(dump_path, k);
