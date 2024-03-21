@@ -10,8 +10,7 @@
 namespace sshash{
 class dictionary;
 }
-namespace mtg {
-namespace graph {
+namespace mtg::graph {
 
 class DBGSSHash : public DeBruijnGraph {
   public:
@@ -107,7 +106,6 @@ class DBGSSHash : public DeBruijnGraph {
     Mode mode_;
 };
 
-} // namespace graph
-} // namespace mtg
+} // namespace mtg::graph
 
 #endif // __DBG_SSHASH_HPP__
