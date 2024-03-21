@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <cstdint>
 
 
 void serialize_number(std::ostream &out, uint64_t number);

@@ -1092,6 +1092,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --alignment-profile [STR] \t\t\tload settings for different alignment modes: e.g., SCA, MLA. If unspecified, uses default parameters. []\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\tdisable the filter for low-complexity seeds. [off]\n");
@@ -1126,6 +1127,9 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
+            fprintf(stderr, "Advanced options for MLA:\n");
+            fprintf(stderr, "\t   --align-label-change-scale-factor [FLOAT]\tscore scaling factor for label change operations [match score]\n");
+            fprintf(stderr, "\t   --align-fixed-haplotype [FLOAT]\tparameter for adjusting MLA scoring. 0: variable label change score and node length changes; <0: fixed label change score score; >0: variable label change, no node length change [0]\n");
 }
         } break;
         case COMPARE: {
