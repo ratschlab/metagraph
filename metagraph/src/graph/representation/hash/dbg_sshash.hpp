@@ -68,12 +68,8 @@ class DBGSSHash : public DeBruijnGraph {
     void call_kmers(const std::function<void(node_index, const std::string &)> &callback) const override;
 
     size_t outdegree(node_index) const override;
-    bool has_single_outgoing(node_index) const override;
-    bool has_multiple_outgoing(node_index) const override;
 
     size_t indegree(node_index) const override;
-    bool has_no_incoming(node_index) const override;
-    bool has_single_incoming(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
     std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
