@@ -14,7 +14,7 @@ DBGSSHash::DBGSSHash(size_t k):k_(k) {
 
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode):k_(k), mode_(mode) {
     sshash::build_configuration build_config;
-    build_config.k = k;//
+    build_config.k = k;
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_+1)/2;
     if(build_config.m % 2 == 0) build_config.m++;
@@ -27,9 +27,7 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode):k_(
 
 void DBGSSHash::add_sequence(std::string_view sequence,
                              const std::function<void(node_index)> &on_insertion) {
-    // TODO: throw exception? :)
-        throw std::runtime_error("adding sequences not implemented");
-
+    throw std::runtime_error("adding sequences not implemented");
 }
 
 void DBGSSHash::map_to_nodes(std::string_view sequence,
