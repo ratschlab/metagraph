@@ -70,4 +70,4 @@
 	url = https://github.com/samtools/htslib
 [submodule "metagraph/external-libraries/sshash"]
 	path = metagraph/external-libraries/sshash
-	url = https://github.com/jermp/sshash.git
+	url = https://github.com/ratschlab/sshash

@@ -13,6 +13,7 @@
 namespace mtg::graph {
 
 class DBGSSHash : public DeBruijnGraph {
+    using kmer_t = sshash::dna_uint_kmer_t<uint64_t>;
   public:
     explicit DBGSSHash(size_t k);
     DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
@@ -91,11 +92,11 @@ class DBGSSHash : public DeBruijnGraph {
 
     const std::string &alphabet() const override;
 
-    const sshash::dictionary& data() const { return dict_; }
+    const sshash::dictionary<kmer_t>& data() const { return dict_; }
 
   private:
     static const std::string alphabet_;
-    sshash::dictionary dict_;
+    sshash::dictionary<kmer_t> dict_;
     size_t k_;
     Mode mode_;
 };

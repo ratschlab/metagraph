@@ -6,8 +6,8 @@
 namespace mtg {
 namespace graph {
 
-constexpr DeBruijnGraph::node_index hash_to_graph_index(sshash::kmer_t kmer) { return kmer + 1; }
-constexpr sshash::kmer_t graph_index_to_hash(DeBruijnGraph::node_index node) { return node - 1; }
+constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) { return idx + 1; }
+constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) { return idx - 1; }
 
 DBGSSHash::DBGSSHash(size_t k):k_(k) {}
 
@@ -47,69 +47,43 @@ void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
     if (terminate() || sequence.size() < k_)
         return;
 
-    auto uint_kmer = sshash::util::string_to_uint_kmer(sequence.data(), k_ - 1) << 2;
+    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
+    uint_kmer.pad_char();
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
-        uint_kmer = (uint_kmer >> 2) + (sshash::util::char_to_uint(sequence[i]) << (2 * (k_ - 1)));
-        callback(hash_to_graph_index(dict_.lookup_uint(uint_kmer, false)));
+        uint_kmer.drop_char();
+        uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
+        callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer, false)));
     }
 }
 
 void DBGSSHash ::map_to_nodes_with_rc(std::string_view sequence,
                                       const std::function<void(node_index, bool)> &callback,
                                       const std::function<bool()> &terminate) const {
-    sshash::streaming_query_regular_parsing streamer(&dict_);
+    sshash::streaming_query_regular_parsing<kmer_t> streamer(&dict_);
     streamer.start();
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
         const char *kmer = sequence.data() + i;
         auto res = streamer.lookup_advanced(kmer);
-        callback(hash_to_graph_index(res.kmer_id), res.kmer_orientation);
+        callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
     }
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
-    std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
-    uint64_t ssh_idx = -1;
-    switch (next_char) {
-    case 'A':
-        ssh_idx = nb.forward_A.kmer_id;
-        break;
-    case 'C':
-        ssh_idx = nb.forward_C.kmer_id;
-        break;
-    case 'G':
-        ssh_idx = nb.forward_G.kmer_id;
-        break;
-    case 'T':
-        ssh_idx = nb.forward_T.kmer_id;
-        break;
-    default:
-        break;
-    }
-    return hash_to_graph_index(ssh_idx);
+    std::string string_kmer = DBGSSHash::get_node_sequence(node);
+    kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
+    new_kmer.drop_char();
+    new_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(next_char));
+    uint64_t sshash_id = dict_.lookup_advanced_uint(new_kmer, /*check_reverse_complement*/false).kmer_id;
+    return sshash_to_graph_index(sshash_id);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
-    std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
-    uint64_t ssh_idx = -1;
-    switch (prev_char) {
-    case 'A':
-        ssh_idx = nb.backward_A.kmer_id;
-        break;
-    case 'C':
-        ssh_idx = nb.backward_C.kmer_id;
-        break;
-    case 'G':
-        ssh_idx = nb.backward_G.kmer_id;
-        break;
-    case 'T':
-        ssh_idx = nb.backward_T.kmer_id;
-        break;
-    default:
-        break;
-    }
-    return hash_to_graph_index(ssh_idx);
+    std::string string_kmer = DBGSSHash::get_node_sequence(node);
+    kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
+    new_kmer.append_char(prev_char);
+    new_kmer.take_chars(k_);
+    uint64_t sshash_id = dict_.lookup_advanced_uint(new_kmer, /*check_reverse_complement*/false).kmer_id;
+    return sshash_to_graph_index(sshash_id);
 }
 
 void DBGSSHash ::adjacent_outgoing_nodes(node_index node,
@@ -127,99 +101,66 @@ void DBGSSHash ::adjacent_incoming_nodes(node_index node,
 void DBGSSHash ::call_outgoing_kmers(node_index node,
                                      const OutgoingEdgeCallback &callback) const {
     assert(node > 0 && node <= num_nodes());
-
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
-    if (nb.forward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_A.kmer_id), 'A');
-
-    if (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_C.kmer_id), 'C');
-
-    if (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_G.kmer_id), 'G');
-
-    if (nb.forward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_T.kmer_id), 'T');
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
+    for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
+        if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
+            callback(sshash_to_graph_index(nb.forward[i].kmer_id), kmer_t::alphabet[i]);
+        }
+    }
 }
-
 
 void DBGSSHash ::call_incoming_kmers(node_index node,
                                      const IncomingEdgeCallback &callback) const {
     assert(node > 0 && node <= num_nodes());
-
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
-    if (nb.backward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_A.kmer_id), 'A');
-
-    if (nb.backward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_C.kmer_id), 'C');
-
-    if (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_G.kmer_id), 'G');
-
-    if (nb.backward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_T.kmer_id), 'T');
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
+    for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
+        if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
+            callback(sshash_to_graph_index(nb.backward[i].kmer_id), kmer_t::alphabet[i]);
+        }
+    }
 }
 
 void DBGSSHash ::call_outgoing_kmers_with_rc(node_index node,
                                      const std::function<void(node_index, char, bool)> &callback) const {
     assert(node > 0 && node <= num_nodes());
-
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), true);
-    if (nb.forward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_A.kmer_id), 'A', nb.forward_A.kmer_orientation);
-
-    if (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_C.kmer_id), 'C', nb.forward_C.kmer_orientation);
-
-    if (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_G.kmer_id), 'G', nb.forward_G.kmer_orientation);
-
-    if (nb.forward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.forward_T.kmer_id), 'T', nb.forward_T.kmer_orientation);
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
+    for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
+        if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
+            callback(sshash_to_graph_index(nb.forward[i].kmer_id), kmer_t::alphabet[i], nb.forward[i].kmer_orientation);
+        }
+    }
 }
 
 
 void DBGSSHash ::call_incoming_kmers_with_rc(node_index node,
                                      const std::function<void(node_index, char, bool)> &callback) const {
     assert(node > 0 && node <= num_nodes());
-
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), true);
-    if (nb.backward_A.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_A.kmer_id), 'A', nb.backward_A.kmer_orientation);
-
-    if (nb.backward_C.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_C.kmer_id), 'C', nb.backward_C.kmer_orientation);
-
-    if (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_G.kmer_id), 'G', nb.backward_G.kmer_orientation);
-
-    if (nb.backward_T.kmer_id != sshash::constants::invalid_uint64)
-        callback(hash_to_graph_index(nb.backward_T.kmer_id), 'T', nb.backward_T.kmer_orientation);
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
+    for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
+        if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
+            callback(sshash_to_graph_index(nb.backward[i].kmer_id), kmer_t::alphabet[i], nb.backward[i].kmer_orientation);
+        }
+    }
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
-    size_t out_deg = (nb.forward_A.kmer_id != sshash::constants::invalid_uint64) // change to loop?
-                    + (nb.forward_C.kmer_id != sshash::constants::invalid_uint64)
-                    + (nb.forward_G.kmer_id != sshash::constants::invalid_uint64)
-                    + (nb.forward_T.kmer_id != sshash::constants::invalid_uint64);
-    return out_deg;
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
+    return std::count_if(begin(nb.forward), end(nb.forward), [](auto const& lookup_result) {
+        return lookup_result.kmer_id != sshash::constants::invalid_uint64;
+    });
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
-    sshash::neighbourhood nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
-    size_t in_deg = (nb.backward_A.kmer_id != sshash::constants::invalid_uint64) // change to loop?
-                    + (nb.backward_C.kmer_id != sshash::constants::invalid_uint64)
-                    + (nb.backward_G.kmer_id != sshash::constants::invalid_uint64)
-                    + (nb.backward_T.kmer_id != sshash::constants::invalid_uint64);
-    return in_deg;
+    sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
+    return std::count_if(begin(nb.backward), end(nb.backward), [](auto const& lookup_result) {
+        return lookup_result.kmer_id != sshash::constants::invalid_uint64;
+    });
 }
 
 void DBGSSHash::call_kmers(
@@ -238,12 +179,12 @@ std::pair<DBGSSHash::node_index, bool> DBGSSHash::kmer_to_node_with_rc(std::stri
         return std::make_pair(npos, false);
 
     auto res = dict_.lookup_advanced(kmer.begin(), true);
-    return std::make_pair(hash_to_graph_index(res.kmer_id), res.kmer_orientation);
+    return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
     std::string str_kmer(k_, ' ');
-    uint64_t ssh_idx = graph_index_to_hash(node);
+    uint64_t ssh_idx = graph_index_to_sshash(node);
     dict_.access(ssh_idx, str_kmer.data());
     return str_kmer;
 }
@@ -257,7 +198,7 @@ void DBGSSHash::serialize(const std::string &filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
 
     // TODO: fix this in the essentials library. for some reason, it's saver takes a non-const ref
-    essentials::save(const_cast<sshash::dictionary&>(dict_), suffixed_filename.c_str());
+    essentials::save(const_cast<sshash::dictionary<kmer_t>&>(dict_), suffixed_filename.c_str());
 }
 
 bool DBGSSHash::load(std::istream &in) {
