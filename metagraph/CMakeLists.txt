@@ -277,6 +277,10 @@ include_directories(
 include_directories(
   PUBLIC SYSTEM
   external-libraries/asio/asio/include
+  external-libraries/sshash
+  external-libraries/sshash/include
+  external-libraries/sshash/external/pthash
+  external-libraries/sshash/external/pthash/external/essentials/include
 )
 
 add_library(ips4o INTERFACE)
@@ -319,6 +323,8 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+add_subdirectory(external-libraries/sshash SYSTEM)
+target_compile_options(test_alphabet PRIVATE -Wno-strict-aliasing)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
@@ -409,6 +415,7 @@ set(METALIBS ${METALIBS}
   mersenne_twister
   sdust
   spdlog::spdlog
+  sshash_static
   XXSDS_DYNAMIC
   ips4o
   caches
