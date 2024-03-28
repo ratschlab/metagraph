@@ -58,7 +58,7 @@ void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
     if (terminate() || sequence.size() < k_)
         return;
 
-    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
+    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(std::string(sequence).c_str(), k_ - 1);
     uint_kmer.pad_char();
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
         uint_kmer.drop_char();
@@ -92,7 +92,7 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
     std::string string_kmer = DBGSSHash::get_node_sequence(node);
     kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
-    new_kmer.append_char(prev_char);
+    new_kmer.append_char(kmer_t::char_to_uint(prev_char));
     new_kmer.take_chars(k_);
     uint64_t sshash_id
             = dict_.lookup_advanced_uint(new_kmer, /*check_reverse_complement*/ false).kmer_id;
@@ -188,7 +188,7 @@ void DBGSSHash::call_kmers(
 }
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
-    return num_nodes() ? dict_.lookup(kmer.begin(), false) + 1 : npos;
+    return num_nodes() ? dict_.lookup(std::string(kmer).c_str(), false) + 1 : npos;
 }
 
 std::pair<DBGSSHash::node_index, bool>
@@ -196,7 +196,7 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
     if (!num_nodes())
         return std::make_pair(npos, false);
 
-    auto res = dict_.lookup_advanced(kmer.begin(), true);
+    auto res = dict_.lookup_advanced(std::string(kmer).c_str(), true);
     return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
 }
 
