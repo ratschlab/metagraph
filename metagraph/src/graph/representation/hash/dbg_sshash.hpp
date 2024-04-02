@@ -3,9 +3,14 @@
 
 #include <iostream>
 #include <tsl/ordered_set.h>
+#include <numeric>
+
 #include "common/utils/string_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "../external-libraries/sshash/external/pthash/external/essentials/include/essentials.hpp"
+// for superkmer stats
+#include "../external-libraries/sshash/include/util.hpp"
+#include "graph/annotated_dbg.hpp"
 
 namespace sshash{
 class dictionary;
@@ -86,6 +91,14 @@ class DBGSSHash : public DeBruijnGraph {
 
     const std::string &alphabet() const override;
 
+    //still in progress
+    
+    void superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const;
+    bool equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2) const;
+
+    void sanity_check_1(const std::vector<uint64_t>& cc_skmer, const std::vector<uint64_t>& km_skmer, uint64_t num_super_kmers) const;
+    void sanity_check_2(const std::vector<uint64_t>& km_skmer, uint64_t num_kmers) const;
+    
   private:
     static const std::string alphabet_;
     std::unique_ptr<sshash::dictionary> dict_;

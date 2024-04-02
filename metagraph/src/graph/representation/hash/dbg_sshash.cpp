@@ -175,7 +175,7 @@ void DBGSSHash::call_kmers(
 }
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
-    uint64_t ssh_idx = dict_->lookup(kmer.begin(), false);
+    uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
     return ssh_idx + 1;
 }
 
@@ -230,5 +230,130 @@ const std::string &DBGSSHash::alphabet() const {
 }
 
 uint64_t DBGSSHash::num_nodes() const { return dict_->size(); }
+
+void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const{
+    std::cout<< "Computing superkmer statistics...\n";   
+    uint64_t num_kmers = dict_->size();
+    uint64_t one_pm_num_kmers = num_kmers/1000;
+    uint64_t num_super_kmers = dict_->num_superkmers();
+    uint64_t dict_m = dict_->m();
+    uint64_t dict_seed = dict_->seed();
+
+    std::vector<uint64_t> color_changes_per_superkmer(0);
+    std::vector<uint64_t> kmers_per_superkmer(0);
+
+    sshash::dictionary::iterator it = dict_->begin();
+
+    // first kmer
+    uint64_t first_kmer_id = 0;
+    std::string first_kmer_str = "";
+    dict_->access(first_kmer_id, &(first_kmer_str[0]));
+    sshash::kmer_t uint_kmer = sshash::util::string_to_uint_kmer(&(first_kmer_str[0]), k_);
+
+    uint64_t count_labels = 0;
+    uint64_t count_kmers = 1;
+
+    uint64_t minim, new_minim;
+    uint64_t contig_id, new_contig_id;
+
+    // first contig
+    contig_id = dict_->lookup_advanced_uint(uint_kmer, false).contig_id;
+    new_contig_id = contig_id;
+    //first minimizer
+    minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed);
+    new_minim = minim;
+
+    //first labels
+    std::vector<std::string> labels, new_labels;
+    labels = anno_graph->get_labels(first_kmer_str);
+    new_labels = labels;
+    
+    uint64_t kmer_id;
+    std::string kmer_str;
+
+    std::cout<< "iterating through graph... \n";
+    while(it.has_next()){
+        // step to next kmer        
+        auto kmer_pair = it.next();
+        kmer_str = kmer_pair.second;
+        kmer_id = kmer_pair.first;
+        uint_kmer = sshash::util::string_to_uint_kmer(&(kmer_str[0]), k_);
+        new_minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed);
+        new_labels = anno_graph->get_labels(kmer_str);
+        new_contig_id = dict_->lookup_advanced_uint(uint_kmer, false).contig_id;
+
+
+        //next superkmer?
+        if(new_minim != minim || new_contig_id != contig_id){//yes
+            minim = new_minim;
+            contig_id = new_contig_id;
+            labels = new_labels;
+            color_changes_per_superkmer.push_back(count_labels);
+            kmers_per_superkmer.push_back(count_kmers);
+            //reset counters
+            count_labels = 0;
+            count_kmers = 1;
+        }else {//no
+            if(!equal(new_labels, labels)){
+                count_labels++;
+                labels = new_labels;
+            }
+            
+            count_kmers++;
+        }
+        if(kmer_id % one_pm_num_kmers == 0) std::cout<<'.'<<std::flush;
+    }
+    color_changes_per_superkmer.push_back(count_labels);
+    kmers_per_superkmer.push_back(count_kmers);
+    std::cout<< "done!\n";
+    // sanity checks:
+    // 1. per superkmer vectors have same size == num_super_kmers
+    sanity_check_1(color_changes_per_superkmer, kmers_per_superkmer, num_super_kmers);
+    // 2. sum of kmers_per_superkmer is num_kmers
+    sanity_check_2(kmers_per_superkmer, num_kmers);
+
+
+    // save stats
+    std::ofstream output_file("./superkmer_stats_kmers.txt");
+    output_file << "kmers_per_superkmer: "<<'\n';
+
+    for(auto const& x : kmers_per_superkmer){
+        output_file << x << '\n';
+    }
+    output_file.close();
+    
+    std::ofstream output_file("./superkmer_stats_color.txt");
+    output_file << "color_changes_per_superkmer: "<<'\n';
+    for(auto const& y : color_changes_per_superkmer){
+        output_file << y << '\n';
+
+    }
+    output_file.close();
+
+}
+
+bool DBGSSHash::equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2)const {
+    if(input1.size() != input2.size()){
+        return false;
+    }
+    for(size_t i = 0; i < input1.size(); i++){
+        if(input1.at(i) != input2.at(i)){
+            return false;
+        }
+    }
+    return true; 
+}
+
+void DBGSSHash::sanity_check_1(const std::vector<uint64_t>& cc_skmer, const std::vector<uint64_t>& km_skmer, uint64_t num_super_kmers)const {
+    std::cout << "length of color changes vector: "<<cc_skmer.size()<< std::endl;
+    std::cout << "length of kmers vector: "<<km_skmer.size()<< std::endl;
+    std::cout << "number of superkmers: "<<num_super_kmers<< std::endl;
+}
+void DBGSSHash::sanity_check_2(const std::vector<uint64_t>& km_skmer, uint64_t num_kmers)const{
+    uint64_t sum = std::accumulate(km_skmer.begin(), km_skmer.end(),0);
+    std::cout << "sum of kmers in superkmers vector: "<<sum<< std::endl;
+    std::cout << "total number of kmers: "<<num_kmers<< std::endl;
+}
+
 } // namespace graph
 } // namespace mtg
