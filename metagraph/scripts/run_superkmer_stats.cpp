@@ -7,16 +7,19 @@
 
 
 
-int main (){
+int main (int argc, char *argv[]){
     
     using namespace mtg::graph;
     using namespace mtg::annot;
     using namespace mtg::annot::matrix;
     using namespace mtg::cli;
 
-    std::string graph_path = "/home/marianna/Documents/Masterthesis/new_clone/metagraph/metagraph/build/graph_subset_750.sshashdbg";
-    std::string anno_path = "/home/marianna/Documents/Masterthesis/new_clone/metagraph/metagraph/build/graph_subset_750_annotation.column.annodbg";
-
+    if(argc < 3){
+    	std::cerr<<"missing input files!\n";
+	return EXIT_FAILURE;
+    }
+    std::string graph_path = argv[1];
+    std::string anno_path = argv[2];
     std::shared_ptr<mtg::graph::DBGSSHash> graph_ptr = std::make_shared<mtg::graph::DBGSSHash>(31);
     graph_ptr->load(graph_path);
     

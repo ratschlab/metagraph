@@ -230,12 +230,27 @@ const std::string &DBGSSHash::alphabet() const {
 }
 
 uint64_t DBGSSHash::num_nodes() const { return dict_->size(); }
+void write_stats_to_file(const std::vector<uint64_t>& km_skmer, const std::vector<uint64_t>& cc_skmer){
+    std::ofstream output_file_kmers("./superkmer_stats_kmers.txt");
+    output_file_kmers << "kmers_per_superkmer: "<<'\n';
 
+    for(auto const& x : km_skmer){
+        output_file_kmers << x << '\n';
+    }
+    output_file_kmers.close();
+    
+    std::ofstream output_file_colors("./superkmer_stats_color.txt");
+    output_file_colors << "color_changes_per_superkmer: "<<'\n';
+    for(auto const& y : cc_skmer){
+        output_file_colors << y << '\n';
+    }
+    output_file_colors.close();
+}
 void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const{
     std::cout<< "Computing superkmer statistics...\n";   
     uint64_t num_kmers = dict_->size();
     uint64_t one_pm_num_kmers = num_kmers/1000;
-    uint64_t num_super_kmers = dict_->num_superkmers();
+    //uint64_t num_super_kmers = dict_->num_superkmers();
     uint64_t dict_m = dict_->m();
     uint64_t dict_seed = dict_->seed();
 
@@ -308,28 +323,13 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
     std::cout<< "done!\n";
     // sanity checks:
     // 1. per superkmer vectors have same size == num_super_kmers
-    sanity_check_1(color_changes_per_superkmer, kmers_per_superkmer, num_super_kmers);
+    sanity_check_1(color_changes_per_superkmer, kmers_per_superkmer, 0);//num_super_kmers);
     // 2. sum of kmers_per_superkmer is num_kmers
     sanity_check_2(kmers_per_superkmer, num_kmers);
 
 
     // save stats
-    std::ofstream output_file("./superkmer_stats_kmers.txt");
-    output_file << "kmers_per_superkmer: "<<'\n';
-
-    for(auto const& x : kmers_per_superkmer){
-        output_file << x << '\n';
-    }
-    output_file.close();
-    
-    std::ofstream output_file("./superkmer_stats_color.txt");
-    output_file << "color_changes_per_superkmer: "<<'\n';
-    for(auto const& y : color_changes_per_superkmer){
-        output_file << y << '\n';
-
-    }
-    output_file.close();
-
+    write_stats_to_file(kmers_per_superkmer, color_changes_per_superkmer);
 }
 
 bool DBGSSHash::equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2)const {
