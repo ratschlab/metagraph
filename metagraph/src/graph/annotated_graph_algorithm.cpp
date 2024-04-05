@@ -234,14 +234,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
         size_t num_tests = 0;
-        graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-            for (node_index node : path) {
-                if (likelihoods[node] > 0) {
-                    ++num_tests;
-                    break;
-                }
-            }
-        });
+        graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_tests; });
         common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
