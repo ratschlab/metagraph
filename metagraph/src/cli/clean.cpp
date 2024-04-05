@@ -148,7 +148,8 @@ int clean_graph(Config *config) {
             graph->call_unitigs(callback,
                                 num_threads,
                                 config->min_tip_size,
-                                graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
+                                config->kmers_in_single_form);
+                                // graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
 
         } else {
             graph->call_sequences(callback, num_threads,

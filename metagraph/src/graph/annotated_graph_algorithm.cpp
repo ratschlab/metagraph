@@ -1,7 +1,6 @@
 #include "annotated_graph_algorithm.hpp"
 
 #include <boost/math/distributions/chi_squared.hpp>
-#include <boost/math/statistics/t_test.hpp>
 #include <boost/math/statistics/univariate_statistics.hpp>
 
 #include "common/utils/string_utils.hpp"
@@ -29,6 +28,364 @@ typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
+
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                         const std::vector<std::string> &files,
+                         const tsl::hopscotch_set<Label> &labels_in,
+                         const tsl::hopscotch_set<Label> &labels_out,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads,
+                         size_t num_parallel_files) {
+    bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
+    common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
+    common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
+    common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
+
+    size_t max_index = graph_ptr->max_index();
+    std::vector<double> medians;
+    std::vector<uint64_t> max_vals;
+    std::vector<size_t> n_kmers;
+    std::vector<uint64_t> sums;
+    std::vector<uint64_t> sums_of_squares;
+    std::vector<std::unique_ptr<bit_vector>> columns_all;
+
+    using ValuesContainer = sdsl::int_vector<>;
+    std::vector<std::unique_ptr<ValuesContainer>> column_values_all;
+    std::vector<bool> groups;
+    uint8_t max_width = 0;
+    uint64_t max_val = 0;
+    uint64_t max_observed_value = 0;
+
+    annot::ColumnCompressed<>::load_columns_and_values(files,
+        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
+            groups.push_back(labels_out.count(label));
+
+            max_width = std::max(max_width, column_values.width());
+            max_val = sdsl::bits::lo_set[max_width];
+
+            // median calculation modifies the underlying vector, so we have to make a copy
+            std::vector<uint8_t> vals;
+            vals.reserve(column_values.size());
+            std::copy(column_values.begin(), column_values.end(), std::back_inserter(vals));
+            medians.push_back(boost::math::statistics::median(vals));
+            max_vals.push_back(max_val);
+
+            uint64_t sum = std::accumulate(column_values.begin(), column_values.end(),
+                                           uint64_t(0));
+            uint64_t sum_of_squares = std::accumulate(
+                column_values.begin(), column_values.end(), uint64_t(0),
+                [&](auto&& prev, uint64_t cur) { return std::move(prev) + cur * cur; }
+            );
+            size_t n = column_values.size();
+
+            sums.push_back(sum);
+            sums_of_squares.push_back(sum_of_squares);
+            n_kmers.push_back(n);
+
+            columns_all.emplace_back(std::move(column));
+            column_values_all.push_back(std::make_unique<ValuesContainer>(std::move(column_values)));
+
+            common::logger->trace("{}: {}\tMean: {}\tCutoff: {}",
+                                  label, groups.back() ? "out": "in",
+                                  static_cast<double>(sum) / n,
+                                  max_vals.back());
+        }
+    );
+
+    common::logger->trace("Max width: {}\tMax val: {}\tMax obs. val: {}", max_width, max_val, max_observed_value);
+
+    double in_kmers = 0;
+    double out_kmers = 0;
+    for (size_t j = 0; j < sums.size(); ++j) {
+        if (groups[j]) {
+            out_kmers += sums[j];
+        } else {
+            in_kmers += sums[j];
+        }
+    }
+    double total_kmers = in_kmers + out_kmers;
+
+    sdsl::bit_vector indicator_in(max_index + 1, false);
+    sdsl::bit_vector indicator_out(max_index + 1, false);
+
+    std::vector<double> likelihoods;
+    likelihoods.reserve(max_index + 1);
+    likelihoods.emplace_back(0);
+
+    if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom" || config.test_type == "nbinom_unitig") {
+        boost::math::chi_squared dist(1);
+        sdsl::int_vector<> counts(columns_all[0]->size() * 2, 0, 32);
+        sdsl::int_vector<> nnzero(columns_all[0]->size() * 2, 0, 32);
+        sdsl::int_vector<> foundtotal(columns_all[0]->size() * 2, 0, 64);
+        std::vector<double> foundlogtotal(columns_all[0]->size() * 2);
+        std::vector<double> stuff(columns_all[0]->size() * 2);
+        for (size_t j = 0; j < groups.size(); ++j) {
+            size_t offset = groups[j];
+            const auto &col = *columns_all[j];
+            const auto &col_vals = *column_values_all[j];
+            uint64_t rank = 0;
+            col.call_ones([&](uint64_t row_i) {
+                uint64_t val = col_vals[rank++];
+                counts[row_i * 2 + offset] += val;
+                ++nnzero[row_i * 2 + offset];
+                foundtotal[row_i * 2 + offset] += sums[j];
+                foundlogtotal[row_i * 2 + offset] += log(static_cast<double>(sums[j]));
+                if (val > 1) {
+                    stuff[row_i * 2 + offset] += (val - 1) * (log(static_cast<double>(val - 1)) - 1)
+                                                - lgamma(static_cast<double>(val + 1));
+                }
+            });
+        }
+
+        size_t num_tests = 0;
+        ProgressBar progress(columns_all[0]->size(),
+                             "Testing k-mers",
+                             std::cerr, !common::get_verbose());
+        for (size_t i = 0; i < counts.size(); i += 2) {
+            ++progress;
+            double in_sum = static_cast<uint64_t>(counts[i]);
+            double out_sum = static_cast<uint64_t>(counts[i + 1]);
+
+            if (in_sum == 0 && out_sum == 0) {
+                likelihoods.emplace_back(0);
+                continue;
+            }
+
+            size_t in_nnzero = nnzero[i];
+            size_t out_nnzero = nnzero[i + 1];
+
+            if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
+                double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
+                double log_likelihood_out = out_sum > 0 ? -out_sum + out_sum * log(out_sum) : 0.0;
+                double theta = (in_sum + out_sum) / total_kmers;
+
+                double mean_denom_in = theta * in_kmers;
+                double mean_denom_out = theta * out_kmers;
+                double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
+                log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
+
+                double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
+                num_tests += (lstat > 0);
+                likelihoods.emplace_back(lstat);
+            } else {
+                // generalized poisson
+                double log_likelihood_in = 0;
+                if (in_sum > 0) {
+                    size_t in_notfoundtotal = in_kmers - foundtotal[i];
+                    double rho_in = static_cast<double>(in_nnzero) / in_notfoundtotal;
+                    log_likelihood_in = rho_in * in_notfoundtotal + rho_in * in_nnzero + foundlogtotal[i] + stuff[i];
+                } else if (in_nnzero == labels_in.size()) {
+                    log_likelihood_in = stuff[i] + foundlogtotal[i];
+                }
+
+                double log_likelihood_out = 0;
+                if (out_sum > 0) {
+                    size_t out_notfoundtotal = out_kmers - foundtotal[i + 1];
+                    double rho_out = static_cast<double>(out_nnzero) / out_notfoundtotal;
+                    log_likelihood_out = rho_out * out_notfoundtotal + rho_out * out_nnzero + foundlogtotal[i + 1] + stuff[i + 1];
+                } else if (out_nnzero == labels_out.size()) {
+                    log_likelihood_out = stuff[i + 1] + foundlogtotal[i + 1];
+                }
+
+                double log_likelihood_null = 0;
+                if (in_sum > 0 && out_sum > 0) {
+                    log_likelihood_null = stuff[i] + stuff[i + 1] + foundlogtotal[i] + foundlogtotal[i + 1];
+                } else {
+                    size_t null_notfoundtotal = total_kmers - foundtotal[i] - foundtotal[i + 1];
+                    double rho_null = static_cast<double>(in_nnzero + out_nnzero) / null_notfoundtotal;
+                    log_likelihood_null = rho_null * null_notfoundtotal + rho_null * (in_nnzero + out_nnzero) + foundlogtotal[i] + foundlogtotal[i + 1] + stuff[i] + stuff[i + 1];
+                }
+
+                double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
+                num_tests += (lstat > 0);
+                likelihoods.emplace_back(lstat);
+            }
+        }
+
+        if (config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom_unitig") {
+            num_tests = 0;
+            graph_ptr->call_unitigs([&](const auto &, const auto &path) {
+                for (node_index node : path) {
+                    if (likelihoods[node] > 0) {
+                        ++num_tests;
+                        break;
+                    }
+                }
+            });
+        }
+
+        for (node_index node = 0; node < likelihoods.size(); ++node) {
+            double lstat = likelihoods[node];
+            if (lstat > 0) {
+                double pval = boost::math::cdf(boost::math::complement(dist, lstat * 2.0));
+                if (pval * num_tests < 0.05) {
+                    uint64_t i = AnnotatedDBG::graph_to_anno_index(node);
+                    double in_sum = static_cast<uint64_t>(counts[i * 2]);
+                    double out_sum = static_cast<uint64_t>(counts[i * 2 + 1]);
+                    double scaled_outsum = out_sum / out_kmers * in_kmers;
+                    if (scaled_outsum < in_sum) {
+                        indicator_in[node] = true;
+                    } else if (scaled_outsum > in_sum) {
+                        indicator_out[node] = true;
+                    }
+                }
+            }
+        }
+    } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
+        size_t num_tests = 0;
+        graph_ptr->call_unitigs([&](const auto &, const auto &path) {
+            for (node_index node : path) {
+                if (likelihoods[node] > 0) {
+                    ++num_tests;
+                    break;
+                }
+            }
+        });
+        common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
+                                                                    [&](const auto &row) {
+            if (row.empty()) {
+                likelihoods.emplace_back(0);
+                ++row_i;
+                return;
+            }
+
+            std::vector<double> in_counts;
+            in_counts.reserve(labels_in.size());
+            std::vector<double> out_counts;
+            out_counts.reserve(labels_out.size());
+            for (const auto &[j, c] : row) {
+                auto &bucket = groups[j] ? out_counts : in_counts;
+                bucket.emplace_back(static_cast<double>(c) / medians[j]);
+            }
+            in_counts.resize(labels_in.size());
+            out_counts.resize(labels_out.size());
+
+            auto rankdata = [&](const std::vector<double> &c) {
+                auto c_p = c;
+                std::sort(c_p.begin(), c_p.end());
+                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
+                for (size_t i = 0; i < c_p.size(); ++i) {
+                    auto &[rank_sum, nranks] = counts[c_p[i]];
+                    rank_sum += i + 1;
+                    ++nranks;
+                }
+
+                std::vector<double> ranks;
+                ranks.reserve(c.size());
+                for (double v : c) {
+                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
+                }
+
+                return std::make_pair(std::move(ranks), std::move(counts));
+            };
+
+            size_t nx = in_counts.size();
+            size_t ny = out_counts.size();
+            double p2 = 0.0;
+            double likelihood = std::numeric_limits<double>::max();
+
+            std::vector<double> c;
+            c.reserve(in_counts.size() + out_counts.size());
+            std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
+            std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
+            auto [rankc, countsc] = rankdata(c);
+            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
+            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
+
+            if (config.test_type == "nonparametric") {
+                if (nx > 1 && ny > 1) {
+                    auto [rankx, countsx] = rankdata(in_counts);
+                    auto [ranky, countsy] = rankdata(out_counts);
+                    double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
+                    double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
+
+                    double Sx = 0;
+                    for (size_t i = 0; i < nx; ++i) {
+                        Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
+                    }
+                    Sx /= nx - 1;
+                    double Sy = 0;
+                    for (size_t i = 0; i < ny; ++i) {
+                        Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
+                    }
+                    Sy /= ny - 1;
+
+                    double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
+                    wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
+
+                    double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
+                    double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
+
+                    if (df_denom != 0) {
+                        double df = df_numer / df_denom;
+                        boost::math::students_t dist(df);
+                        double p = boost::math::cdf(dist, wbfn);
+                        double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
+                        p2 = 2 * std::min(p, p1);
+                        likelihood = abs(wbfn);
+                    }
+                }
+            } else {
+                // https://datatab.net/tutorial/mann-whitney-u-test
+                double corr = 0;
+                for (const auto &[val,rks] : countsc) {
+                    const auto &[rk, c] = rks;
+                    if (c > 0)
+                        corr += c * c * c - c;
+                }
+
+                double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
+                double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
+                double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
+                double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
+                double u = std::min(u1, u2);
+                double mu = static_cast<double>(nx * nx) / 2;
+                double n = nx + ny;
+                double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n - corr) / 12);
+
+                double z = abs((u - mu) / sd);
+                auto dist = boost::math::normal_distribution();
+                p2 = boost::math::cdf(boost::math::complement(dist, z)) * 2;
+                likelihood = z;
+            }
+
+            likelihoods.emplace_back(likelihood);
+
+            if (p2 * num_tests < 0.05) {
+                if (rankcx_mean > rankcy_mean) {
+                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
+                } else if (rankcx_mean < rankcy_mean) {
+                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
+                }
+            }
+
+            ++row_i;
+        });
+    } else {
+        throw std::runtime_error("Test not implemented");
+    }
+
+    auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
+        graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
+        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+    );
+    masked_graph_in->likelihood_ratios = likelihoods;
+
+    auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
+        graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_out)), true,
+        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+    );
+    masked_graph_out->likelihood_ratios = likelihoods;
+
+    return std::make_pair(masked_graph_in, masked_graph_out);
+}
+
+
 
 typedef std::function<size_t()> LabelCountCallback;
 
@@ -450,891 +807,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                labels_in, labels_out,
                                labels_in_round2, labels_out_round2, total_kmers,
                                config, num_threads, {});
-}
-
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
-mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         const std::vector<std::string> &files,
-                         const tsl::hopscotch_set<Label> &labels_in,
-                         const tsl::hopscotch_set<Label> &labels_out,
-                         const DifferentialAssemblyConfig &config,
-                         size_t num_threads,
-                         size_t num_parallel_files) {
-    bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
-    common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
-    common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
-    common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
-
-    size_t max_index = graph_ptr->max_index();
-    std::vector<double> medians;
-    std::vector<size_t> n_kmers;
-    std::vector<uint64_t> sums;
-    std::vector<std::unique_ptr<bit_vector>> columns_all;
-
-    using ValuesContainer = sdsl::int_vector<>;
-    std::vector<std::unique_ptr<ValuesContainer>> column_values_all;
-    std::vector<bool> groups;
-    uint8_t max_width = 0;
-    uint64_t max_val = 0;
-    uint64_t max_observed_value = 0;
-
-    annot::ColumnCompressed<>::load_columns_and_values(files,
-        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
-            groups.push_back(labels_out.count(label));
-            common::logger->trace("{}: {}", label, groups.back() ? "out": "in");
-            columns_all.emplace_back(std::move(column));
-
-            max_width = std::max(max_width, column_values.width());
-            max_val = sdsl::bits::lo_set[max_width];
-
-            // median calculation modifies the underlying vector, so we have to make a copy
-            std::vector<uint8_t> vals;
-            vals.reserve(column_values.size());
-            std::copy(column_values.begin(), column_values.end(), std::back_inserter(vals));
-            medians.push_back(boost::math::statistics::median(vals));
-            if (medians.back() == max_val)
-                common::logger->warn("Column {}: Median == {}", label, max_val);
-
-            uint64_t sum = 0;
-            size_t n = 0;
-            for (uint64_t val : column_values) {
-                max_observed_value = std::max(max_observed_value, val);
-                if (val < max_val) {
-                    sum += val;
-                    ++n;
-                }
-            }
-            sums.push_back(sum);
-            n_kmers.push_back(n);
-
-            column_values_all.push_back(std::make_unique<ValuesContainer>(std::move(column_values)));
-        }
-    );
-
-    common::logger->trace("Max width: {}\tMax val: {}\tMax obs. val: {}", max_width, max_val, max_observed_value);
-
-    double in_kmers = 0;
-    double out_kmers = 0;
-    for (size_t j = 0; j < sums.size(); ++j) {
-        if (groups[j]) {
-            out_kmers += sums[j];
-        } else {
-            in_kmers += sums[j];
-        }
-    }
-    double total_kmers = in_kmers + out_kmers;
-
-    sdsl::bit_vector indicator_in(max_index + 1, false);
-    sdsl::bit_vector indicator_out(max_index + 1, false);
-
-    uint64_t num_unitigs = 0;
-    if (config.test_type != "likelihoodratio")
-        graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_unitigs; });
-
-    if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
-        boost::math::chi_squared dist(1);
-        sdsl::int_vector<> counts(columns_all[0]->size() * 2, 0, 32);
-        size_t num_nonzeros = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            size_t offset = groups[j];
-            const auto &col = *columns_all[j];
-            const auto &col_vals = *column_values_all[j];
-            uint64_t rank = 0;
-            col.call_ones([&](uint64_t row_i) {
-                uint64_t val = col_vals[rank++];
-                if (val < max_val) {
-                    num_nonzeros += (counts[row_i * 2] == 0 && counts[row_i * 2 + 1] == 0);
-                    counts[row_i * 2 + offset] += val;
-                }
-            });
-        }
-
-        size_t num_tests = config.test_type == "likelihoodratio"
-            ? num_nonzeros : num_unitigs;
-
-        common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
-
-        for (size_t i = 0; i < counts.size(); i += 2) {
-            double in_sum = static_cast<uint64_t>(counts[i]);
-            double out_sum = static_cast<uint64_t>(counts[i + 1]);
-
-            double log_likelihood_num_in = in_sum > 0 ? in_sum * log(in_sum) - in_sum : 0.0;
-            double log_likelihood_num_out = out_sum > 0 ? out_sum * log(out_sum) - out_sum : 0.0;
-            double theta = (in_sum + out_sum) / total_kmers;
-
-            double mean_denom_in = theta * in_kmers;
-            double mean_denom_out = theta * out_kmers;
-            double log_likelihood_denom = log(mean_denom_in) * in_sum - mean_denom_in + log(mean_denom_out) * out_sum - mean_denom_out;
-
-            double lstat = log_likelihood_num_in + log_likelihood_num_out - log_likelihood_denom;
-            if (lstat > 0 && boost::math::cdf(boost::math::complement(dist, lstat * 2.0)) * num_tests < 0.05) {
-                node_index node = AnnotatedDBG::anno_to_graph_index(i / 2);
-                double scaled_outsum = out_sum / out_kmers * in_kmers;
-                if (scaled_outsum < in_sum) {
-                    indicator_in[node] = true;
-                } else if (scaled_outsum > in_sum) {
-                    indicator_out[node] = true;
-                }
-            }
-        }
-    } else if (config.test_type == "nonparametric") {
-        size_t num_tests = num_unitigs;
-        common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                                    [&](const auto &row) {
-            if (row.empty()) {
-                ++row_i;
-                return;
-            }
-
-            std::vector<double> in_counts;
-            in_counts.reserve(labels_in.size());
-            std::vector<double> out_counts;
-            out_counts.reserve(labels_out.size());
-            for (const auto &[j, c] : row) {
-                if (c < max_val) {
-                    auto &bucket = groups[j] ? out_counts : in_counts;
-                    bucket.emplace_back(static_cast<double>(c) / medians[j]);
-                }
-            }
-            in_counts.resize(labels_in.size());
-            out_counts.resize(labels_out.size());
-
-            auto rankdata = [&](const std::vector<double> &c) {
-                std::vector<std::pair<double, double>> c_p;
-                c_p.reserve(c.size());
-                for (size_t i = 0; i < c.size(); ++i) {
-                    c_p.emplace_back(c[i], i + 1);
-                }
-                std::sort(c_p.begin(), c_p.end());
-                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
-                for (const auto &[v, r] : c_p) {
-                    counts[v].first += r;
-                    ++counts[v].second;
-                }
-
-                std::vector<double> ranks;
-                ranks.reserve(c.size());
-                for (double v : c) {
-                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
-                }
-
-                return std::make_pair(std::move(ranks), std::move(counts));
-            };
-
-            size_t nx = in_counts.size();
-            size_t ny = out_counts.size();
-            double p2 = 0.0;
-
-            std::vector<double> c;
-            c.reserve(in_counts.size() + out_counts.size());
-            std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
-            std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
-            auto [rankc, countsc] = rankdata(c);
-
-            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
-
-            if (nx > 1 && ny > 1) {
-                auto [rankx, countsx] = rankdata(in_counts);
-                auto [ranky, countsy] = rankdata(out_counts);
-                double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
-                double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
-
-                double Sx = 0;
-                for (size_t i = 0; i < nx; ++i) {
-                    Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
-                }
-                Sx /= nx - 1;
-                double Sy = 0;
-                for (size_t i = 0; i < ny; ++i) {
-                    Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
-                }
-                Sy /= ny - 1;
-
-                double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
-                wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
-
-                double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
-                double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
-
-                if (df_denom != 0) {
-                    double df = df_numer / df_denom;
-                    boost::math::students_t dist(df);
-                    double p = boost::math::cdf(dist, wbfn);
-                    double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
-                    p2 = 2 * std::min(p, p1);
-                }
-            }
-
-            if (p2 * num_tests < 0.05) {
-                if (rankcy_mean > rankcx_mean) {
-                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                } else if (rankcy_mean < rankcx_mean) {
-                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                }
-            }
-
-            ++row_i;
-        });
-    } else if (config.test_type == "likelihoodratio_perunitig") {
-        graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-            std::vector<double> log_likelihood_num_ins;
-            std::vector<double> log_likelihood_num_outs;
-            std::vector<double> log_likelihood_denoms;
-            log_likelihood_num_ins.reserve(path.size());
-            log_likelihood_num_outs.reserve(path.size());
-            log_likelihood_denoms.reserve(path.size());
-            for (node_index node : path) {
-                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-                double in_sum = 0;
-                double out_sum = 0;
-                for (size_t j = 0; j < columns_all.size(); ++j) {
-                    const auto &col = *columns_all[j];
-                    const auto &col_values = *column_values_all[j];
-                    uint64_t val = 0;
-                    if (uint64_t rk = col.conditional_rank1(row_i)) {
-                        val = col_values[rk - 1];
-                        if (val >= max_val)
-                            val = 0;
-                    }
-
-                    if (groups[j]) {
-                        out_sum += val;
-                    } else {
-                        in_sum += val;
-                    }
-                }
-
-                log_likelihood_num_ins.emplace_back(in_sum > 0 ? in_sum * log(in_sum) - in_sum : 0.0);
-                log_likelihood_num_outs.emplace_back(out_sum > 0 ? out_sum * log(out_sum) - out_sum : 0.0);
-                double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-
-                double mean_denom_in = theta * in_kmers;
-                double mean_denom_out = theta * out_kmers;
-                log_likelihood_denoms.emplace_back(log(mean_denom_in) * in_sum - mean_denom_in + log(mean_denom_out) * out_sum - mean_denom_out);
-            }
-
-            std::vector<double> lstats;
-            lstats.reserve(log_likelihood_num_ins.size());
-            for (size_t i = 0; i < log_likelihood_num_ins.size(); ++i) {
-                lstats.emplace_back(2 * (log_likelihood_num_ins[i] + log_likelihood_num_outs[i] - log_likelihood_denoms[i]));
-            }
-
-            std::vector<double> lstats_sums;
-            std::vector<double> num_diffs;
-            std::vector<double> log_likelihood_num_out_sums;
-            lstats_sums.reserve(lstats.size() + 1);
-            num_diffs.reserve(lstats.size() + 1);
-            log_likelihood_num_out_sums.reserve(lstats.size() + 1);
-            lstats_sums.push_back(0);
-            num_diffs.push_back(0);
-            log_likelihood_num_out_sums.push_back(0);
-            std::partial_sum(lstats.begin(), lstats.end(), std::back_inserter(lstats_sums));
-            std::partial_sum(log_likelihood_num_ins.begin(), log_likelihood_num_ins.end(), std::back_inserter(num_diffs));
-            std::partial_sum(log_likelihood_num_outs.begin(), log_likelihood_num_outs.end(), std::back_inserter(log_likelihood_num_out_sums));
-            for (size_t i = 0; i < log_likelihood_num_outs.size(); ++i) {
-                num_diffs[i] -= log_likelihood_num_outs[i];
-            }
-
-            double lstat_best = lstats_sums.back();
-            auto begin_best = lstats_sums.begin();
-            auto end_best = lstats_sums.end() - 1;
-            // for (auto begin = lstats_sums.begin(); begin < lstats_sums.end(); ++begin) {
-            //     for (auto end = begin + 1; end < lstats_sums.end(); ++end) {
-            //         if (*end - *begin > lstat_best) {
-            //             lstat_best = *end - *begin;
-            //             begin_best = begin;
-            //             end_best = end;
-            //         }
-            //     }
-            // }
-
-            boost::math::chi_squared dist(2*(end_best - begin_best) - 1);
-            if (lstat_best > 0 && boost::math::cdf(boost::math::complement(dist, lstat_best)) * num_unitigs < 0.05) {
-                size_t i_begin = begin_best - lstats_sums.begin();
-                size_t i_end = end_best - lstats_sums.begin();
-                double num_diff = num_diffs[i_end] - num_diffs[i_begin];
-                auto &indicator = num_diff > 0 ? indicator_in : indicator_out;
-                for (size_t i = i_begin; i < i_end; ++i) {
-                    indicator[path[i]] = true;
-                }
-            }
-        });
-
-    } else if (config.test_type == "nonparametric_perunitig") {
-        size_t num_tests = num_unitigs;
-        graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-            std::vector<double> in_counts;
-            std::vector<double> out_counts;
-            for (node_index node : path) {
-                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-                for (size_t j = 0; j < columns_all.size(); ++j) {
-                    double scaled_val = 0.0;
-                    if (uint64_t rk = columns_all[j]->conditional_rank1(row_i)) {
-                        uint64_t val = (*column_values_all[j])[rk - 1];
-                        if (val < max_val)
-                            scaled_val = static_cast<double>(val) / medians[j];
-                    }
-                    auto &bucket = groups[j] ? out_counts : in_counts;
-                    bucket.emplace_back(scaled_val);
-                }
-            }
-
-            auto rankdata = [&](const std::vector<double> &c) {
-                std::vector<std::pair<double, double>> c_p;
-                c_p.reserve(c.size());
-                for (size_t i = 0; i < c.size(); ++i) {
-                    c_p.emplace_back(c[i], i + 1);
-                }
-                std::sort(c_p.begin(), c_p.end());
-                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
-                for (const auto &[v, r] : c_p) {
-                    counts[v].first += r;
-                    ++counts[v].second;
-                }
-
-                std::vector<double> ranks;
-                ranks.reserve(c.size());
-                for (double v : c) {
-                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
-                }
-
-                return std::make_pair(std::move(ranks), std::move(counts));
-            };
-
-            size_t nx = in_counts.size();
-            size_t ny = out_counts.size();
-            double p2 = 0.0;
-
-            std::vector<double> c;
-            c.reserve(in_counts.size() + out_counts.size());
-            std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
-            std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
-            auto [rankc, countsc] = rankdata(c);
-
-            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
-
-            if (nx > 1 && ny > 1) {
-                auto [rankx, countsx] = rankdata(in_counts);
-                auto [ranky, countsy] = rankdata(out_counts);
-                double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
-                double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
-
-                double Sx = 0;
-                for (size_t i = 0; i < nx; ++i) {
-                    Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
-                }
-                Sx /= nx - 1;
-                double Sy = 0;
-                for (size_t i = 0; i < ny; ++i) {
-                    Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
-                }
-                Sy /= ny - 1;
-
-                double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
-                wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
-
-                double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
-                double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
-
-                if (df_denom != 0) {
-                    double df = df_numer / df_denom;
-                    boost::math::students_t dist(df);
-                    double p = boost::math::cdf(dist, wbfn);
-                    double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
-                    p2 = 2 * std::min(p, p1);
-                }
-            }
-
-            if (p2 * num_tests < 0.05) {
-                auto add_to = [&](auto &indicator) {
-                    for (node_index node : path) {
-                        indicator[node] = true;
-                    }
-                };
-                if (rankcy_mean > rankcx_mean) {
-                    add_to(indicator_in);
-                } else if (rankcy_mean < rankcx_mean) {
-                    add_to(indicator_out);
-                }
-            }
-        });
-    }
-
-    // common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_unitigs);
-
-    // if (config.test_type == "nonparametric") {
-
-    // } else {
-    //     graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-    //         if (path.size() == 1)
-    //             return;
-
-    //         if (config.test_type == "zmp") {
-    //             std::vector<double> in_counts;
-    //             std::vector<double> out_counts;
-    //             for (node_index node : path) {
-    //                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-    //                 for (size_t j = 0; j < columns_all.size(); ++j) {
-    //                     auto &bucket = groups[j] ? out_counts : in_counts;
-    //                     const auto &col = *columns_all[j];
-    //                     if (uint64_t rk = col.conditional_rank1(row_i)) {
-    //                         uint64_t val = (*column_values_all[j])[rk - 1];
-    //                         if (val < max_val) {
-    //                             bucket.push_back(static_cast<double>(val) / medians[j]);
-    //                         } else {
-    //                             bucket.push_back(0.0);
-    //                         }
-    //                     } else {
-    //                         bucket.push_back(0.0);
-    //                     }
-    //                 }
-    //             }
-
-    //             if (std::equal(in_counts.begin() + 1, in_counts.end(), in_counts.begin())
-    //                     && std::equal(out_counts.begin() + 1, out_counts.end(), out_counts.begin())
-    //                     && in_counts[0] == out_counts[0])
-    //                 return;
-
-    //             try {
-    //                 auto [t, p] = boost::math::statistics::two_sample_t_test(in_counts, out_counts);
-    //                 if (p * num_unitigs >= 0.05)
-    //                     return;
-
-    //                 auto &indicator = t > 0 ? indicator_in : indicator_out;
-    //                 for (node_index node : path) {
-    //                     indicator[node] = true;
-    //                 }
-    //             } catch (...) {
-    //                 common::logger->trace("f\t{}\t{}",fmt::join(in_counts, ","),fmt::join(out_counts,","));
-    //                 throw std::runtime_error("f");
-    //             }
-    //         } else if (config.test_type == "likelihoodratio_unitig") {
-    //             std::vector<double> log_likelihood_num_ins;
-    //             std::vector<double> log_likelihood_num_outs;
-    //             std::vector<double> log_likelihood_denoms;
-    //             log_likelihood_num_ins.reserve(path.size());
-    //             log_likelihood_num_outs.reserve(path.size());
-    //             log_likelihood_denoms.reserve(path.size());
-    //             for (node_index node : path) {
-    //                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-    //                 double in_sum = 0;
-    //                 double out_sum = 0;
-    //                 for (size_t j = 0; j < columns_all.size(); ++j) {
-    //                     const auto &col = *columns_all[j];
-    //                     const auto &col_values = *column_values_all[j];
-    //                     uint64_t val = 0;
-    //                     if (uint64_t rk = col.conditional_rank1(row_i)) {
-    //                         val = col_values[rk - 1];
-    //                         if (val >= max_val)
-    //                             val = 0;
-    //                     }
-
-    //                     if (groups[j]) {
-    //                         out_sum += val;
-    //                     } else {
-    //                         in_sum += val;
-    //                     }
-    //                 }
-
-    //                 log_likelihood_num_ins.emplace_back((log(static_cast<double>(in_sum)) - 1) * in_sum);
-    //                 log_likelihood_num_outs.emplace_back((log(static_cast<double>(out_sum)) - 1) * out_sum);
-    //                 double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-
-    //                 double mean_denom_in = theta * in_kmers;
-    //                 double mean_denom_out = theta * out_kmers;
-    //                 log_likelihood_denoms.emplace_back(log(mean_denom_in) * in_sum - mean_denom_in + log(mean_denom_out) * out_sum - mean_denom_out);
-    //             }
-
-    //             std::vector<double> lstats;
-    //             lstats.reserve(log_likelihood_num_ins.size());
-    //             for (size_t i = 0; i < log_likelihood_num_ins.size(); ++i) {
-    //                 lstats.emplace_back(2 * (log_likelihood_num_ins[i] + log_likelihood_num_outs[i] - log_likelihood_denoms[i]));
-    //             }
-
-    //             std::vector<double> lstats_sums;
-    //             std::vector<double> num_diffs;
-    //             std::vector<double> log_likelihood_num_out_sums;
-    //             lstats_sums.reserve(lstats.size() + 1);
-    //             num_diffs.reserve(lstats.size() + 1);
-    //             log_likelihood_num_out_sums.reserve(lstats.size() + 1);
-    //             lstats_sums.push_back(0);
-    //             num_diffs.push_back(0);
-    //             log_likelihood_num_out_sums.push_back(0);
-    //             std::partial_sum(lstats.begin(), lstats.end(), std::back_inserter(lstats_sums));
-    //             std::partial_sum(log_likelihood_num_ins.begin(), log_likelihood_num_ins.end(), std::back_inserter(num_diffs));
-    //             std::partial_sum(log_likelihood_num_outs.begin(), log_likelihood_num_outs.end(), std::back_inserter(log_likelihood_num_out_sums));
-    //             for (size_t i = 0; i < log_likelihood_num_outs.size(); ++i) {
-    //                 num_diffs[i] -= log_likelihood_num_outs[i];
-    //             }
-
-    //             double lstat_best = lstats_sums.back();
-    //             auto begin_best = lstats_sums.begin();
-    //             auto end_best = lstats_sums.end() - 1;
-    //             // for (auto begin = lstats_sums.begin(); begin < lstats_sums.end(); ++begin) {
-    //             //     for (auto end = begin + 1; end < lstats_sums.end(); ++end) {
-    //             //         if (*end - *begin > lstat_best) {
-    //             //             lstat_best = *end - *begin;
-    //             //             begin_best = begin;
-    //             //             end_best = end;
-    //             //         }
-    //             //     }
-    //             // }
-
-    //             boost::math::chi_squared dist(2*(end_best - begin_best) - 1);
-    //             if (lstat_best > 0 && boost::math::cdf(boost::math::complement(dist, lstat_best)) * num_unitigs < 0.05) {
-    //                 size_t i_begin = begin_best - lstats_sums.begin();
-    //                 size_t i_end = end_best - lstats_sums.begin();
-    //                 double num_diff = num_diffs[i_end] - num_diffs[i_begin];
-    //                 auto &indicator = num_diff > 0 ? indicator_in : indicator_out;
-    //                 for (size_t i = i_begin; i < i_end; ++i) {
-    //                     indicator[path[i]] = true;
-    //                 }
-    //             }
-    //         }
-    //     });
-    // }
-
-    auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
-        graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
-        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-    );
-
-    auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
-        graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_out)), true,
-        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-    );
-
-    // if (!is_primary)
-        return std::make_pair(masked_graph_in, masked_graph_out);
-
-    // return std::make_pair(std::make_shared<CanonicalDBG>(masked_graph_in),
-    //                       std::make_shared<CanonicalDBG>(masked_graph_out));
-
-    // sdsl::bit_vector indicator(max_index + 1, false);
-    // std::vector<bool> groups;
-    // std::vector<uint64_t> sums;
-
-    // uint8_t max_width = 0;
-
-    // annot::ColumnCompressed<>::load_columns_and_values(files,
-    //     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, sdsl::int_vector_buffer<> && column_values) {
-    //         groups.push_back(labels_out.count(label));
-    //         sums.push_back(std::accumulate(column_values.begin(),
-    //                                        column_values.end(),
-    //                                        0llu));
-    //         column->call_ones([&](uint64_t row_i) {
-    //             node_index i = AnnotatedDBG::anno_to_graph_index(row_i);
-    //             indicator[i] = true;
-    //         });
-    //         max_width = std::max(max_width, column_values.width());
-    //         columns_all.emplace_back(std::move(column));
-    //         column_values_all.push_back(std::make_unique<sdsl::int_vector_buffer<>>(std::move(column_values)));
-    //     }
-    // );
-
-    // // size_t total_unique_kmers = sdsl::util::cnt_one_bits(indicator);
-    // size_t num_tests = 1;
-    // boost::math::chi_squared dist(groups.size() - 1);
-
-    // uint64_t row_i = 0;
-    // utils::call_rows<std::unique_ptr<bit_vector>,
-    //                  std::unique_ptr<sdsl::int_vector_buffer<>>,
-    //                  std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
-    //     if (row.empty()) {
-    //         ++row_i;
-    //         return;
-    //     }
-
-    //     std::vector<uint64_t> all_counts(groups.size());
-    //     std::vector<uint64_t> counts[2];
-    //     uint64_t sums[2] = { 0, 0 };
-    //     for (const auto &[j, c] : row) {
-    //         if (c) {
-    //             sums[groups[j]] += c;
-    //             counts[groups[j]].emplace_back(c);
-    //             all_counts[j] = c;
-    //         }
-    //     }
-
-    //     double in_mean = 0;
-    //     double in_nzeros = 0;
-    //     double out_mean = 0;
-    //     double out_nzeros = 0;
-    //     double null_mean = 0;
-    //     double null_nzeros = 0;
-
-    //     if (counts[0].size()) {
-    //         std::tie(in_mean, in_nzeros) = estimate_ztp_mean(
-    //             [&](const auto &callback) { std::for_each(counts[0].begin(), counts[0].end(), callback); },
-    //             max_width
-    //         );
-    //     }
-
-    //     if (counts[1].size()) {
-    //         std::tie(out_mean, out_nzeros) = estimate_ztp_mean(
-    //             [&](const auto &callback) { std::for_each(counts[1].begin(), counts[1].end(), callback); },
-    //             max_width
-    //         );
-    //     }
-
-    //     std::tie(null_mean, null_nzeros) = estimate_ztp_mean(
-    //         [&](const auto &callback) {
-    //             std::for_each(counts[0].begin(), counts[0].end(), callback);
-    //             std::for_each(counts[1].begin(), counts[1].end(), callback);
-    //         },
-    //         max_width
-    //     );
-
-    //     // double log_likelihood_alt = 0;
-    //     // if (in_mean > 0)
-    //     //     log_likelihood_alt += log(in_mean) * sums[0] - (in_mean + log1p(-exp(-in_mean))) * counts[0].size();
-
-    //     // if (out_mean > 0)
-    //     //     log_likelihood_alt += log(out_mean) * sums[1] - (out_mean + log1p(-exp(-out_mean))) * counts[1].size();
-
-    //     // double log_likelihood_null = log(null_mean) * (sums[0] + sums[1]) - (null_mean + log1p(-exp(-null_mean))) * (counts[0].size() + counts[1].size());
-
-    //     double log_likelihood_alt = 0;
-    //     double log_likelihood_null = 0;
-    //     for (size_t j = 0; j < all_counts.size(); ++j) {
-    //         if (all_counts[j]) {
-    //             double cur_mean = static_cast<double>(sums[j]) / (groups[j] ? out_mean : in_mean);
-    //             double cur_null_mean = static_cast<double>(sums[j]) / null_mean;
-    //             log_likelihood_alt += log(cur_mean) * all_counts[j] - cur_mean - log1p(-exp(-cur_mean));
-    //             log_likelihood_null += log(cur_null_mean) * all_counts[j] - cur_null_mean - log1p(-exp(-cur_null_mean));
-    //         }
-    //     }
-
-    //     double lstat = 2 * (log_likelihood_alt - log_likelihood_null);
-
-    //     double pval = lstat > 0
-    //         ? (1.0 - boost::math::cdf(dist, lstat)) * num_tests
-    //         : 1.0;
-
-    //     common::logger->trace("{}\t{}\t{} {}",
-    //         std::min(pval, double(1.0)),
-    //         fmt::join(all_counts, ","),
-    //         log_likelihood_alt,
-    //         log_likelihood_null
-    //     );
-
-    //     node_index i = AnnotatedDBG::anno_to_graph_index(row_i);
-    //     if (pval >= 0.05)
-    //         indicator[i] = false;
-
-    //     ++row_i;
-    // });
-
-
-    // sdsl::bit_vector in_indicator(max_index + 1, false);
-    // sdsl::bit_vector out_indicator(max_index + 1, false);
-    // sdsl::bit_vector indicator(max_index + 1, false);
-    // std::vector<std::unique_ptr<bit_vector>> columns_all;
-    // std::vector<bool> groups;
-    // size_t num_set_bits = 0;
-
-    // std::vector<size_t> n_kmers;
-    // std::vector<size_t> count_sums;
-    // // std::vector<std::pair<double, double>> ztp_params;
-    // // double in_rate = 0;
-    // // double out_rate = 0;
-    // uint8_t max_width = 8;
-    // uint64_t in_sum = 0;
-    // uint64_t out_sum = 0;
-    // double ztp_out_mean = 0;
-    // double ztp_out_nzeros = 0;
-    // double ztp_in_mean = 0;
-    // double ztp_in_nzeros = 0;
-
-    // auto overall_iterator = [&](const auto &global_callback) {
-    //     auto in_iterator = [&](const auto &in_callback) {
-    //         auto out_iterator = [&](const auto &out_callback) {
-    //             annot::ColumnCompressed<>::load_columns_and_values(files,
-    //                 [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector<> && column_values) {
-    //                     num_set_bits += column_values.size();
-    //                     groups.push_back(labels_out.count(label));
-    //                     uint64_t sum = 0;
-    //                     size_t rank = 0;
-    //                     column->call_ones([&](uint64_t row_i) {
-    //                         node_index i = AnnotatedDBG::anno_to_graph_index(row_i);
-    //                         indicator[i] = true;
-    //                         uint64_t val = column_values[rank++];
-    //                         global_callback(val);
-
-    //                         if (groups.back()) {
-    //                             out_callback(val);
-    //                             out_indicator[i] = true;
-    //                             out_sum += val;
-    //                         } else {
-    //                             in_callback(val);
-    //                             in_indicator[i] = true;
-    //                             in_sum += val;
-    //                         }
-    //                         sum += val;
-    //                     });
-    //                     count_sums.push_back(sum);
-    //                     n_kmers.push_back(column_values.size());
-    //                     columns_all.emplace_back(std::move(column));
-    //                 }
-    //             );
-    //         };
-    //         std::tie(ztp_out_mean, ztp_out_nzeros) = estimate_ztp_mean(out_iterator, max_width);
-    //         // out_rate = ztp_out_mean / out_sum;
-    //     };
-
-    //     std::tie(ztp_in_mean, ztp_in_nzeros) = estimate_ztp_mean(in_iterator, max_width);
-    //     // in_rate = ztp_in_mean / in_sum;
-    // };
-
-    // auto [overall_ztp_mean, overall_ztp_nzeros] = estimate_ztp_mean(overall_iterator, max_width);
-    // // double null_rate = overall_ztp_mean / (in_sum + out_sum);
-
-    // // common::logger->trace("Rates: in: {}\tout: {}\tnull: {}",in_rate, out_rate, null_rate);
-
-    // assert(!indicator[DeBruijnGraph::npos]);
-    // auto ind_p = std::make_unique<bitmap_vector>(std::move(indicator));
-    // double overall_prob = static_cast<double>(num_set_bits) / (ind_p->num_set_bits() * groups.size());
-    // double log_overall_denom = log1p(-exp(-overall_ztp_mean));
-
-    // boost::math::chi_squared dist(groups.size() - 1);
-
-    // std::vector<std::unique_ptr<sdsl::int_vector_buffer<>>> column_values_all;
-    // annot::ColumnCompressed<>::load_columns_and_values(files,
-    //     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&, sdsl::int_vector_buffer<> && column_values) {
-    //         column_values_all.push_back(std::make_unique<sdsl::int_vector_buffer<>>(std::move(column_values)));
-    //     }
-    // );
-
-    // bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
-
-    // // auto initial_masked_graph = std::make_shared<MaskedDeBruijnGraph>(
-    // //     graph_ptr, std::move(ind_p), true,
-    // //     is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-    // // );
-    // // std::shared_ptr<DeBruijnGraph> test_graph = initial_masked_graph;
-    // // // if (is_primary)
-    // // //     test_graph = std::make_shared<CanonicalDBG>(initial_masked_graph);
-
-    // // size_t num_tests = 0;
-    // // test_graph->call_unitigs([&](const auto&, const auto&) {
-    // //     ++num_tests;
-    // // });
-    // // // if (is_primary)
-    // // //     num_tests /= 2;
-
-    // // ind_p = std::unique_ptr<bitmap_vector>(static_cast<bitmap_vector*>(initial_masked_graph->release_mask()));
-    // size_t num_tests = ind_p->num_set_bits();
-
-    // // num_tests = 1;
-    // common::logger->trace("Num tests: {}", num_tests);
-
-    // for (size_t i = 0; i < groups.size(); ++i) {
-    //     common::logger->trace("{}: zero prob: {}", i, 1.0 - static_cast<double>(n_kmers[i])/ind_p->num_set_bits());
-    // }
-    // common::logger->trace("null: zero prob: {}", 1.0 - overall_prob);
-
-    // uint64_t row_i = 0;
-    // // ProgressBar progress(indicator.size() - 1,
-    // //                      "Testing k-mers zmp",
-    // //                      std::cerr, !common::get_verbose());
-    // utils::call_rows<std::unique_ptr<bit_vector>,
-    //                 std::unique_ptr<sdsl::int_vector_buffer<>>,
-    //                 std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-    //     [&](const auto &row) {
-    //         // ++progress;
-    //         if (row.empty()) {
-    //             ++row_i;
-    //             return;
-    //         }
-
-    //         std::vector<uint64_t> counts(groups.size());
-    //         for (const auto &[j, c] : row) {
-    //             counts[j] = c;
-    //         }
-
-    //         // double likelihood_num = 1;
-    //         // double likelihood_denom = 1;
-    //         double log_likelihood_num = 0;
-    //         double log_likelihood_denom = 0;
-    //         for (size_t j = 0; j < counts.size(); ++j) {
-    //             uint64_t c = counts[j];
-    //             double log_p_denom = 0;
-    //             for (uint64_t cc = 2; cc <= c; ++cc) {
-    //                 log_p_denom += log(cc);
-    //             }
-
-    //             // the distribution is a zero-inflated, zero-truncated poisson
-    //             {
-    //                 // double mean_est = ztp_params[j].first;
-    //                 // double mean_est = (groups[j] ? out_rate : in_rate) * count_sums[j];
-    //                 double mean_est = groups[j] ? ztp_out_mean : ztp_in_mean;
-    //                 double log_prob = log(static_cast<double>(n_kmers[j])) - log(static_cast<double>(ind_p->num_set_bits()));
-    //                 if (!c) {
-    //                     // we are in the zero-count zone
-    //                     log_prob = log(static_cast<double>(ind_p->num_set_bits() - n_kmers[j])) - log(static_cast<double>(ind_p->num_set_bits()));
-    //                 } else {
-    //                     // we are now in the ztp zone
-    //                     double log_denom = log1p(-exp(-mean_est));
-    //                     double log_p_num = c * log(mean_est) - mean_est;
-    //                     double log_ztp_prob = log_p_num - log_p_denom - log_denom;
-    //                     log_prob += log_ztp_prob;
-    //                 }
-
-    //                 log_likelihood_num += log_prob;
-    //             }
-
-    //             {
-    //                 double mean_est = overall_ztp_mean;
-    //                 // double mean_est = null_rate * count_sums[j];
-    //                 double log_prob = log(overall_prob);
-    //                 if (!c) {
-    //                     // we are in the zero-count zone
-    //                     log_prob = log1p(-overall_prob);
-    //                 } else {
-    //                     // we are now in the ztp zone
-    //                     double log_p_num = c * log(mean_est) - mean_est;
-    //                     double log_ztp_prob = log_p_num - log_p_denom - log_overall_denom;
-    //                     log_prob += log_ztp_prob;
-    //                 }
-
-    //                 log_likelihood_denom += log_prob;
-    //             }
-    //         }
-
-    //         // common::logger->trace("{} {}", likelihood_num, likelihood_denom);
-    //         double lstat = 2 * (log_likelihood_num - log_likelihood_denom);
-    //         double pval = lstat > 0
-    //             ? (1.0 - boost::math::cdf(dist, lstat)) * num_tests
-    //             : 1.0;
-
-    //         // if (counts[0] + counts[2] > counts[1] && counts[0] && counts[2]) {
-    //         //     common::logger->trace("{}\t{} {}\t{}", pval, log_likelihood_num, log_likelihood_denom, lstat);
-    //         //     common::logger->trace("{}", fmt::join(groups, "\t"));
-    //         //     common::logger->trace("{}", fmt::join(counts, "\t"));
-    //         // }
-
-    //         node_index i = AnnotatedDBG::anno_to_graph_index(row_i);
-    //         if (pval >= 0.05)
-    //             ind_p->set(i, false);
-
-    //         ++row_i;
-    //     }
-    // );
-
-    // auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
-    //     graph_ptr, std::move(ind_p), true,
-    //     is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-    // );
-    // if (!is_primary)
-    //     return masked_graph;
-
-    // return std::make_shared<CanonicalDBG>(masked_graph);
 }
 
 std::shared_ptr<DeBruijnGraph>
