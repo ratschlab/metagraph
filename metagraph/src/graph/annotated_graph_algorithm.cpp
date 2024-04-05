@@ -278,7 +278,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             size_t nx = in_counts.size();
             size_t ny = out_counts.size();
-            double p2 = 0.0;
+            double p = 0.0;
             double likelihood = std::numeric_limits<double>::max();
 
             std::vector<double> c;
@@ -314,11 +314,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
 
                     if (df_denom != 0) {
+                        wbfn = abs(wbfn);
                         double df = df_numer / df_denom;
                         boost::math::students_t dist(df);
-                        double p = boost::math::cdf(dist, wbfn);
-                        double p1 = boost::math::cdf(boost::math::complement(dist, wbfn));
-                        p2 = 2 * std::min(p, p1);
+                        p = 2 * boost::math::cdf(boost::math::complement(dist, wbfn));
                         likelihood = abs(wbfn);
                     }
                 }
@@ -342,13 +341,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double z = abs((u - mu) / sd);
                 auto dist = boost::math::normal_distribution();
-                p2 = boost::math::cdf(boost::math::complement(dist, z)) * 2;
+                p = boost::math::cdf(boost::math::complement(dist, z)) * 2;
                 likelihood = z / sqrt(n);
             }
 
             likelihoods.emplace_back(likelihood);
 
-            if (p2 * num_tests < 0.05) {
+            if (p * num_tests < 0.05) {
                 if (rankcx_mean > rankcy_mean) {
                     indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
                 } else if (rankcx_mean < rankcy_mean) {
