@@ -50,7 +50,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> sums_of_squares;
     std::vector<std::unique_ptr<bit_vector>> columns_all;
 
-    using ValuesContainer = sdsl::int_vector<>;
+    using ValuesContainer = sdsl::int_vector_buffer<>;
     std::vector<std::unique_ptr<ValuesContainer>> column_values_all;
     std::vector<bool> groups;
     uint8_t max_width = 0;
@@ -68,16 +68,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::vector<uint8_t> vals;
             vals.reserve(column_values.size());
             std::copy(column_values.begin(), column_values.end(), std::back_inserter(vals));
-            medians.push_back(boost::math::statistics::median(vals));
-            max_vals.push_back(max_val);
-
-            uint64_t sum = std::accumulate(column_values.begin(), column_values.end(),
-                                           uint64_t(0));
+            uint64_t sum = std::accumulate(vals.begin(), vals.end(), uint64_t(0));
             uint64_t sum_of_squares = std::accumulate(
-                column_values.begin(), column_values.end(), uint64_t(0),
+                vals.begin(), vals.end(), uint64_t(0),
                 [&](auto&& prev, uint64_t cur) { return std::move(prev) + cur * cur; }
             );
             size_t n = column_values.size();
+
+            medians.push_back(boost::math::statistics::median(vals));
+            max_vals.push_back(max_val);
 
             sums.push_back(sum);
             sums_of_squares.push_back(sum_of_squares);
@@ -344,7 +343,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double z = abs((u - mu) / sd);
                 auto dist = boost::math::normal_distribution();
                 p2 = boost::math::cdf(boost::math::complement(dist, z)) * 2;
-                likelihood = z;
+                likelihood = z / sqrt(n);
             }
 
             likelihoods.emplace_back(likelihood);
