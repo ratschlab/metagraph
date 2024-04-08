@@ -137,7 +137,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             });
         }
 
-        size_t num_tests = 0;
+        size_t num_tests = config.num_tests;
+        bool count_tests = !num_tests;
         ProgressBar progress(columns_all[0]->size(),
                              "Testing k-mers",
                              std::cerr, !common::get_verbose());
@@ -197,12 +198,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
-                num_tests += (lstat > 0);
+                if (count_tests)
+                    num_tests += (lstat > 0);
+
                 likelihoods.emplace_back(lstat);
             }
         }
 
-        if (config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom_unitig") {
+        if (count_tests && (config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom_unitig")) {
             num_tests = 0;
             graph_ptr->call_unitigs([&](const auto &, const auto &path) {
                 for (node_index node : path) {
@@ -232,8 +235,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
-        size_t num_tests = 0;
-        graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_tests; });
+        size_t num_tests = config.num_tests;
+        if (!num_tests)
+            graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_tests; });
+
         common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
