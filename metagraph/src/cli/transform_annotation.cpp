@@ -4,6 +4,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -324,7 +325,18 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation...");
 
         if (input_anno_type == Config::ColumnCompressed) {
-            if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
+            if (config->count_kmers) {
+                ColumnCompressed<>::load_columns_and_values(files,
+                    [&](uint64_t offset, const auto &label, std::unique_ptr<bit_vector> &&column, sdsl::int_vector_buffer<>&& column_values) {
+                        std::ofstream outstream(utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension)
+                                    + fmt::format(".{}.tsv", offset));
+                        uint64_t rk = 0;
+                        column->call_ones([&](uint64_t pos) {
+                            outstream << pos << "\t" << column_values[rk++] << "\n";
+                        });
+                    }
+                );
+            } else if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
             }
