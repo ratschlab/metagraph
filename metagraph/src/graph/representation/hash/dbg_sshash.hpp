@@ -12,6 +12,11 @@
 #include "../external-libraries/sshash/include/util.hpp"
 #include "graph/annotated_dbg.hpp"
 
+// shady includes for superkmer annotation
+//#define private public
+//#include "../external-libraries/sshash/include/buckets.hpp"
+//#include "../external-libraries/sshash/include/minimizers.hpp"
+
 namespace sshash{
 class dictionary;
 }
@@ -79,6 +84,8 @@ class DBGSSHash : public DeBruijnGraph {
     bool has_single_incoming(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
+
+
     
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const override;
@@ -92,7 +99,8 @@ class DBGSSHash : public DeBruijnGraph {
     const std::string &alphabet() const override;
 
     //still in progress
-    
+    node_index kmer_to_superkmer_node(std::string_view kmer) const ;
+
     void superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const;
     bool equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2) const;
 

@@ -40,7 +40,7 @@ void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        callback(kmer_to_node(sequence.substr(i, k_)));
+        callback(kmer_to_superkmer_node(sequence.substr(i, k_)));
     }
 }
 
@@ -176,6 +176,15 @@ void DBGSSHash::call_kmers(
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
+    return ssh_idx + 1;
+}
+
+// superkmer experiment: use minimizer to get superkmer positions (offsets) -> get superkmer that contains kmer 
+DBGSSHash::node_index DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
+    uint64_t ssh_idx = dict_->kmer_to_superkmer_idx(kmer);
+    if(ssh_idx == sshash::constants::invalid_uint64){
+        return npos;
+    }
     return ssh_idx + 1;
 }
 
