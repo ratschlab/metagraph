@@ -42,6 +42,7 @@ struct DifferentialAssemblyConfig {
     bool filter = true;
     uint64_t min_count = 1;
     uint64_t num_tests = 0;
+    std::string outfbase;
 };
 
 /**

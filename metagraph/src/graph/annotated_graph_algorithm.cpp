@@ -113,27 +113,43 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     likelihoods.emplace_back(0);
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
-        boost::math::chi_squared dist(1);
-        sdsl::int_vector<> counts(columns_all[0]->size() * 2, 0, 32);
-        for (size_t j = 0; j < groups.size(); ++j) {
-            size_t offset = groups[j];
-            const auto &col = *columns_all[j];
-            const auto &col_vals = *column_values_all[j];
-            uint64_t rank = 0;
-            col.call_ones([&](uint64_t row_i) {
-                counts[row_i * 2 + offset] += col_vals[rank++];
-            });
+        {
+            sdsl::int_vector_buffer<> counts(config.outfbase + "counts.tmp",
+                                             std::ios::binary | std::ios::out,
+                                             1024*1024,
+                                             32);
+            for (size_t j = 0; j < groups.size(); ++j) {
+                size_t offset = groups[j];
+                const auto &col = *columns_all[j];
+                const auto &col_vals = *column_values_all[j];
+                uint64_t rank = 0;
+                col.call_ones([&](uint64_t row_i) {
+                    size_t idx = row_i * 2 + offset;
+                    while (counts.size() <= idx) {
+                        counts.push_back(0);
+                    }
+
+                    counts[idx] += col_vals[rank++];
+                });
+            }
         }
 
+        sdsl::int_vector_buffer<> counts(config.outfbase + "counts.tmp",
+                                         std::ios::binary | std::ios::in,
+                                         1024*1024,
+                                         32);
+
+        boost::math::chi_squared dist(1);
         size_t num_tests = config.num_tests;
         bool count_tests = !num_tests;
         ProgressBar progress(columns_all[0]->size(),
                              "Testing k-mers",
                              std::cerr, !common::get_verbose());
-        for (size_t i = 0; i < counts.size(); i += 2) {
+        for (size_t i = 0; i < columns_all[0]->size(); ++i) {
             ++progress;
-            double in_sum = static_cast<uint64_t>(counts[i]);
-            double out_sum = static_cast<uint64_t>(counts[i + 1]);
+            size_t j = i * 2;
+            double in_sum = j < counts.size() ? static_cast<uint64_t>(counts[j]) : 0;
+            double out_sum = j + 1 < counts.size() ? static_cast<uint64_t>(counts[j + 1]) : 0;
 
             if (in_sum == 0 && out_sum == 0) {
                 likelihoods.emplace_back(0);
@@ -155,6 +171,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             likelihoods.emplace_back(lstat);
         }
+
+        counts.close(true);
 
         if (count_tests && config.test_type == "likelihoodratio_unitig") {
             num_tests = 0;

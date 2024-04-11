@@ -62,7 +62,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                 .label_mask_in_kmer_fraction = 1.0,
                 .label_mask_out_unitig_fraction = 1.0,
                 .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = 1.0
+                .label_mask_other_unitig_fraction = 1.0,
+                .outfbase = "",
             };
 
             auto masked_dbg = mask_nodes_by_label(*anno_graph,
@@ -110,7 +111,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
             .label_mask_in_kmer_fraction = 0.0,
             .label_mask_out_unitig_fraction = 1.0,
             .label_mask_out_kmer_fraction = 0.99,
-            .label_mask_other_unitig_fraction = 1.0
+            .label_mask_other_unitig_fraction = 1.0,
+            .outfbase = "",
         };
 
         auto masked_dbg = mask_nodes_by_label(*anno_graph,
@@ -161,7 +163,8 @@ void test_mask_unitigs(double inlabel_fraction,
                 .label_mask_in_kmer_fraction = 1.0,
                 .label_mask_out_unitig_fraction = outlabel_fraction,
                 .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = other_label_fraction
+                .label_mask_other_unitig_fraction = other_label_fraction,
+                .outfbase = "",
             };
 
             auto masked_dbg = mask_nodes_by_label(*anno_graph,
@@ -258,7 +261,8 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                 .label_mask_out_unitig_fraction = outlabel_fraction,
                 .label_mask_out_kmer_fraction = 0.0,
                 .label_mask_other_unitig_fraction = other_label_fraction,
-                .add_complement = add_complement
+                .add_complement = add_complement,
+                .outfbase = "",
             };
 
             auto masked_dbg = mask_nodes_by_label(*anno_graph,

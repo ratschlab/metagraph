@@ -127,6 +127,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             tsl::hopscotch_set<std::string> background_labels;
 
             DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
+            diff_config.outfbase = config->outfbase;
 
             std::string exp_name = experiment["name"].asString()
                                     + (config->enumerate_out_sequences ? "." : "");
@@ -188,6 +189,7 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             tsl::hopscotch_set<std::string> background_labels;
 
             DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
+            diff_config.outfbase = config->outfbase;
 
             std::string exp_name = experiment["name"].asString()
                                     + (config->enumerate_out_sequences ? "." : "");
