@@ -152,24 +152,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 continue;
             }
 
-            size_t in_nnzero = nnzero[i];
-            size_t out_nnzero = nnzero[i + 1];
-
             if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
                 double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
                 double log_likelihood_out = out_sum > 0 ? -out_sum + out_sum * log(out_sum) : 0.0;
-                double theta = (in_sum + out_sum) / total_kmers;
 
+                double theta = (in_sum + out_sum) / total_kmers;
                 double mean_denom_in = theta * in_kmers;
                 double mean_denom_out = theta * out_kmers;
                 double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
                 log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
 
                 double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
-                num_tests += (lstat > 0);
+                if (count_tests)
+                    num_tests += (lstat > 0);
+
                 likelihoods.emplace_back(lstat);
             } else {
                 // generalized poisson
+                size_t in_nnzero = nnzero[i];
+                size_t out_nnzero = nnzero[i + 1];
+
                 double log_likelihood_in = 0;
                 if (in_sum > 0) {
                     size_t in_notfoundtotal = in_kmers - foundtotal[i];
@@ -235,6 +237,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
+        auto rankdata = [&](const std::vector<double> &c) {
+            auto c_p = c;
+            std::sort(c_p.begin(), c_p.end());
+            tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
+            for (size_t i = 0; i < c_p.size(); ++i) {
+                auto &[rank_sum, nranks] = counts[c_p[i]];
+                rank_sum += i + 1;
+                ++nranks;
+            }
+
+            std::vector<double> ranks;
+            ranks.reserve(c.size());
+            for (double v : c) {
+                ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
+            }
+
+            return std::make_pair(std::move(ranks), std::move(counts));
+        };
+
         size_t num_tests = config.num_tests;
         if (!num_tests)
             graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_tests; });
@@ -242,8 +263,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Test type: {}\tNum tests: {}", config.test_type, num_tests);
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
+                        std::unique_ptr<ValuesContainer>,
+                        std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
                                                                     [&](const auto &row) {
             if (row.empty()) {
                 likelihoods.emplace_back(0);
@@ -261,25 +282,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
             in_counts.resize(labels_in.size());
             out_counts.resize(labels_out.size());
-
-            auto rankdata = [&](const std::vector<double> &c) {
-                auto c_p = c;
-                std::sort(c_p.begin(), c_p.end());
-                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
-                for (size_t i = 0; i < c_p.size(); ++i) {
-                    auto &[rank_sum, nranks] = counts[c_p[i]];
-                    rank_sum += i + 1;
-                    ++nranks;
-                }
-
-                std::vector<double> ranks;
-                ranks.reserve(c.size());
-                for (double v : c) {
-                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
-                }
-
-                return std::make_pair(std::move(ranks), std::move(counts));
-            };
 
             size_t nx = in_counts.size();
             size_t ny = out_counts.size();
