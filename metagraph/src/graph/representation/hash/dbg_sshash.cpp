@@ -181,8 +181,11 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 
 // superkmer experiment: use minimizer to get superkmer positions (offsets) -> get superkmer that contains kmer 
 DBGSSHash::node_index DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
-    uint64_t ssh_idx = dict_->kmer_to_superkmer_idx(kmer);
+    uint64_t ssh_idx = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(ssh_idx == sshash::constants::invalid_uint64){
+        //if(dict_->lookup(kmer.begin(), true)){
+        //    std::cout<< "\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
+        //}
         return npos;
     }
     return ssh_idx + 1;
