@@ -112,28 +112,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     likelihoods.reserve(max_index + 1);
     likelihoods.emplace_back(0);
 
-    if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom" || config.test_type == "nbinom_unitig") {
+    if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
         boost::math::chi_squared dist(1);
         sdsl::int_vector<> counts(columns_all[0]->size() * 2, 0, 32);
-        sdsl::int_vector<> nnzero(columns_all[0]->size() * 2, 0, 32);
-        sdsl::int_vector<> foundtotal(columns_all[0]->size() * 2, 0, 64);
-        std::vector<double> foundlogtotal(columns_all[0]->size() * 2);
-        std::vector<double> stuff(columns_all[0]->size() * 2);
         for (size_t j = 0; j < groups.size(); ++j) {
             size_t offset = groups[j];
             const auto &col = *columns_all[j];
             const auto &col_vals = *column_values_all[j];
             uint64_t rank = 0;
             col.call_ones([&](uint64_t row_i) {
-                uint64_t val = col_vals[rank++];
-                counts[row_i * 2 + offset] += val;
-                ++nnzero[row_i * 2 + offset];
-                foundtotal[row_i * 2 + offset] += sums[j];
-                foundlogtotal[row_i * 2 + offset] += log(static_cast<double>(sums[j]));
-                if (val > 1) {
-                    stuff[row_i * 2 + offset] += (val - 1) * (log(static_cast<double>(val - 1)) - 1)
-                                                - lgamma(static_cast<double>(val + 1));
-                }
+                counts[row_i * 2 + offset] += col_vals[rank++];
             });
         }
 
@@ -152,62 +140,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 continue;
             }
 
-            if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
-                double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
-                double log_likelihood_out = out_sum > 0 ? -out_sum + out_sum * log(out_sum) : 0.0;
+            double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
+            double log_likelihood_out = out_sum > 0 ? -out_sum + out_sum * log(out_sum) : 0.0;
 
-                double theta = (in_sum + out_sum) / total_kmers;
-                double mean_denom_in = theta * in_kmers;
-                double mean_denom_out = theta * out_kmers;
-                double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
-                log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
+            double theta = (in_sum + out_sum) / total_kmers;
+            double mean_denom_in = theta * in_kmers;
+            double mean_denom_out = theta * out_kmers;
+            double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
+            log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
 
-                double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
-                if (count_tests)
-                    num_tests += (lstat > 0);
+            double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
+            if (count_tests)
+                num_tests += (lstat > 0);
 
-                likelihoods.emplace_back(lstat);
-            } else {
-                // generalized poisson
-                size_t in_nnzero = nnzero[i];
-                size_t out_nnzero = nnzero[i + 1];
-
-                double log_likelihood_in = 0;
-                if (in_sum > 0) {
-                    size_t in_notfoundtotal = in_kmers - foundtotal[i];
-                    double rho_in = static_cast<double>(in_nnzero) / in_notfoundtotal;
-                    log_likelihood_in = rho_in * in_notfoundtotal + rho_in * in_nnzero + foundlogtotal[i] + stuff[i];
-                } else if (in_nnzero == labels_in.size()) {
-                    log_likelihood_in = stuff[i] + foundlogtotal[i];
-                }
-
-                double log_likelihood_out = 0;
-                if (out_sum > 0) {
-                    size_t out_notfoundtotal = out_kmers - foundtotal[i + 1];
-                    double rho_out = static_cast<double>(out_nnzero) / out_notfoundtotal;
-                    log_likelihood_out = rho_out * out_notfoundtotal + rho_out * out_nnzero + foundlogtotal[i + 1] + stuff[i + 1];
-                } else if (out_nnzero == labels_out.size()) {
-                    log_likelihood_out = stuff[i + 1] + foundlogtotal[i + 1];
-                }
-
-                double log_likelihood_null = 0;
-                if (in_sum > 0 && out_sum > 0) {
-                    log_likelihood_null = stuff[i] + stuff[i + 1] + foundlogtotal[i] + foundlogtotal[i + 1];
-                } else {
-                    size_t null_notfoundtotal = total_kmers - foundtotal[i] - foundtotal[i + 1];
-                    double rho_null = static_cast<double>(in_nnzero + out_nnzero) / null_notfoundtotal;
-                    log_likelihood_null = rho_null * null_notfoundtotal + rho_null * (in_nnzero + out_nnzero) + foundlogtotal[i] + foundlogtotal[i + 1] + stuff[i] + stuff[i + 1];
-                }
-
-                double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
-                if (count_tests)
-                    num_tests += (lstat > 0);
-
-                likelihoods.emplace_back(lstat);
-            }
+            likelihoods.emplace_back(lstat);
         }
 
-        if (count_tests && (config.test_type == "likelihoodratio_unitig" || config.test_type == "nbinom_unitig")) {
+        if (count_tests && config.test_type == "likelihoodratio_unitig") {
             num_tests = 0;
             graph_ptr->call_unitigs([&](const auto &, const auto &path) {
                 for (node_index node : path) {
