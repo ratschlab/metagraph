@@ -183,11 +183,15 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 DBGSSHash::node_index DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
     uint64_t ssh_idx = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(ssh_idx == sshash::constants::invalid_uint64){
-        //if(dict_->lookup(kmer.begin(), true)){
-        //    std::cout<< "\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
-        //}
+        if(dict_->lookup(kmer.begin(), true)!= sshash::constants::invalid_uint64){
+            std::cout<< kmer <<"\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
+        }
         return npos;
     }
+    if(dict_->lookup(kmer.begin(), true) == sshash::constants::invalid_uint64){
+        std::cout<< kmer <<"\n***********  found with kmer_to_index but not with lookup!! *********" <<std::endl;
+    }
+
     return ssh_idx + 1;
 }
 
@@ -305,7 +309,7 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
         kmer_str = kmer_pair.second;
         kmer_id = kmer_pair.first;
         uint_kmer = sshash::util::string_to_uint_kmer(&(kmer_str[0]), k_);
-        new_minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed);
+        new_minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed); // is this the correct minimizer?
         new_labels = anno_graph->get_labels(kmer_str);
         new_contig_id = dict_->lookup_advanced_uint(uint_kmer, false).contig_id;
 
