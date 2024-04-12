@@ -117,15 +117,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         boost::math::chi_squared dist(1);
         if (!num_tests) {
             if (config.test_type == "likelihoodratio_unitig") {
-                num_tests = 0;
-                graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-                    for (node_index node : path) {
-                        if (likelihoods[node] > 0) {
-                            ++num_tests;
-                            break;
-                        }
-                    }
-                });
+                graph_ptr->call_unitigs([&](const auto &, const auto &) { ++num_tests; });
             } else {
                 num_tests = max_index;
             }
