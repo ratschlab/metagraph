@@ -113,47 +113,44 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     likelihoods.emplace_back(0);
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig") {
-        {
-            sdsl::int_vector_buffer<> counts(config.outfbase + "counts.tmp",
-                                             std::ios::binary | std::ios::out,
-                                             1024*1024,
-                                             32);
-            for (size_t j = 0; j < groups.size(); ++j) {
-                size_t offset = groups[j];
-                const auto &col = *columns_all[j];
-                const auto &col_vals = *column_values_all[j];
-                uint64_t rank = 0;
-                col.call_ones([&](uint64_t row_i) {
-                    size_t idx = row_i * 2 + offset;
-                    while (counts.size() <= idx) {
-                        counts.push_back(0);
+        size_t num_tests = config.num_tests;
+        boost::math::chi_squared dist(1);
+        if (!num_tests) {
+            if (config.test_type == "likelihoodratio_unitig") {
+                num_tests = 0;
+                graph_ptr->call_unitigs([&](const auto &, const auto &path) {
+                    for (node_index node : path) {
+                        if (likelihoods[node] > 0) {
+                            ++num_tests;
+                            break;
+                        }
                     }
-
-                    counts[idx] += col_vals[rank++];
                 });
+            } else {
+                num_tests = max_index;
             }
         }
 
-        sdsl::int_vector_buffer<> counts(config.outfbase + "counts.tmp",
-                                         std::ios::binary | std::ios::in,
-                                         1024*1024,
-                                         32);
-
-        boost::math::chi_squared dist(1);
-        size_t num_tests = config.num_tests;
-        bool count_tests = !num_tests;
-        ProgressBar progress(columns_all[0]->size(),
-                             "Testing k-mers",
-                             std::cerr, !common::get_verbose());
-        for (size_t i = 0; i < columns_all[0]->size(); ++i) {
-            ++progress;
-            size_t j = i * 2;
-            double in_sum = j < counts.size() ? static_cast<uint64_t>(counts[j]) : 0;
-            double out_sum = j + 1 < counts.size() ? static_cast<uint64_t>(counts[j + 1]) : 0;
-
-            if (in_sum == 0 && out_sum == 0) {
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                        std::unique_ptr<ValuesContainer>,
+                        std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
+                                                                    [&](const auto &row) {
+            if (row.empty()) {
                 likelihoods.emplace_back(0);
-                continue;
+                ++row_i;
+                return;
+            }
+
+            double in_sum = 0;
+            double out_sum = 0;
+
+            for (const auto &[j, c] : row) {
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
             }
 
             double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
@@ -166,34 +163,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
 
             double lstat = log_likelihood_in + log_likelihood_out - log_likelihood_null;
-            if (count_tests)
-                num_tests += (lstat > 0);
-
             likelihoods.emplace_back(lstat);
-        }
 
-        counts.close(true);
-
-        if (count_tests && config.test_type == "likelihoodratio_unitig") {
-            num_tests = 0;
-            graph_ptr->call_unitigs([&](const auto &, const auto &path) {
-                for (node_index node : path) {
-                    if (likelihoods[node] > 0) {
-                        ++num_tests;
-                        break;
-                    }
-                }
-            });
-        }
-
-        for (node_index node = 0; node < likelihoods.size(); ++node) {
-            double lstat = likelihoods[node];
             if (lstat > 0) {
                 double pval = boost::math::cdf(boost::math::complement(dist, lstat * 2.0));
                 if (pval * num_tests < 0.05) {
-                    uint64_t i = AnnotatedDBG::graph_to_anno_index(node);
-                    double in_sum = static_cast<uint64_t>(counts[i * 2]);
-                    double out_sum = static_cast<uint64_t>(counts[i * 2 + 1]);
+                    node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
                     double scaled_outsum = out_sum / out_kmers * in_kmers;
                     if (scaled_outsum < in_sum) {
                         indicator_in[node] = true;
@@ -202,7 +177,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
             }
-        }
+
+            ++row_i;
+        });
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
         auto rankdata = [&](const std::vector<double> &c) {
             auto c_p = c;
