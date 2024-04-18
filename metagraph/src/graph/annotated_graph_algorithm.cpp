@@ -33,23 +33,6 @@ typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
 
-struct IDist {
-    virtual ~IDist() {}
-    virtual double cdf(double x) const = 0;
-};
-
-template <class T>
-struct Dist : public IDist {
-    template <typename... Args>
-    Dist(Args&&... args) : d(std::forward<Args>(args)...) {}
-
-    double cdf(double x) const override final { return boost::math::cdf(d, x); }
-    const T d;
-};
-
-template struct Dist<boost::math::negative_binomial>;
-template struct Dist<boost::math::poisson>;
-
 std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<std::string> &files,
@@ -139,13 +122,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
             || config.test_type == "fisher") {
-        bool found_bad_chi2_stat = false;
         boost::math::chi_squared dist(1);
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                                    [&](const auto &row) {
+                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
+                                                                     [&](const auto &row) {
             if (row.empty()) {
                 pvals.emplace_back(1);
                 ++row_i;
@@ -203,21 +185,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         indicator_out[node] = true;
                     }
                 }
-            } else {
-                found_bad_chi2_stat |= (chi_stat < 0);
+            } else if (chi_stat == 0) {
                 pval = 1.0;
+            } else {
+                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                throw std::runtime_error("Test failed");
             }
 
             pvals.emplace_back(pval);
 
             ++row_i;
         });
-
-        if (found_bad_chi2_stat)
-            common::logger->warn("Detected likelihood ratio(s) < 0");
-
     } else if (config.test_type == "nbinom") {
-        bool found_bad_chi2_stat = false;
         double r_num = 0;
         double r_denom = 0;
         for (size_t i = 0; i < groups.size(); ++i) {
@@ -236,8 +215,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                                    [&](const auto &row) {
+                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
+                                                                     [&](const auto &row) {
             if (row.empty()) {
                 pvals.emplace_back(1.0);
                 ++row_i;
@@ -263,6 +242,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double total_sum = in_sum + out_sum;
+            size_t ndigits = 20;
 
             double lambda_in = boost::math::tools::newton_raphson_iterate([&](double lambda) {
                 double val = 0;
@@ -272,22 +252,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         double prop = static_cast<double>(sums[j]) * lambda;
                         double shift_prop = r + prop;
                         val += (c - prop) / shift_prop;
-                        dval -= prop * (r + c) / shift_prop / shift_prop;
+                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
                     }
                 }
 
                 for (size_t j : unfound) {
-                    uint64_t c = 0;
                     if (!groups[j]) {
+                        uint64_t c = 0;
                         double prop = static_cast<double>(sums[j]) * lambda;
                         double shift_prop = r + prop;
                         val += (c - prop) / shift_prop;
-                        dval -= prop * (r + c) / shift_prop / shift_prop;
+                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
                     }
                 }
 
                 return std::make_pair(val, dval);
-            }, in_sum / in_kmers, 0.0, 1.0, 5);
+            }, in_sum / in_kmers, 0.0, 1.0, ndigits);
 
             double lambda_out = boost::math::tools::newton_raphson_iterate([&](double lambda) {
                 double val = 0;
@@ -297,22 +277,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         double prop = static_cast<double>(sums[j]) * lambda;
                         double shift_prop = r + prop;
                         val += (c - prop) / shift_prop;
-                        dval -= prop * (r + c) / shift_prop / shift_prop;
+                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
                     }
                 }
 
                 for (size_t j : unfound) {
-                    uint64_t c = 0;
                     if (groups[j]) {
+                        uint64_t c = 0;
                         double prop = static_cast<double>(sums[j]) * lambda;
                         double shift_prop = r + prop;
                         val += (c - prop) / shift_prop;
-                        dval -= prop * (r + c) / shift_prop / shift_prop;
+                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
                     }
                 }
 
                 return std::make_pair(val, dval);
-            }, out_sum / out_kmers, 0.0, 1.0, 5);
+            }, out_sum / out_kmers, 0.0, 1.0, ndigits);
 
             double lambda_null = boost::math::tools::newton_raphson_iterate([&](double lambda) {
                 double val = 0;
@@ -321,7 +301,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double prop = static_cast<double>(sums[j]) * lambda;
                     double shift_prop = r + prop;
                     val += (c - prop) / shift_prop;
-                    dval -= prop * (r + c) / shift_prop / shift_prop;
+                    dval -= (r + c) / shift_prop / shift_prop * sums[j];
                 }
 
                 for (size_t j : unfound) {
@@ -329,11 +309,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double prop = static_cast<double>(sums[j]) * lambda;
                     double shift_prop = r + prop;
                     val += (c - prop) / shift_prop;
-                    dval -= prop * (r + c) / shift_prop / shift_prop;
+                    dval -= (r + c) / shift_prop / shift_prop * sums[j];
                 }
 
                 return std::make_pair(val, dval);
-            }, total_sum / total_kmers, 0.0, 1.0, 5);
+            }, total_sum / total_kmers, 0.0, 1.0, ndigits);
 
             double loglikelihood_alt = 0;
             double loglikelihood_null = 0;
@@ -341,10 +321,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (const auto &[j, c] : row) {
                 double lambda = groups[j] ? lambda_out : lambda_in;
                 double prop = lambda * sums[j];
-                loglikelihood_alt += log(prop) * c - log(r + prop) * (r + c);
+                loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
 
                 double prop_null = lambda_null * sums[j];
-                loglikelihood_null += log(prop_null) * c - log(r + prop_null) * (r + c);
+                loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
+            }
+
+            for (size_t j : unfound) {
+                double lambda = groups[j] ? lambda_out : lambda_in;
+                double prop = lambda * sums[j];
+                loglikelihood_alt -= log(r + prop) * r;
+
+                double prop_null = lambda_null * sums[j];
+                loglikelihood_null -= log(r + prop_null) * r;
             }
 
             double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
@@ -362,17 +351,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 pvals.emplace_back(pval);
-            } else {
-                found_bad_chi2_stat |= (chi_stat < 0);
+            } else if (chi_stat == 0) {
                 pvals.emplace_back(1.0);
+            } else {
+                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                throw std::runtime_error("Test failed");
             }
 
             ++row_i;
         });
-
-        if (found_bad_chi2_stat)
-            common::logger->warn("Detected likelihood ratio(s) < 0");
-
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u" || config.test_type == "quantile") {
         auto norm = boost::math::normal_distribution();
         auto rankdata = [&](const std::vector<double> &c) {
@@ -396,9 +383,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
-                        std::unique_ptr<ValuesContainer>,
-                        std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                                    [&](const auto &row) {
+                         std::unique_ptr<ValuesContainer>,
+                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
+                                                                     [&](const auto &row) {
             if (row.empty()) {
                 pvals.emplace_back(1.0);
                 ++row_i;
@@ -508,6 +495,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     }
 
     {
+        uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
+        common::logger->trace("Correcting {}/{} significant p-values", total_sig, max_index);
+
         VectorMap<double, std::vector<size_t>> stats_map;
         call_ones(indicator_in, [&](size_t i) {
             stats_map[pvals[i]].emplace_back(i);

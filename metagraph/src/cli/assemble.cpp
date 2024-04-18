@@ -250,8 +250,8 @@ int assemble(Config *config) {
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
-        std::filesystem::remove(config->outfbase + ".loglikelihoodratio");
-        std::filesystem::remove(config->outfbase + ".all.loglikelihoodratio");
+        std::filesystem::remove(config->outfbase + ".pvals");
+        std::filesystem::remove(config->outfbase + ".all.pvals");
 
         auto graph_callback = [&](const graph::DeBruijnGraph &graph, const std::string &header) {
             const auto *masked_graph = dynamic_cast<const graph::MaskedDeBruijnGraph*>(&graph);
