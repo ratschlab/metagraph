@@ -36,11 +36,20 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
     map_to_nodes_sequentially(sequence, callback, terminate);
 }
 
-void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
+void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
+    if(!loaded_mask){
+        
+    }
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        callback(kmer_to_superkmer_node(sequence.substr(i, k_)));
+        auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
+        if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
+            callback(kmer_to_node(sequence.substr(i, k_)));
+            // maybe implement kmer_to_node_from_superkmer(s_idx);
+        }else{
+            callback(s_idx);
+        }
     }
 }
 
@@ -174,25 +183,30 @@ void DBGSSHash::call_kmers(
     }
 }
 
+DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer) const {
+    uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
+    return ssh_idx + 1;
+}
+
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
     return ssh_idx + 1;
 }
 
 // superkmer experiment: use minimizer to get superkmer positions (offsets) -> get superkmer that contains kmer 
-DBGSSHash::node_index DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
-    uint64_t ssh_idx = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
+std::pair<DBGSSHash::node_index, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
+    auto [ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(ssh_idx == sshash::constants::invalid_uint64){
         if(dict_->lookup(kmer.begin(), true)!= sshash::constants::invalid_uint64){
             std::cout<< kmer <<"\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
         }
-        return npos;
+        return std::pair(npos, sshash::constants::invalid_uint64);
     }
     if(dict_->lookup(kmer.begin(), true) == sshash::constants::invalid_uint64){
         std::cout<< kmer <<"\n***********  found with kmer_to_index but not with lookup!! *********" <<std::endl;
     }
 
-    return ssh_idx + 1;
+    return std::pair(ssh_idx + 1, superkmer_id);
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
@@ -232,6 +246,9 @@ bool DBGSSHash::load(const std::string &filename) {
         dict_->print_info();
     }
     k_ = dict_->k();
+
+    std::string s_mask_name = filename + "_sk_mask";
+    load_superkmer_mask(s_mask_name);
     return true;
 }
 
@@ -262,8 +279,33 @@ void write_stats_to_file(const std::vector<uint64_t>& km_skmer, const std::vecto
     }
     output_file_colors.close();
 }
-void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const{
-    std::cout<< "Computing superkmer statistics...\n";   
+sdsl::bit_vector mask_into_bit_vec(const std::vector<bool>& mask){
+    sdsl::bit_vector bv (mask.size());
+    for(size_t idx = 0; idx < mask.size(); idx++){
+        bv[idx] = mask[idx];
+    }
+    return bv;
+}
+
+void DBGSSHash::load_superkmer_mask(std::string file){
+    std::ifstream infile("file", std::ios::binary);
+    superkmer_mask.load(infile);
+    loaded_mask = true;
+}
+
+void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
+    std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";   
+    
+    std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&](std::string str){return anno_graph->get_labels(str);});
+    sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
+    // elias fano encoding and serialize
+    sdsl::sd_vector<> ef_bv (non_mono_superkmer); 
+    std::cout << "serializing bit vector..." << std::endl;
+    std::ofstream outfile(file_sk_mask, std::ios::binary);
+    ef_bv.serialize(outfile);
+    outfile.close();
+
+    /*
     uint64_t num_kmers = dict_->size();
     uint64_t one_pm_num_kmers = num_kmers/1000;
     //uint64_t num_super_kmers = dict_->num_superkmers();
@@ -346,6 +388,7 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
 
     // save stats
     write_stats_to_file(kmers_per_superkmer, color_changes_per_superkmer);
+    */
 }
 
 bool DBGSSHash::equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2)const {

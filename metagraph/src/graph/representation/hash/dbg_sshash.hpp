@@ -11,11 +11,7 @@
 // for superkmer stats
 #include "../external-libraries/sshash/include/util.hpp"
 #include "graph/annotated_dbg.hpp"
-
-// shady includes for superkmer annotation
-//#define private public
-//#include "../external-libraries/sshash/include/buckets.hpp"
-//#include "../external-libraries/sshash/include/minimizers.hpp"
+#include "sdsl/bit_vectors.hpp"
 
 namespace sshash{
 class dictionary;
@@ -84,6 +80,7 @@ class DBGSSHash : public DeBruijnGraph {
     bool has_single_incoming(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
+    node_index kmer_to_node_from_superkmer(std::string_view kmer) const;
 
 
     
@@ -99,9 +96,10 @@ class DBGSSHash : public DeBruijnGraph {
     const std::string &alphabet() const override;
 
     //still in progress
-    node_index kmer_to_superkmer_node(std::string_view kmer) const ;
+    std::pair<DBGSSHash::node_index, uint64_t> kmer_to_superkmer_node(std::string_view kmer) const ;
 
-    void superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph) const;
+    void load_superkmer_mask(std::string file);
+    void superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const;
     bool equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2) const;
 
     void sanity_check_1(const std::vector<uint64_t>& cc_skmer, const std::vector<uint64_t>& km_skmer, uint64_t num_super_kmers) const;
@@ -110,6 +108,8 @@ class DBGSSHash : public DeBruijnGraph {
   private:
     static const std::string alphabet_;
     std::unique_ptr<sshash::dictionary> dict_;
+    bool loaded_mask = false;
+    sdsl::sd_vector<> superkmer_mask;
     size_t k_;
 };
 

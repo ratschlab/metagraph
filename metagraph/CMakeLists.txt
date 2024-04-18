@@ -552,6 +552,7 @@ target_include_directories(superkmer_stats PRIVATE src/graph/representation/hash
                                                    src/annotation/representation/base/
                                                    src/cli/config
                                                    src/cli/load
+                                                   src/common/utils/
                                                    )
 
 target_link_libraries(superkmer_stats PRIVATE metagraph-core metagraph-cli ${METALIBS})
