@@ -251,6 +251,7 @@ int assemble(Config *config) {
         );
 
         std::filesystem::remove(config->outfbase + ".loglikelihoodratio");
+        std::filesystem::remove(config->outfbase + ".all.loglikelihoodratio");
 
         auto graph_callback = [&](const graph::DeBruijnGraph &graph, const std::string &header) {
             const auto *masked_graph = dynamic_cast<const graph::MaskedDeBruijnGraph*>(&graph);
@@ -259,20 +260,26 @@ int assemble(Config *config) {
                                        config->enumerate_out_sequences,
                                        num_threads > 1, /* async write */
                                        "a" /* append mode */);
-            std::ofstream fout(config->outfbase + ".loglikelihoodratio", ios::out | ios::app);
+            std::ofstream fout(config->outfbase + ".pvals", ios::out | ios::app);
+            {
+                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                for (double pval : masked_graph->likelihood_ratios) {
+                    fout_all << pval << "\n";
+                }
+            }
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph.call_unitigs(
                     [&](const std::string &unitig, auto&& path) {
-                        std::vector<double> lstats;
-                        lstats.reserve(path.size());
+                        std::vector<double> pvals;
+                        pvals.reserve(path.size());
                         for (auto node : path) {
-                            lstats.emplace_back(masked_graph->likelihood_ratios[node]);
+                            pvals.emplace_back(masked_graph->likelihood_ratios[node]);
                         }
                         std::lock_guard<std::mutex> lock(write_mutex);
                         writer.write(unitig);
-                        for (double l : lstats) {
-                            fout << l << "\n";
+                        for (double p : pvals) {
+                            fout << p << "\n";
                         }
                     },
                     num_threads, config->min_tip_size,
@@ -281,15 +288,15 @@ int assemble(Config *config) {
             } else {
                 graph.call_sequences(
                     [&](const std::string &seq, auto&& path) {
-                        std::vector<double> lstats;
-                        lstats.reserve(path.size());
+                        std::vector<double> pvals;
+                        pvals.reserve(path.size());
                         for (auto node : path) {
-                            lstats.emplace_back(masked_graph->likelihood_ratios[node]);
+                            pvals.emplace_back(masked_graph->likelihood_ratios[node]);
                         }
                         std::lock_guard<std::mutex> lock(write_mutex);
                         writer.write(seq);
-                        for (double l : lstats) {
-                            fout << l << "\n";
+                        for (double p : pvals) {
+                            fout << p << "\n";
                         }
                     },
                     num_threads, config->kmers_in_single_form
