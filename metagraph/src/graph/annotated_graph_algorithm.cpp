@@ -1,27 +1,22 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <typeinfo>
+
+#include <sdust.h>
+
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/statistics/univariate_statistics.hpp>
-#include <boost/math/distributions/negative_binomial.hpp>
-#include <boost/math/distributions/poisson.hpp>
-#include <boost/math/statistics/t_test.hpp>
 #include <boost/math/tools/roots.hpp>
 
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
-#include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/vector_map.hpp"
 #include "common/vectors/transpose.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/graph_cleaning.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "differential_tests.hpp"
-#include "timer.hpp"
-#include <sdust.h>
-#include "common/vectors/transpose.hpp"
-#include <typeinfo>
 
 namespace mtg {
 namespace graph {
@@ -117,7 +112,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     std::vector<double> pvals;
     pvals.reserve(max_index + 1);
-    pvals.emplace_back(1.0);
+    pvals.emplace_back(std::numeric_limits<double>::max());
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
@@ -129,7 +124,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
                                                                      [&](const auto &row) {
             if (row.empty()) {
-                pvals.emplace_back(1);
+                pvals.emplace_back(std::numeric_limits<double>::max());
                 ++row_i;
                 return;
             }
@@ -218,7 +213,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
                                                                      [&](const auto &row) {
             if (row.empty()) {
-                pvals.emplace_back(1.0);
+                pvals.emplace_back(std::numeric_limits<double>::max());
                 ++row_i;
                 return;
             }
@@ -387,7 +382,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
                                                                      [&](const auto &row) {
             if (row.empty()) {
-                pvals.emplace_back(1.0);
+                pvals.emplace_back(std::numeric_limits<double>::max());
                 ++row_i;
                 return;
             }
@@ -843,7 +838,6 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
     double threshold = config.min_count; // TODO get from config
     assert(files.size() > 0);
     // generate a vector of the total number of kmers per sample for each group (in and out)
-    Timer t;
     std::vector<double> medians;
     logger->trace("filtering_column");
     annot::ColumnCompressed<>::load_columns_and_values(files,
@@ -864,7 +858,6 @@ std::vector<double> filtering_column(const std::vector<std::string> &files,
                 medians.push_back(median);
                 logger->trace("median: {}", median);
             });
-            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());
         }
     );
     return medians;
@@ -1002,8 +995,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 else{
                     assert(files.size() > 0);
                     // generate a vector of the total number of kmers per sample for each group (in and out)
-                    Timer t;
-                    logger->trace("OOOOOOOOOOO time to generate counts vector {}",  t.elapsed());
                     annot::ColumnCompressed<>::load_columns_and_values(files,
                         [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, sdsl::int_vector_buffer<> && column_values) { // goes through all files in a group
                             int max_col_width = std::pow(2, 16); // max value for int16_t
@@ -1018,7 +1009,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                         value_callback(i, column_value);
                                 });
                             });
-                            logger->trace("OOOOOOOOOOO time to load columns and values {}",  t.elapsed());
                         }
                     );
                 }
