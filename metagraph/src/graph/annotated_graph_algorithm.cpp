@@ -192,18 +192,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             ++row_i;
         });
     } else if (config.test_type == "nbinom") {
-        double r_num = 0;
-        double r_denom = 0;
-        for (size_t i = 0; i < groups.size(); ++i) {
-            double mean = static_cast<double>(sums[i]) / n_kmers[i];
-            r_num += mean;
+        // use moments to fit the r parameter of a beta negative binomial
+        double total_size = max_index * groups.size();
+        double bnb_mean = static_cast<double>(total_kmers) / total_size;
+        double bnb_m2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
+                                                            sums_of_squares.end(),
+                                                            size_t(0))) / total_size - bnb_mean;
+        double a = bnb_mean * bnb_m2;
+        double b = bnb_m2 * (2 * bnb_mean * bnb_mean - bnb_m2 + bnb_mean);
+        double c = 2 * bnb_mean * bnb_mean * bnb_m2;
 
-            double var = static_cast<double>(sums_of_squares[i]) / n_kmers[i] - mean * mean;
-            r_denom += var / mean;
-        }
+        double r = (-b + sqrt(b * b - 4 * a * c)) / 2 / a;
+        double r_low = (-b - sqrt(b * b - 4 * a * c)) / 2 / a;
+        if (r_low > 0)
+            common::logger->warn("Two possible solutions for r: {} and {}", r_low, r);
 
-        r_denom -= groups.size();
-        double r = r_num / r_denom;
         common::logger->trace("r est: {}", r);
 
         boost::math::chi_squared dist(1);
