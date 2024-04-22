@@ -39,17 +39,8 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
-    if(!loaded_mask){
-        
-    }
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
-        if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
-            callback(kmer_to_node(sequence.substr(i, k_)));
-            // maybe implement kmer_to_node_from_superkmer(s_idx);
-        }else{
-            callback(s_idx);
-        }
+	callback(kmer_to_node(sequence.substr(i, k_)));
     }
 }
 
@@ -298,6 +289,11 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
     
     std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph](std::string_view str){return anno_graph->get_labels(str);});
     sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
+    // print to check
+    std::cout<< "printing sk_mask indeces: \n";
+    for(size_t i = 0; i < non_mono_superkmer.size(); i++){
+        if(non_mono_superkmer[i] == 1)std::cout<< i << " ";
+    }
     // elias fano encoding and serialize
     sdsl::sd_vector<> ef_bv (non_mono_superkmer); 
     
