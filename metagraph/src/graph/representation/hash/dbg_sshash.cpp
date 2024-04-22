@@ -39,9 +39,6 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
-    if(!loaded_mask){
-        
-    }
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
         auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
         if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
