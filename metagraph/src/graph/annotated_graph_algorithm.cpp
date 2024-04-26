@@ -119,7 +119,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
 
-    tsl::hopscotch_map<size_t, size_t> m;
+    double pval_min = 0;
 
     sdsl::bit_vector indicator_in(max_index + 1, false);
     sdsl::bit_vector indicator_out(max_index + 1, false);
@@ -207,10 +207,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         });
     } else if (config.test_type == "nbinom") {
         // use moments to fit the r parameter of a beta negative binomial
+        double in_sq_kmers = 0;
+        double out_sq_kmers = 0;
         double mu_sum = 0;
         double sum_of_vars = 0;
         double other_stat = 0;
         for (size_t i = 0; i < groups.size(); ++i) {
+            if (groups[i]) {
+                out_sq_kmers += sums[i] * sums[i];
+            } else {
+                in_sq_kmers += sums[i] * sums[i];
+            }
             mu_sum += sums[i];
 
             double mu = static_cast<double>(sums[i]) / max_index;
@@ -240,7 +247,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         auto compute_pval = [&](const auto &row) {
             if (row.empty())
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+                return std::make_tuple(1.1, 0.0, 0.0);
 
             double in_sum = 0;
             double out_sum = 0;
@@ -339,15 +346,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             );
 
             double chi_stat = 0;
-            if (true) {
+            if (false) {
                 // score test
                 auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
                 auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
+
                 val_in *= r / lambda_null;
                 val_out *= r / lambda_null;
 
-                chi_stat = val_in * val_in / r / (r + lambda_null) * lambda_null / in_kmers
-                            + val_out * val_out / r / (r + lambda_null) * lambda_null / out_kmers;
+                dval_in = -(dval_in * r / lambda_null - val_in / lambda_null) / labels_in.size();
+                dval_out = -(dval_out * r / lambda_null - val_out / lambda_null) / labels_out.size();
+                chi_stat = val_in * val_in / dval_in + val_out * val_out / dval_out;
+                // chi_stat = val_in * val_in / (in_kmers + lambda_null / r * in_sq_kmers)
+                //             + val_out * val_out / (out_kmers + lambda_null / r * out_sq_kmers);
             } else {
                 // log likelihood test
                 double lambda_in = boost::math::tools::newton_raphson_iterate(
@@ -398,12 +409,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             );
         };
 
+        auto [pval_min_in, max_sum_in, min_sum_out] = compute_pval(in_best);
+        auto [pval_min_out, min_sum_in, max_sum_out] = compute_pval(out_best);
+        pval_min = std::min(pval_min_in, pval_min_out);
+
         uint64_t row_i = 0;
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
                          PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            // TODO: compute min p value based on lambda, keep track of m(k) in dictionary
-            auto [pval, in_sum, out_sum, pval_min] = compute_pval(row);
+            auto [pval, in_sum, out_sum] = compute_pval(row);
+            if (pval < pval_min) {
+                common::logger->error("Invalid pval_min: {} > {}", pval_min, pval);
+                throw std::runtime_error("Test failed");
+            }
             pvals.emplace_back(pval);
             if (pval < 0.05) {
                 node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
@@ -554,29 +572,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, max_index);
 
-        VectorMap<double, std::vector<size_t>> stats_map;
-        call_ones(indicator_in, [&](size_t i) {
-            stats_map[pvals[i]].emplace_back(i);
-        });
-        call_ones(indicator_out, [&](size_t i) {
-            stats_map[pvals[i]].emplace_back(i);
-        });
-        auto stats = const_cast<std::vector<std::pair<double, std::vector<size_t>>>&&>(
-            stats_map.values_container()
-        );
-        std::sort(stats.begin(), stats.end(), utils::LessFirst());
-
-        // we need k * pval_min < 0.05 => k < 0.05 / pval_min
-        size_t k = 0.05 / pval_min;
-
-        // we need to decrease k until total_sig <= k
-
-        common::logger->trace("Corr: {}\tp: {}", k, 0.05 / k);
-
-        for (auto jt = stats.begin(); jt != stats.end(); ++jt) {
-            const auto &[p, bucket] = *jt;
-            if (jt >= it || p * acc >= 0.05) {
-                for (size_t i : bucket) {
+        // we need to find min k s.t.
+        // k * pval_min < 0.05 and total_sig <= k
+        // so
+        // total_sig <= k < 0.05 / pval_min
+        common::logger->trace("Min p-val: {}\talpha_corr: {}", pval_min, 0.05 / total_sig);
+        if (pval_min * total_sig >= 0.05) {
+            sdsl::util::set_to_value(indicator_in, false);
+            sdsl::util::set_to_value(indicator_out, false);
+        } else {
+            for (size_t i = 0; i < pvals.size(); ++i) {
+                if (pvals[i] < 0.05 && pvals[i] * total_sig >= 0.05) {
                     indicator_in[i] = false;
                     indicator_out[i] = false;
                 }
