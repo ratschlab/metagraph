@@ -12,6 +12,8 @@
 #include "../external-libraries/sshash/include/util.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "sdsl/bit_vectors.hpp"
+#include "sdsl/rank_support.hpp"
+#include "sdsl/util.hpp"
 
 namespace sshash{
 class dictionary;

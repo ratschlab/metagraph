@@ -287,7 +287,22 @@ void DBGSSHash::load_superkmer_mask(std::string file){
 void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
     std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";   
     
-    std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph](std::string_view str){return anno_graph->get_labels(str);});
+    //getting labels in batches
+    size_t num_labels = anno_graph->get_annotator().num_labels();
+    std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence){
+                    auto labels = anno_graph->get_top_label_signatures(sequence, num_labels);
+                    // since get_top_label_signatures returns only labels that were found, 
+                    // if any entry is zero not all the kmers share all the same labels -> return false
+                    for(auto pair : labels){
+                        sdsl::rank_support_v rs;
+                        sdsl::util::init_support(rs,&pair.second);
+                        size_t bit_vec_size = pair.second.size();
+                        if(rs(bit_vec_size) != bit_vec_size) return false;
+                    }
+                    return true;
+         });
+    //std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph](std::string_view str){return anno_graph->get_labels(str);});
+
     sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
     // print to check
     std::cout<< "printing sk_mask indeces: \n";
