@@ -27,6 +27,7 @@ typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
+using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
 
 std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
@@ -106,6 +107,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
     double total_kmers = in_kmers + out_kmers;
+
+    PairContainer in_best;
+    PairContainer out_best;
+
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (groups[i]) {
+            out_best.emplace_back(i, sums[i]);
+        } else {
+            in_best.emplace_back(i, sums[i]);
+        }
+    }
+
+    tsl::hopscotch_map<size_t, size_t> m;
 
     sdsl::bit_vector indicator_in(max_index + 1, false);
     sdsl::bit_vector indicator_out(max_index + 1, false);
@@ -193,33 +207,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         });
     } else if (config.test_type == "nbinom") {
         // use moments to fit the r parameter of a beta negative binomial
-        double total_size = max_index * groups.size();
-        double bnb_mean = static_cast<double>(total_kmers) / total_size;
-        double bnb_m2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
-                                                            sums_of_squares.end(),
-                                                            size_t(0))) / total_size - bnb_mean;
-        double a = bnb_mean * bnb_m2;
-        double b = bnb_m2 * (2 * bnb_mean * bnb_mean - bnb_m2 + bnb_mean);
-        double c = 2 * bnb_mean * bnb_mean * bnb_m2;
+        double mu_sum = 0;
+        double sum_of_vars = 0;
+        double other_stat = 0;
+        for (size_t i = 0; i < groups.size(); ++i) {
+            mu_sum += sums[i];
 
-        double r = (-b + sqrt(b * b - 4 * a * c)) / 2 / a;
-        double r_low = (-b - sqrt(b * b - 4 * a * c)) / 2 / a;
-        if (r_low > 0)
-            common::logger->warn("Two possible solutions for r: {} and {}", r_low, r);
+            double mu = static_cast<double>(sums[i]) / max_index;
+            double var = static_cast<double>(sums_of_squares[i]) / max_index - mu * mu;
 
+            sum_of_vars += var;
+            other_stat += (var - mu) / mu;
+        }
+        mu_sum /= max_index;
+
+        double var_sum = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
+            double sum = 0;
+            for (const auto &[j, c] : row) {
+                sum += c;
+            }
+            var_sum += sum * sum;
+        });
+        var_sum = var_sum / max_index - mu_sum * mu_sum;
+
+        double r = mu_sum / other_stat * sqrt((sum_of_vars - mu_sum)/(var_sum - mu_sum));
         common::logger->trace("r est: {}", r);
 
         boost::math::chi_squared dist(1);
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
-                                                                     [&](const auto &row) {
-            if (row.empty()) {
-                pvals.emplace_back(std::numeric_limits<double>::max());
-                ++row_i;
-                return;
-            }
+
+        auto compute_pval = [&](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
             double in_sum = 0;
             double out_sum = 0;
@@ -242,7 +263,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double total_sum = in_sum + out_sum;
             size_t ndigits = 20;
 
-            double lambda_in = boost::math::tools::newton_raphson_iterate([&](double lambda) {
+            auto ll_dx_ddx_in = [&](double lambda) {
                 double val = 0;
                 double dval = 0;
                 for (const auto &[j, c] : row) {
@@ -265,9 +286,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 return std::make_pair(val, dval);
-            }, in_sum / in_kmers, 0.0, 1.0, ndigits);
+            };
 
-            double lambda_out = boost::math::tools::newton_raphson_iterate([&](double lambda) {
+            auto ll_dx_ddx_out = [&](double lambda) {
                 double val = 0;
                 double dval = 0;
                 for (const auto &[j, c] : row) {
@@ -290,9 +311,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 return std::make_pair(val, dval);
-            }, out_sum / out_kmers, 0.0, 1.0, ndigits);
+            };
 
-            double lambda_null = boost::math::tools::newton_raphson_iterate([&](double lambda) {
+            auto ll_dx_ddx_null = [&](double lambda) {
                 double val = 0;
                 double dval = 0;
                 for (const auto &[j, c] : row) {
@@ -311,51 +332,88 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 return std::make_pair(val, dval);
-            }, total_sum / total_kmers, 0.0, 1.0, ndigits);
+            };
 
-            double loglikelihood_alt = 0;
-            double loglikelihood_null = 0;
+            double lambda_null = boost::math::tools::newton_raphson_iterate(
+                ll_dx_ddx_null, total_sum / total_kmers, 0.0, 1.0, ndigits
+            );
 
-            for (const auto &[j, c] : row) {
-                double lambda = groups[j] ? lambda_out : lambda_in;
-                double prop = lambda * sums[j];
-                loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
+            double chi_stat = 0;
+            if (true) {
+                // score test
+                auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
+                auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
+                val_in *= r / lambda_null;
+                val_out *= r / lambda_null;
 
-                double prop_null = lambda_null * sums[j];
-                loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
-            }
+                chi_stat = val_in * val_in / r / (r + lambda_null) * lambda_null / in_kmers
+                            + val_out * val_out / r / (r + lambda_null) * lambda_null / out_kmers;
+            } else {
+                // log likelihood test
+                double lambda_in = boost::math::tools::newton_raphson_iterate(
+                    ll_dx_ddx_in, in_sum / in_kmers, 0.0, 1.0, ndigits
+                );
 
-            for (size_t j : unfound) {
-                double lambda = groups[j] ? lambda_out : lambda_in;
-                double prop = lambda * sums[j];
-                loglikelihood_alt -= log(r + prop) * r;
+                double lambda_out = boost::math::tools::newton_raphson_iterate(
+                    ll_dx_ddx_out, out_sum / out_kmers, 0.0, 1.0, ndigits
+                );
 
-                double prop_null = lambda_null * sums[j];
-                loglikelihood_null -= log(r + prop_null) * r;
-            }
+                double loglikelihood_alt = 0;
+                double loglikelihood_null = 0;
 
-            double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
+                for (const auto &[j, c] : row) {
+                    double lambda = groups[j] ? lambda_out : lambda_in;
+                    double prop = lambda * sums[j];
+                    loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
 
-            if (chi_stat > 0) {
-                double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
-                if (pval < 0.05) {
-                    node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                    double scaled_outsum = out_sum / out_kmers * in_kmers;
-                    if (scaled_outsum < in_sum) {
-                        indicator_in[node] = true;
-                    } else if (scaled_outsum > in_sum) {
-                        indicator_out[node] = true;
-                    }
+                    double prop_null = lambda_null * sums[j];
+                    loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
                 }
 
-                pvals.emplace_back(pval);
-            } else if (chi_stat == 0) {
-                pvals.emplace_back(1.0);
-            } else {
+                for (size_t j : unfound) {
+                    double lambda = groups[j] ? lambda_out : lambda_in;
+                    double prop = lambda * sums[j];
+                    loglikelihood_alt -= log(r + prop) * r;
+
+                    double prop_null = lambda_null * sums[j];
+                    loglikelihood_null -= log(r + prop_null) * r;
+                }
+
+                chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
+            }
+
+            if (chi_stat == 0)
+                return std::make_tuple(1.0, in_sum, out_sum);
+
+            if (chi_stat < 0) {
                 common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
                 throw std::runtime_error("Test failed");
             }
 
+            double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+            return std::make_tuple(
+                pval,
+                in_sum,
+                out_sum
+            );
+        };
+
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
+            // TODO: compute min p value based on lambda, keep track of m(k) in dictionary
+            auto [pval, in_sum, out_sum, pval_min] = compute_pval(row);
+            pvals.emplace_back(pval);
+            if (pval < 0.05) {
+                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                double scaled_outsum = out_sum / out_kmers * in_kmers;
+                if (scaled_outsum < in_sum) {
+                    indicator_in[node] = true;
+                } else if (scaled_outsum > in_sum) {
+                    indicator_out[node] = true;
+                }
+            }
             ++row_i;
         });
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u" || config.test_type == "quantile") {
@@ -508,18 +566,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         );
         std::sort(stats.begin(), stats.end(), utils::LessFirst());
 
-        size_t acc = 0;
-        auto it = stats.begin();
-        for ( ; it != stats.end(); ++it) {
-            const auto &[p, bucket] = *it;
-            double k = 0.05 / p;
-            if (acc + bucket.size() > k)
-                break;
+        // we need k * pval_min < 0.05 => k < 0.05 / pval_min
+        size_t k = 0.05 / pval_min;
 
-            acc += bucket.size();
-        }
+        // we need to decrease k until total_sig <= k
 
-        common::logger->trace("Corr: {}\tp: {}", acc, 0.05 / acc);
+        common::logger->trace("Corr: {}\tp: {}", k, 0.05 / k);
 
         for (auto jt = stats.begin(); jt != stats.end(); ++jt) {
             const auto &[p, bucket] = *jt;
