@@ -115,7 +115,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     pvals.reserve(max_index + 1);
     pvals.emplace_back(std::numeric_limits<double>::max());
 
-    VectorMap<size_t, size_t> m;
+    VectorMap<size_t, std::vector<uint64_t>> m;
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
@@ -424,9 +424,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 size_t k = 0.05 / pval_min;
-                ++m[k];
 
                 node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                m[k].emplace_back(node);
+
                 if (in_kmer) {
                     indicator_in[node] = true;
                 } else if (out_kmer) {
@@ -728,18 +729,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, max_index);
 
-        auto m_data = const_cast<std::vector<std::pair<size_t, size_t>>&&>(m.values_container());
+        auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
         std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
 
-        size_t acc = 0;
+        size_t acc = total_sig;
         size_t k = 0;
-        for (const auto &[cur_k, c] : m_data) {
-            acc += c;
+        auto it = m_data.begin();
+        for (; it != m_data.end(); ++it) {
+            const auto &[cur_k, bucket] = *it;
             common::logger->trace("Checking: m(k) = {}\tk <= {}", acc, cur_k);
             if (acc <= cur_k) {
                 k = acc;
                 break;
             }
+            acc -= bucket.size();
         }
 
         if (k == 0) {
@@ -748,13 +751,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             sdsl::util::set_to_value(indicator_out, false);
         } else {
             common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
-
-            for (size_t i = 0; i < pvals.size(); ++i) {
-                if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
-                    indicator_in[i] = false;
-                    indicator_out[i] = false;
+            for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
+                const auto &[cur_k, bucket] = *jt;
+                for (uint64_t i : bucket) {
+                    if (jt < it || pvals[i] * k >= 0.05) {
+                        indicator_in[i] = false;
+                        indicator_out[i] = false;
+                    }
                 }
             }
+
+            // for (size_t i = 0; i < pvals.size(); ++i) {
+            //     if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
+            //         indicator_in[i] = false;
+            //         indicator_out[i] = false;
+            //     }
+            // }
         }
     }
 
