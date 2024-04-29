@@ -45,6 +45,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     size_t max_index = graph_ptr->max_index();
     std::vector<double> medians;
     std::vector<uint64_t> max_vals;
+    std::vector<uint64_t> max_obs_vals;
     std::vector<size_t> n_kmers;
     std::vector<uint64_t> sums;
     std::vector<uint64_t> sums_of_squares;
@@ -68,8 +69,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::vector<uint64_t> vals;
             vals.reserve(column_values.size());
             std::copy(column_values.begin(), column_values.end(), std::back_inserter(vals));
-            max_observed_value = std::max(max_observed_value,
-                                          *std::max_element(vals.begin(), vals.end()));
+            max_obs_vals.emplace_back(*std::max_element(vals.begin(), vals.end()));
+            max_observed_value = std::max(max_observed_value, max_obs_vals.back());
             uint64_t sum = std::accumulate(vals.begin(), vals.end(), uint64_t(0));
             uint64_t sum_of_squares = std::accumulate(
                 vals.begin(), vals.end(), uint64_t(0),
@@ -121,16 +122,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             || config.test_type == "cmh"
             || config.test_type == "fisher") {
         boost::math::chi_squared dist(1);
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
-                                                                     [&](const auto &row) {
-            if (row.empty()) {
-                pvals.emplace_back(std::numeric_limits<double>::max());
-                ++row_i;
-                return;
-            }
+        auto compute_pval = [&](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0);
 
             double in_sum = 0;
             double out_sum = 0;
@@ -170,71 +164,71 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
             }
 
-            if (chi_stat > 0) {
-                if (pval == -1)
-                    pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+            if (chi_stat == 0)
+                return std::make_tuple(1.0, in_sum, out_sum);
 
-                if (pval < 0.05) {
-                    node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                    double scaled_outsum = out_sum / out_kmers * in_kmers;
-                    if (scaled_outsum < in_sum) {
-                        indicator_in[node] = true;
-                    } else if (scaled_outsum > in_sum) {
-                        indicator_out[node] = true;
-                    }
-                }
-            } else if (chi_stat == 0) {
-                pval = 1.0;
-            } else {
+            if (chi_stat < 0) {
                 common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
                 throw std::runtime_error("Test failed");
             }
 
-            pvals.emplace_back(pval);
+            if (pval == -1)
+                pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
 
+            return std::make_tuple(pval, in_sum, out_sum);
+        };
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all,
+                                        [&](const auto &row) {
+            auto [pval, in_sum, out_sum] = compute_pval(row);
+            pvals.emplace_back(pval);
+            double scaled_outsum = out_sum / out_kmers * in_kmers;
+
+            if (pval > 1.0 || scaled_outsum == in_sum) {
+                ++row_i;
+                return;
+            }
+
+            bool in_kmer = scaled_outsum < in_sum;
+            bool out_kmer = scaled_outsum > in_sum;
+
+            PairContainer best;
+            for (const auto &[j, c] : row) {
+                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
+                    best.emplace_back(j, sums[j]);
+            }
+
+            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
+
+            if (pval_min > pval) {
+                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+                throw std::runtime_error("Test failed");
+            }
+
+            double lkd = log(0.05) - log(pval_min);
+            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
+                ? std::numeric_limits<uint64_t>::max()
+                : exp(lkd);
+
+            if (k == 0) {
+                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
+                throw std::runtime_error("Min failed");
+            }
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            m[k].emplace_back(node);
+            if (pval < 0.05) {
+                if (in_kmer) {
+                    indicator_in[node] = true;
+                } else if (out_kmer) {
+                    indicator_out[node] = true;
+                }
+            }
             ++row_i;
         });
     } else if (config.test_type == "nbinom") {
         // use moments to fit the r parameter of a beta negative binomial
-        // double in_sq_kmers = 0;
-        // double out_sq_kmers = 0;
-        // double mu_sum = 0;
-        // double sum_of_vars = 0;
-        // double other_stat = 0;
-        // for (size_t i = 0; i < groups.size(); ++i) {
-        //     if (groups[i]) {
-        //         out_sq_kmers += sums[i] * sums[i];
-        //     } else {
-        //         in_sq_kmers += sums[i] * sums[i];
-        //     }
-        //     mu_sum += sums[i];
-
-        //     double mu = static_cast<double>(sums[i]) / max_index;
-        //     double var = static_cast<double>(sums_of_squares[i]) / max_index - mu * mu;
-
-        //     sum_of_vars += var;
-        //     other_stat += (var - mu) / mu;
-        // }
-        // mu_sum /= max_index;
-
-        // double var_sum = 0;
-        // utils::call_rows<std::unique_ptr<bit_vector>,
-        //                  std::unique_ptr<ValuesContainer>,
-        //                  PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-        //     double sum = 0;
-        //     for (const auto &[j, c] : row) {
-        //         sum += c;
-        //     }
-        //     var_sum += sum * sum;
-        // });
-        // var_sum = var_sum / max_index - mu_sum * mu_sum;
-
-        // double r = mu_sum / other_stat * sqrt((sum_of_vars - mu_sum)/(var_sum - mu_sum));
-        // double mu = static_cast<double>(total_kmers) / max_index / groups.size();
-        // double var = static_cast<double>(std::accumulate(sums_of_squares.begin(),
-        //                                                  sums_of_squares.end(),
-        //                                                  size_t(0))) / max_index / groups.size() - mu * mu;
-        // double r = mu * mu / (var - mu);
         uint64_t sum_of_cubes = 0;
         for (const auto &count_ptr : column_values_all) {
             sum_of_cubes += std::accumulate(count_ptr->begin(), count_ptr->end(),
@@ -438,8 +432,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto [pval, in_sum, out_sum] = compute_pval(row);
             pvals.emplace_back(pval);
             double scaled_outsum = out_sum / out_kmers * in_kmers;
-            if (scaled_outsum == in_sum)
+            if (pval > 1.0 || scaled_outsum == in_sum) {
+                ++row_i;
                 return;
+            }
 
             bool in_kmer = scaled_outsum < in_sum;
             bool out_kmer = scaled_outsum > in_sum;
@@ -599,161 +595,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             ++row_i;
         });
-    } else if (config.test_type == "zinb") {
-        // size_t nelem_orig = std::accumulate(n_kmers.begin(), n_kmers.end(), size_t(0));
-        // size_t total_sq_kmers = std::accumulate(sums_of_squares.begin(),
-        //                                         sums_of_squares.end(),
-        //                                         size_t(0));
-        // size_t nelem = nelem_orig;
-        // double r = 0;
-        // for (size_t i = 0; i < 100; ++i) {
-        //     double mu = static_cast<double>(total_kmers) / nelem;
-        //     double var = static_cast<double>(total_sq_kmers) / nelem - mu * mu;
-        //     double old_r = r;
-        //     r = mu * mu / (var - mu);
-        //     double p = mu / var;
-        //     nelem = nelem_orig / (1 - pow(p, r));
-        //     if (abs(r - old_r) / r < 1e-5)
-        //         break;
-        // }
-
-        std::vector<double> pi;
-        // double r_prod = 1;
-        double r_sum = 0;
-        pi.reserve(n_kmers.size());
-        for (size_t j = 0; j < n_kmers.size(); ++j) {
-            size_t nelem_orig = n_kmers[j];
-            size_t nelem = nelem_orig;
-            double p = 0;
-            double r = 0;
-            for (size_t i = 0; i < 100; ++i) {
-                double mu = static_cast<double>(sums[j]) / nelem;
-                double var = static_cast<double>(sums_of_squares[j]) / nelem;
-                double p_old = p;
-                r = mu * mu / (var - mu);
-                p = mu / var;
-                nelem = nelem_orig / (1 - pow(p, r));
-                if (abs(p - p_old) / p < 1e-5)
-                    break;
-            }
-            double mu = static_cast<double>(sums[j]) / max_index;
-            pi.emplace_back(1.0 - mu / (r * (1 - p) / p));
-            common::logger->trace("Label: {}\tr: {}\tp: {}\tpi: {}", j, r, p, pi.back());
-            r_sum += r;
-        }
-        double r = r_sum / groups.size();
-        common::logger->trace("r est: {}", r);
-
-        boost::math::chi_squared dist(1);
-        auto compute_pval = [&](const auto &row) {
-            if (row.empty())
-                return std::make_tuple(1.1, 0.0, 0.0);
-
-            std::vector<uint64_t> row_c(groups.size());
-            double in_sum = 0;
-            double out_sum = 0;
-            for (const auto &[j, c] : row) {
-                if (groups[j]) {
-                    out_sum += c;
-                } else {
-                    in_sum += c;
-                }
-                row_c[j] = c;
-            }
-
-            auto ll_dx_ddx_pick = [&](const auto &picker) {
-                return [&](double lambda) {
-                    double val = 0;
-                    double dval = 0;
-                    for (size_t j = 0; j < row_c.size(); ++j) {
-                        if (picker(j)) {
-                            uint64_t c = row_c[j];
-                            double mu = static_cast<double>(sums[j]) * lambda;
-                            double rshift = r + mu;
-                            double p = r / rshift;
-                            if (c > 0) {
-                                double interm = p / lambda * (c - mu);
-                                val += interm;
-                                dval -= interm / lambda + p / lambda * sums[j] * (r + c) / rshift;
-                            } else {
-                                double p_p = pow(p, r);
-                                double denom = pi[j] + (1 - pi[j]) * p_p;
-                                val -= (1 - pi[j]) * sums[j] * p_p * p / (pi[j] + (1 - pi[j]) * p_p);
-                                dval -= r * sums[j] * sums[j] * (1 - pi[j]) / rshift * p_p * p / denom / denom * (denom + r * pi[j]);
-                            }
-                        }
-                    }
-
-                    return std::make_pair(val, dval);
-                };
-            };
-
-            size_t ndigits = 20;
-            double lambda_in = boost::math::tools::newton_raphson_iterate(
-                ll_dx_ddx_pick([&](size_t j) { return !groups[j]; }),
-                0.5, -0.01, 1.0, ndigits
-            );
-            double lambda_out = boost::math::tools::newton_raphson_iterate(
-                ll_dx_ddx_pick([&](size_t j) { return groups[j]; }),
-                0.5, -0.01, 1.0, ndigits
-            );
-            double lambda_null = boost::math::tools::newton_raphson_iterate(
-                ll_dx_ddx_pick([&](size_t) { return true; }),
-                0.5, 0.0, 1.0, ndigits
-            );
-
-            if (lambda_in < 0 || lambda_out < 0) {
-                common::logger->error("Fit out of bounds: in: {}\tout: {}", lambda_in, lambda_out);
-                throw std::runtime_error("Fit failed");
-            }
-
-            double loglikelihood_alt = 0;
-            double loglikelihood_null = 0;
-            for (size_t j = 0; j < row_c.size(); ++j) {
-                uint64_t c = row_c[j];
-                double lambda = groups[j] ? lambda_out : lambda_in;
-                double mu = static_cast<double>(sums[j]) / lambda;
-                double mu_null = static_cast<double>(sums[j]) / lambda_null;
-                double rshift = r + mu;
-                double rshift_null = r + mu_null;
-
-                if (c > 0) {
-                    loglikelihood_alt += c * log(mu) - c * log(rshift) - r * log(rshift);
-                    loglikelihood_null += c * log(mu_null) - c * log(rshift_null) - r * log(rshift_null);
-                } else {
-                    loglikelihood_alt += log(pi[j] + (1 - pi[j]) * pow(r / rshift, r));
-                    loglikelihood_null += log(pi[j] + (1 - pi[j]) * pow(r / rshift_null, r));
-                }
-            }
-
-            double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
-            if (chi_stat < 0) {
-                common::logger->error("stat {} < 0", chi_stat);
-                throw std::runtime_error("Failed test");
-            }
-
-            double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
-            return std::make_tuple(pval, in_sum, out_sum);
-        };
-
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            auto [pval, in_sum, out_sum] = compute_pval(row);
-            pvals.emplace_back(pval);
-            if (pval < 0.05) {
-                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                double scaled_outsum = out_sum / out_kmers * in_kmers;
-                if (scaled_outsum < in_sum) {
-                    indicator_in[node] = true;
-                } else if (scaled_outsum > in_sum) {
-                    indicator_out[node] = true;
-                }
-            }
-            ++row_i;
-        });
-
     } else {
         throw std::runtime_error("Test not implemented");
     }
@@ -782,35 +623,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         size_t last_k = 0;
         for ( ; begin != m_data.end(); ++begin) {
             const auto &[cur_k, bucket] = *begin;
+            common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
             if (acc <= cur_k) {
-                k = last_k + 1;
+                k = std::max(acc, last_k + 1);
                 break;
             }
 
             last_k = cur_k;
             acc -= bucket.size();
         }
-        // size_t acc = 0;
-        // size_t k = 1;
-        // auto begin = m_data.begin();
-        // auto it = begin;
-        // while (it < m_data.end()) {
-        //     common::logger->trace("k: {}\tp: {}", k, 0.05 / k);
-        //     while (acc <= k && it < m_data.end()) {
-        //         acc += it->second.size();
-        //         ++it;
-        //     }
-        //     if (acc > k) {
-        //         size_t old_k = k;
-        //         k = acc;
-        //         while (begin < it && k >= begin->first && begin->first > old_k) {
-        //             acc -= begin->second.size();
-        //             ++begin;
-        //         }
-        //     } else {
-        //         break;
-        //     }
-        // }
 
         if (k == 0) {
             common::logger->trace("No good k value found");
