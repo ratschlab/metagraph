@@ -196,46 +196,81 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         });
     } else if (config.test_type == "nbinom") {
         // use moments to fit the r parameter of a beta negative binomial
-        double in_sq_kmers = 0;
-        double out_sq_kmers = 0;
-        double mu_sum = 0;
-        double sum_of_vars = 0;
-        double other_stat = 0;
-        for (size_t i = 0; i < groups.size(); ++i) {
-            if (groups[i]) {
-                out_sq_kmers += sums[i] * sums[i];
-            } else {
-                in_sq_kmers += sums[i] * sums[i];
-            }
-            mu_sum += sums[i];
+        // double in_sq_kmers = 0;
+        // double out_sq_kmers = 0;
+        // double mu_sum = 0;
+        // double sum_of_vars = 0;
+        // double other_stat = 0;
+        // for (size_t i = 0; i < groups.size(); ++i) {
+        //     if (groups[i]) {
+        //         out_sq_kmers += sums[i] * sums[i];
+        //     } else {
+        //         in_sq_kmers += sums[i] * sums[i];
+        //     }
+        //     mu_sum += sums[i];
 
-            double mu = static_cast<double>(sums[i]) / max_index;
-            double var = static_cast<double>(sums_of_squares[i]) / max_index - mu * mu;
+        //     double mu = static_cast<double>(sums[i]) / max_index;
+        //     double var = static_cast<double>(sums_of_squares[i]) / max_index - mu * mu;
 
-            sum_of_vars += var;
-            other_stat += (var - mu) / mu;
-        }
-        mu_sum /= max_index;
+        //     sum_of_vars += var;
+        //     other_stat += (var - mu) / mu;
+        // }
+        // mu_sum /= max_index;
 
-        double var_sum = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            double sum = 0;
-            for (const auto &[j, c] : row) {
-                sum += c;
-            }
-            var_sum += sum * sum;
-        });
-        var_sum = var_sum / max_index - mu_sum * mu_sum;
+        // double var_sum = 0;
+        // utils::call_rows<std::unique_ptr<bit_vector>,
+        //                  std::unique_ptr<ValuesContainer>,
+        //                  PairContainer>(columns_all, column_values_all, [&](const auto &row) {
+        //     double sum = 0;
+        //     for (const auto &[j, c] : row) {
+        //         sum += c;
+        //     }
+        //     var_sum += sum * sum;
+        // });
+        // var_sum = var_sum / max_index - mu_sum * mu_sum;
 
-        double r = mu_sum / other_stat * sqrt((sum_of_vars - mu_sum)/(var_sum - mu_sum));
+        // double r = mu_sum / other_stat * sqrt((sum_of_vars - mu_sum)/(var_sum - mu_sum));
         // double mu = static_cast<double>(total_kmers) / max_index / groups.size();
         // double var = static_cast<double>(std::accumulate(sums_of_squares.begin(),
         //                                                  sums_of_squares.end(),
         //                                                  size_t(0))) / max_index / groups.size() - mu * mu;
         // double r = mu * mu / (var - mu);
-        common::logger->trace("r est: {}", r);
+        uint64_t sum_of_cubes = 0;
+        for (const auto &count_ptr : column_values_all) {
+            sum_of_cubes += std::accumulate(count_ptr->begin(), count_ptr->end(),
+                                            uint64_t(0),
+                                            [&](uint64_t sum, int64_t c) { return sum + c * (c - 1) * (c - 2); });
+        }
+        double mu = static_cast<double>(total_kmers) / groups.size() / max_index;
+        double mu2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
+                                                         sums_of_squares.end(), uint64_t(0))) / groups.size() / max_index - mu;
+        double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / max_index;
+        double a = mu3 * mu + mu * mu * mu2 + 2 * mu2 * mu2;
+        double b = 2 * mu3 * mu * mu + mu3 * mu - mu2 * mu3 - mu * mu2 * mu2 + 3 * mu * mu + mu2 - 4 * mu2 * mu2;
+        double c = -2 * mu * (mu2 * mu2 - mu * mu2 - mu3 * mu);
+        double r_low = (-b - sqrt(b * b - 4 * a * c)) / 2 / a;
+        double r_high = (-b + sqrt(b * b - 4 * a * c)) / 2 / a;
+
+        double r_low_var_sqerr = 0;
+        double r_high_var_sqerr = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            double mu = static_cast<double>(sums[j]) / max_index;
+            double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
+            double p_low = r_low / (r_low + mu);
+            double p_high = r_high / (r_high + mu);
+            double t_var_low = mu / p_low;
+            double t_var_high = mu / p_high;
+            r_low_var_sqerr += pow(t_var_low - var, 2.0);
+            r_high_var_sqerr += pow(t_var_high - var, 2.0);
+            common::logger->trace("label: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
+                                  j, var, p_low, t_var_low, p_high, t_var_high);
+        }
+
+        common::logger->trace("r low: {} (sqerr: {})\t r high: {} (sqerr: {})",
+                              r_low, r_low_var_sqerr, r_high, r_high_var_sqerr);
+
+        double r = r_low_var_sqerr < r_high_var_sqerr ? r_low : r_high;
+        common::logger->trace("r: {}", r);
 
         boost::math::chi_squared dist(1);
 
@@ -340,6 +375,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             );
 
             double chi_stat = 0;
+            double loglikelihood_null = 0;
             if (false) {
                 // score test
                 auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
@@ -363,7 +399,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 );
 
                 double loglikelihood_alt = 0;
-                double loglikelihood_null = 0;
 
                 for (const auto &[j, c] : row) {
                     double lambda = groups[j] ? lambda_out : lambda_in;
@@ -380,7 +415,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     loglikelihood_alt -= log(r + prop) * r;
 
                     double prop_null = lambda_null * sums[j];
-                    loglikelihood_null -= log(r + prop_null) * r;\
+                    loglikelihood_null -= log(r + prop_null) * r;
                 }
 
                 chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
@@ -419,11 +454,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
 
                 if (pval_min > pval) {
-                    common::logger->trace("Min p-val estimate too high: {} > {}", pval_min, pval);
+                    common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
                     throw std::runtime_error("Test failed");
                 }
 
-                size_t k = 0.05 / pval_min;
+                double lkd = log(0.05) - log(pval_min);
+                uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
+                    ? std::numeric_limits<uint64_t>::max()
+                    : exp(lkd);
+
+                if (k == 0) {
+                    common::logger->error("k: {}\tpval_min: {}", k, pval_min);
+                    throw std::runtime_error("Min failed");
+                }
 
                 node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
                 m[k].emplace_back(node);
@@ -730,19 +773,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, max_index);
 
         auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
-        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
 
-        size_t acc = total_sig;
-        size_t k = 0;
-        auto it = m_data.begin();
-        for (; it != m_data.end(); ++it) {
-            const auto &[cur_k, bucket] = *it;
-            common::logger->trace("Checking: m(k) = {}\tk <= {}", acc, cur_k);
-            if (acc <= cur_k) {
+        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
+        size_t acc = 0;
+        size_t k = 1;
+        auto begin = m_data.begin();
+        auto it = begin;
+        while (it < m_data.end()) {
+            common::logger->trace("k: {}\tp: {}", k, 0.05 / k);
+            while (acc <= k && it < m_data.end()) {
+                acc += it->second.size();
+                ++it;
+            }
+            if (acc > k) {
+                size_t old_k = k;
                 k = acc;
+                while (begin < it && k >= begin->first && begin->first > old_k) {
+                    acc -= begin->second.size();
+                    ++begin;
+                }
+            } else {
                 break;
             }
-            acc -= bucket.size();
         }
 
         if (k == 0) {
@@ -754,19 +806,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
                 const auto &[cur_k, bucket] = *jt;
                 for (uint64_t i : bucket) {
-                    if (jt < it || pvals[i] * k >= 0.05) {
+                    if (jt < begin || pvals[i] * k >= 0.05) {
                         indicator_in[i] = false;
                         indicator_out[i] = false;
                     }
                 }
             }
-
-            // for (size_t i = 0; i < pvals.size(); ++i) {
-            //     if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
-            //         indicator_in[i] = false;
-            //         indicator_out[i] = false;
-            //     }
-            // }
         }
     }
 
