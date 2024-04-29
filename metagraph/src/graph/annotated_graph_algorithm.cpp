@@ -437,40 +437,38 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          PairContainer>(columns_all, column_values_all, [&](const auto &row) {
             auto [pval, in_sum, out_sum] = compute_pval(row);
             pvals.emplace_back(pval);
+            double scaled_outsum = out_sum / out_kmers * in_kmers;
+            if (scaled_outsum == in_sum)
+                return;
+
+            bool in_kmer = scaled_outsum < in_sum;
+            bool out_kmer = scaled_outsum > in_sum;
+
+            PairContainer best;
+            for (const auto &[j, c] : row) {
+                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
+                    best.emplace_back(j, sums[j]);
+            }
+
+            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
+
+            if (pval_min > pval) {
+                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+                throw std::runtime_error("Test failed");
+            }
+
+            double lkd = log(0.05) - log(pval_min);
+            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
+                ? std::numeric_limits<uint64_t>::max()
+                : exp(lkd);
+
+            if (k == 0) {
+                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
+                throw std::runtime_error("Min failed");
+            }
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            m[k].emplace_back(node);
             if (pval < 0.05) {
-                double scaled_outsum = out_sum / out_kmers * in_kmers;
-                if (scaled_outsum == in_sum)
-                    return;
-
-                bool in_kmer = scaled_outsum < in_sum;
-                bool out_kmer = scaled_outsum > in_sum;
-
-                PairContainer best;
-                for (const auto &[j, c] : row) {
-                    if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                        best.emplace_back(j, sums[j]);
-                }
-
-                auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
-
-                if (pval_min > pval) {
-                    common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
-                    throw std::runtime_error("Test failed");
-                }
-
-                double lkd = log(0.05) - log(pval_min);
-                uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
-                    ? std::numeric_limits<uint64_t>::max()
-                    : exp(lkd);
-
-                if (k == 0) {
-                    common::logger->error("k: {}\tpval_min: {}", k, pval_min);
-                    throw std::runtime_error("Min failed");
-                }
-
-                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                m[k].emplace_back(node);
-
                 if (in_kmer) {
                     indicator_in[node] = true;
                 } else if (out_kmer) {
@@ -770,32 +768,49 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
-        common::logger->trace("Correcting {}/{} significant p-values", total_sig, max_index);
+
 
         auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
 
         std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
-        size_t acc = 0;
-        size_t k = 1;
+        size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
+                                     [](size_t sum, const auto &a) { return sum + a.second.size(); });
+        common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
+
         auto begin = m_data.begin();
-        auto it = begin;
-        while (it < m_data.end()) {
-            common::logger->trace("k: {}\tp: {}", k, 0.05 / k);
-            while (acc <= k && it < m_data.end()) {
-                acc += it->second.size();
-                ++it;
-            }
-            if (acc > k) {
-                size_t old_k = k;
-                k = acc;
-                while (begin < it && k >= begin->first && begin->first > old_k) {
-                    acc -= begin->second.size();
-                    ++begin;
-                }
-            } else {
+        size_t k = 0;
+        size_t last_k = 0;
+        for ( ; begin != m_data.end(); ++begin) {
+            const auto &[cur_k, bucket] = *begin;
+            if (acc <= cur_k) {
+                k = last_k + 1;
                 break;
             }
+
+            last_k = cur_k;
+            acc -= bucket.size();
         }
+        // size_t acc = 0;
+        // size_t k = 1;
+        // auto begin = m_data.begin();
+        // auto it = begin;
+        // while (it < m_data.end()) {
+        //     common::logger->trace("k: {}\tp: {}", k, 0.05 / k);
+        //     while (acc <= k && it < m_data.end()) {
+        //         acc += it->second.size();
+        //         ++it;
+        //     }
+        //     if (acc > k) {
+        //         size_t old_k = k;
+        //         k = acc;
+        //         while (begin < it && k >= begin->first && begin->first > old_k) {
+        //             acc -= begin->second.size();
+        //             ++begin;
+        //         }
+        //     } else {
+        //         break;
+        //     }
+        // }
 
         if (k == 0) {
             common::logger->trace("No good k value found");
