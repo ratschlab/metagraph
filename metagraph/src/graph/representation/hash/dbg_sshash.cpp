@@ -289,7 +289,7 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
     
     //getting labels in batches
     size_t num_labels = anno_graph->get_annotator().num_labels();
-    std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence){
+    std::vector<uint64_t> superkmer_idxs = dict_->build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence){
                     auto labels = anno_graph->get_top_label_signatures(sequence, num_labels);
                     // since get_top_label_signatures returns only labels that were found, 
                     // if any entry is zero not all the kmers share all the same labels -> return false
@@ -303,14 +303,16 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
          });
     //std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph](std::string_view str){return anno_graph->get_labels(str);});
 
-    sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
+    //sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
     // print to check
+    /*
     std::cout<< "printing sk_mask indeces: \n";
-    for(size_t i = 0; i < non_mono_superkmer.size(); i++){
-        if(non_mono_superkmer[i] == 1)std::cout<< i << " ";
+    for(size_t i = 0; i < superkmer_idxs.size(); i++){
+        std::cout<< superkmer_idxs[i] << " ";
     }
+    */
     // elias fano encoding and serialize
-    sdsl::sd_vector<> ef_bv (non_mono_superkmer); 
+    sdsl::sd_vector<> ef_bv (superkmer_idxs.begin(), superkmer_idxs.end()); 
     
     std::cout << "serializing bit vector..." << std::endl;
     bool check = store_to_file(ef_bv, file_sk_mask);
