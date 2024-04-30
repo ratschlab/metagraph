@@ -197,7 +197,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             PairContainer best;
             for (const auto &[j, c] : row) {
                 if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                    best.emplace_back(j, sums[j]);
+                    best.emplace_back(j, max_obs_vals[j]);
             }
 
             auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
@@ -443,7 +443,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             PairContainer best;
             for (const auto &[j, c] : row) {
                 if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                    best.emplace_back(j, sums[j]);
+                    best.emplace_back(j, max_obs_vals[j]);
             }
 
             auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
@@ -459,8 +459,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 : exp(lkd);
 
             if (k == 0) {
-                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
-                throw std::runtime_error("Min failed");
+                ++row_i;
+                return;
             }
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
             m[k].emplace_back(node);
