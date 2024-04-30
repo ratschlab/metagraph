@@ -117,12 +117,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     pvals.emplace_back(std::numeric_limits<double>::max());
 
     VectorMap<size_t, std::vector<uint64_t>> m;
+    using RowStats = std::tuple<double, double, double>;
+    std::function<RowStats(const PairContainer&)> compute_pval;
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
             || config.test_type == "fisher") {
         boost::math::chi_squared dist(1);
-        auto compute_pval = [&](const auto &row) {
+        compute_pval = [&,dist](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
@@ -175,58 +177,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (pval == -1)
                 pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
 
-            return std::make_tuple(pval, in_sum, out_sum);
+            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all,
-                                        [&](const auto &row) {
-            auto [pval, in_sum, out_sum] = compute_pval(row);
-            pvals.emplace_back(pval);
-            double scaled_outsum = out_sum / out_kmers * in_kmers;
-
-            if (pval > 1.0 || scaled_outsum == in_sum) {
-                ++row_i;
-                return;
-            }
-
-            bool in_kmer = scaled_outsum < in_sum;
-            bool out_kmer = scaled_outsum > in_sum;
-
-            PairContainer best;
-            for (const auto &[j, c] : row) {
-                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                    best.emplace_back(j, max_obs_vals[j]);
-            }
-
-            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
-
-            if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
-                throw std::runtime_error("Test failed");
-            }
-
-            double lkd = log(0.05) - log(pval_min);
-            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
-                ? std::numeric_limits<uint64_t>::max()
-                : exp(lkd);
-
-            if (k == 0) {
-                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
-                throw std::runtime_error("Min failed");
-            }
-            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            m[k].emplace_back(node);
-            if (pval < 0.05) {
-                if (in_kmer) {
-                    indicator_in[node] = true;
-                } else if (out_kmer) {
-                    indicator_out[node] = true;
-                }
-            }
-            ++row_i;
-        });
     } else if (config.test_type == "nbinom") {
         // use moments to fit the r parameter of a beta negative binomial
         uint64_t sum_of_cubes = 0;
@@ -268,7 +220,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         boost::math::chi_squared dist(1);
 
-        auto compute_pval = [&](const auto &row) {
+        compute_pval = [&,r,dist](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
@@ -422,81 +374,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
 
-            return std::make_tuple(pval, in_sum, out_sum);
+            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
-
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            auto [pval, in_sum, out_sum] = compute_pval(row);
-            pvals.emplace_back(pval);
-            double scaled_outsum = out_sum / out_kmers * in_kmers;
-            if (pval > 1.0 || scaled_outsum == in_sum) {
-                ++row_i;
-                return;
-            }
-
-            bool in_kmer = scaled_outsum < in_sum;
-            bool out_kmer = scaled_outsum > in_sum;
-
-            PairContainer best;
-            for (const auto &[j, c] : row) {
-                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                    best.emplace_back(j, max_obs_vals[j]);
-            }
-
-            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
-
-            if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
-                throw std::runtime_error("Test failed");
-            }
-
-            double lkd = log(0.05) - log(pval_min);
-            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
-                ? std::numeric_limits<uint64_t>::max()
-                : exp(lkd);
-
-            if (k == 0) {
-                ++row_i;
-                return;
-            }
-            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            m[k].emplace_back(node);
-            if (pval < 0.05) {
-                if (in_kmer) {
-                    indicator_in[node] = true;
-                } else if (out_kmer) {
-                    indicator_out[node] = true;
-                }
-            }
-            ++row_i;
-        });
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u" || config.test_type == "quantile") {
-        auto norm = boost::math::normal_distribution();
-        auto rankdata = [&](const std::vector<double> &c) {
-            auto c_p = c;
-            std::sort(c_p.begin(), c_p.end());
-            tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
-            for (size_t i = 0; i < c_p.size(); ++i) {
-                auto &[rank_sum, nranks] = counts[c_p[i]];
-                rank_sum += i + 1;
-                ++nranks;
-            }
-
-            std::vector<double> ranks;
-            ranks.reserve(c.size());
-            for (double v : c) {
-                ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
-            }
-
-            return std::make_pair(std::move(ranks), std::move(counts));
-        };
-
-        auto compute_pval = [&](const auto &row) {
+        compute_pval = [&](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
+
+            auto norm = boost::math::normal_distribution();
+            auto rankdata = [&](const std::vector<double> &c) {
+                auto c_p = c;
+                std::sort(c_p.begin(), c_p.end());
+                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
+                for (size_t i = 0; i < c_p.size(); ++i) {
+                    auto &[rank_sum, nranks] = counts[c_p[i]];
+                    rank_sum += i + 1;
+                    ++nranks;
+                }
+
+                std::vector<double> ranks;
+                ranks.reserve(c.size());
+                for (double v : c) {
+                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
+                }
+
+                return std::make_pair(std::move(ranks), std::move(counts));
+            };
 
             std::vector<double> in_counts;
             in_counts.reserve(labels_in.size());
@@ -578,59 +481,58 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::make_tuple(p, rankcx_mean, rankcy_mean);
         };
-
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
-                                                                     [&](const auto &row) {
-            auto [pval, rankcx_mean, rankcy_mean] = compute_pval(row);
-            pvals.emplace_back(pval);
-            bool in_kmer = rankcx_mean > rankcy_mean;
-            bool out_kmer = rankcx_mean < rankcy_mean;
-
-            if (pval > 1.0 || (!in_kmer && !out_kmer)) {
-                ++row_i;
-                return;
-            }
-
-            PairContainer best;
-            for (const auto &[j, c] : row) {
-                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
-                    best.emplace_back(j, max_obs_vals[j]);
-            }
-
-            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
-
-            if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
-                throw std::runtime_error("Test failed");
-            }
-
-            double lkd = log(0.05) - log(pval_min);
-            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
-                ? std::numeric_limits<uint64_t>::max()
-                : exp(lkd);
-
-            if (k == 0) {
-                ++row_i;
-                return;
-            }
-            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            m[k].emplace_back(node);
-
-            if (pval < 0.05) {
-                if (in_kmer) {
-                    indicator_in[node] = true;
-                } else if (out_kmer) {
-                    indicator_out[node] = true;
-                }
-            }
-            ++row_i;
-        });
     } else {
         throw std::runtime_error("Test not implemented");
     }
+
+    uint64_t row_i = 0;
+    utils::call_rows<std::unique_ptr<bit_vector>,
+                     std::unique_ptr<ValuesContainer>,
+                     PairContainer>(columns_all, column_values_all, [&](const auto &row) {
+        auto [pval, in_stat, out_stat] = compute_pval(row);
+        pvals.emplace_back(pval);
+
+        if (pval > 1.0 || in_stat == out_stat) {
+            ++row_i;
+            return;
+        }
+
+        bool in_kmer = in_stat > out_stat;
+        bool out_kmer = in_stat < out_stat;
+
+        PairContainer best;
+        for (const auto &[j, c] : row) {
+            if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
+                best.emplace_back(j, max_obs_vals[j]);
+        }
+
+        auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
+
+        if (pval_min > pval) {
+            common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+            throw std::runtime_error("Test failed");
+        }
+
+        double lkd = log(0.05) - log(pval_min);
+        uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
+            ? std::numeric_limits<uint64_t>::max()
+            : exp(lkd);
+
+        if (k == 0) {
+            common::logger->error("k: {}\tpval_min: {}", k, pval_min);
+            throw std::runtime_error("Min failed");
+        }
+        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+        m[k].emplace_back(node);
+        if (pval < 0.05) {
+            if (in_kmer) {
+                indicator_in[node] = true;
+            } else if (out_kmer) {
+                indicator_out[node] = true;
+            }
+        }
+        ++row_i;
+    });
 
     for (auto &col : columns_all) {
         col.reset();
@@ -640,17 +542,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         col_vals.reset();
     }
 
-    {
-        uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
+    uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
 
+    auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
 
-        auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
+    std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
+    size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
+                                 [](size_t sum, const auto &a) { return sum + a.second.size(); });
+    common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
-        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
-        size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                     [](size_t sum, const auto &a) { return sum + a.second.size(); });
-        common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
-
+    if (total_sig) {
         auto begin = m_data.begin();
         size_t k = 0;
         size_t last_k = 0;
