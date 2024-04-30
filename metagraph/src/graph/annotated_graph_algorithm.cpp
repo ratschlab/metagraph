@@ -494,16 +494,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_pair(std::move(ranks), std::move(counts));
         };
 
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
-                                                                     [&](const auto &row) {
-            if (row.empty()) {
-                pvals.emplace_back(std::numeric_limits<double>::max());
-                ++row_i;
-                return;
-            }
+        auto compute_pval = [&](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0);
 
             std::vector<double> in_counts;
             in_counts.reserve(labels_in.size());
@@ -583,16 +576,56 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 p = boost::math::cdf(boost::math::complement(norm, z)) * 2;
             }
 
-            pvals.emplace_back(p);
+            return std::make_tuple(p, rankcx_mean, rankcy_mean);
+        };
 
-            if (p < 0.05) {
-                if (rankcx_mean > rankcy_mean) {
-                    indicator_in[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                } else if (rankcx_mean < rankcy_mean) {
-                    indicator_out[AnnotatedDBG::anno_to_graph_index(row_i)] = true;
-                }
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         std::vector<std::pair<uint64_t, uint64_t>>>(columns_all, column_values_all,
+                                                                     [&](const auto &row) {
+            auto [pval, rankcx_mean, rankcy_mean] = compute_pval(row);
+            pvals.emplace_back(pval);
+            bool in_kmer = rankcx_mean > rankcy_mean;
+            bool out_kmer = rankcx_mean < rankcy_mean;
+
+            if (pval > 1.0 || (!in_kmer && !out_kmer)) {
+                ++row_i;
+                return;
             }
 
+            PairContainer best;
+            for (const auto &[j, c] : row) {
+                if ((in_kmer && !groups[j]) || (out_kmer && groups[j]))
+                    best.emplace_back(j, max_obs_vals[j]);
+            }
+
+            auto [pval_min, in_sum_m, out_sum_m] = compute_pval(best);
+
+            if (pval_min > pval) {
+                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+                throw std::runtime_error("Test failed");
+            }
+
+            double lkd = log(0.05) - log(pval_min);
+            uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
+                ? std::numeric_limits<uint64_t>::max()
+                : exp(lkd);
+
+            if (k == 0) {
+                ++row_i;
+                return;
+            }
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            m[k].emplace_back(node);
+
+            if (pval < 0.05) {
+                if (in_kmer) {
+                    indicator_in[node] = true;
+                } else if (out_kmer) {
+                    indicator_out[node] = true;
+                }
+            }
             ++row_i;
         });
     } else {
