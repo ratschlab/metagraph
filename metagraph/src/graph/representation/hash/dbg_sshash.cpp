@@ -42,8 +42,8 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
         auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
         if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
-            callback(kmer_to_node(sequence.substr(i, k_)));
-            // maybe implement kmer_to_node_from_superkmer(s_idx);
+            //callback(kmer_to_node(sequence.substr(i, k_)));
+            callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id));
         }else{
             callback(s_idx);
         }
@@ -180,8 +180,8 @@ void DBGSSHash::call_kmers(
     }
 }
 
-DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer) const {
-    uint64_t ssh_idx = dict_->lookup(kmer.begin(), true);
+DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id) const {
+    uint64_t ssh_idx = dict_->look_up_from_superkmer_id(s_id, kmer.begin());
     return ssh_idx + 1;
 }
 
@@ -194,15 +194,8 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 std::pair<DBGSSHash::node_index, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
     auto [ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(ssh_idx == sshash::constants::invalid_uint64){
-        if(dict_->lookup(kmer.begin(), true)!= sshash::constants::invalid_uint64){
-            std::cout<< kmer <<"\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
-        }
         return std::pair(npos, sshash::constants::invalid_uint64);
     }
-    if(dict_->lookup(kmer.begin(), true) == sshash::constants::invalid_uint64){
-        std::cout<< kmer <<"\n***********  found with kmer_to_index but not with lookup!! *********" <<std::endl;
-    }
-
     return std::pair(ssh_idx + 1, superkmer_id);
 }
 
