@@ -576,20 +576,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             } else {
                 // https://datatab.net/tutorial/mann-whitney-u-test
+                double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
+                double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
+                double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
+                double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
+                double u = std::min(u1, u2);
+
+                double n = nx + ny;
+                    // normal approximation
+                double mu = static_cast<double>(nx * ny) / 2;
                 double corr = 0;
                 for (const auto &[val,rks] : countsc) {
                     const auto &[rk, c] = rks;
                     if (c > 1)
                         corr += c * c * c - c;
                 }
-
-                double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
-                double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
-                double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
-                double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
-                double u = std::min(u1, u2);
-                double mu = static_cast<double>(nx * ny) / 2;
-                double n = nx + ny;
                 double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
 
                 double z = abs((u - mu) / sd);
@@ -607,17 +608,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                      std::unique_ptr<ValuesContainer>,
                      PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
         PairContainer row;
-        size_t in_count = 0;
-        size_t out_count = 0;
         for (const auto &[j, raw_c] : raw_row) {
-            if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i)) {
-                if (groups[j]) {
-                    ++out_count;
-                } else {
-                    ++in_count;
-                }
+            if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i))
                 row.emplace_back(j, c);
-            }
         }
 
         auto [pval, in_stat, out_stat] = compute_pval(row);
@@ -630,42 +623,46 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         bool in_kmer = in_stat > out_stat;
         bool out_kmer = in_stat < out_stat;
-        double pval_min = 0;
-        if (config.test_type == "nonparametric_u") {
-            pval_min = exp(lgamma(in_count + 1) + lgamma(out_count + 1) - lgamma(in_count + out_count + 1));
-        } else {
-            PairContainer best;
-            for (const auto &[j, c] : row) {
-                if ((in_kmer && !groups[j]) || (out_kmer && groups[j])) {
-                    best.emplace_back(j, max_obs_vals[j]);
-                } else {
-                    best.emplace_back(j, 1);
+        uint64_t k = std::numeric_limits<uint64_t>::max();
+
+        if (config.test_type != "nonparametric") {
+            double pval_min = 0;
+            if (config.test_type == "nonparametric_u") {
+                pval_min = 2.0 / exp(lgamma(groups.size() + 1) - lgamma(labels_in.size() + 1) - lgamma(labels_out.size() + 1));
+            } else {
+                PairContainer best;
+                for (const auto &[j, c] : row) {
+                    if ((in_kmer && !groups[j]) || (out_kmer && groups[j])) {
+                        best.emplace_back(j, max_obs_vals[j]);
+                    } else {
+                        best.emplace_back(j, 1);
+                    }
                 }
+
+                auto [pm, in_sum_m, out_sum_m] = compute_pval(best);
+                pval_min = pm;
             }
 
-            auto [pm, in_sum_m, out_sum_m] = compute_pval(best);
-            pval_min = pm;
+            if (pval_min > pval) {
+                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+                throw std::runtime_error("Test failed");
+            }
+
+            if (pval_min >= 0.05) {
+                ++row_i;
+                return;
+            }
+
+            double lkd = log(0.05) - log(pval_min);
+            if (lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max())))
+                k = exp(lkd);
+
+            if (k == 0) {
+                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
+                throw std::runtime_error("Min failed");
+            }
         }
 
-        if (pval_min > pval) {
-            common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
-            throw std::runtime_error("Test failed");
-        }
-
-        if (pval_min >= 0.05) {
-            ++row_i;
-            return;
-        }
-
-        double lkd = log(0.05) - log(pval_min);
-        uint64_t k = lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max()))
-            ? std::numeric_limits<uint64_t>::max()
-            : exp(lkd);
-
-        if (k == 0) {
-            common::logger->error("k: {}\tpval_min: {}", k, pval_min);
-            throw std::runtime_error("Min failed");
-        }
         node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
         m[k].emplace_back(node);
         auto &indicator = in_kmer ? indicator_in : indicator_out;
