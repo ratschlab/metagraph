@@ -194,15 +194,8 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 std::pair<DBGSSHash::node_index, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
     auto [ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(ssh_idx == sshash::constants::invalid_uint64){
-        if(dict_->lookup(kmer.begin(), true)!= sshash::constants::invalid_uint64){
-            std::cout<< kmer <<"\n***********  NOT FOUND WITH KMER_TO_SUPERKMER_IDX BUT FOUND WITH LOOKUP" <<std::endl;
-        }
         return std::pair(npos, sshash::constants::invalid_uint64);
     }
-    if(dict_->lookup(kmer.begin(), true) == sshash::constants::invalid_uint64){
-        std::cout<< kmer <<"\n***********  found with kmer_to_index but not with lookup!! *********" <<std::endl;
-    }
-
     return std::pair(ssh_idx + 1, superkmer_id);
 }
 
@@ -244,9 +237,9 @@ bool DBGSSHash::load(const std::string &filename) {
     }
     k_ = dict_->k();
 
-    std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
-    std::cout << "LOADING MASK! \n";
-    load_superkmer_mask(s_mask_name);
+    //std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
+    //std::cout << "LOADING MASK! \n";
+    //load_superkmer_mask(s_mask_name);
     return true;
 }
 
