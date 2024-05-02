@@ -360,105 +360,62 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double total_sum = in_sum + out_sum;
-            size_t ndigits = 20;
+            size_t ndigits = 30;
 
-            auto ll_dx_ddx_in = [&](double lambda) {
-                double val = 0;
-                double dval = 0;
-                for (const auto &[j, c] : row) {
-                    if (!groups[j]) {
-                        double prop = static_cast<double>(sums[j]) * lambda;
-                        double shift_prop = r + prop;
-                        val += (c - prop) / shift_prop;
-                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
+            auto ll_dx_ddx_pick = [&](const auto &picker) {
+                return [&](double lambda) {
+                    double val = 0;
+                    double dval = 0;
+                    for (const auto &[j, c] : row) {
+                        if (picker(j)) {
+                            double prop = static_cast<double>(sums[j]) * lambda;
+                            double shift_prop = r + prop;
+                            val += (c - prop) / shift_prop;
+                            dval -= (r + c) / shift_prop / shift_prop * sums[j];
+                        }
                     }
-                }
 
-                for (size_t j : unfound) {
-                    if (!groups[j]) {
-                        uint64_t c = 0;
-                        double prop = static_cast<double>(sums[j]) * lambda;
-                        double shift_prop = r + prop;
-                        val += (c - prop) / shift_prop;
-                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
+                    for (size_t j : unfound) {
+                        if (picker(j)) {
+                            double prop = static_cast<double>(sums[j]) * lambda;
+                            double shift_prop = r + prop;
+                            val -= prop / shift_prop;
+                            dval -= r / shift_prop / shift_prop * sums[j];
+                        }
                     }
-                }
 
-                return std::make_pair(val, dval);
-            };
-
-            auto ll_dx_ddx_out = [&](double lambda) {
-                double val = 0;
-                double dval = 0;
-                for (const auto &[j, c] : row) {
-                    if (groups[j]) {
-                        double prop = static_cast<double>(sums[j]) * lambda;
-                        double shift_prop = r + prop;
-                        val += (c - prop) / shift_prop;
-                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
-                    }
-                }
-
-                for (size_t j : unfound) {
-                    if (groups[j]) {
-                        uint64_t c = 0;
-                        double prop = static_cast<double>(sums[j]) * lambda;
-                        double shift_prop = r + prop;
-                        val += (c - prop) / shift_prop;
-                        dval -= (r + c) / shift_prop / shift_prop * sums[j];
-                    }
-                }
-
-                return std::make_pair(val, dval);
-            };
-
-            auto ll_dx_ddx_null = [&](double lambda) {
-                double val = 0;
-                double dval = 0;
-                for (const auto &[j, c] : row) {
-                    double prop = static_cast<double>(sums[j]) * lambda;
-                    double shift_prop = r + prop;
-                    val += (c - prop) / shift_prop;
-                    dval -= (r + c) / shift_prop / shift_prop * sums[j];
-                }
-
-                for (size_t j : unfound) {
-                    uint64_t c = 0;
-                    double prop = static_cast<double>(sums[j]) * lambda;
-                    double shift_prop = r + prop;
-                    val += (c - prop) / shift_prop;
-                    dval -= (r + c) / shift_prop / shift_prop * sums[j];
-                }
-
-                return std::make_pair(val, dval);
+                    return std::make_pair(val, dval);
+                };
             };
 
             double lambda_null = boost::math::tools::newton_raphson_iterate(
-                ll_dx_ddx_null, total_sum / total_kmers, 0.0, 1.0, ndigits
+                ll_dx_ddx_pick([&](size_t) { return true; }),
+                total_sum / total_kmers, -0.01, 1.01, ndigits
             );
 
             double chi_stat = 0;
             double loglikelihood_null = 0;
-            if (false) {
-                // score test
-                auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
-                auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
+            // if (false) {
+            //     // score test
+            //     auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
+            //     auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
 
-                val_in *= r / lambda_null;
-                val_out *= r / lambda_null;
+            //     val_in *= r / lambda_null;
+            //     val_out *= r / lambda_null;
 
-                dval_in = (val_in / lambda_null - dval_in * r / lambda_null) / labels_in.size();
-                dval_out = (val_out / lambda_null - dval_out * r / lambda_null) / labels_out.size();
-                chi_stat = std::max(val_in * val_in / dval_in + val_out * val_out / dval_out,
-                                    double(0.0));
-            } else {
+            //     dval_in = (val_in / lambda_null - dval_in * r / lambda_null) / labels_in.size();
+            //     dval_out = (val_out / lambda_null - dval_out * r / lambda_null) / labels_out.size();
+            //     chi_stat = val_in * val_in / dval_in + val_out * val_out / dval_out;
+            // } else {
                 // log likelihood test
                 double lambda_in = boost::math::tools::newton_raphson_iterate(
-                    ll_dx_ddx_in, in_sum / in_kmers, 0.0, 1.0, ndigits
+                    ll_dx_ddx_pick([&](size_t j) { return !groups[j]; }),
+                    in_sum / in_kmers, -0.01, 1.01, ndigits
                 );
 
                 double lambda_out = boost::math::tools::newton_raphson_iterate(
-                    ll_dx_ddx_out, out_sum / out_kmers, 0.0, 1.0, ndigits
+                    ll_dx_ddx_pick([&](size_t j) { return groups[j]; }),
+                    out_sum / out_kmers, -0.01, 1.01, ndigits
                 );
 
                 double loglikelihood_alt = 0;
@@ -485,8 +442,113 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 if (chi_stat < 0) {
                     common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                    common::logger->error("Theta null: {}\ttheta in: {}\ttheta out: {}",
+                                          lambda_null, lambda_in, lambda_out);
                     throw std::runtime_error("Test failed");
                 }
+            // }
+
+            double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
+
+            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
+        };
+    } else if (config.test_type == "bp") {
+        boost::math::chi_squared dist(1);
+
+        double a_sum_in = 0;
+        double a_sum_out = 0;
+        double b_sum_in = 0;
+        double b_sum_out = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            double n = static_cast<double>(sums[j]);
+            double mu = n / max_index;
+            double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
+            double overdisp = var / mu;
+            double common = (overdisp - sums[j] + mu * n - 1) / n / (1 - overdisp * n);
+
+            double a = mu * common;
+            double b = (n - mu) * common;
+            common::logger->trace("Label: {}\ta: {}\tb: {}", j, a, b);
+
+            if (a <= 0 || b <= 0)
+                throw std::runtime_error("Fail");
+
+            if (groups[j]) {
+                a_sum_out += a;
+                b_sum_out += b;
+            } else {
+                a_sum_in += a;
+                b_sum_in += b;
+            }
+        }
+
+        double a_sum_null = a_sum_in + a_sum_out;
+        double b_sum_null = b_sum_in + b_sum_out;
+
+        auto get_theta = [&](double total, double k_sum, double a_sum, double b_sum) {
+            double b = 2 - k_sum - a_sum - b_sum - total;
+            double c = k_sum + a_sum - 1;
+            double common = sqrt(b * b - 4 * total * c);
+            double theta_low = (-b - common) / 2.0 / total;
+            double theta_high = (-b + common) / 2.0 / total;
+
+            bool low_valid = theta_low >= 0 && theta_low <= 1.0;
+            bool high_valid = theta_high >= 0 && theta_high <= 1.0;
+
+            if (low_valid && high_valid) {
+                common::logger->error("Two valid thetas: {}\t{}", theta_low, theta_high);
+                throw std::runtime_error("Fail");
+            }
+
+            if (!low_valid && !high_valid) {
+                common::logger->error("No valid thetas: {}\t{}", theta_low, theta_high);
+                throw std::runtime_error("Fail");
+            }
+
+            return low_valid ? theta_low : theta_high;
+        };
+
+        compute_pval = [&,dist](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0);
+
+            sdsl::bit_vector unfound(groups.size(), true);
+            double in_sum = 0;
+            double out_sum = 0;
+            for (const auto &[j, c] : row) {
+                unfound[j] = false;
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
+            }
+            double null_sum = in_sum + out_sum;
+
+            double theta_in = get_theta(in_kmers, in_sum, a_sum_in, b_sum_in);
+            double theta_out = get_theta(out_kmers, out_sum, a_sum_out, b_sum_out);
+            double theta_null = get_theta(total_kmers, null_sum, a_sum_null, b_sum_null);
+
+            double loglikelihood_alt = 0;
+            double loglikelihood_null = -theta_null * total_kmers;
+
+            for (size_t j = 0; j < groups.size(); ++j) {
+                double theta = groups[j] ? theta_out : theta_in;
+                loglikelihood_alt -= theta * sums[j];
+            }
+
+            for (const auto &[j, c] : row) {
+                double theta = groups[j] ? theta_out : theta_in;
+                loglikelihood_alt += log(theta) * c;
+                loglikelihood_null += log(theta_null) * c;
+            }
+
+            double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
+            if (chi_stat < 0) {
+                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                common::logger->error("theta in: {}\ttheta out: {}\ttheta null: {}",
+                                      theta_in, theta_out, theta_null);
+                throw std::runtime_error("Test failed");
             }
 
             double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
@@ -583,7 +645,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double u = std::min(u1, u2);
 
                 double n = nx + ny;
-                    // normal approximation
+                // normal approximation
                 double mu = static_cast<double>(nx * ny) / 2;
                 double corr = 0;
                 for (const auto &[val,rks] : countsc) {
@@ -653,13 +715,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return;
             }
 
-            double lkd = log(0.05) - log(pval_min);
-            if (lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max())))
-                k = exp(lkd);
+            if (pval_min > 0) {
+                double lkd = log(0.05) - log(pval_min);
+                if (lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max())))
+                    k = exp(lkd);
 
-            if (k == 0) {
-                common::logger->error("k: {}\tpval_min: {}", k, pval_min);
-                throw std::runtime_error("Min failed");
+                if (k == 0) {
+                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                    throw std::runtime_error("Min failed");
+                }
             }
         }
 
@@ -681,15 +745,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     }
 
     uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
+    auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
+
+    std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
+    size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
+                                 [](size_t sum, const auto &a) { return sum + a.second.size(); });
+    size_t total_tests = acc;
+    common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
     if (total_sig) {
-        auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
-
-        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
-        size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                    [](size_t sum, const auto &a) { return sum + a.second.size(); });
-        size_t total_tests = acc;
-        common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
         auto begin = m_data.begin();
         size_t k = 0;
         size_t last_k = 0;
