@@ -8,6 +8,7 @@
 
 #include "string_utils.hpp"
 
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 int main (int argc, char *argv[]){
@@ -57,9 +58,8 @@ int main (int argc, char *argv[]){
         */
     assert(config == Config::AnnotationType::RowFlat);
     //std::unique_ptr<ColumnCompressed<>> anno_ptr =  std::make_unique<ColumnCompressed<>> (); 
-    auto anno_ptr = std::make_unique<RowCompressed<>>();
+    std::unique_ptr<RowFlatAnnotator> anno_ptr = std::make_unique<RowFlatAnnotator>();
     anno_ptr->load(anno_path);
-
     std::unique_ptr<AnnotatedDBG> anno_graph = std::make_unique<AnnotatedDBG>(graph_ptr, std::move(anno_ptr), false);
     graph_ptr->superkmer_statistics(anno_graph, sk_mask_path);
 
