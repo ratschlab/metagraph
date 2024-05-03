@@ -474,17 +474,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double mu = n / max_index;
         double var = static_cast<double>(sum_of_squares) / max_index;
 
-        double overdisp = var / mu;
-        double common = (overdisp - n + mu * n - 1) / n / (1 - overdisp * n);
+        double common = (mu * (n - mu) - var + mu) / n / (var - mu);
 
         double a = mu * common;
         double b = (n - mu) * common;
-        common::logger->trace("mu: {}\tvar: {}\ta: {}\tb: {}", mu, var, a, b);
+        common::logger->trace("mu: {}\tvar: {}\ta: {}\tb: {}\ttheory mean: {}\ttheory var: {}",
+                              mu, var, a, b, n * a / (a + b),
+                              mu * (1 + n * b / (a + b) / (a + b + 1)));
 
         if (a <= 0 || b <= 0)
             throw std::runtime_error("Fail");
 
         auto get_theta = [&](double total, double k_sum) {
+            if (k_sum == 0)
+                return 0.0;
+
             double qb = 2 - k_sum - a - b - total;
             double qc = k_sum + a - 1;
             double common = sqrt(qb * qb - 4 * total * qc);
