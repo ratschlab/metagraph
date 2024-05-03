@@ -486,28 +486,34 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::runtime_error("Fail");
 
         auto get_theta = [&](double total, double k_sum) {
-            if (k_sum == 0)
-                return 0.0;
-
-            double qb = 2 - k_sum - a - b - total;
+            double qb = b - a - k_sum - total;
             double qc = k_sum + a - 1;
             double common = sqrt(qb * qb - 4 * total * qc);
             double theta_low = (-qb - common) / 2.0 / total;
             double theta_high = (-qb + common) / 2.0 / total;
 
-            bool low_valid = theta_low >= 0 && theta_low <= 1.0;
-            bool high_valid = theta_high >= 0 && theta_high <= 1.0;
+            bool low_valid = theta_low > 0 && theta_low < 1.0;
+            bool high_valid = theta_high > 0 && theta_high < 1.0;
 
             if (low_valid && high_valid) {
-                // pick the one that's closest to the measured count
-                if (abs(total * theta_low - k_sum) < abs(total * theta_high - k_sum)) {
+                double stat_low = 0;
+                double stat_high = 0;
+                if (theta_low != 0 && theta_high != 0) {
+                    stat_low = (k_sum + a - 1) * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low;
+                    stat_high = (k_sum + a - 1) * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high;
+                }
+
+                if (stat_low == stat_high) {
+                    common::logger->error("Two valid thetas: {}\t{}\tTotal: {}\tK: {}",
+                                          theta_low, theta_high,
+                                          total, k_sum);
+                    throw std::runtime_error("Fail");
+                } else if (stat_low > stat_high) {
                     high_valid = false;
                 } else {
                     low_valid = false;
                 }
-            }
-
-            if (!low_valid && !high_valid) {
+            } else if (!low_valid && !high_valid) {
                 common::logger->error("No valid thetas: {}\t{}\t{},{}",
                                       theta_low, theta_high,
                                       total, k_sum);
@@ -532,121 +538,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
             double null_sum = in_sum + out_sum;
 
+            double theta_null = get_theta(total_kmers, null_sum);
             double theta_in = get_theta(in_kmers, in_sum);
             double theta_out = get_theta(out_kmers, out_sum);
-            double theta_null = get_theta(total_kmers, null_sum);
 
-            double loglikelihood_alt = in_sum > 0 ? in_sum * log(theta_in) - theta_in * in_kmers : 0;
-            loglikelihood_alt += out_sum > 0 ? out_sum * log(theta_out) - theta_out * out_kmers : 0;
-            double loglikelihood_null = null_sum * log(theta_null) - theta_null * total_kmers;
+            auto get_stat = [&](double theta, double k, double total) -> double {
+                return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
+            };
+            double log_in_stat = get_stat(theta_in, in_sum, in_kmers);
+            double log_out_stat = get_stat(theta_out, out_sum, out_kmers);
 
-            double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
-            if (chi_stat < 0) {
-                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                common::logger->error("theta in: {}\ttheta out: {}\ttheta null: {}",
-                                      theta_in, theta_out, theta_null);
-                throw std::runtime_error("Test failed");
-            }
+            double map_pval_in = exp(get_stat(theta_null, in_sum, in_kmers) - log_in_stat);
+            double map_pval_out = exp(get_stat(theta_null, out_sum, out_kmers) - log_out_stat);
 
-            double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
-
-            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
+            return std::make_tuple(std::min(map_pval_in, map_pval_out), in_sum, out_sum / out_kmers * in_kmers);
         };
-
-        // double a_sum_in = 0;
-        // double a_sum_out = 0;
-        // double b_sum_in = 0;
-        // double b_sum_out = 0;
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     double n = static_cast<double>(sums[j]);
-        //     double mu = n / max_index;
-        //     double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
-        //     double overdisp = var / mu;
-        //     double common = (overdisp - sums[j] + mu * n - 1) / n / (1 - overdisp * n);
-
-        //     double a = mu * common;
-        //     double b = (n - mu) * common;
-        //     common::logger->trace("Label: {}\ta: {}\tb: {}", j, a, b);
-
-        //     if (a <= 0 || b <= 0)
-        //         throw std::runtime_error("Fail");
-
-        //     if (groups[j]) {
-        //         a_sum_out += a;
-        //         b_sum_out += b;
-        //     } else {
-        //         a_sum_in += a;
-        //         b_sum_in += b;
-        //     }
-        // }
-
-        // double a_sum_null = a_sum_in + a_sum_out;
-        // double b_sum_null = b_sum_in + b_sum_out;
-
-        // auto get_theta = [&](double total, double k_sum, double a_sum, double b_sum, size_t nelem) {
-        //     double b = 2 * nelem - k_sum - a_sum - b_sum - total;
-        //     double c = k_sum + a_sum - nelem;
-        //     double common = sqrt(b * b - 4 * total * c);
-        //     double theta_low = (-b - common) / 2.0 / total;
-        //     double theta_high = (-b + common) / 2.0 / total;
-
-        //     bool low_valid = theta_low >= 0 && theta_low <= 1.0;
-        //     bool high_valid = theta_high >= 0 && theta_high <= 1.0;
-
-        //     if (low_valid && high_valid) {
-        //         // pick the one that's closest to the measured count
-        //         if (abs(total * theta_low - k_sum) < abs(total * theta_high - k_sum)) {
-        //             high_valid = false;
-        //         } else {
-        //             low_valid = false;
-        //         }
-        //     }
-
-        //     if (!low_valid && !high_valid) {
-        //         common::logger->error("No valid thetas: {}\t{}\t{},{},{},{}",
-        //                               theta_low, theta_high,
-        //                               total, k_sum, a_sum, b_sum);
-        //         throw std::runtime_error("Fail");
-        //     }
-
-        //     return low_valid ? theta_low : theta_high;
-        // };
-
-        // compute_pval = [&,dist](const auto &row) {
-        //     if (row.empty())
-        //         return std::make_tuple(1.1, 0.0, 0.0);
-
-        //     double in_sum = 0;
-        //     double out_sum = 0;
-        //     for (const auto &[j, c] : row) {
-        //         if (groups[j]) {
-        //             out_sum += c;
-        //         } else {
-        //             in_sum += c;
-        //         }
-        //     }
-        //     double null_sum = in_sum + out_sum;
-
-        //     double theta_in = get_theta(in_kmers, in_sum, a_sum_in, b_sum_in, labels_in.size());
-        //     double theta_out = get_theta(out_kmers, out_sum, a_sum_out, b_sum_out, labels_out.size());
-        //     double theta_null = get_theta(total_kmers, null_sum, a_sum_null, b_sum_null, groups.size());
-
-        //     double loglikelihood_alt = in_sum > 0 ? in_sum * log(theta_in) - theta_in * in_kmers : 0;
-        //     loglikelihood_alt += out_sum > 0 ? out_sum * log(theta_out) - theta_out * out_kmers : 0;
-        //     double loglikelihood_null = null_sum * log(theta_null) - theta_null * total_kmers;
-
-        //     double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
-        //     if (chi_stat < 0) {
-        //         common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-        //         common::logger->error("theta in: {}\ttheta out: {}\ttheta null: {}",
-        //                               theta_in, theta_out, theta_null);
-        //         throw std::runtime_error("Test failed");
-        //     }
-
-        //     double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
-
-        //     return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
-        // };
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u" || config.test_type == "quantile") {
         compute_pval = [&](const auto &row) {
             if (row.empty())
