@@ -4,10 +4,11 @@
 
 #include "cli/load/load_annotation.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 #include "string_utils.hpp"
 
-
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 int main (int argc, char *argv[]){
     
@@ -54,8 +55,9 @@ int main (int argc, char *argv[]){
         RowDiffBRWTCoord,
         RowDiffDiskCoord,
         */
-    assert(config == Config::AnnotationType::ColumnCompressed);
-    std::unique_ptr<ColumnCompressed<>> anno_ptr =  std::make_unique<ColumnCompressed<>> (); 
+    assert(config == Config::AnnotationType::RowFlat);
+    //std::unique_ptr<ColumnCompressed<>> anno_ptr =  std::make_unique<ColumnCompressed<>> (); 
+    auto anno_ptr = std::make_unique<RowCompressed<>>();
     anno_ptr->load(anno_path);
 
     std::unique_ptr<AnnotatedDBG> anno_graph = std::make_unique<AnnotatedDBG>(graph_ptr, std::move(anno_ptr), false);
