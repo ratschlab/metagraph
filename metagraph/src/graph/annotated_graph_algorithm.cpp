@@ -455,53 +455,58 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     } else if (config.test_type == "bp") {
         boost::math::chi_squared dist(1);
 
-        double a_sum_in = 0;
-        double a_sum_out = 0;
-        double b_sum_in = 0;
-        double b_sum_out = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            double n = static_cast<double>(sums[j]);
-            double mu = n / max_index;
-            double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
-            double overdisp = var / mu;
-            double common = (overdisp - sums[j] + mu * n - 1) / n / (1 - overdisp * n);
-
-            double a = mu * common;
-            double b = (n - mu) * common;
-            common::logger->trace("Label: {}\ta: {}\tb: {}", j, a, b);
-
-            if (a <= 0 || b <= 0)
-                throw std::runtime_error("Fail");
-
-            if (groups[j]) {
-                a_sum_out += a;
-                b_sum_out += b;
-            } else {
-                a_sum_in += a;
-                b_sum_in += b;
+        uint64_t row_i = 0;
+        uint64_t sum_of_squares = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                        std::unique_ptr<ValuesContainer>,
+                        PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
+            uint64_t sum = 0;
+            for (const auto &[j, raw_c] : raw_row) {
+                if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i))
+                    sum += c;
             }
-        }
 
-        double a_sum_null = a_sum_in + a_sum_out;
-        double b_sum_null = b_sum_in + b_sum_out;
+            sum_of_squares += sum * sum;
+            ++row_i;
+        });
 
-        auto get_theta = [&](double total, double k_sum, double a_sum, double b_sum) {
-            double b = 2 - k_sum - a_sum - b_sum - total;
-            double c = k_sum + a_sum - 1;
-            double common = sqrt(b * b - 4 * total * c);
-            double theta_low = (-b - common) / 2.0 / total;
-            double theta_high = (-b + common) / 2.0 / total;
+        double n = static_cast<double>(total_kmers);
+        double mu = n / max_index;
+        double var = static_cast<double>(sum_of_squares) / max_index;
+
+        double overdisp = var / mu;
+        double common = (overdisp - n + mu * n - 1) / n / (1 - overdisp * n);
+
+        double a = mu * common;
+        double b = (n - mu) * common;
+        common::logger->trace("mu: {}\tvar: {}\ta: {}\tb: {}", mu, var, a, b);
+
+        if (a <= 0 || b <= 0)
+            throw std::runtime_error("Fail");
+
+        auto get_theta = [&](double total, double k_sum) {
+            double qb = 2 - k_sum - a - b - total;
+            double qc = k_sum + a - 1;
+            double common = sqrt(qb * qb - 4 * total * qc);
+            double theta_low = (-qb - common) / 2.0 / total;
+            double theta_high = (-qb + common) / 2.0 / total;
 
             bool low_valid = theta_low >= 0 && theta_low <= 1.0;
             bool high_valid = theta_high >= 0 && theta_high <= 1.0;
 
             if (low_valid && high_valid) {
-                common::logger->error("Two valid thetas: {}\t{}", theta_low, theta_high);
-                throw std::runtime_error("Fail");
+                // pick the one that's closest to the measured count
+                if (abs(total * theta_low - k_sum) < abs(total * theta_high - k_sum)) {
+                    high_valid = false;
+                } else {
+                    low_valid = false;
+                }
             }
 
             if (!low_valid && !high_valid) {
-                common::logger->error("No valid thetas: {}\t{}", theta_low, theta_high);
+                common::logger->error("No valid thetas: {}\t{}\t{},{}",
+                                      theta_low, theta_high,
+                                      total, k_sum);
                 throw std::runtime_error("Fail");
             }
 
@@ -512,11 +517,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
-            sdsl::bit_vector unfound(groups.size(), true);
             double in_sum = 0;
             double out_sum = 0;
             for (const auto &[j, c] : row) {
-                unfound[j] = false;
                 if (groups[j]) {
                     out_sum += c;
                 } else {
@@ -525,23 +528,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
             double null_sum = in_sum + out_sum;
 
-            double theta_in = get_theta(in_kmers, in_sum, a_sum_in, b_sum_in);
-            double theta_out = get_theta(out_kmers, out_sum, a_sum_out, b_sum_out);
-            double theta_null = get_theta(total_kmers, null_sum, a_sum_null, b_sum_null);
+            double theta_in = get_theta(in_kmers, in_sum);
+            double theta_out = get_theta(out_kmers, out_sum);
+            double theta_null = get_theta(total_kmers, null_sum);
 
-            double loglikelihood_alt = 0;
-            double loglikelihood_null = -theta_null * total_kmers;
-
-            for (size_t j = 0; j < groups.size(); ++j) {
-                double theta = groups[j] ? theta_out : theta_in;
-                loglikelihood_alt -= theta * sums[j];
-            }
-
-            for (const auto &[j, c] : row) {
-                double theta = groups[j] ? theta_out : theta_in;
-                loglikelihood_alt += log(theta) * c;
-                loglikelihood_null += log(theta_null) * c;
-            }
+            double loglikelihood_alt = in_sum > 0 ? in_sum * log(theta_in) - theta_in * in_kmers : 0;
+            loglikelihood_alt += out_sum > 0 ? out_sum * log(theta_out) - theta_out * out_kmers : 0;
+            double loglikelihood_null = null_sum * log(theta_null) - theta_null * total_kmers;
 
             double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
             if (chi_stat < 0) {
@@ -555,6 +548,101 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
+
+        // double a_sum_in = 0;
+        // double a_sum_out = 0;
+        // double b_sum_in = 0;
+        // double b_sum_out = 0;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     double n = static_cast<double>(sums[j]);
+        //     double mu = n / max_index;
+        //     double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
+        //     double overdisp = var / mu;
+        //     double common = (overdisp - sums[j] + mu * n - 1) / n / (1 - overdisp * n);
+
+        //     double a = mu * common;
+        //     double b = (n - mu) * common;
+        //     common::logger->trace("Label: {}\ta: {}\tb: {}", j, a, b);
+
+        //     if (a <= 0 || b <= 0)
+        //         throw std::runtime_error("Fail");
+
+        //     if (groups[j]) {
+        //         a_sum_out += a;
+        //         b_sum_out += b;
+        //     } else {
+        //         a_sum_in += a;
+        //         b_sum_in += b;
+        //     }
+        // }
+
+        // double a_sum_null = a_sum_in + a_sum_out;
+        // double b_sum_null = b_sum_in + b_sum_out;
+
+        // auto get_theta = [&](double total, double k_sum, double a_sum, double b_sum, size_t nelem) {
+        //     double b = 2 * nelem - k_sum - a_sum - b_sum - total;
+        //     double c = k_sum + a_sum - nelem;
+        //     double common = sqrt(b * b - 4 * total * c);
+        //     double theta_low = (-b - common) / 2.0 / total;
+        //     double theta_high = (-b + common) / 2.0 / total;
+
+        //     bool low_valid = theta_low >= 0 && theta_low <= 1.0;
+        //     bool high_valid = theta_high >= 0 && theta_high <= 1.0;
+
+        //     if (low_valid && high_valid) {
+        //         // pick the one that's closest to the measured count
+        //         if (abs(total * theta_low - k_sum) < abs(total * theta_high - k_sum)) {
+        //             high_valid = false;
+        //         } else {
+        //             low_valid = false;
+        //         }
+        //     }
+
+        //     if (!low_valid && !high_valid) {
+        //         common::logger->error("No valid thetas: {}\t{}\t{},{},{},{}",
+        //                               theta_low, theta_high,
+        //                               total, k_sum, a_sum, b_sum);
+        //         throw std::runtime_error("Fail");
+        //     }
+
+        //     return low_valid ? theta_low : theta_high;
+        // };
+
+        // compute_pval = [&,dist](const auto &row) {
+        //     if (row.empty())
+        //         return std::make_tuple(1.1, 0.0, 0.0);
+
+        //     double in_sum = 0;
+        //     double out_sum = 0;
+        //     for (const auto &[j, c] : row) {
+        //         if (groups[j]) {
+        //             out_sum += c;
+        //         } else {
+        //             in_sum += c;
+        //         }
+        //     }
+        //     double null_sum = in_sum + out_sum;
+
+        //     double theta_in = get_theta(in_kmers, in_sum, a_sum_in, b_sum_in, labels_in.size());
+        //     double theta_out = get_theta(out_kmers, out_sum, a_sum_out, b_sum_out, labels_out.size());
+        //     double theta_null = get_theta(total_kmers, null_sum, a_sum_null, b_sum_null, groups.size());
+
+        //     double loglikelihood_alt = in_sum > 0 ? in_sum * log(theta_in) - theta_in * in_kmers : 0;
+        //     loglikelihood_alt += out_sum > 0 ? out_sum * log(theta_out) - theta_out * out_kmers : 0;
+        //     double loglikelihood_null = null_sum * log(theta_null) - theta_null * total_kmers;
+
+        //     double chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
+        //     if (chi_stat < 0) {
+        //         common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+        //         common::logger->error("theta in: {}\ttheta out: {}\ttheta null: {}",
+        //                               theta_in, theta_out, theta_null);
+        //         throw std::runtime_error("Test failed");
+        //     }
+
+        //     double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
+
+        //     return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
+        // };
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u" || config.test_type == "quantile") {
         compute_pval = [&](const auto &row) {
             if (row.empty())
@@ -706,7 +794,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: {} > {}", pval_min, pval);
+                common::logger->error("Min p-val estimate too high: min {} > cur {}", pval_min, pval);
                 throw std::runtime_error("Test failed");
             }
 
@@ -716,9 +804,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (pval_min > 0) {
-                double lkd = log(0.05) - log(pval_min);
-                if (lkd > log(static_cast<double>(std::numeric_limits<uint64_t>::max())))
-                    k = exp(lkd);
+                double lkd = log2(0.05) - log2(pval_min);
+                if (lkd <= 64)
+                    k = pow(2.0, lkd);
 
                 if (k == 0) {
                     common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
