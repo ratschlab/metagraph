@@ -284,102 +284,30 @@ void DBGSSHash::load_superkmer_mask(std::string file){
 }
 
 void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
-    std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";   
-    
-    std::vector<bool> superkmer_mask = dict_->build_superkmer_bv([&anno_graph](std::string_view str){return anno_graph->get_labels(str);});
-    sdsl::bit_vector non_mono_superkmer = mask_into_bit_vec(superkmer_mask);
+    std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";
+
+    //getting labels in batches
+    size_t num_labels = anno_graph->get_annotator().num_labels();
+    std::vector<uint64_t> superkmer_idxs = dict_->build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence){
+                    auto labels = anno_graph->get_top_label_signatures(sequence, num_labels);
+                    // since get_top_label_signatures returns only labels that were found, 
+                    // if any entry is zero not all the kmers share all the same labels -> return false
+                    for(auto pair : labels){
+                        sdsl::rank_support_v rs;
+                        sdsl::util::init_support(rs,&pair.second);
+                        size_t bit_vec_size = pair.second.size();
+                        if(rs(bit_vec_size) != bit_vec_size) return false;
+                    }
+                    return true;
+         });
+
     // elias fano encoding and serialize
-    sdsl::sd_vector<> ef_bv (non_mono_superkmer); 
-    
+    sdsl::sd_vector<> ef_bv (superkmer_idxs.begin(), superkmer_idxs.end());
+
     std::cout << "serializing bit vector..." << std::endl;
     bool check = store_to_file(ef_bv, file_sk_mask);
     std::cout<< " successfully stored " << file_sk_mask<<"?: " <<check<<std::endl;
 
-
-    /*
-    uint64_t num_kmers = dict_->size();
-    uint64_t one_pm_num_kmers = num_kmers/1000;
-    //uint64_t num_super_kmers = dict_->num_superkmers();
-    uint64_t dict_m = dict_->m();
-    uint64_t dict_seed = dict_->seed();
-
-    std::vector<uint64_t> color_changes_per_superkmer(0);
-    std::vector<uint64_t> kmers_per_superkmer(0);
-
-    sshash::dictionary::iterator it = dict_->begin();
-
-    // first kmer
-    uint64_t first_kmer_id = 0;
-    std::string first_kmer_str = "";
-    dict_->access(first_kmer_id, &(first_kmer_str[0]));
-    sshash::kmer_t uint_kmer = sshash::util::string_to_uint_kmer(&(first_kmer_str[0]), k_);
-
-    uint64_t count_labels = 0;
-    uint64_t count_kmers = 1;
-
-    uint64_t minim, new_minim;
-    uint64_t contig_id, new_contig_id;
-
-    // first contig
-    contig_id = dict_->lookup_advanced_uint(uint_kmer, false).contig_id;
-    new_contig_id = contig_id;
-    //first minimizer
-    minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed);
-    new_minim = minim;
-
-    //first labels
-    std::vector<std::string> labels, new_labels;
-    labels = anno_graph->get_labels(first_kmer_str);
-    new_labels = labels;
-    
-    uint64_t kmer_id;
-    std::string kmer_str;
-
-    std::cout<< "iterating through graph... \n";
-    while(it.has_next()){
-        // step to next kmer        
-        auto kmer_pair = it.next();
-        kmer_str = kmer_pair.second;
-        kmer_id = kmer_pair.first;
-        uint_kmer = sshash::util::string_to_uint_kmer(&(kmer_str[0]), k_);
-        new_minim = sshash::util::compute_minimizer(uint_kmer, k_, dict_m, dict_seed); // is this the correct minimizer?
-        new_labels = anno_graph->get_labels(kmer_str);
-        new_contig_id = dict_->lookup_advanced_uint(uint_kmer, false).contig_id;
-
-
-        //next superkmer?
-        if(new_minim != minim || new_contig_id != contig_id){//yes
-            minim = new_minim;
-            contig_id = new_contig_id;
-            labels = new_labels;
-            color_changes_per_superkmer.push_back(count_labels);
-            kmers_per_superkmer.push_back(count_kmers);
-            //reset counters
-            count_labels = 0;
-            count_kmers = 1;
-        }else {//no
-            if(!equal(new_labels, labels)){
-                count_labels++;
-                labels = new_labels;
-            }
-            
-            count_kmers++;
-        }
-        if(kmer_id % one_pm_num_kmers == 0) std::cout<<'.'<<std::flush;
-    }
-    color_changes_per_superkmer.push_back(count_labels);
-    kmers_per_superkmer.push_back(count_kmers);
-    std::cout<< "done!\n";
-    // sanity checks:
-    // 1. per superkmer vectors have same size == num_super_kmers
-    sanity_check_1(color_changes_per_superkmer, kmers_per_superkmer, 0);//num_super_kmers);
-    // 2. sum of kmers_per_superkmer is num_kmers
-    sanity_check_2(kmers_per_superkmer, num_kmers);
-
-
-    // save stats
-    write_stats_to_file(kmers_per_superkmer, color_changes_per_superkmer);
-    */
 }
 
 bool DBGSSHash::equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2)const {
