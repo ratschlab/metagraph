@@ -43,7 +43,7 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
         auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
         if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
             //callback(kmer_to_node(sequence.substr(i, k_)));
-            callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id));
+            callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id, true));
         }else{
             callback(s_idx);
         }
@@ -180,8 +180,8 @@ void DBGSSHash::call_kmers(
     }
 }
 
-DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id) const {
-    uint64_t ssh_idx = dict_->look_up_from_superkmer_id(s_id, kmer.begin());
+DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id, bool check_reverse_complement) const {
+    uint64_t ssh_idx = dict_->look_up_from_superkmer_id(s_id, kmer.begin(), check_reverse_complement);
     return ssh_idx + 1;
 }
 

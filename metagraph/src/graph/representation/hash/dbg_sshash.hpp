@@ -80,7 +80,7 @@ class DBGSSHash : public DeBruijnGraph {
     bool has_single_incoming(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
-    node_index kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id) const;
+    node_index kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id, bool check_reverse_complement) const;
 
     
     void call_outgoing_kmers(node_index node,
