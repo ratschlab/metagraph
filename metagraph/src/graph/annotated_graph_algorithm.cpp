@@ -10,6 +10,7 @@
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/tools/minima.hpp>
+#include <boost/math/tools/roots.hpp>
 
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
@@ -494,9 +495,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         auto get_a = [&](double k, double k2, uint8_t pick) {
             double mu = k / nelem;
-            auto get_ll = [&](double r) {
-                double p = r / (r + mu);
-                double ll = nelem * r * log(p) - nelem * lgamma(r);
+            auto get_dll = [&](double r) {
+                double lp = log(r) - log(r + mu);
+                double dll = nelem * lp - nelem * boost::math::digamma(r);
                 for (const auto &[si, so] : counts) {
                     double s = 0;
                     if (pick == 0) {
@@ -506,44 +507,64 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     } else {
                         s = si + so;
                     }
-                    ll += lgamma(r + s);
+                    dll += boost::math::digamma(r + s);
                 }
 
-                return -ll;
+                return dll;
             };
 
-            return boost::math::tools::brent_find_minima(
-                get_ll, 0.0, nelem, 64
-            ).first * nelem / (nelem - 1);
+            double var = k2 / nelem - mu * mu;
+            double r_guess = mu * mu / (var - mu);
+
+            long unsigned int max_iter = 100;
+            auto [r_min,r_max] = boost::math::tools::bracket_and_solve_root(
+                get_dll, r_guess, 2.0, false, [&](double r_min, double r_max) {
+                    return abs(r_min - r_max) / r_max < 1e-5;
+                },
+                max_iter
+            );
+            double a = (r_min + r_max) / 2.0 * nelem / (nelem - 1);
+
+            double b = (nelem - 1) * a;
+
+            common::logger->trace("{}:\tmean: {}\tvar: {}\ta: {}\tb: {}\texp: {}\tvar: {}",
+                                  pick, mu, k2 / nelem - mu * mu,
+                                  a, b,
+                                  k * a / (a + b),
+                                  mu + mu * mu * (nelem - 1) / (nelem * a + 1));
+
+            return std::make_pair(a, b);
         };
 
-        double a_in = get_a(in_kmers, sum_of_squares_in, 0);
-        double a_out = get_a(out_kmers, sum_of_squares_out, 1);
-        double a_null = get_a(total_kmers, sum_of_squares_null, 2);
+        auto [a_null, b_null] = get_a(total_kmers, sum_of_squares_null, 2);
 
-        double b_in = (nelem - 1) * a_in;
-        double b_out = (nelem - 1) * a_out;
-        double b_null = (nelem - 1) * a_null;
+        if (a_null <= 1) {
+            throw std::runtime_error("a_null <= 1");
+        }
 
-        common::logger->trace("In: {},{}\tOut: {},{}\tNull: {},{}",
-                              a_in,b_in,a_out,b_out,a_null,b_null);
+        auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 0);
+        auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 1);
+
+        if (a_in <= 1) {
+            a_in = a_null;
+            b_in = b_null;
+        }
+
+        if (a_out <= 1) {
+            a_out = a_null;
+            b_out = b_null;
+        }
 
         auto get_theta = [&](double a, double b, double total, double k_sum) {
             double qb = 2.0 - total - k_sum - a - b;
             double qc = k_sum + a - 1;
-            double common = sqrt(qb * qb - 4 * total * qc);
-            double theta_low = (-qb - common) / 2.0 / total;
-            double theta_high = (-qb + common) / 2.0 / total;
+            double qf = sqrt(qb * qb - 4 * total * qc);
+            double theta_low = (-qb - qf) / 2.0 / total;
+            double theta_high = (-qb + qf) / 2.0 / total;
 
             bool low_valid = theta_low > 0 && theta_low < 1.0;
-            bool high_valid = common != 0 && theta_high > 0 && theta_high < 1.0;
+            bool high_valid = qf != 0 && theta_high > 0 && theta_high < 1.0;
 
-            // double stat_zero = k_sum + a - 1 < 1
-            //     ? std::numeric_limits<double>::infinity()
-            //     : -std::numeric_limits<double>::infinity();
-            // double stat_one = -total;
-            double stat_zero = -std::numeric_limits<double>::infinity();
-            double stat_one = -std::numeric_limits<double>::infinity();
             double stat_low = low_valid
                 ? (k_sum + a - 1) * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
                 : -std::numeric_limits<double>::infinity();
@@ -551,43 +572,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ? (k_sum + a - 1) * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
                 : -std::numeric_limits<double>::infinity();
 
-            double stat_max = std::max({ stat_zero, stat_one, stat_low, stat_high });
+            double stat_max = std::max({ stat_low, stat_high });
 
-            bool stat_is_zero = stat_max == stat_zero;
-            bool stat_is_one = stat_max == stat_one;
             bool stat_is_low = low_valid && stat_max == stat_low;
             bool stat_is_high = high_valid && stat_max == stat_high;
 
-            if ((stat_is_zero && stat_is_one)
-                    || (stat_is_zero && stat_is_low)
-                    || (stat_is_zero && stat_is_high)
-                    || (stat_is_one && stat_is_low)
-                    || (stat_is_one && stat_is_high)
-                    || (stat_is_low && stat_is_high)) {
+            if (stat_is_low && stat_is_high) {
                 common::logger->error("Multiple valid thetas\t{}", stat_max);
-                common::logger->error("{}\t{}\t{}\t{}", 0.0, 1.0, theta_low, theta_high);
-                common::logger->error("{}\t{}\t{}\t{}", stat_zero, stat_one, stat_low, stat_high);
-                common::logger->error("{}\t{}\t{}\t{}", stat_is_zero, stat_is_one, stat_is_low, stat_is_high);
+                common::logger->error("{}\t{}", theta_low, theta_high);
+                common::logger->error("{}\t{}", stat_low, stat_high);
+                common::logger->error("{}\t{}", stat_is_low, stat_is_high);
                 common::logger->error("Ratio: {} / {}", k_sum, total);
                 throw std::runtime_error("Fail");
             }
 
-            if (stat_is_zero)
-                return 0.0;
-
-            if (stat_is_one)
-                return 1.0;
-
-            if (stat_is_low)
-                return theta_low;
-
-            if (stat_is_high)
-                return theta_high;
+            if (stat_is_low || stat_is_high)
+                return std::make_tuple(theta_low, theta_high, stat_is_low, stat_is_high);
 
             common::logger->error("No valid thetas\t{}", stat_max);
-            common::logger->error("{}\t{}\t{}\t{}", 0.0, 1.0, theta_low, theta_high);
-            common::logger->error("{}\t{}\t{}\t{}", stat_zero, stat_one, stat_low, stat_high);
-            common::logger->error("{}\t{}\t{}\t{}", stat_is_zero, stat_is_one, stat_is_low, stat_is_high);
+            common::logger->error("{}\t{}", theta_low, theta_high);
+            common::logger->error("{}\t{}", stat_low, stat_high);
+            common::logger->error("{}\t{}", stat_is_low, stat_is_high);
+            common::logger->error("Ratio: {} / {}", k_sum, total);
             throw std::runtime_error("Fail");
         };
 
@@ -607,43 +613,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double null_sum = in_sum + out_sum;
 
-            double theta_null = get_theta(a_null, b_null, total_kmers, null_sum);
-            double theta_in = get_theta(a_in, b_in, in_kmers, in_sum);
-            double theta_out = get_theta(a_out, b_out, out_kmers, out_sum);
+            auto [theta_null_low, theta_null_high, null_is_low, null_is_high]
+                = get_theta(a_null, b_null, total_kmers, null_sum);
+            auto [theta_in_low, theta_in_high, in_is_low, in_is_high]
+                = get_theta(a_in, b_in, in_kmers, in_sum);
+            auto [theta_out_low, theta_out_high, out_is_low, out_is_high]
+                = get_theta(a_out, b_out, out_kmers, out_sum);
+
+            double theta_null = null_is_low ? theta_null_low : theta_null_high;
+            double theta_in = in_is_low ? theta_in_low : theta_in_high;
+            double theta_out = out_is_low ? theta_out_low : theta_out_high;
 
             auto get_stat_log = [&](double a, double b, double theta, double k, double total) -> double {
                 return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
             };
 
-            auto get_stat = [&](double a, double b, double theta, double k, double total) -> double {
-                return pow(theta, k + a - 1) * pow(1.0 - theta, b - 1) * exp(-total * theta);
-            };
+            double map_pval_in = exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
+                                    - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers));
 
-            double map_pval_in = theta_in > 0
-                ? exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
-                        - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers))
-                : get_stat(a_in, b_in, theta_null, in_sum, in_kmers);
+            double map_pval_out = exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
+                                    - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers));
 
-            double map_pval_out = theta_out > 0
-                ? exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
-                        - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers))
-                : get_stat(a_out, b_out, theta_null, out_sum, out_kmers);
-
-            // double map_pval_in = theta_in > 0
-            //     ? exp(get_stat_log(theta_in, null_sum, total_kmers)
-            //             - get_stat_log(theta_null, null_sum, total_kmers))
-            //     : exp(-get_stat_log(theta_null, null_sum, total_kmers));
-
-            // double map_pval_out = theta_out > 0
-            //     ? exp(get_stat_log(theta_out, null_sum, total_kmers)
-            //             - get_stat_log(theta_null, null_sum, total_kmers))
-            //     : exp(-get_stat_log(theta_null, null_sum, total_kmers));
+            // common::logger->trace("{},{},{}\t{},{}", theta_in, theta_out, theta_null, map_pval_in, map_pval_out);
 
             if (map_pval_in > 1.0 || map_pval_in < 0.0
                     || map_pval_out > 1.0 || map_pval_out < 0.0) {
+                return std::make_tuple(1.0, in_sum,
+                                       out_sum / out_kmers * in_kmers);
                 common::logger->error("Failed to compute MAP of thetas");
                 common::logger->error("Theta in: {}\tTheta out: {}\tTheta null: {}",
                                       theta_in, theta_out, theta_null);
+                common::logger->error("Theta in low: {}\tTheta out low: {}\tTheta null low: {}",
+                                      theta_in_low, theta_out_low, theta_null_low);
+                common::logger->error("Theta in high: {}\tTheta out high: {}\tTheta null high: {}",
+                                      theta_in_high, theta_out_high, theta_null_high);
                 common::logger->error("In sum: {}\tOut sum: {}", in_sum, out_sum);
                 common::logger->error("In p-val: {}\tOut p-val: {}", map_pval_in, map_pval_out);
                 throw std::runtime_error("Fail");
