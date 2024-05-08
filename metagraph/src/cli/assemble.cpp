@@ -212,8 +212,34 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                         background_labels,
                                         diff_config, num_threads,
                                         config->parallel_nodes);
+
+            sdsl::bit_vector mask;
             callback(*ingraph, exp_name + "in.");
+            if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(ingraph)) {
+                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                for (double pval : masked_graph->likelihood_ratios) {
+                    fout_all << pval << "\n";
+                }
+                std::unique_ptr<bitmap_vector> inmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                mask = const_cast<sdsl::bit_vector&&>(inmask->data());
+                inmask.reset();
+            }
+            ingraph.reset();
+
             callback(*outgraph, exp_name + "out.");
+            if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(outgraph)) {
+                std::unique_ptr<bitmap_vector> outmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                outmask->add_to(&mask);
+                outmask.reset();
+                mask.flip();
+                auto masked_graph_null = std::make_shared<MaskedDeBruijnGraph>(
+                    graph_ptr, std::make_unique<bitmap_vector>(std::move(mask)), true,
+                    graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+                );
+                masked_graph_null->likelihood_ratios = std::move(masked_graph->likelihood_ratios);
+                callback(*masked_graph_null, exp_name + "shared.");
+            }
+            outgraph.reset();
         }
     }
 }
@@ -261,12 +287,6 @@ int assemble(Config *config) {
                                        num_threads > 1, /* async write */
                                        "a" /* append mode */);
             std::ofstream fout(config->outfbase + ".pvals", ios::out | ios::app);
-            {
-                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
-                for (double pval : masked_graph->likelihood_ratios) {
-                    fout_all << pval << "\n";
-                }
-            }
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph.call_unitigs(

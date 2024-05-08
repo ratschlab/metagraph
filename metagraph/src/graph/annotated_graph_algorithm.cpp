@@ -114,6 +114,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     uint8_t max_width = 0;
     uint64_t max_val = 0;
 
+    sdsl::bit_vector singletons(max_index, false);
+
     auto get_count = [&](uint64_t raw_count, uint64_t cutoff, uint64_t row_i) {
         return raw_count <= cutoff ? raw_count : 0;
         // if (raw_count <= cutoff)
