@@ -495,6 +495,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         auto get_a = [&](double k, double k2, uint8_t pick) {
             double mu = k / nelem;
+            // model with a negative binomial, similar to
+            // https://github.com/JBHilton/beta-poisson-epidemics/blob/master/functions.py#L140
             auto get_dll = [&](double r) {
                 double lp = log(r) - log(r + mu);
                 double dll = nelem * lp - nelem * boost::math::digamma(r);
@@ -542,18 +544,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::runtime_error("a_null <= 1");
         }
 
-        auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 0);
-        auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 1);
+        // auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 0);
+        // auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 1);
 
-        if (a_in <= 1) {
-            a_in = a_null;
-            b_in = b_null;
-        }
+        // if (a_in <= 1) {
+            double a_in = a_null;
+            double b_in = b_null;
+        // }
 
-        if (a_out <= 1) {
-            a_out = a_null;
-            b_out = b_null;
-        }
+        // if (a_out <= 1) {
+            double a_out = a_null;
+            double b_out = b_null;
+        // }
 
         auto get_theta = [&](double a, double b, double total, double k_sum) {
             double qb = 2.0 - total - k_sum - a - b;
