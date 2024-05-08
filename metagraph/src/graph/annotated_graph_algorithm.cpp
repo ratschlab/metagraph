@@ -348,6 +348,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("mu: {}\tmu2: {}\tmu3: {}\tr_low: {}\tr_high: {}",
                               mu, mu2, mu3, r_low, r_high);
 
+        // check for NaNs
+        // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
+        if (r_low != r_low && r_high != r_high) {
+            common::logger->error("{},{},{}", a, b, c);
+            throw std::runtime_error("Failed to fit, no real roots");
+        }
+
         double r_low_var_sqerr = 0;
         double r_high_var_sqerr = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -596,8 +603,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
 
-            bool low_valid = theta_low > 0 && theta_low < 1.0;
-            bool high_valid = theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
+            // Note: comparisons of thetas to themselves ensure that they are not NaN
+            // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
+            bool low_valid = theta_low == theta_low && theta_low > 0 && theta_low < 1.0;
+            bool high_valid = theta_high == theta_high && theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
 
             double stat_low = low_valid
                 ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
