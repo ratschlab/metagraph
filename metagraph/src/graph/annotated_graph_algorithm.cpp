@@ -117,7 +117,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     sdsl::bit_vector singletons(max_index, false);
 
     auto get_count = [&](uint64_t raw_count, uint64_t cutoff, uint64_t row_i) {
-        return raw_count <= cutoff ? raw_count : 0;
+        return raw_count <= cutoff && !singletons[row_i] ? raw_count : 0;
         // if (raw_count <= cutoff)
         //     return raw_count;
 
@@ -133,76 +133,100 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_val = sdsl::bits::lo_set[max_width];
             max_vals.push_back(max_val);
 
-            // median calculation modifies the underlying vector, so we have to make a copy
-            std::vector<uint64_t> vals;
-            vals.reserve(column_values.size());
-            std::copy(column_values.begin(), column_values.end(), std::back_inserter(vals));
+            columns_all.emplace_back(std::move(column));
+            column_values_all.push_back(std::make_unique<ValuesContainer>(std::move(column_values)));
+        }
+    );
 
-            uint64_t in_max_obs_val = *std::max_element(vals.begin(), vals.end());
+    if (groups.size()) {
+        uint64_t row_i = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
+            singletons[row_i++] = raw_row.empty() || (raw_row.size() == 1 && raw_row[0].second == 1);
+        });
+    }
 
-            auto [q1, q3] = quartiles(vals.begin(), vals.end());
-            double q2 = boost::math::statistics::median(vals);
-            double outlier_cutoff = q3 + 1.5 * (q3 - q1);
+    uint64_t num_singletons = sdsl::util::cnt_one_bits(singletons);
 
-            double repeats_mu = 0;
-            double repeats_cutoff = 0;
-            size_t num_large = 0;
-            for (uint64_t c : vals) {
-                if (c >= outlier_cutoff) {
-                    repeats_mu += c;
-                    ++num_large;
-                }
+    for (size_t j = 0; j < groups.size(); ++j) {
+        const auto &column = columns_all[j];
+        const auto &column_values = *column_values_all[j];
+
+        // median calculation modifies the underlying vector, so we have to make a copy
+        std::vector<uint64_t> vals;
+        vals.reserve(column_values.size() - num_singletons);
+
+        {
+            size_t i = 0;
+            column->call_ones([&](uint64_t row_i) {
+                if (!singletons[row_i])
+                    vals.emplace_back(column_values[i]);
+                ++i;
+            });
+        }
+
+        uint64_t in_max_obs_val = *std::max_element(vals.begin(), vals.end());
+
+        auto [q1, q3] = quartiles(vals.begin(), vals.end());
+        double q2 = boost::math::statistics::median(vals);
+        double outlier_cutoff = q3 + 1.5 * (q3 - q1);
+
+        double repeats_mu = 0;
+        double repeats_cutoff = 0;
+        size_t num_large = 0;
+        for (uint64_t c : vals) {
+            if (c >= outlier_cutoff) {
+                repeats_mu += c;
+                ++num_large;
             }
-            if (num_large) {
-                repeats_mu /= num_large;
+        }
+        if (num_large) {
+            repeats_mu /= num_large;
 
-                repeats_cutoff = boost::math::quantile(boost::math::complement(
-                    boost::math::poisson(repeats_mu), 0.95
-                ));
+            repeats_cutoff = boost::math::quantile(boost::math::complement(
+                boost::math::poisson(repeats_mu), 0.95
+            ));
 
-                if (repeats_cutoff > outlier_cutoff) {
-                    check_cutoff.emplace_back(repeats_cutoff);
-                } else {
-                    check_cutoff.emplace_back(max_val);
-                }
+            if (repeats_cutoff > outlier_cutoff) {
+                check_cutoff.emplace_back(repeats_cutoff);
             } else {
                 check_cutoff.emplace_back(max_val);
             }
-
-            uint64_t sum = 0;
-            uint64_t sum_of_squares = 0;
-            uint64_t max_obs_val = 0;
-            size_t i = 0;
-            size_t n = 0;
-            column->call_ones([&](uint64_t row_i) {
-                if (uint64_t c = get_count(column_values[i], check_cutoff.back(), row_i)) {
-                    sum += c;
-                    sum_of_squares += c * c;
-                    max_obs_val = std::max(max_obs_val, c);
-                    ++n;
-                }
-                ++i;
-            });
-
-            max_obs_vals.emplace_back(max_obs_val);
-
-            medians.push_back(q2);
-
-            sums.push_back(sum);
-            sums_of_squares.push_back(sum_of_squares);
-            n_kmers.push_back(n);
-
-            columns_all.emplace_back(std::move(column));
-            column_values_all.push_back(std::make_unique<ValuesContainer>(std::move(column_values)));
-
-            common::logger->trace("{}: {}\tGroup: {}\tTotal: {}\tQ1: {}\tQ2: {}\tQ3: {}\tMax val: {}\tOutlier cutoff: {}\tRepeat mu: {}\tRepeat lb: {}\tCheck cutoff: {}",
-                                  groups.size(), label, groups.back() ? "out": "in", sum,
-                                  q1, q2, q3,
-                                  in_max_obs_val,
-                                  outlier_cutoff,
-                                  repeats_mu, repeats_cutoff, check_cutoff.back());
+        } else {
+            check_cutoff.emplace_back(max_val);
         }
-    );
+
+        uint64_t sum = 0;
+        uint64_t sum_of_squares = 0;
+        uint64_t max_obs_val = 0;
+        size_t i = 0;
+        size_t n = 0;
+        column->call_ones([&](uint64_t row_i) {
+            if (uint64_t c = get_count(column_values[i], check_cutoff.back(), row_i)) {
+                sum += c;
+                sum_of_squares += c * c;
+                max_obs_val = std::max(max_obs_val, c);
+                ++n;
+            }
+            ++i;
+        });
+
+        max_obs_vals.emplace_back(max_obs_val);
+
+        medians.push_back(q2);
+
+        sums.push_back(sum);
+        sums_of_squares.push_back(sum_of_squares);
+        n_kmers.push_back(n);
+
+        common::logger->trace("{}\tGroup: {}\tTotal: {}\tQ1: {}\tQ2: {}\tQ3: {}\tMax val: {}\tOutlier cutoff: {}\tRepeat mu: {}\tRepeat lb: {}\tCheck cutoff: {}",
+                                j, groups[j] ? "out": "in", sum,
+                                q1, q2, q3,
+                                in_max_obs_val,
+                                outlier_cutoff,
+                                repeats_mu, repeats_cutoff, check_cutoff[j]);
+    }
 
     uint64_t max_observed_value = *std::max_element(max_obs_vals.begin(), max_obs_vals.end());
 
@@ -219,6 +243,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
     double total_kmers = in_kmers + out_kmers;
+
+    double nelem = max_index - num_singletons;
 
     sdsl::bit_vector indicator_in(max_index + 1, false);
     sdsl::bit_vector indicator_out(max_index + 1, false);
@@ -309,29 +335,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++i;
             });
         }
-        double mu = static_cast<double>(total_kmers) / groups.size() / max_index;
+        double mu = static_cast<double>(total_kmers) / groups.size() / nelem;
         double mu2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
-                                                         sums_of_squares.end(), uint64_t(0))) / groups.size() / max_index - mu;
-        double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / max_index;
+                                                         sums_of_squares.end(), uint64_t(0))) / groups.size() / nelem - mu;
+        double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / nelem;
         double a = mu3 * mu + mu * mu * mu2 + 2 * mu2 * mu2;
         double b = 2 * mu3 * mu * mu + mu3 * mu - mu2 * mu3 - mu * mu2 * mu2 + 3 * mu * mu + mu2 - 4 * mu2 * mu2;
         double c = -2 * mu * (mu2 * mu2 - mu * mu2 - mu3 * mu);
-        double r_low = (-b - sqrt(b * b - 4 * a * c)) / 2 / a;
-        double r_high = (-b + sqrt(b * b - 4 * a * c)) / 2 / a;
+
+        auto [r_low, r_high] = boost::math::tools::quadratic_roots(a, b, c);
+
+        common::logger->trace("mu: {}\tmu2: {}\tmu3: {}\tr_low: {}\tr_high: {}",
+                              mu, mu2, mu3, r_low, r_high);
 
         double r_low_var_sqerr = 0;
         double r_high_var_sqerr = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            double mu = static_cast<double>(sums[j]) / max_index;
-            double var = static_cast<double>(sums_of_squares[j]) / max_index - mu * mu;
+            double mu = static_cast<double>(sums[j]) / nelem;
+            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
             double p_low = r_low / (r_low + mu);
             double p_high = r_high / (r_high + mu);
             double t_var_low = mu / p_low;
             double t_var_high = mu / p_high;
             r_low_var_sqerr += pow(t_var_low - var, 2.0);
             r_high_var_sqerr += pow(t_var_high - var, 2.0);
-            common::logger->trace("label: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
-                                  j + 1, var, p_low, t_var_low, p_high, t_var_high);
+            common::logger->trace("label: {}\tmean: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
+                                  j + 1, mu, var, p_low, t_var_low, p_high, t_var_high);
         }
 
         common::logger->trace("r low: {} (sqerr: {})\t r high: {} (sqerr: {})",
@@ -459,9 +488,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "bp") {
         double pseudocount = 0;
-        in_kmers += pseudocount * max_index;
-        out_kmers += pseudocount * max_index;
-        total_kmers += pseudocount * 2.0 * max_index;
+        in_kmers += pseudocount * nelem;
+        out_kmers += pseudocount * nelem;
+        total_kmers += pseudocount * 2.0 * nelem;
         uint64_t row_i = 0;
         double sum_of_squares_in = 0;
         double sum_of_squares_out = 0;
@@ -470,23 +499,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         utils::call_rows<std::unique_ptr<bit_vector>,
                         std::unique_ptr<ValuesContainer>,
                         PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
-            double sum_in = pseudocount;
-            double sum_out = pseudocount;
-            for (const auto &[j, raw_c] : raw_row) {
-                if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i)) {
-                    if (groups[j]) {
-                        sum_in += c;
-                    } else {
-                        sum_out += c;
+            if (!singletons[row_i]) {
+                double sum_in = pseudocount;
+                double sum_out = pseudocount;
+                for (const auto &[j, raw_c] : raw_row) {
+                    if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i)) {
+                        if (groups[j]) {
+                            sum_in += c;
+                        } else {
+                            sum_out += c;
+                        }
                     }
                 }
-            }
 
-            if (sum_in + sum_out > 0) {
-                counts.emplace_back(sum_in, sum_out);
-                sum_of_squares_in += sum_in * sum_in;
-                sum_of_squares_out += sum_out * sum_out;
-                sum_of_squares_null += pow(sum_in + sum_out, 2.0);
+                if (sum_in + sum_out > 0) {
+                    counts.emplace_back(sum_in, sum_out);
+                    sum_of_squares_in += sum_in * sum_in;
+                    sum_of_squares_out += sum_out * sum_out;
+                    sum_of_squares_null += pow(sum_in + sum_out, 2.0);
+                }
             }
             ++row_i;
         });
@@ -561,19 +592,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         auto get_theta = [&](double a, double b, double total, double k_sum) {
             double qb = 2.0 - total - k_sum - a - b;
-            double qc = k_sum + a - 1;
-            double qf = sqrt(qb * qb - 4 * total * qc);
-            double theta_low = (-qb - qf) / 2.0 / total;
-            double theta_high = (-qb + qf) / 2.0 / total;
+            double qc = k_sum + a - 1.0;
+
+            auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
 
             bool low_valid = theta_low > 0 && theta_low < 1.0;
-            bool high_valid = qf != 0 && theta_high > 0 && theta_high < 1.0;
+            bool high_valid = theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
 
             double stat_low = low_valid
-                ? (k_sum + a - 1) * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
+                ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
                 : -std::numeric_limits<double>::infinity();
             double stat_high = high_valid
-                ? (k_sum + a - 1) * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
+                ? qc * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
                 : -std::numeric_limits<double>::infinity();
 
             double stat_max = std::max({ stat_low, stat_high });
@@ -587,6 +617,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->error("{}\t{}", stat_low, stat_high);
                 common::logger->error("{}\t{}", stat_is_low, stat_is_high);
                 common::logger->error("Ratio: {} / {}", k_sum, total);
+                common::logger->error("{},{}\t{},{},{}", a,b, total, qb, qc);
                 throw std::runtime_error("Fail");
             }
 
@@ -598,10 +629,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->error("{}\t{}", stat_low, stat_high);
             common::logger->error("{}\t{}", stat_is_low, stat_is_high);
             common::logger->error("Ratio: {} / {}", k_sum, total);
+            common::logger->error("{},{}\t{},{},{}", a,b,total, qb, qc);
             throw std::runtime_error("Fail");
         };
 
-        compute_pval = [&](const auto &row) {
+        compute_pval = [&,a_in,a_out,a_null,b_in,b_out,b_null,nelem,get_theta](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
@@ -774,69 +806,71 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     utils::call_rows<std::unique_ptr<bit_vector>,
                      std::unique_ptr<ValuesContainer>,
                      PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
-        PairContainer row;
-        for (const auto &[j, raw_c] : raw_row) {
-            if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i))
-                row.emplace_back(j, c);
-        }
-
-        auto [pval, in_stat, out_stat] = compute_pval(row);
-        pvals.emplace_back(pval);
-
-        if (pval > 1.0 || in_stat == out_stat) {
-            ++row_i;
-            return;
-        }
-
-        bool in_kmer = in_stat > out_stat;
-        bool out_kmer = in_stat < out_stat;
-        uint64_t k = std::numeric_limits<uint64_t>::max();
-
-        if (config.test_type != "nonparametric") {
-            double pval_min = 0;
-            if (config.test_type == "nonparametric_u") {
-                pval_min = 2.0 / exp(lgamma(groups.size() + 1) - lgamma(labels_in.size() + 1) - lgamma(labels_out.size() + 1));
-            } else {
-                PairContainer best;
-                for (const auto &[j, c] : row) {
-                    if ((in_kmer && !groups[j]) || (out_kmer && groups[j])) {
-                        best.emplace_back(j, max_obs_vals[j]);
-                    } else {
-                        best.emplace_back(j, 1);
-                    }
-                }
-
-                auto [pm, in_sum_m, out_sum_m] = compute_pval(best);
-                pval_min = pm;
+        if (!singletons[row_i]) {
+            PairContainer row;
+            for (const auto &[j, raw_c] : raw_row) {
+                if (uint64_t c = get_count(raw_c, check_cutoff[j], row_i))
+                    row.emplace_back(j, c);
             }
 
-            if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: min {} > cur {}", pval_min, pval);
-                throw std::runtime_error("Test failed");
-            }
+            auto [pval, in_stat, out_stat] = compute_pval(row);
+            pvals.emplace_back(pval);
 
-            if (pval_min >= 0.05) {
+            if (pval > 1.0 || in_stat == out_stat) {
                 ++row_i;
                 return;
             }
 
-            if (pval_min > 0) {
-                double lkd = log2(0.05) - log2(pval_min);
-                if (lkd <= 64)
-                    k = pow(2.0, lkd);
+            bool in_kmer = in_stat > out_stat;
+            bool out_kmer = in_stat < out_stat;
+            uint64_t k = std::numeric_limits<uint64_t>::max();
 
-                if (k == 0) {
-                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
-                    throw std::runtime_error("Min failed");
+            if (config.test_type != "nonparametric") {
+                double pval_min = 0;
+                if (config.test_type == "nonparametric_u") {
+                    pval_min = 2.0 / exp(lgamma(groups.size() + 1) - lgamma(labels_in.size() + 1) - lgamma(labels_out.size() + 1));
+                } else {
+                    PairContainer best;
+                    for (const auto &[j, c] : row) {
+                        if ((in_kmer && !groups[j]) || (out_kmer && groups[j])) {
+                            best.emplace_back(j, max_obs_vals[j]);
+                        } else {
+                            best.emplace_back(j, 1);
+                        }
+                    }
+
+                    auto [pm, in_sum_m, out_sum_m] = compute_pval(best);
+                    pval_min = pm;
+                }
+
+                if (pval_min > pval) {
+                    common::logger->error("Min p-val estimate too high: min {} > cur {}", pval_min, pval);
+                    throw std::runtime_error("Test failed");
+                }
+
+                if (pval_min >= 0.05) {
+                    ++row_i;
+                    return;
+                }
+
+                if (pval_min > 0) {
+                    double lkd = log2(0.05) - log2(pval_min);
+                    if (lkd <= 64)
+                        k = pow(2.0, lkd);
+
+                    if (k == 0) {
+                        common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                        throw std::runtime_error("Min failed");
+                    }
                 }
             }
-        }
 
-        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-        m[k].emplace_back(node);
-        auto &indicator = in_kmer ? indicator_in : indicator_out;
-        if (pval < 0.05)
-            indicator[node] = true;
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            m[k].emplace_back(node);
+            auto &indicator = in_kmer ? indicator_in : indicator_out;
+            if (pval < 0.05)
+                indicator[node] = true;
+        }
 
         ++row_i;
     });
