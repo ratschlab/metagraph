@@ -122,13 +122,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         num_parallel_files
     );
 
-    std::vector<double> medians;
-    std::vector<uint64_t> min_counts;
-    std::vector<uint64_t> check_cutoff;
-    std::vector<uint64_t> max_obs_vals;
-    std::vector<size_t> n_kmers;
-    std::vector<uint64_t> sums;
-    std::vector<uint64_t> sums_of_squares;
+
+    std::vector<uint64_t> min_counts(groups.size(), 0);
+    std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
     auto adjust_count = [&](uint64_t raw_count, size_t j, uint64_t row_i) {
         std::ignore = row_i;
@@ -137,42 +133,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             : 0;
     };
 
-    common::logger->trace("Cleaning count columns");
-    double in_kmers = 0;
-    double out_kmers = 0;
-    for (size_t j = 0; j < groups.size(); ++j) {
-        const auto &column = *columns_all[j];
-        const auto &column_values = *column_values_all[j];
+    if (config.clean && !config.min_count) {
+        common::logger->trace("Cleaning count columns");
+        for (size_t j = 0; j < groups.size(); ++j) {
+            const auto &column_values = *column_values_all[j];
 
-        // median calculation modifies the underlying vector, so we have to make a copy
-        std::vector<uint64_t> vals;
-        vals.reserve(column_values.size());
-
-        for (size_t i = 0; i < column_values.size(); ++i) {
-            vals.emplace_back(column_values[i]);
-        }
-
-        check_cutoff.emplace_back(std::numeric_limits<uint64_t>::max());
-        min_counts.emplace_back(config.min_count);
-
-        if (config.clean && !config.min_count) {
             // set cutoff for lower end of distribution
             auto [mean_est, nzeros_est] = estimate_ztp_mean(
                 [&](const auto &callback) {
-                    std::for_each(vals.begin(), vals.end(), callback);
+                    for (size_t i = 0; i < column_values.size(); ++i) {
+                        callback(column_values[i]);
+                    }
                 },
                 max_width,
                 0,
                 N_BUCKETS_FOR_ESTIMATION
             );
 
-            min_counts.back() = boost::math::quantile(
+            min_counts[j] = boost::math::quantile(
                 boost::math::poisson(mean_est), exp(-mean_est) - CDF_CUTOFF * expm1(-mean_est)
             );
 
-            vals.clear();
+            // quartile calculation modifies the underlying vector, so we have to make a copy
+            std::vector<uint64_t> vals;
+            vals.reserve(column_values.size());
             for (size_t i = 0; i < column_values.size(); ++i) {
-                if (column_values[i] >= min_counts.back())
+                if (column_values[i] >= min_counts[j])
                     vals.emplace_back(column_values[i]);
             }
 
@@ -196,26 +182,60 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ));
 
                 if (repeats_cutoff > outlier_cutoff)
-                    check_cutoff.back() = repeats_cutoff;
+                    check_cutoff[j] = repeats_cutoff;
             }
         }
+    }
 
+    common::logger->trace("Marking discarded k-mers");
+    if (groups.size()) {
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all,
+                                        [&](uint64_t row_i, const auto &row) {
+            if (row.empty()) {
+                ignored[row_i] = true;
+            } else if (config.clean) {
+                uint64_t sum = 0;
+                for (const auto &[j, raw_c] : row) {
+                    if (uint64_t c = adjust_count(raw_c, j, row_i))
+                        sum += c;
+                }
+
+                ignored[row_i] = sum < config.min_count;
+            }
+        });
+    }
+
+    common::logger->trace("Computing aggregate statistics");
+    double in_kmers = 0;
+    double out_kmers = 0;
+    std::vector<double> medians;
+    std::vector<uint64_t> max_obs_vals;
+    std::vector<size_t> n_kmers;
+    std::vector<uint64_t> sums;
+    std::vector<uint64_t> sums_of_squares;
+    for (size_t j = 0; j < groups.size(); ++j) {
+        const auto &column = *columns_all[j];
+        const auto &column_values = *column_values_all[j];
         uint64_t sum = 0;
         uint64_t sum_of_squares = 0;
-        uint64_t max_obs_val = 0;
         size_t i = 0;
         size_t n = 0;
+
+        std::vector<uint64_t> vals;
+        vals.reserve(column_values.size());
         column.call_ones([&](uint64_t row_i) {
             if (uint64_t c = adjust_count(column_values[i], j, row_i)) {
+                vals.emplace_back(c);
                 sum += c;
                 sum_of_squares += c * c;
-                max_obs_val = std::max(max_obs_val, c);
                 ++n;
             }
             ++i;
         });
 
-        max_obs_vals.emplace_back(max_obs_val);
+        max_obs_vals.emplace_back(*std::max_element(vals.begin(), vals.end()));
         medians.push_back(boost::math::statistics::median(vals));
 
         sums.push_back(sum);
@@ -228,38 +248,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         n_kmers.push_back(n);
 
         common::logger->trace("{}: sum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
-                              j, sum, medians[j], max_obs_val, min_counts.back(), check_cutoff.back());
+                              j, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
     }
 
     double total_kmers = in_kmers + out_kmers;
-
-    common::logger->trace("Marking discarded k-mers");
-    if (groups.size()) {
-        uint64_t row_i = 0;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            if (row.empty()) {
-                ignored[row_i++] = true;
-                return;
-            } else if (!config.clean) {
-                ++row_i;
-                return;
-            }
-
-            bool found = true;
-            for (const auto &[j, raw_c] : row) {
-                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                    found = false;
-                    break;
-                }
-            }
-
-            ignored[row_i++] = found;
-        });
-    }
-
     double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
+
+    common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
+                          nelem, total_kmers);
 
     common::logger->trace("Running differential tests");
     sdsl::bit_vector indicator_in(graph_ptr->max_index() + 1, false);
@@ -511,32 +507,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "bp") {
-        uint64_t row_i = 0;
         double sum_of_squares = 0;
         std::vector<double> counts;
         counts.reserve(nelem);
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all, [&](const auto &row) {
-            if (!ignored[row_i]) {
-                double sum_in = 0;
-                double sum_out = 0;
-                for (const auto &[j, raw_c] : row) {
-                    if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                        if (groups[j]) {
-                            sum_in += c;
-                        } else {
-                            sum_out += c;
-                        }
+                         PairContainer>(columns_all, column_values_all,
+                                        [&](uint64_t row_i, const auto &row) {
+            if (ignored[row_i])
+                return;
+
+            double sum_in = 0;
+            double sum_out = 0;
+            for (const auto &[j, raw_c] : row) {
+                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
+                    if (groups[j]) {
+                        sum_in += c;
+                    } else {
+                        sum_out += c;
                     }
                 }
-
-                if (sum_in + sum_out > 0) {
-                    counts.emplace_back(sum_in + sum_out);
-                    sum_of_squares += pow(counts.back(), 2.0);
-                }
             }
-            ++row_i;
+
+            if (sum_in + sum_out > 0) {
+                counts.emplace_back(sum_in + sum_out);
+                sum_of_squares += pow(counts.back(), 2.0);
+            }
         });
 
         auto get_a = [&](double k, double k2) {
@@ -795,10 +791,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         throw std::runtime_error("Test not implemented");
     }
 
-    uint64_t row_i = 0;
     utils::call_rows<std::unique_ptr<bit_vector>,
                      std::unique_ptr<ValuesContainer>,
-                     PairContainer>(columns_all, column_values_all, [&](const auto &raw_row) {
+                     PairContainer>(columns_all, column_values_all,
+                                    [&](uint64_t row_i, const auto &raw_row) {
         PairContainer row;
         if (!ignored[row_i]) {
             for (const auto &[j, raw_c] : raw_row) {
@@ -810,10 +806,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto [pval, in_stat, out_stat] = compute_pval(row);
         pvals.emplace_back(pval);
 
-        if (pval > 1.0 || in_stat == out_stat) {
-            ++row_i;
+        if (pval > 1.1 || in_stat == out_stat)
             return;
-        }
 
         bool in_kmer = in_stat > out_stat;
         bool out_kmer = in_stat < out_stat;
@@ -842,10 +836,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::runtime_error("Test failed");
             }
 
-            if (pval_min >= 0.05) {
-                ++row_i;
+            if (pval_min >= 0.05)
                 return;
-            }
 
             if (pval_min > 0) {
                 double lkd = log2(0.05) - log2(pval_min);
@@ -1141,18 +1133,17 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
             else throw std::runtime_error("Label not found in labels_in or labels_out");
         }
     );
-    int64_t row_id = 0;
     int64_t num_tests = 0;
     int64_t kept_nodes = 0;
     // calculate the p-value for the brunner munzel test
     auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);
     utils::call_rows<std::unique_ptr<bit_vector>,
                     std::unique_ptr<sdsl::int_vector_buffer<>>,
-                    std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all, [&](const auto &row) {
+                    std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
+                                                               [&](uint64_t row_id, const auto &row) {
                         // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
                         if (row.size() == 0) { // if the kmer is not present in any sample
                             mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
-                            row_id++;
                             return;
                         }
                         else{
@@ -1181,11 +1172,9 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
                                 else{
                                     kept_nodes++;
                                 }
-                                row_id++;
                             }
                             else{
                                 mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;
-                                row_id++;
                             }
 
                         }
