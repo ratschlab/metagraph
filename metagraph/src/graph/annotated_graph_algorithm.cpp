@@ -33,7 +33,8 @@ typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
 using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
-using ValuesContainer = sdsl::int_vector_buffer<>;
+// using ValuesContainer = sdsl::int_vector_buffer<>;
+using ValuesContainer = sdsl::int_vector<>;
 
 double CDF_CUTOFF = 0.95;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
@@ -123,17 +124,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     );
 
 
-    std::vector<uint64_t> min_counts(groups.size(), 0);
+    std::vector<uint64_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
-    auto adjust_count = [&](uint64_t raw_count, size_t j, uint64_t row_i) {
+    auto adjust_count = [&](uint64_t raw_count, size_t j, uint64_t row_i) -> uint64_t {
         std::ignore = row_i;
         return raw_count >= min_counts[j] && raw_count <= check_cutoff[j]
             ? raw_count
             : 0;
     };
 
-    if (config.clean && !config.min_count) {
+    if (config.clean) {
         common::logger->trace("Cleaning count columns");
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &column_values = *column_values_all[j];
@@ -142,7 +143,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto [mean_est, nzeros_est] = estimate_ztp_mean(
                 [&](const auto &callback) {
                     for (size_t i = 0; i < column_values.size(); ++i) {
-                        callback(column_values[i]);
+                        if (column_values[i] <= N_BUCKETS_FOR_ESTIMATION)
+                            callback(column_values[i]);
                     }
                 },
                 max_width,
@@ -195,17 +197,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                         [&](uint64_t row_i, const auto &row) {
             if (row.empty()) {
                 ignored[row_i] = true;
-            } else if (config.clean) {
-                uint64_t sum = 0;
+            } else if (config.clean || config.min_count) {
                 for (const auto &[j, raw_c] : row) {
-                    if (uint64_t c = adjust_count(raw_c, j, row_i))
-                        sum += c;
+                    if (adjust_count(raw_c, j, row_i))
+                        return;
                 }
 
-                ignored[row_i] = sum < config.min_count;
+                ignored[row_i] = true;
             }
         });
     }
+
+    double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
 
     common::logger->trace("Computing aggregate statistics");
     double in_kmers = 0;
@@ -247,12 +250,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         sums_of_squares.push_back(sum_of_squares);
         n_kmers.push_back(n);
 
-        common::logger->trace("{}: sum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
-                              j, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+        common::logger->trace("{}: kept: {} / {}\tsum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
+                              j, n, i, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
     }
 
     double total_kmers = in_kmers + out_kmers;
-    double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
 
     common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
                           nelem, total_kmers);
@@ -806,8 +808,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto [pval, in_stat, out_stat] = compute_pval(row);
         pvals.emplace_back(pval);
 
-        if (pval > 1.1 || in_stat == out_stat)
+        if (pval > 1.1 || in_stat == out_stat) {
+            if (pval <= 1.0 && in_stat == out_stat)
+                throw std::runtime_error("FOO");
             return;
+        }
 
         bool in_kmer = in_stat > out_stat;
         bool out_kmer = in_stat < out_stat;
@@ -836,10 +841,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::runtime_error("Test failed");
             }
 
-            if (pval_min >= 0.05)
-                return;
-
-            if (pval_min > 0) {
+            if (pval_min >= 0.05) {
+                k = 0;
+            } else if (pval_min > 0) {
                 double lkd = log2(0.05) - log2(pval_min);
                 if (lkd <= 64)
                     k = pow(2.0, lkd);
@@ -878,18 +882,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (total_sig) {
         auto begin = m_data.begin();
         size_t k = 0;
-        size_t last_k = 0;
-        for ( ; begin != m_data.end(); ++begin) {
-            const auto &[cur_k, bucket] = *begin;
-            common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
-            if (acc <= cur_k) {
-                k = std::max(acc, last_k + 1);
-                break;
-            }
+        // size_t last_k = 0;
+        // for ( ; begin != m_data.end(); ++begin) {
+        //     const auto &[cur_k, bucket] = *begin;
+        //     common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
+        //     if (acc <= cur_k) {
+        //         k = std::max(acc, last_k + 1);
+        //         break;
+        //     }
 
-            last_k = cur_k;
-            acc -= bucket.size();
-        }
+        //     last_k = cur_k;
+        //     acc -= bucket.size();
+        // }
 
         if (k == 0) {
             common::logger->trace("No good k value found, defaulting to Bonferroni cutoff");
