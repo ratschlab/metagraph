@@ -155,10 +155,11 @@ std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::
     return std::make_pair(mean_est, total_est - nupto);
 }
 
-std::tuple<int64_t,double,double> estimate_min_kmer_abundance(const bit_vector &idx,
-                                     const sdsl::int_vector<> &values,
-                                     uint64_t num_singleton_kmers,
-                                     bool discard_last_count) {
+std::tuple<int64_t,double,double>
+estimate_min_kmer_abundance(const bit_vector &idx,
+                            const sdsl::int_vector<> &values,
+                            uint64_t num_singleton_kmers,
+                            bool discard_last_count) {
     std::vector<uint64_t> hist;
     idx.call_ones([&](auto i) {
         uint64_t kmer_count = values[idx.rank1(i) - 1];
@@ -181,9 +182,12 @@ std::tuple<int64_t,double,double> estimate_min_kmer_abundance(const bit_vector &
     }
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
-    int64_t threshold = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
-                                        &alpha_est_ptr, &beta_est_ptr,
-                                        &false_pos_ptr, &false_neg_ptr);
+    int64_t threshold = cleaning_pick_kmer_threshold(
+        hist.data(), hist.size(),
+        &alpha_est_ptr, &beta_est_ptr,
+        &false_pos_ptr, &false_neg_ptr
+    );
+
     return std::make_tuple(threshold,alpha_est_ptr,beta_est_ptr);
 }
 

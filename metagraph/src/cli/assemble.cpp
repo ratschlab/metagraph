@@ -72,6 +72,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("count_kmers:\t{}", diff_config.count_kmers);
     logger->trace("Test type:\t{}", diff_config.test_type);
     logger->trace("Filter:\t{}", diff_config.filter);
+    logger->trace("Min count:\t{}", diff_config.min_count);
 
 
     // TODO get the folder with the annotation columns from the .json or command, because it is redundant to have to give all of them as an input.
