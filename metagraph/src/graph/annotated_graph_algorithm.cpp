@@ -765,26 +765,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
             } else {
-                // https://datatab.net/tutorial/mann-whitney-u-test
-                double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
-                double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
-                double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
-                double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
-                double u = std::min(u1, u2);
+                if (!nx || !ny) {
+                    p = 1.0;
+                } else {
+                    // https://datatab.net/tutorial/mann-whitney-u-test
+                    double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
+                    double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
+                    double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
+                    double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
+                    double u = std::min(u1, u2);
 
-                double n = nx + ny;
-                // normal approximation
-                double mu = static_cast<double>(nx * ny) / 2;
-                double corr = 0;
-                for (const auto &[val,rks] : countsc) {
-                    const auto &[rk, c] = rks;
-                    if (c > 1)
-                        corr += c * c * c - c;
+                    double n = nx + ny;
+                    // normal approximation
+                    double mu = static_cast<double>(nx * ny) / 2;
+                    double corr = 0;
+                    for (const auto &[val,rks] : countsc) {
+                        const auto &[rk, c] = rks;
+                        if (c > 1)
+                            corr += c * c * c - c;
+                    }
+                    double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
+
+                    double z = abs((u - mu) / sd);
+
+                    // hack just in case sd == 0
+                    p = u != mu ? boost::math::cdf(boost::math::complement(norm, z)) * 2 : 1.0;
                 }
-                double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
-
-                double z = abs((u - mu) / sd);
-                p = boost::math::cdf(boost::math::complement(norm, z)) * 2;
             }
 
             return std::make_tuple(p, rankcx_mean, rankcy_mean);
@@ -808,11 +814,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto [pval, in_stat, out_stat] = compute_pval(row);
         pvals.emplace_back(pval);
 
-        if (pval > 1.1 || in_stat == out_stat) {
-            if (pval <= 1.0 && in_stat == out_stat)
-                throw std::runtime_error("FOO");
+        if (pval > 1.1)
             return;
-        }
 
         bool in_kmer = in_stat > out_stat;
         bool out_kmer = in_stat < out_stat;
@@ -857,6 +860,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
         m[k].emplace_back(node);
+        if (in_stat == out_stat)
+            return;
+
         auto &indicator = in_kmer ? indicator_in : indicator_out;
         if (pval < 0.05)
             indicator[node] = true;
@@ -882,30 +888,45 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (total_sig) {
         auto begin = m_data.begin();
         size_t k = 0;
-        // size_t last_k = 0;
-        // for ( ; begin != m_data.end(); ++begin) {
-        //     const auto &[cur_k, bucket] = *begin;
-        //     common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
-        //     if (acc <= cur_k) {
-        //         k = std::max(acc, last_k + 1);
-        //         break;
-        //     }
+        size_t last_k = 0;
+        for ( ; begin != m_data.end(); ++begin) {
+            const auto &[cur_k, bucket] = *begin;
+            common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
+            if (acc <= cur_k) {
+                k = std::max(acc, last_k + 1);
+                break;
+            }
 
-        //     last_k = cur_k;
-        //     acc -= bucket.size();
-        // }
+            last_k = cur_k;
+            acc -= bucket.size();
+        }
 
         if (k == 0) {
-            common::logger->trace("No good k value found, defaulting to Bonferroni cutoff");
-            k = total_tests;
+            common::logger->trace("No good k value found, falling back to Benjamini–Yekutieli");
+            m_data = decltype(m_data)();
+
+            VectorMap<double, size_t> pval_map;
+            for (double p : pvals) {
+                if (p <= 1.0)
+                    ++pval_map[p];
+            }
+            auto p_data = const_cast<std::vector<std::pair<double, size_t>>&&>(pval_map.values_container());
+            std::sort(p_data.begin(), p_data.end(), utils::LessFirst());
+
+            double factor = 0.05 / total_tests / (boost::math::digamma(total_tests) + 0.5772156649015329); // std::numbers::e_gamma_v<double>
+            for (const auto &[p, c] : p_data) {
+                k += c;
+                if (p > factor * k) {
+                    k = p / factor;
+                    break;
+                }
+            }
+
             common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
-            for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
-                const auto &[cur_k, bucket] = *jt;
-                for (uint64_t i : bucket) {
-                    if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
-                        indicator_in[i] = false;
-                        indicator_out[i] = false;
-                    }
+            for (size_t i = 0; i < pvals.size(); ++i) {
+                if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
+                    indicator_in[i] = false;
+                    indicator_out[i] = false;
                 }
             }
         } else {
