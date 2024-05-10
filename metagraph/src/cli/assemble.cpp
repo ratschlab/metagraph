@@ -58,6 +58,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.filter = experiment.get("filter", true).asBool();
     diff_config.clean = experiment.get("clean", false).asBool();
     diff_config.min_count = experiment.get("min_count", 0).asInt();
+    diff_config.min_recurrence = experiment.get("min_recurrence", 1).asInt();
     diff_config.num_tests = experiment.get("num_tests", 0).asInt();
 
 

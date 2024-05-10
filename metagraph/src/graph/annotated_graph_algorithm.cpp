@@ -199,9 +199,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (row.empty()) {
                 ignored[row_i] = true;
             } else if (config.clean || config.min_count) {
+                size_t count = 0;
                 for (const auto &[j, raw_c] : row) {
-                    if (adjust_count(raw_c, j, row_i))
-                        return;
+                    if (adjust_count(raw_c, j, row_i)) {
+                        ++count;
+                        if (count >= config.min_recurrence)
+                            return;
+                    }
                 }
 
                 ignored[row_i] = true;
@@ -230,6 +234,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::vector<uint64_t> vals;
         vals.reserve(column_values.size());
         column.call_ones([&](uint64_t row_i) {
+            if (!ignored[row_i])
+                return;
+
             if (uint64_t c = adjust_count(column_values[i], j, row_i)) {
                 vals.emplace_back(c);
                 sum += c;
@@ -594,18 +601,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 1);
-        if (config.test_type == "bp" && a_in <= 1) {
-            common::logger->warn("a_in: {} <= 1, resetting to a_null: {}", a_in, a);
-            a_in = a;
-            b_in = b;
-        }
-
         auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 2);
-        if (config.test_type == "bp" && a_out <= 1) {
-            common::logger->warn("a_out: {} <= 1, resetting to a_null: {}", a_out, a);
-            a_out = a;
-            b_out = b;
-        }
 
         double mu = 0;
         double mu_in = 0;
@@ -648,6 +644,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             if (config.test_type == "bp") {
                 auto get_theta = [&](double a, double b, double total, double k_sum) {
+                    if (a + k_sum <= 1)
+                        return std::make_tuple(0.0, 0.0, true, false);
+
                     double qb = 2.0 - total - k_sum - a - b;
                     double qc = k_sum + a - 1.0;
 
@@ -707,13 +706,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double theta_in = in_is_low ? theta_in_low : theta_in_high;
                 double theta_out = out_is_low ? theta_out_low : theta_out_high;
 
+                map_pval_in = theta_in > 0
+                    ? exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
+                                - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers))
+                    : 0.0;
 
-
-                map_pval_in = exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
-                                - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers));
-
-                map_pval_out = exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
-                                - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers));
+                map_pval_out = theta_out > 0
+                    ? exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
+                                - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers))
+                    : 0.0;
             } else if (config.test_type == "lnp") {
                 auto get_theta = [&](double mu, double var, double total, double k_sum) {
                     size_t ndigits = 40;
@@ -903,7 +904,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto [pval, in_stat, out_stat] = compute_pval(row);
         pvals.emplace_back(pval);
 
-        if (pval > 1.1)
+        if (pval >= 1.1)
             return;
 
         bool in_kmer = in_stat > out_stat;
