@@ -9,6 +9,7 @@
 #include <boost/math/statistics/univariate_statistics.hpp>
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
+#include <boost/math/special_functions/trigamma.hpp>
 #include <boost/math/tools/minima.hpp>
 #include <boost/math/tools/roots.hpp>
 
@@ -508,9 +509,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
-    } else if (config.test_type == "bp") {
+    } else if (config.test_type == "bp" || config.test_type == "lnp") {
         double sum_of_squares = 0;
-        std::vector<double> counts;
+        double sum_of_squares_in = 0;
+        double sum_of_squares_out = 0;
+        std::vector<std::pair<double, double>> counts;
         counts.reserve(nelem);
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
@@ -532,19 +535,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (sum_in + sum_out > 0) {
-                counts.emplace_back(sum_in + sum_out);
-                sum_of_squares += pow(counts.back(), 2.0);
+                counts.emplace_back(sum_in, sum_out);
+                sum_of_squares_in += sum_in * sum_in;
+                sum_of_squares_out += sum_out * sum_out;
+                sum_of_squares += pow(sum_in + sum_out, 2.0);
             }
         });
 
-        auto get_a = [&](double k, double k2) {
+        auto get_a = [&](double k, double k2, uint8_t pick = 0) {
             double mu = k / nelem;
             // model with a negative binomial, similar to
             // https://github.com/JBHilton/beta-poisson-epidemics/blob/master/functions.py#L140
             auto get_dll = [&](double r) {
                 double lp = log(r) - log(r + mu);
                 double dll = nelem * lp - nelem * boost::math::digamma(r);
-                for (double c : counts) {
+                for (const auto &[c_in, c_out] : counts) {
+                    double c;
+                    switch (pick) {
+                        case 1: { c = c_in; } break;
+                        case 2: { c = c_out; } break;
+                        default: { c = c_in + c_out; }
+                    }
+
                     dll += boost::math::digamma(r + c);
                 }
 
@@ -576,57 +588,46 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         auto [a, b] = get_a(total_kmers, sum_of_squares);
 
-        if (a <= 1) {
+        if (config.test_type == "bp" && a <= 1) {
             common::logger->error("a <= 1");
             throw std::runtime_error("Fit failed");
         }
 
-        auto get_theta = [&,a,b](double total, double k_sum) {
-            double qb = 2.0 - total - k_sum - a - b;
-            double qc = k_sum + a - 1.0;
+        auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 1);
+        if (config.test_type == "bp" && a_in <= 1) {
+            common::logger->warn("a_in: {} <= 1, resetting to a_null: {}", a_in, a);
+            a_in = a;
+            b_in = b;
+        }
 
-            auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
+        auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 2);
+        if (config.test_type == "bp" && a_out <= 1) {
+            common::logger->warn("a_out: {} <= 1, resetting to a_null: {}", a_out, a);
+            a_out = a;
+            b_out = b;
+        }
 
-            // Note: comparisons of thetas to themselves ensure that they are not NaN
-            // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
-            bool low_valid = theta_low == theta_low && theta_low > 0 && theta_low < 1.0;
-            bool high_valid = theta_high == theta_high && theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
+        double mu = 0;
+        double mu_in = 0;
+        double mu_out = 0;
+        double var = 0;
+        double var_in = 0;
+        double var_out = 0;
+        if (config.test_type == "lnp") {
+            mu = boost::math::digamma(a) - boost::math::digamma(b);
+            mu_in = boost::math::digamma(a_in) - boost::math::digamma(b_in);
+            mu_out = boost::math::digamma(a_out) - boost::math::digamma(b_out);
 
-            double stat_low = low_valid
-                ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
-                : -std::numeric_limits<double>::infinity();
-            double stat_high = high_valid
-                ? qc * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
-                : -std::numeric_limits<double>::infinity();
+            var = boost::math::trigamma(a) + boost::math::trigamma(b);
+            var_in = boost::math::trigamma(a_in) + boost::math::trigamma(b_in);
+            var_out = boost::math::trigamma(a_out) + boost::math::trigamma(b_out);
 
-            double stat_max = std::max({ stat_low, stat_high });
+            common::logger->trace("LN null:\tmu: {}\tvar: {}", mu, var);
+            common::logger->trace("LN in:\tmu: {}\tvar: {}", mu_in, var_in);
+            common::logger->trace("LN out:\tmu: {}\tvar: {}", mu_out, var_out);
+        }
 
-            bool stat_is_low = low_valid && stat_max == stat_low;
-            bool stat_is_high = high_valid && stat_max == stat_high;
-
-            if (stat_is_low && stat_is_high) {
-                common::logger->error("Multiple valid thetas\t{}", stat_max);
-                common::logger->error("{}\t{}", theta_low, theta_high);
-                common::logger->error("{}\t{}", stat_low, stat_high);
-                common::logger->error("{}\t{}", stat_is_low, stat_is_high);
-                common::logger->error("Ratio: {} / {}", k_sum, total);
-                common::logger->error("{},{}\t{},{},{}", a,b, total, qb, qc);
-                throw std::runtime_error("Fail");
-            }
-
-            if (stat_is_low || stat_is_high)
-                return std::make_tuple(theta_low, theta_high, stat_is_low, stat_is_high);
-
-            common::logger->error("No valid thetas\t{}", stat_max);
-            common::logger->error("{}\t{}", theta_low, theta_high);
-            common::logger->error("{}\t{}", stat_low, stat_high);
-            common::logger->error("{}\t{}", stat_is_low, stat_is_high);
-            common::logger->error("Ratio: {} / {}", k_sum, total);
-            common::logger->error("{},{}\t{},{},{}", a,b,total, qb, qc);
-            throw std::runtime_error("Fail");
-        };
-
-        compute_pval = [&,a,b,nelem,get_theta](const auto &row) {
+        compute_pval = [&,a,b,a_in,b_in,a_out,b_out,mu,mu_in,mu_out,var,var_in,var_out,nelem](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
@@ -642,40 +643,128 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double null_sum = in_sum + out_sum;
 
-            auto [theta_null_low, theta_null_high, null_is_low, null_is_high]
-                = get_theta(total_kmers, null_sum);
-            auto [theta_in_low, theta_in_high, in_is_low, in_is_high]
-                = get_theta(in_kmers, in_sum);
-            auto [theta_out_low, theta_out_high, out_is_low, out_is_high]
-                = get_theta(out_kmers, out_sum);
+            double map_pval_in = 1.0;
+            double map_pval_out = 1.0;
 
-            double theta_null = null_is_low ? theta_null_low : theta_null_high;
-            double theta_in = in_is_low ? theta_in_low : theta_in_high;
-            double theta_out = out_is_low ? theta_out_low : theta_out_high;
+            if (config.test_type == "bp") {
+                auto get_theta = [&](double a, double b, double total, double k_sum) {
+                    double qb = 2.0 - total - k_sum - a - b;
+                    double qc = k_sum + a - 1.0;
 
-            auto get_stat_log = [&,a,b](double theta, double k, double total) -> double {
-                return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
-            };
+                    auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
 
-            double map_pval_in = exp(get_stat_log(theta_null, in_sum, in_kmers)
-                                    - get_stat_log(theta_in, in_sum, in_kmers));
+                    // Note: comparisons of thetas to themselves ensure that they are not NaN
+                    // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
+                    bool low_valid = theta_low == theta_low && theta_low > 0 && theta_low < 1.0;
+                    bool high_valid = theta_high == theta_high && theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
 
-            double map_pval_out = exp(get_stat_log(theta_null, out_sum, out_kmers)
-                                    - get_stat_log(theta_out, out_sum, out_kmers));
+                    double stat_low = low_valid
+                        ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
+                        : -std::numeric_limits<double>::infinity();
+                    double stat_high = high_valid
+                        ? qc * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
+                        : -std::numeric_limits<double>::infinity();
+
+                    double stat_max = std::max({ stat_low, stat_high });
+
+                    bool stat_is_low = low_valid && stat_max == stat_low;
+                    bool stat_is_high = high_valid && stat_max == stat_high;
+
+                    if (stat_is_low && stat_is_high) {
+                        common::logger->error("Multiple valid thetas\t{}", stat_max);
+                        common::logger->error("{}\t{}", theta_low, theta_high);
+                        common::logger->error("{}\t{}", stat_low, stat_high);
+                        common::logger->error("{}\t{}", stat_is_low, stat_is_high);
+                        common::logger->error("Ratio: {} / {}", k_sum, total);
+                        common::logger->error("{},{}\t{},{},{}", a,b, total, qb, qc);
+                        throw std::runtime_error("Fail");
+                    }
+
+                    if (stat_is_low || stat_is_high)
+                        return std::make_tuple(theta_low, theta_high, stat_is_low, stat_is_high);
+
+                    common::logger->error("No valid thetas\t{}", stat_max);
+                    common::logger->error("{}\t{}", theta_low, theta_high);
+                    common::logger->error("{}\t{}", stat_low, stat_high);
+                    common::logger->error("{}\t{}", stat_is_low, stat_is_high);
+                    common::logger->error("Ratio: {} / {}", k_sum, total);
+                    common::logger->error("{},{}\t{},{},{}", a,b,total, qb, qc);
+                    throw std::runtime_error("Fail");
+                };
+
+                auto get_stat_log = [&](double a, double b, double theta, double k, double total) -> double {
+                    return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
+                };
+
+                auto [theta_null_low, theta_null_high, null_is_low, null_is_high]
+                    = get_theta(a, b, total_kmers, null_sum);
+                auto [theta_in_low, theta_in_high, in_is_low, in_is_high]
+                    = get_theta(a_in, b_in, in_kmers, in_sum);
+                auto [theta_out_low, theta_out_high, out_is_low, out_is_high]
+                    = get_theta(a_out, b_out, out_kmers, out_sum);
+
+                double theta_null = null_is_low ? theta_null_low : theta_null_high;
+                double theta_in = in_is_low ? theta_in_low : theta_in_high;
+                double theta_out = out_is_low ? theta_out_low : theta_out_high;
+
+
+
+                map_pval_in = exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
+                                - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers));
+
+                map_pval_out = exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
+                                - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers));
+            } else if (config.test_type == "lnp") {
+                auto get_theta = [&](double mu, double var, double total, double k_sum) {
+                    size_t ndigits = 40;
+                    return boost::math::tools::newton_raphson_iterate(
+                        [&](double theta) -> std::pair<double, double> {
+                            double norm_factor = (log(theta) - log1p(-theta) - mu) / var;
+                            return std::make_pair(
+                                (k_sum - total * theta - 1) * (1 - theta) - (1 - 2.0 * theta) * norm_factor,
+                                1.0 - k_sum + 2.0 * norm_factor - (1.0 - 2.0 * theta) * ((1.0 - 2.0 * theta) / (var * theta * (1.0 - theta)) + total)
+                            );
+                        },
+                        k_sum > 0 ? k_sum / total : 0.01, 0.0, 1.0, ndigits
+                    );
+                };
+
+                auto get_stat_log = [&](double mu, double var, double theta, double k, double total) -> double {
+                    return (k - 1) * log(theta) - log1p(-theta) - total * theta - pow(log(theta) - log1p(-theta) - mu, 2.0) / 2.0 / var;
+                };
+
+                auto theta_null = get_theta(mu, var, total_kmers, null_sum);
+                auto theta_in = get_theta(mu_in, var_in, in_kmers, in_sum);
+                auto theta_out = get_theta(mu_out, var_out, out_kmers, out_sum);
+
+                if (theta_null != theta_null || theta_in != theta_in || theta_out != theta_out
+                        || theta_null == 0 || theta_null == 1.0
+                        || theta_in == 0 || theta_in == 1.0
+                        || theta_out == 0 || theta_out == 1.0) {
+                    common::logger->error("{}\t{}\t{}", theta_null, theta_in, theta_out);
+                    throw std::runtime_error("Failed to find theta");
+                }
+
+                map_pval_in = exp(get_stat_log(mu_in, var_in, theta_null, in_sum, in_kmers)
+                                - get_stat_log(mu_in, var_in, theta_in, in_sum, in_kmers));
+
+                map_pval_out = exp(get_stat_log(mu_out, var_out, theta_null, out_sum, out_kmers)
+                                - get_stat_log(mu_out, var_out, theta_out, out_sum, out_kmers));
+            }
 
             if (map_pval_in > 1.0 || map_pval_in < 0.0
                     || map_pval_out > 1.0 || map_pval_out < 0.0) {
                 return std::make_tuple(1.0, in_sum,
                                        out_sum / out_kmers * in_kmers);
                 common::logger->error("Failed to compute MAP of thetas");
-                common::logger->error("Theta in: {}\tTheta out: {}\tTheta null: {}",
-                                      theta_in, theta_out, theta_null);
-                common::logger->error("Theta in low: {}\tTheta out low: {}\tTheta null low: {}",
-                                      theta_in_low, theta_out_low, theta_null_low);
-                common::logger->error("Theta in high: {}\tTheta out high: {}\tTheta null high: {}",
-                                      theta_in_high, theta_out_high, theta_null_high);
-                common::logger->error("In sum: {}\tOut sum: {}", in_sum, out_sum);
-                common::logger->error("In p-val: {}\tOut p-val: {}", map_pval_in, map_pval_out);
+                // common::logger->error("Theta in: {}\tTheta out: {}\tTheta null: {}",
+                //                       theta_in, theta_out, theta_null);
+                // common::logger->error("Theta in low: {}\tTheta out low: {}\tTheta null low: {}",
+                //                       theta_in_low, theta_out_low, theta_null_low);
+                // common::logger->error("Theta in high: {}\tTheta out high: {}\tTheta null high: {}",
+                //                       theta_in_high, theta_out_high, theta_null_high);
+                // common::logger->error("In sum: {}\tOut sum: {}", in_sum, out_sum);
+                // common::logger->error("In p-val: {}\tOut p-val: {}", map_pval_in, map_pval_out);
                 throw std::runtime_error("Fail");
             }
 
@@ -901,30 +990,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             acc -= bucket.size();
         }
 
+        VectorMap<double, double> pval_map;
+        for (double p : pvals) {
+            if (p <= 1.0)
+                ++pval_map[p];
+        }
+        auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
+        std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
+
+        double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
+        pval_map = decltype(pval_map)();
+        size_t cur_rank = 0;
+        for (const auto &[p, c] : p_data) {
+            cur_rank += c;
+            pval_map[p] = cm * cur_rank;
+        }
+
         if (k == 0) {
-            common::logger->trace("No good k value found, falling back to Benjamini–Yekutieli");
-            m_data = decltype(m_data)();
-
-            VectorMap<double, size_t> pval_map;
-            for (double p : pvals) {
-                if (p <= 1.0)
-                    ++pval_map[p];
-            }
-            auto p_data = const_cast<std::vector<std::pair<double, size_t>>&&>(pval_map.values_container());
-            std::sort(p_data.begin(), p_data.end(), utils::LessFirst());
-
-            double factor = 0.05 / total_tests / (boost::math::digamma(total_tests) + 0.5772156649015329); // std::numbers::e_gamma_v<double>
-            for (const auto &[p, c] : p_data) {
-                k += c;
-                if (p > factor * k) {
-                    k = p / factor;
-                    break;
-                }
-            }
-
+            common::logger->trace("Falling back to Benjamini-Yekutieli");
+            double k_b = total_tests;
             common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
             for (size_t i = 0; i < pvals.size(); ++i) {
-                if (pvals[i] < 0.05 && pvals[i] * k >= 0.05) {
+                if (pvals[i] < 0.05 && pvals[i] * std::min(k_b, pval_map[pvals[i]]) >= 0.05) {
                     indicator_in[i] = false;
                     indicator_out[i] = false;
                 }
