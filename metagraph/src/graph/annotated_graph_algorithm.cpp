@@ -554,34 +554,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             // model with a negative binomial, similar to
             // https://github.com/JBHilton/beta-poisson-epidemics/blob/master/functions.py#L140
             auto get_dll = [&](double r) {
-                double lp = log(r) - log(r + mu);
-                double dll = nelem * lp - nelem * boost::math::digamma(r);
+                double dll = nelem * (log(r) - log(r + mu)) - nelem * boost::math::digamma(r);
+                double ddll = nelem / r - nelem / (r + mu) - nelem * boost::math::trigamma(r);
                 for (const auto &[c_in, c_out] : counts) {
                     double c;
                     switch (pick) {
                         case 1: { c = c_in; } break;
                         case 2: { c = c_out; } break;
-                        default: { c = c_in + c_out; }
+                        default: { c = c_in + c_out; } break;
                     }
 
                     dll += boost::math::digamma(r + c);
+                    ddll += boost::math::trigamma(r + c);
                 }
 
-                return dll;
+                return std::make_pair(dll, ddll);
             };
 
             double var = k2 / nelem - mu * mu;
             double r_guess = mu * mu / (var - mu);
 
-            long unsigned int max_iter = 100;
-            auto [r_min,r_max] = boost::math::tools::bracket_and_solve_root(
-                get_dll, r_guess, 2.0, false, [&](double r_min, double r_max) {
-                    return abs(r_min - r_max) / r_max < 1e-5;
-                },
-                max_iter
-            );
-            double a = (r_min + r_max) / 2.0 * nelem / (nelem - 1);
+            // double a = boost::math::tools::newton_raphson_iterate(
+            //     get_dll, r_guess, 0.0, total_kmers, 30
+            // ) * nelem / (nelem - 1);
 
+            // long unsigned int max_iter = 100;
+            // auto [r_min,r_max] = boost::math::tools::bracket_and_solve_root(
+            //     get_dll, r_guess, 2.0, false, [&](double r_min, double r_max) {
+            //         return abs(r_min - r_max) / r_max < 1e-5;
+            //     },
+            //     max_iter
+            // );
+            // double a = (r_min + r_max) / 2.0 * nelem / (nelem - 1);
+
+            double a = r_guess * nelem / (nelem - 1);
             double b = (nelem - 1) * a;
 
             common::logger->trace("mean: {}\tvar: {}\ta: {}\tb: {}\texp: {}\tvar: {}",
