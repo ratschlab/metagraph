@@ -238,8 +238,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return;
 
             uint64_t c = adjust_count(column_values[i], j, row_i);
-            vals.emplace_back(c);
             if (c) {
+                vals.emplace_back(c);
                 sum += c;
                 sum_of_squares += c * c;
                 ++n;
