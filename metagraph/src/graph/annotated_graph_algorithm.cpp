@@ -237,8 +237,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (!ignored[row_i])
                 return;
 
-            if (uint64_t c = adjust_count(column_values[i], j, row_i)) {
-                vals.emplace_back(c);
+            uint64_t c = adjust_count(column_values[i], j, row_i);
+            vals.emplace_back(c);
+            if (c) {
                 sum += c;
                 sum_of_squares += c * c;
                 ++n;
@@ -517,97 +518,35 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "bp" || config.test_type == "lnp") {
-        double sum_of_squares = 0;
-        double sum_of_squares_in = 0;
-        double sum_of_squares_out = 0;
-        std::vector<std::pair<double, double>> counts;
-        counts.reserve(nelem);
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all,
-                                        [&](uint64_t row_i, const auto &row) {
-            if (ignored[row_i])
-                return;
-
-            double sum_in = 0;
-            double sum_out = 0;
-            for (const auto &[j, raw_c] : row) {
-                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                    if (groups[j]) {
-                        sum_in += c;
-                    } else {
-                        sum_out += c;
-                    }
-                }
-            }
-
-            if (sum_in + sum_out > 0) {
-                counts.emplace_back(sum_in, sum_out);
-                sum_of_squares_in += sum_in * sum_in;
-                sum_of_squares_out += sum_out * sum_out;
-                sum_of_squares += pow(sum_in + sum_out, 2.0);
-            }
-        });
-
-        auto get_a = [&](double k, double k2, uint8_t pick = 0) {
-            double mu = k / nelem;
+        auto get_a = [&](double n, double k, double k2, uint8_t pick = 0) {
+            double mu = k / n;
             // model with a negative binomial, similar to
             // https://github.com/JBHilton/beta-poisson-epidemics/blob/master/functions.py#L140
-            auto get_dll = [&](double r) {
-                double dll = nelem * (log(r) - log(r + mu)) - nelem * boost::math::digamma(r);
-                double ddll = nelem / r - nelem / (r + mu) - nelem * boost::math::trigamma(r);
-                for (const auto &[c_in, c_out] : counts) {
-                    double c;
-                    switch (pick) {
-                        case 1: { c = c_in; } break;
-                        case 2: { c = c_out; } break;
-                        default: { c = c_in + c_out; } break;
-                    }
-
-                    dll += boost::math::digamma(r + c);
-                    ddll += boost::math::trigamma(r + c);
-                }
-
-                return std::make_pair(dll, ddll);
-            };
-
-            double var = k2 / nelem - mu * mu;
+            double var = k2 / n - mu * mu;
             double r_guess = mu * mu / (var - mu);
 
-            // double a = boost::math::tools::newton_raphson_iterate(
-            //     get_dll, r_guess, 0.0, total_kmers, 30
-            // ) * nelem / (nelem - 1);
-
-            // long unsigned int max_iter = 100;
-            // auto [r_min,r_max] = boost::math::tools::bracket_and_solve_root(
-            //     get_dll, r_guess, 2.0, false, [&](double r_min, double r_max) {
-            //         return abs(r_min - r_max) / r_max < 1e-5;
-            //     },
-            //     max_iter
-            // );
-            // double a = (r_min + r_max) / 2.0 * nelem / (nelem - 1);
-
-            double a = r_guess * nelem / (nelem - 1);
-            double b = (nelem - 1) * a;
+            double a = r_guess * n / (n - 1);
+            double b = (n - 1) * a;
 
             common::logger->trace("mean: {}\tvar: {}\ta: {}\tb: {}\texp: {}\tvar: {}",
-                                  mu, k2 / nelem - mu * mu,
+                                  mu, var,
                                   a, b,
                                   k * a / (a + b),
-                                  mu + mu * mu * (nelem - 1) / (nelem * a + 1));
+                                  mu + mu * mu * (n - 1) / (n * a + 1));
 
             return std::make_pair(a, b);
         };
 
-        auto [a, b] = get_a(total_kmers, sum_of_squares);
+        uint64_t total_sq_kmers = std::accumulate(sums_of_squares.begin(),
+                                                  sums_of_squares.end(),
+                                                  uint64_t(0));
+        common::logger->trace("Sum: {}\tSum of squares: {}", total_kmers, total_sq_kmers);
+        auto [a, b] = get_a(nelem * groups.size(), total_kmers, total_sq_kmers);
 
-        if (config.test_type == "bp" && a <= 1) {
-            common::logger->error("a <= 1");
-            throw std::runtime_error("Fit failed");
-        }
-
-        auto [a_in, b_in] = get_a(in_kmers, sum_of_squares_in, 1);
-        auto [a_out, b_out] = get_a(out_kmers, sum_of_squares_out, 2);
+        double a_in = a;
+        double a_out = a;
+        double b_in = b;
+        double b_out = b;
 
         double mu = 0;
         double mu_in = 0;
