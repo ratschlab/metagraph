@@ -4,6 +4,7 @@
 #include <iostream>
 #include <tsl/ordered_set.h>
 #include <numeric>
+#include <tuple>
 
 #include "common/utils/string_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -95,7 +96,7 @@ class DBGSSHash : public DeBruijnGraph {
     const std::string &alphabet() const override;
 
     //still in progress
-    std::pair<DBGSSHash::node_index, uint64_t> kmer_to_superkmer_node(std::string_view kmer) const ;
+    std::tuple<uint64_t, uint64_t, uint64_t> kmer_to_superkmer_node(std::string_view kmer) const ;
 
     void load_superkmer_mask(std::string file);
     void superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const;

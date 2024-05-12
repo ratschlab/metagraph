@@ -40,10 +40,11 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
-        if(s_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
-            //callback(kmer_to_node(sequence.substr(i, k_)));
-            callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id, true));
+        //auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
+        auto [k_idx, s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
+        if(k_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
+            //callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id, true));
+            callback(k_idx);
         }else{
             callback(s_idx);
         }
@@ -191,12 +192,13 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 }
 
 // superkmer experiment: use minimizer to get superkmer positions (offsets) -> get superkmer that contains kmer 
-std::pair<DBGSSHash::node_index, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
-    auto [ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
-    if(ssh_idx == sshash::constants::invalid_uint64){
-        return std::pair(npos, sshash::constants::invalid_uint64);
+std::tuple<uint64_t, uint64_t, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
+    //auto [k_ssh_idx, s_ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
+    auto [kmer_idx, superkmer_idx, superkmer_id] = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
+    if(kmer_idx == sshash::constants::invalid_uint64){
+        return {sshash::constants::invalid_uint64, sshash::constants::invalid_uint64, sshash::constants::invalid_uint64};
     }
-    return std::pair(ssh_idx + 1, superkmer_id);
+    return {kmer_idx + 1, superkmer_idx + 1, superkmer_id};
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
