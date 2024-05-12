@@ -196,7 +196,7 @@ std::tuple<uint64_t, uint64_t, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::
     //auto [k_ssh_idx, s_ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     auto [kmer_idx, superkmer_idx, superkmer_id] = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(kmer_idx == sshash::constants::invalid_uint64){
-        return {sshash::constants::invalid_uint64, sshash::constants::invalid_uint64, sshash::constants::invalid_uint64};
+        return {npos, npos, sshash::constants::invalid_uint64};
     }
     return {kmer_idx + 1, superkmer_idx + 1, superkmer_id};
 }
