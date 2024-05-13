@@ -600,12 +600,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     typedef Eigen::Matrix<long double, 2, 2> MatrixS;
                     typedef Eigen::DiagonalMatrix<long double, Eigen::Dynamic> Diag;
 
+                    std::vector<uint64_t> k(groups.size());
+                    for (const auto &[j, c] : row) {
+                        k[j] = c;
+                    }
+
                     MatrixRd A(m, 2);
                     A.col(0).setOnes();
+                    A.col(1).setZero();
                     Vectord totals(m);
                     size_t im = 0;
                     for (size_t j = 0; j < groups.size(); ++j) {
                         if (picker(j)) {
+                            A(im, 1) = k[j];
                             totals(im, 0) = sums[j];
                             ++im;
                         }
@@ -615,20 +622,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     Vectord y(m);
                     y.array() = totals.array() * a / (a + b);
 
-                    size_t i = 0;
-                    for (const auto &[j, c] : row) {
-                        if (picker(j)) {
-                            A(i, 1) = c;
-                            ++i;
-                        }
-                    }
-
                     VectorS beta = { 0, 0 };
                     Vectord nu(m, 1);
                     Vectord enu(m, 1);
 
-                    // if all elements are equal (with an easier check if they are all zero)
-                    if (!i || std::equal(A.col(1).begin(), A.col(1).end() - 1, A.col(1).begin() + 1)) {
+                    // if all elements are equal
+                    if (std::equal(A.col(1).begin(), A.col(1).end() - 1, A.col(1).begin() + 1)) {
                         Vectord c(m);
                         c.noalias() = totals - y;
                         c.array() /= a + b + 1;
