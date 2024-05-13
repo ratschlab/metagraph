@@ -12,6 +12,10 @@
 #include <boost/math/special_functions/trigamma.hpp>
 #include <boost/math/tools/minima.hpp>
 #include <boost/math/tools/roots.hpp>
+#include <boost/math/distributions/fisher_f.hpp>
+
+#include <Eigen/Dense>
+#include <unsupported/Eigen/MatrixFunctions>
 
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
@@ -588,78 +592,251 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double map_pval_out = 1.0;
 
             if (config.test_type == "bp") {
-                auto get_theta = [&](double a, double b, double total, double k_sum) {
-                    if (a + k_sum <= 1)
-                        return std::make_tuple(0.0, 0.0, true, false);
+                // fit to a GLM
+                auto get_glm = [&](double a, double b, size_t m, const auto &picker) -> double {
+                    typedef Eigen::Matrix<long double, Eigen::Dynamic, 2> MatrixRd;
+                    typedef Eigen::Matrix<long double, Eigen::Dynamic, 1> Vectord;
+                    typedef Eigen::Matrix<long double, 2, 1> VectorS;
+                    typedef Eigen::Matrix<long double, 2, 2> MatrixS;
+                    typedef Eigen::DiagonalMatrix<long double, Eigen::Dynamic> Diag;
 
-                    double qb = 2.0 - total - k_sum - a - b;
-                    double qc = k_sum + a - 1.0;
+                    MatrixRd A(m, 2);
+                    A.col(0).setOnes();
+                    Vectord totals(m);
+                    size_t im = 0;
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        if (picker(j)) {
+                            totals(im, 0) = sums[j];
+                            ++im;
+                        }
+                    }
+                    assert(im == m);
 
-                    auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
+                    Vectord y(m);
+                    y.array() = totals.array() * a / (a + b);
 
-                    // Note: comparisons of thetas to themselves ensure that they are not NaN
-                    // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
-                    bool low_valid = theta_low == theta_low && theta_low > 0 && theta_low < 1.0;
-                    bool high_valid = theta_high == theta_high && theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
-
-                    double stat_low = low_valid
-                        ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
-                        : -std::numeric_limits<double>::infinity();
-                    double stat_high = high_valid
-                        ? qc * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
-                        : -std::numeric_limits<double>::infinity();
-
-                    double stat_max = std::max({ stat_low, stat_high });
-
-                    bool stat_is_low = low_valid && stat_max == stat_low;
-                    bool stat_is_high = high_valid && stat_max == stat_high;
-
-                    if (stat_is_low && stat_is_high) {
-                        common::logger->error("Multiple valid thetas\t{}", stat_max);
-                        common::logger->error("{}\t{}", theta_low, theta_high);
-                        common::logger->error("{}\t{}", stat_low, stat_high);
-                        common::logger->error("{}\t{}", stat_is_low, stat_is_high);
-                        common::logger->error("Ratio: {} / {}", k_sum, total);
-                        common::logger->error("{},{}\t{},{},{}", a,b, total, qb, qc);
-                        throw std::runtime_error("Fail");
+                    size_t i = 0;
+                    for (const auto &[j, c] : row) {
+                        if (picker(j)) {
+                            A(i, 1) = c;
+                            ++i;
+                        }
                     }
 
-                    if (stat_is_low || stat_is_high)
-                        return std::make_tuple(theta_low, theta_high, stat_is_low, stat_is_high);
+                    VectorS beta = { 0, 0 };
+                    Vectord nu(m, 1);
+                    Vectord enu(m, 1);
 
-                    common::logger->error("No valid thetas\t{}", stat_max);
-                    common::logger->error("{}\t{}", theta_low, theta_high);
-                    common::logger->error("{}\t{}", stat_low, stat_high);
-                    common::logger->error("{}\t{}", stat_is_low, stat_is_high);
-                    common::logger->error("Ratio: {} / {}", k_sum, total);
-                    common::logger->error("{},{}\t{},{},{}", a,b,total, qb, qc);
-                    throw std::runtime_error("Fail");
+                    // if all elements are equal (with an easier check if they are all zero)
+                    if (!i || std::equal(A.col(1).begin(), A.col(1).end() - 1, A.col(1).begin() + 1)) {
+                        Vectord c(m);
+                        c.noalias() = totals - y;
+                        c.array() /= a + b + 1;
+                        c.array() += 1.0;
+                        c.array() = y.array() / c.array();
+
+                        double num = y.transpose() * c;
+                        double denom = c.sum();
+
+                        beta(0, 0) = log(num) - log(denom);
+                        nu.noalias() = A * beta;
+                        enu.array() = Eigen::exp(nu.array());
+                    } else {
+                        VectorS beta_next;
+                        Vectord var(m, 1);
+                        Vectord z(m, 1);
+
+                        MatrixS scale;
+
+                        Diag W(m);
+
+                        for (size_t i = 0; i < 100; ++i) {
+                            nu.noalias() = A * beta;
+
+                            // TODO: for some reason, this is fine, but nu.exp() segfaults
+                            enu.array() = Eigen::exp(nu.array());
+
+                            z.noalias() = beta - nu;
+                            z.array() /= enu.array();
+                            z.noalias() += nu;
+
+                            // var.noalias() = totals - enu;
+                            // var.array() /= a + b + 1;
+                            // var.array() += 1.0;
+                            // var.array() *= enu.array();
+
+                            // W.diagonal().noalias() = enu.pow(2.0);
+                            // W.diagonal().array() /= var.array();
+
+                            // compute in log space to avoid underflow
+                            var.array() = Eigen::log((totals - enu).array());
+                            var.array() -= log(a + b + 1);
+                            var.array() += Eigen::log(enu.array());
+                            var.array() = Eigen::exp(var.array());
+                            var.noalias() += enu;
+
+                            W.diagonal().noalias() = nu;
+                            W.diagonal().array() *= 2.0;
+                            W.diagonal().array() -= Eigen::log(var.array());
+                            W.diagonal().array() = Eigen::exp(W.diagonal().array());
+
+                            scale.noalias() = A.transpose() * W * A; // nxm * mxm * mxn -> nxn
+                            if (scale != scale) {
+                                common::logger->error("Scale fail");
+                                std::cerr << A << "\n\n";
+                                std::cerr << totals << "\n\n";
+                                std::cerr << y << "\n\n";
+                                std::cerr << nu << "\n\n";
+                                std::cerr << enu << "\n\n";
+                                std::cerr << z << "\n\n";
+                                std::cerr << var << "\n\n";
+                                std::cerr << W.diagonal() << "\n\n";
+                                std::cerr << scale << std::endl;
+                                throw std::runtime_error("Fail");
+                            }
+                            beta_next.noalias() = scale.inverse() * A.transpose() * W * z; // nxn * nxm * mxm * mx1 -> nx1
+                            if (beta_next != beta_next) {
+                                common::logger->error("beta fail");
+                                std::cerr << A << "\n\n";
+                                std::cerr << totals << "\n\n";
+                                std::cerr << y << "\n\n";
+                                std::cerr << nu << "\n\n";
+                                std::cerr << enu << "\n\n";
+                                std::cerr << z << "\n\n";
+                                std::cerr << var << "\n\n";
+                                std::cerr << W.diagonal() << "\n\n";
+                                std::cerr << scale << "\n\n";
+                                std::cerr << scale.inverse() << "\n\n";
+                                std::cerr << beta_next << std::endl;
+                                throw std::runtime_error("Fail");
+                            }
+
+                            std::swap(beta, beta_next);
+                            beta_next.noalias() -= beta;
+
+                            if (beta_next.norm() < 1e-5)
+                                break;
+                        }
+                    }
+
+                    enu -= y;
+                    return enu.squaredNorm();
                 };
 
-                auto get_stat_log = [&](double a, double b, double theta, double k, double total) -> double {
-                    return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
-                };
+                int64_t df_null = groups.size() - 2;
+                int64_t df_in = labels_in.size() - 2;
+                int64_t df_out = labels_in.size() - 2;
 
-                auto [theta_null_low, theta_null_high, null_is_low, null_is_high]
-                    = get_theta(a, b, total_kmers, null_sum);
-                auto [theta_in_low, theta_in_high, in_is_low, in_is_high]
-                    = get_theta(a_in, b_in, in_kmers, in_sum);
-                auto [theta_out_low, theta_out_high, out_is_low, out_is_high]
-                    = get_theta(a_out, b_out, out_kmers, out_sum);
+                double sse_in = get_glm(a, b, labels_in.size(), [&](size_t j) { return !groups[j]; });
+                double sse_out = get_glm(a, b, labels_out.size(), [&](size_t j) { return groups[j]; });
+                double sse_null = get_glm(a, b, groups.size(), [&](size_t) { return true; });
 
-                double theta_null = null_is_low ? theta_null_low : theta_null_high;
-                double theta_in = in_is_low ? theta_in_low : theta_in_high;
-                double theta_out = out_is_low ? theta_out_low : theta_out_high;
+                double dsse_in = sse_null - sse_in;
+                double dsse_out = sse_null - sse_out;
 
-                map_pval_in = theta_in > 0
-                    ? exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
-                                - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers))
-                    : 0.0;
+                if (dsse_in <= 0) {
+                    map_pval_in = 1.0;
+                } else {
+                    double f = dsse_in / sse_in * (df_null - df_in) / df_in;
+                    map_pval_in = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_in), f));
+                }
 
-                map_pval_out = theta_out > 0
-                    ? exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
-                                - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers))
-                    : 0.0;
+                if (dsse_out <= 0) {
+                    map_pval_out = 1.0;
+                } else {
+                    double f = dsse_out / sse_out * (df_null - df_out) / df_out;
+                    map_pval_out = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_out), f));
+                }
+
+                // double sse_alt = sse_in + sse_out;
+                // double dsse = sse_null - sse_alt;
+                // if (dsse <= 0) {
+                //     map_pval_in = 0.5;
+                //     map_pval_out = 0.5;
+                // } else {
+                //     double f = dsse / sse_alt * d_df / df_alt;
+
+                //     if (f != f) {
+                //         common::logger->error("sse_in: {}\tsse_out: {}\tsse_null: {}",
+                //                             sse_in, sse_out, sse_alt);
+                //     }
+                //     map_pval_in = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_alt), f)) / 2;
+                //     map_pval_out = map_pval_out;
+                // }
+
+
+                // auto get_theta = [&](double a, double b, double total, double k_sum) {
+                //     if (a + k_sum <= 1)
+                //         return std::make_tuple(0.0, 0.0, true, false);
+
+                //     double qb = 2.0 - total - k_sum - a - b;
+                //     double qc = k_sum + a - 1.0;
+
+                //     auto [theta_low, theta_high] = boost::math::tools::quadratic_roots(total, qb, qc);
+
+                //     // Note: comparisons of thetas to themselves ensure that they are not NaN
+                //     // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
+                //     bool low_valid = theta_low == theta_low && theta_low > 0 && theta_low < 1.0;
+                //     bool high_valid = theta_high == theta_high && theta_low != theta_high && theta_high > 0 && theta_high < 1.0;
+
+                //     double stat_low = low_valid
+                //         ? qc * log(theta_low) + (b - 1) * log1p(-theta_low) - total * theta_low
+                //         : -std::numeric_limits<double>::infinity();
+                //     double stat_high = high_valid
+                //         ? qc * log(theta_high) + (b - 1) * log1p(-theta_high) - total * theta_high
+                //         : -std::numeric_limits<double>::infinity();
+
+                //     double stat_max = std::max({ stat_low, stat_high });
+
+                //     bool stat_is_low = low_valid && stat_max == stat_low;
+                //     bool stat_is_high = high_valid && stat_max == stat_high;
+
+                //     if (stat_is_low && stat_is_high) {
+                //         common::logger->error("Multiple valid thetas\t{}", stat_max);
+                //         common::logger->error("{}\t{}", theta_low, theta_high);
+                //         common::logger->error("{}\t{}", stat_low, stat_high);
+                //         common::logger->error("{}\t{}", stat_is_low, stat_is_high);
+                //         common::logger->error("Ratio: {} / {}", k_sum, total);
+                //         common::logger->error("{},{}\t{},{},{}", a,b, total, qb, qc);
+                //         throw std::runtime_error("Fail");
+                //     }
+
+                //     if (stat_is_low || stat_is_high)
+                //         return std::make_tuple(theta_low, theta_high, stat_is_low, stat_is_high);
+
+                //     common::logger->error("No valid thetas\t{}", stat_max);
+                //     common::logger->error("{}\t{}", theta_low, theta_high);
+                //     common::logger->error("{}\t{}", stat_low, stat_high);
+                //     common::logger->error("{}\t{}", stat_is_low, stat_is_high);
+                //     common::logger->error("Ratio: {} / {}", k_sum, total);
+                //     common::logger->error("{},{}\t{},{},{}", a,b,total, qb, qc);
+                //     throw std::runtime_error("Fail");
+                // };
+
+                // auto get_stat_log = [&](double a, double b, double theta, double k, double total) -> double {
+                //     return (k + a - 1) * log(theta) + (b - 1) * log1p(-theta) - total * theta;
+                // };
+
+                // auto [theta_null_low, theta_null_high, null_is_low, null_is_high]
+                //     = get_theta(a, b, total_kmers, null_sum);
+                // auto [theta_in_low, theta_in_high, in_is_low, in_is_high]
+                //     = get_theta(a_in, b_in, in_kmers, in_sum);
+                // auto [theta_out_low, theta_out_high, out_is_low, out_is_high]
+                //     = get_theta(a_out, b_out, out_kmers, out_sum);
+
+                // double theta_null = null_is_low ? theta_null_low : theta_null_high;
+                // double theta_in = in_is_low ? theta_in_low : theta_in_high;
+                // double theta_out = out_is_low ? theta_out_low : theta_out_high;
+
+                // map_pval_in = theta_in > 0
+                //     ? exp(get_stat_log(a_in, b_in, theta_null, in_sum, in_kmers)
+                //                 - get_stat_log(a_in, b_in, theta_in, in_sum, in_kmers))
+                //     : 0.0;
+
+                // map_pval_out = theta_out > 0
+                //     ? exp(get_stat_log(a_out, b_out, theta_null, out_sum, out_kmers)
+                //                 - get_stat_log(a_out, b_out, theta_out, out_sum, out_kmers))
+                //     : 0.0;
             } else if (config.test_type == "lnp") {
                 auto get_theta = [&](double mu, double var, double total, double k_sum) {
                     size_t ndigits = 40;
