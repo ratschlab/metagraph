@@ -593,7 +593,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             if (config.test_type == "bp") {
                 // fit to a GLM
-                auto get_glm = [&](double a, double b, size_t m, const auto &picker) -> double {
+                auto get_glm_joint = [&](double a, double b, size_t m, const auto &picker) -> double {
                     typedef Eigen::Matrix<long double, Eigen::Dynamic, 2> MatrixRd;
                     typedef Eigen::Matrix<long double, Eigen::Dynamic, 1> Vectord;
                     typedef Eigen::Matrix<long double, 2, 1> VectorS;
@@ -609,15 +609,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     A.col(0).setOnes();
                     A.col(1).setZero();
                     Vectord totals(m);
-                    size_t im = 0;
                     for (size_t j = 0; j < groups.size(); ++j) {
-                        if (picker(j)) {
-                            A(im, 1) = k[j];
-                            totals(im, 0) = sums[j];
-                            ++im;
-                        }
+                        if (picker(j))
+                            A(j, 1) = k[j];
+
+                        totals(j, 0) = sums[j];
                     }
-                    assert(im == m);
 
                     Vectord y(m);
                     y.array() = totals.array() * a / (a + b);
@@ -722,46 +719,136 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return enu.squaredNorm();
                 };
 
-                int64_t df_null = groups.size() - 2;
-                int64_t df_in = labels_in.size() - 2;
-                int64_t df_out = labels_in.size() - 2;
+                auto get_glm_sep = [&](double a, double b, size_t m) -> double {
+                    typedef Eigen::Matrix<long double, Eigen::Dynamic, 3> MatrixRd;
+                    typedef Eigen::Matrix<long double, Eigen::Dynamic, 1> Vectord;
+                    typedef Eigen::Matrix<long double, 3, 1> VectorS;
+                    typedef Eigen::Matrix<long double, 3, 3> MatrixS;
+                    typedef Eigen::DiagonalMatrix<long double, Eigen::Dynamic> Diag;
 
-                double sse_in = get_glm(a, b, labels_in.size(), [&](size_t j) { return !groups[j]; });
-                double sse_out = get_glm(a, b, labels_out.size(), [&](size_t j) { return groups[j]; });
-                double sse_null = get_glm(a, b, groups.size(), [&](size_t) { return true; });
+                    std::vector<uint64_t> k(groups.size());
+                    for (const auto &[j, c] : row) {
+                        k[j] = c;
+                    }
 
-                double dsse_in = sse_null - sse_in;
-                double dsse_out = sse_null - sse_out;
+                    MatrixRd A(m, 3);
+                    A.col(0).setOnes();
+                    A.col(1).setZero();
+                    A.col(2).setZero();
+                    Vectord totals(m);
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        A(j, 1 + groups[j]) = k[j];
+                        totals(j, 0) = sums[j];
+                    }
 
-                if (dsse_in <= 0) {
+                    Vectord y(m);
+                    y.array() = totals.array() * a / (a + b);
+
+                    VectorS beta = { 0, 0, 0 };
+                    Vectord nu(m, 1);
+                    Vectord enu(m, 1);
+
+                    // if all elements are equal
+                    if (std::equal(A.col(1).begin(), A.col(1).end() - 1, A.col(1).begin() + 1)) {
+                        return get_glm_joint(a, b, m, [&](size_t j) { return !groups[j]; });
+                    } else if (std::equal(A.col(2).begin(), A.col(2).end() - 1, A.col(2).begin() + 1)) {
+                        return get_glm_joint(a, b, m, [&](size_t j) { return groups[j]; });
+                    } else {
+                        VectorS beta_next;
+                        Vectord var(m, 1);
+                        Vectord z(m, 1);
+
+                        MatrixS scale;
+
+                        Diag W(m);
+
+                        for (size_t i = 0; i < 100; ++i) {
+                            nu.noalias() = A * beta;
+
+                            // TODO: for some reason, this is fine, but nu.exp() segfaults
+                            enu.array() = Eigen::exp(nu.array());
+
+                            z.noalias() = beta - nu;
+                            z.array() /= enu.array();
+                            z.noalias() += nu;
+
+                            // var.noalias() = totals - enu;
+                            // var.array() /= a + b + 1;
+                            // var.array() += 1.0;
+                            // var.array() *= enu.array();
+
+                            // W.diagonal().noalias() = enu.pow(2.0);
+                            // W.diagonal().array() /= var.array();
+
+                            // compute in log space to avoid underflow
+                            var.array() = Eigen::log((totals - enu).array());
+                            var.array() -= log(a + b + 1);
+                            var.array() += Eigen::log(enu.array());
+                            var.array() = Eigen::exp(var.array());
+                            var.noalias() += enu;
+
+                            W.diagonal().noalias() = nu;
+                            W.diagonal().array() *= 2.0;
+                            W.diagonal().array() -= Eigen::log(var.array());
+                            W.diagonal().array() = Eigen::exp(W.diagonal().array());
+
+                            scale.noalias() = A.transpose() * W * A; // nxm * mxm * mxn -> nxn
+                            if (scale != scale) {
+                                common::logger->error("Scale fail");
+                                std::cerr << A << "\n\n";
+                                std::cerr << totals << "\n\n";
+                                std::cerr << y << "\n\n";
+                                std::cerr << nu << "\n\n";
+                                std::cerr << enu << "\n\n";
+                                std::cerr << z << "\n\n";
+                                std::cerr << var << "\n\n";
+                                std::cerr << W.diagonal() << "\n\n";
+                                std::cerr << scale << std::endl;
+                                throw std::runtime_error("Fail");
+                            }
+                            beta_next.noalias() = scale.inverse() * A.transpose() * W * z; // nxn * nxm * mxm * mx1 -> nx1
+                            if (beta_next != beta_next) {
+                                common::logger->error("beta fail");
+                                std::cerr << A << "\n\n";
+                                std::cerr << totals << "\n\n";
+                                std::cerr << y << "\n\n";
+                                std::cerr << nu << "\n\n";
+                                std::cerr << enu << "\n\n";
+                                std::cerr << z << "\n\n";
+                                std::cerr << var << "\n\n";
+                                std::cerr << W.diagonal() << "\n\n";
+                                std::cerr << scale << "\n\n";
+                                std::cerr << scale.inverse() << "\n\n";
+                                std::cerr << beta_next << std::endl;
+                                throw std::runtime_error("Fail");
+                            }
+
+                            std::swap(beta, beta_next);
+                            beta_next.noalias() -= beta;
+
+                            if (beta_next.norm() < 1e-5)
+                                break;
+                        }
+                    }
+
+                    enu -= y;
+                    return enu.squaredNorm();
+                };
+
+                int64_t df_alt = groups.size() - 3;
+
+                double sse_alt = get_glm_sep(a, b, groups.size());
+                double sse_null = get_glm_joint(a, b, groups.size(), [&](size_t) { return true; });
+
+                double dsse_alt = sse_null - sse_alt;
+
+                if (dsse_alt <= 0) {
                     map_pval_in = 1.0;
                 } else {
-                    double f = dsse_in / sse_in * (df_null - df_in) / df_in;
-                    map_pval_in = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_in), f));
+                    double f = dsse_alt / sse_alt * df_alt;
+                    map_pval_in = boost::math::cdf(boost::math::complement(boost::math::fisher_f(1, df_alt), f)) / 2;
+                    map_pval_out = map_pval_in;
                 }
-
-                if (dsse_out <= 0) {
-                    map_pval_out = 1.0;
-                } else {
-                    double f = dsse_out / sse_out * (df_null - df_out) / df_out;
-                    map_pval_out = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_out), f));
-                }
-
-                // double sse_alt = sse_in + sse_out;
-                // double dsse = sse_null - sse_alt;
-                // if (dsse <= 0) {
-                //     map_pval_in = 0.5;
-                //     map_pval_out = 0.5;
-                // } else {
-                //     double f = dsse / sse_alt * d_df / df_alt;
-
-                //     if (f != f) {
-                //         common::logger->error("sse_in: {}\tsse_out: {}\tsse_null: {}",
-                //                             sse_in, sse_out, sse_alt);
-                //     }
-                //     map_pval_in = boost::math::cdf(boost::math::complement(boost::math::fisher_f(df_null, df_alt), f)) / 2;
-                //     map_pval_out = map_pval_out;
-                // }
 
 
                 // auto get_theta = [&](double a, double b, double total, double k_sum) {
