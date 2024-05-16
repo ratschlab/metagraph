@@ -39,16 +39,26 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate) const {
-    for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        //auto [s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
-        auto [k_idx, s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
-        if(k_idx != npos && superkmer_mask[s_id]){ // or s_id != sshash::constants::invalid_64_t
-            //callback(kmer_to_node_from_superkmer(sequence.substr(i, k_), s_id, true));
-            callback(k_idx);
-        }else{
+    if(annotation_mode == 2){
+        for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
+            auto [k_idx, s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
+            if(k_idx != npos && superkmer_mask[s_id]){
+                callback(k_idx);
+            }else{
+                callback(s_idx);
+            }
+        }
+    }else if(annotation_mode == 1){
+        for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
+            auto [k_idx, s_idx, s_id] = kmer_to_superkmer_node(sequence.substr(i, k_));
             callback(s_idx);
         }
+    }else{
+        for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
+            callback(kmer_to_node(sequence.substr(i, k_)));
+        }
     }
+    
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
@@ -239,9 +249,11 @@ bool DBGSSHash::load(const std::string &filename) {
     }
     k_ = dict_->k();
 
-    //std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
-    //std::cout << "LOADING MASK! \n";
-    //load_superkmer_mask(s_mask_name);
+    if(annotation_mode == 2){
+        std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
+        load_superkmer_mask(s_mask_name);
+    }
+
     return true;
 }
 
@@ -286,6 +298,9 @@ void DBGSSHash::load_superkmer_mask(std::string file){
 }
 
 void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
+    if(annotation_mode != 0){
+        throw std::runtime_error("Computing superkmer stats in wrong annotation mode!");
+    }
     std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";   
     
     //getting labels in batches
