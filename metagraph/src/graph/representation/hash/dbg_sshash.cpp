@@ -239,9 +239,9 @@ bool DBGSSHash::load(const std::string &filename) {
     }
     k_ = dict_->k();
 
-    std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
-    std::cout << "LOADING MASK! \n";
-    load_superkmer_mask(s_mask_name);
+    //std::string s_mask_name = utils::remove_suffix(filename, kExtension) + "_sk_mask";
+    //std::cout << "LOADING MASK! \n";
+    //load_superkmer_mask(s_mask_name);
     return true;
 }
 
@@ -309,7 +309,6 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
     std::cout << "serializing bit vector..." << std::endl;
     bool check = store_to_file(ef_bv, file_sk_mask);
     std::cout<< " successfully stored " << file_sk_mask<<"?: " <<check<<std::endl;
-
 
 }
 
