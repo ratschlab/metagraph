@@ -110,7 +110,7 @@ class DBGSSHash : public DeBruijnGraph {
   private:
     static const std::string alphabet_;
     std::unique_ptr<sshash::dictionary> dict_;
-    int annotation_mode = 2; // 0: kmer annotation, 1: lossy superkmer annotation, 2: superkmer annotation with superkmer mask
+    int annotation_mode = 0; // 0: kmer annotation, 1: lossy superkmer annotation, 2: superkmer annotation with superkmer mask
     bool loaded_mask = false;
     sdsl::sd_vector<> superkmer_mask;
     size_t k_;
