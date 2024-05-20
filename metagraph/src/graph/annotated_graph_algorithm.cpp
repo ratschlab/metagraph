@@ -349,175 +349,307 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "nbinom") {
-        // use moments to fit the r parameter of a beta negative binomial
-        uint64_t sum_of_cubes = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            const auto &column = *columns_all[j];
-            const auto &column_values = *column_values_all[j];
-            size_t i = 0;
-            column.call_ones([&](uint64_t row_i) {
-                if (!ignored[row_i]) {
-                    if (int64_t c = adjust_count(column_values[i], j, row_i))
-                        sum_of_cubes += c * (c - 1) * (c - 2);
-                }
-                ++i;
-            });
-        }
-        double mu = static_cast<double>(total_kmers) / groups.size() / nelem;
-        double mu2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
-                                                         sums_of_squares.end(), uint64_t(0))) / groups.size() / nelem - mu;
-        double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / nelem;
-        double a = mu3 * mu + mu * mu * mu2 + 2 * mu2 * mu2;
-        double b = 2 * mu3 * mu * mu + mu3 * mu - mu2 * mu3 - mu * mu2 * mu2 + 3 * mu * mu + mu2 - 4 * mu2 * mu2;
-        double c = -2 * mu * (mu2 * mu2 - mu * mu2 - mu3 * mu);
-
-        auto [r_low, r_high] = boost::math::tools::quadratic_roots(a, b, c);
-
-        common::logger->trace("mu: {}\tmu2: {}\tmu3: {}\tr_low: {}\tr_high: {}",
-                              mu, mu2, mu3, r_low, r_high);
-
-        // check for NaNs
-        // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
-        if (r_low != r_low && r_high != r_high) {
-            common::logger->error("{},{},{}", a, b, c);
-            throw std::runtime_error("Failed to fit, no real roots");
-        }
-
-        double r_low_var_sqerr = 0;
-        double r_high_var_sqerr = 0;
+        double in_num = 0;
+        double out_num = 0;
+        double in_denom = 0;
+        double out_denom = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
             double mu = static_cast<double>(sums[j]) / nelem;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
-            double p_low = r_low / (r_low + mu);
-            double p_high = r_high / (r_high + mu);
-            double t_var_low = mu / p_low;
-            double t_var_high = mu / p_high;
-            r_low_var_sqerr += pow(t_var_low - var, 2.0);
-            r_high_var_sqerr += pow(t_var_high - var, 2.0);
-            common::logger->trace("label: {}\tmean: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
-                                  j, mu, var, p_low, t_var_low, p_high, t_var_high);
+
+            double r = mu * mu / (var - mu);
+            double p = mu / var;
+            double p_frac = (1.0 - p) / p;
+            double ab = r * p_frac;
+            double abb = ab * p_frac;
+            if (groups[j]) {
+                out_num += ab;
+                out_denom += abb;
+            } else {
+                in_num += ab;
+                in_denom += abb;
+            }
         }
+        double b_in = in_denom / in_num;
+        double r_in = in_num / b_in;
 
-        common::logger->trace("r low: {} (sqerr: {})\t r high: {} (sqerr: {})",
-                              r_low, r_low_var_sqerr, r_high, r_high_var_sqerr);
+        double b_out = out_denom / out_num;
+        double r_out = out_num / b_out;
 
-        double r = r_low_var_sqerr < r_high_var_sqerr ? r_low : r_high;
-        common::logger->trace("r: {}", r);
+        double b_null = (in_denom + out_denom) / (in_num + out_num);
+        double r_null = (in_num + out_num) / b_null;
+        // tsl::hopscotch_map<uint64_t, size_t> histogram;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     const auto &column = *columns_all[j];
+        //     const auto &column_values = *column_values_all[j];
+        //     size_t i = 0;
+        //     column.call_ones([&](uint64_t row_i) {
+        //         if (!ignored[row_i])
+        //             ++histogram[adjust_count(column_values[i], j, row_i)];
 
-        boost::math::chi_squared dist(1);
+        //         ++i;
+        //     });
+        // }
 
-        compute_pval = [&,r,dist](const auto &row) {
+        // double r = boost::math::tools::newton_raphson_iterate([&](double r) {
+        //     double size = nelem * groups.size();
+        //     double mu = total_kmers / size;
+        //     double dl = size * (log(r) - log(r + mu) - boost::math::digamma(r));
+        //     double ddl = size * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+        //     for (const auto &[k, c] : histogram) {
+        //         dl += boost::math::digamma(k + r) * c;
+        //         ddl += boost::math::trigamma(k + r) * c;
+        //     }
+        //     return std::make_pair(dl, ddl);
+        // }, 1.0, 0.0, static_cast<double>(total_kmers), 30);
+
+        // common::logger->trace("r: {}", r);
+
+        // // use moments to fit the r parameter of a beta negative binomial
+        // uint64_t sum_of_cubes = 0;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     const auto &column = *columns_all[j];
+        //     const auto &column_values = *column_values_all[j];
+        //     size_t i = 0;
+        //     column.call_ones([&](uint64_t row_i) {
+        //         if (!ignored[row_i]) {
+        //             if (int64_t c = adjust_count(column_values[i], j, row_i))
+        //                 sum_of_cubes += c * (c - 1) * (c - 2);
+        //         }
+        //         ++i;
+        //     });
+        // }
+        // double mu = static_cast<double>(total_kmers) / groups.size() / nelem;
+        // double mu2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
+        //                                                  sums_of_squares.end(), uint64_t(0))) / groups.size() / nelem - mu;
+        // double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / nelem;
+        // double a = mu3 * mu + mu * mu * mu2 + 2 * mu2 * mu2;
+        // double b = 2 * mu3 * mu * mu + mu3 * mu - mu2 * mu3 - mu * mu2 * mu2 + 3 * mu * mu + mu2 - 4 * mu2 * mu2;
+        // double c = -2 * mu * (mu2 * mu2 - mu * mu2 - mu3 * mu);
+
+        // auto [r_low, r_high] = boost::math::tools::quadratic_roots(a, b, c);
+
+        // common::logger->trace("mu: {}\tmu2: {}\tmu3: {}\tr_low: {}\tr_high: {}",
+        //                       mu, mu2, mu3, r_low, r_high);
+
+        // // check for NaNs
+        // // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
+        // if (r_low != r_low && r_high != r_high) {
+        //     common::logger->error("{},{},{}", a, b, c);
+        //     throw std::runtime_error("Failed to fit, no real roots");
+        // }
+
+        // double r_low_var_sqerr = 0;
+        // double r_high_var_sqerr = 0;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     double mu = static_cast<double>(sums[j]) / nelem;
+        //     double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
+        //     double p_low = r_low / (r_low + mu);
+        //     double p_high = r_high / (r_high + mu);
+        //     double t_var_low = mu / p_low;
+        //     double t_var_high = mu / p_high;
+        //     r_low_var_sqerr += pow(t_var_low - var, 2.0);
+        //     r_high_var_sqerr += pow(t_var_high - var, 2.0);
+        //     common::logger->trace("label: {}\tmean: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
+        //                           j, mu, var, p_low, t_var_low, p_high, t_var_high);
+        // }
+
+        // common::logger->trace("r low: {} (sqerr: {})\t r high: {} (sqerr: {})",
+        //                       r_low, r_low_var_sqerr, r_high, r_high_var_sqerr);
+
+        // double r = r_low_var_sqerr < r_high_var_sqerr ? r_low : r_high;
+        // common::logger->trace("r: {}", r);
+
+        boost::math::chi_squared dist(2);
+
+        compute_pval = [&,r_in,r_out,r_null,b_in,b_out,b_null,dist](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
             double in_sum = 0;
             double out_sum = 0;
-            sdsl::bit_vector found(groups.size());
+            // std::vector<uint64_t> counts(groups.size());
             for (const auto &[j, c] : row) {
-                found[j] = true;
                 if (groups[j]) {
                     out_sum += c;
                 } else {
                     in_sum += c;
                 }
+                // counts[j] = c;
             }
 
-            std::vector<size_t> unfound;
-            for (size_t i = 0; i < found.size(); ++i) {
-                if (!found[i])
-                    unfound.emplace_back(i);
-            }
+            double theta_in = (in_sum + r_in - 1) / in_kmers / (b_in + 1);
+            double theta_out = (out_sum + r_out - 1) / out_kmers / (b_out + 1);
+            double theta_null = (in_sum + out_sum + r_null - 1) / total_kmers / (b_null + 1);
 
-            double total_sum = in_sum + out_sum;
-            size_t ndigits = 30;
+            double ll_in = theta_in > 0 ? in_sum * log(theta_in) - in_kmers * theta_in : 0;
+            double ll_out = theta_out > 0 ? out_sum * log(theta_out) - out_kmers * theta_out : 0;
+            double ll_null = (in_sum + out_sum) * log(theta_null) - total_kmers * theta_null;
 
-            auto ll_dx_ddx_pick = [&](const auto &picker) {
-                return [&](double lambda) {
-                    double val = 0;
-                    double dval = 0;
-                    for (const auto &[j, c] : row) {
-                        if (picker(j)) {
-                            double prop = static_cast<double>(sums[j]) * lambda;
-                            double shift_prop = r + prop;
-                            val += (c - prop) / shift_prop;
-                            dval -= (r + c) / shift_prop / shift_prop * sums[j];
-                        }
-                    }
+            double stat = 2 * (ll_in + ll_out - ll_null);
 
-                    for (size_t j : unfound) {
-                        if (picker(j)) {
-                            double prop = static_cast<double>(sums[j]) * lambda;
-                            double shift_prop = r + prop;
-                            val -= prop / shift_prop;
-                            dval -= r / shift_prop / shift_prop * sums[j];
-                        }
-                    }
+            // auto make_ll_getter = [&](const auto &picker) {
+            //     double sum = 0;
+            //     for (const auto &[j, c] : row) {
+            //         if (picker(j))
+            //             sum += c;
+            //     }
 
-                    return std::make_pair(val, dval);
-                };
-            };
+            //     return [&,sum](double theta) {
+            //         double dl = sum / theta;
+            //         double ddl = -sum / theta / theta;
+            //         for (size_t j = 0; j < groups.size(); ++j) {
+            //             if (picker(j)) {
+            //                 double r_shift = (r + counts[j]) * sums[j];
+            //                 double denom = r + theta * sums[j];
+            //                 dl -= r_shift / denom;
+            //                 ddl += r_shift * sums[j] / denom / denom;
+            //             }
+            //         }
 
-            double lambda_null = boost::math::tools::newton_raphson_iterate(
-                ll_dx_ddx_pick([&](size_t) { return true; }),
-                total_sum / total_kmers, -0.01, 1.01, ndigits
-            );
+            //         return std::make_pair(dl, ddl);
+            //     };
+            // };
 
-            double chi_stat = 0;
-            double loglikelihood_null = 0;
-            // if (false) {
-            //     // score test
-            //     auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
-            //     auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
+            // double theta_in = boost::math::tools::newton_raphson_iterate(
+            //     make_ll_getter([&](size_t j) { return !groups[j]; }),
+            //     0.5, 0.0, 1.0, 30
+            // );
+            // double theta_out = boost::math::tools::newton_raphson_iterate(
+            //     make_ll_getter([&](size_t j) { return groups[j]; }),
+            //     0.5, 0.0, 1.0, 30
+            // );
+            // double theta_null = boost::math::tools::newton_raphson_iterate(
+            //     make_ll_getter([&](size_t) { return true; }),
+            //     0.5, 0.0, 1.0, 30
+            // );
 
-            //     val_in *= r / lambda_null;
-            //     val_out *= r / lambda_null;
+            // double ll_alt = 0;
+            // double ll_null = 0;
 
-            //     dval_in = (val_in / lambda_null - dval_in * r / lambda_null) / labels_in.size();
-            //     dval_out = (val_out / lambda_null - dval_out * r / lambda_null) / labels_out.size();
-            //     chi_stat = val_in * val_in / dval_in + val_out * val_out / dval_out;
-            // } else {
-                // log likelihood test
-                double lambda_in = boost::math::tools::newton_raphson_iterate(
-                    ll_dx_ddx_pick([&](size_t j) { return !groups[j]; }),
-                    in_sum / in_kmers, -0.01, 1.01, ndigits
-                );
+            // for (size_t j = 0; j < groups.size(); ++j) {
+            //     double theta = groups[j] ? theta_out : theta_in;
+            //     double denom = log(r + sums[j] * theta);
+            //     ll_alt += - r * denom + counts[j] * (log(theta) - denom);
 
-                double lambda_out = boost::math::tools::newton_raphson_iterate(
-                    ll_dx_ddx_pick([&](size_t j) { return groups[j]; }),
-                    out_sum / out_kmers, -0.01, 1.01, ndigits
-                );
-
-                double loglikelihood_alt = 0;
-
-                for (const auto &[j, c] : row) {
-                    double lambda = groups[j] ? lambda_out : lambda_in;
-                    double prop = lambda * sums[j];
-                    loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
-
-                    double prop_null = lambda_null * sums[j];
-                    loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
-                }
-
-                for (size_t j : unfound) {
-                    double lambda = groups[j] ? lambda_out : lambda_in;
-                    double prop = lambda * sums[j];
-                    loglikelihood_alt -= log(r + prop) * r;
-
-                    double prop_null = lambda_null * sums[j];
-                    loglikelihood_null -= log(r + prop_null) * r;
-                }
-
-                chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
-
-                if (chi_stat < 0) {
-                    common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                    common::logger->error("Theta null: {}\ttheta in: {}\ttheta out: {}",
-                                          lambda_null, lambda_in, lambda_out);
-                    throw std::runtime_error("Test failed");
-                }
+            //     double denom_null = log(r + sums[j] * theta_null);
+            //     ll_null += - r * denom_null + counts[j] * (log(theta_null) - denom_null);
             // }
 
-            double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
+            // double stat = 2 * (ll_alt - ll_null);
+            // double pval = boost::math::cdf(boost::math::complement(dist, stat));
+            double pval = stat > 0
+                ? boost::math::cdf(boost::math::complement(dist, stat))
+                : 1.0;
+
+            // double in_sum = 0;
+            // double out_sum = 0;
+            // sdsl::bit_vector found(groups.size());
+            // for (const auto &[j, c] : row) {
+            //     found[j] = true;
+            //     if (groups[j]) {
+            //         out_sum += c;
+            //     } else {
+            //         in_sum += c;
+            //     }
+            // }
+
+            // std::vector<size_t> unfound;
+            // for (size_t i = 0; i < found.size(); ++i) {
+            //     if (!found[i])
+            //         unfound.emplace_back(i);
+            // }
+
+            // double total_sum = in_sum + out_sum;
+            // size_t ndigits = 30;
+
+            // auto ll_dx_ddx_pick = [&](const auto &picker) {
+            //     return [&](double lambda) {
+            //         double val = 0;
+            //         double dval = 0;
+            //         for (const auto &[j, c] : row) {
+            //             if (picker(j)) {
+            //                 double prop = static_cast<double>(sums[j]) * lambda;
+            //                 double shift_prop = r + prop;
+            //                 val += (c - prop) / shift_prop;
+            //                 dval -= (r + c) / shift_prop / shift_prop * sums[j];
+            //             }
+            //         }
+
+            //         for (size_t j : unfound) {
+            //             if (picker(j)) {
+            //                 double prop = static_cast<double>(sums[j]) * lambda;
+            //                 double shift_prop = r + prop;
+            //                 val -= prop / shift_prop;
+            //                 dval -= r / shift_prop / shift_prop * sums[j];
+            //             }
+            //         }
+
+            //         return std::make_pair(val, dval);
+            //     };
+            // };
+
+            // double lambda_null = boost::math::tools::newton_raphson_iterate(
+            //     ll_dx_ddx_pick([&](size_t) { return true; }),
+            //     total_sum / total_kmers, -0.01, 1.01, ndigits
+            // );
+
+            // double chi_stat = 0;
+            // double loglikelihood_null = 0;
+            // // if (false) {
+            // //     // score test
+            // //     auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
+            // //     auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
+
+            // //     val_in *= r / lambda_null;
+            // //     val_out *= r / lambda_null;
+
+            // //     dval_in = (val_in / lambda_null - dval_in * r / lambda_null) / labels_in.size();
+            // //     dval_out = (val_out / lambda_null - dval_out * r / lambda_null) / labels_out.size();
+            // //     chi_stat = val_in * val_in / dval_in + val_out * val_out / dval_out;
+            // // } else {
+            //     // log likelihood test
+            //     double lambda_in = boost::math::tools::newton_raphson_iterate(
+            //         ll_dx_ddx_pick([&](size_t j) { return !groups[j]; }),
+            //         in_sum / in_kmers, -0.01, 1.01, ndigits
+            //     );
+
+            //     double lambda_out = boost::math::tools::newton_raphson_iterate(
+            //         ll_dx_ddx_pick([&](size_t j) { return groups[j]; }),
+            //         out_sum / out_kmers, -0.01, 1.01, ndigits
+            //     );
+
+            //     double loglikelihood_alt = 0;
+
+            //     for (const auto &[j, c] : row) {
+            //         double lambda = groups[j] ? lambda_out : lambda_in;
+            //         double prop = lambda * sums[j];
+            //         loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
+
+            //         double prop_null = lambda_null * sums[j];
+            //         loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
+            //     }
+
+            //     for (size_t j : unfound) {
+            //         double lambda = groups[j] ? lambda_out : lambda_in;
+            //         double prop = lambda * sums[j];
+            //         loglikelihood_alt -= log(r + prop) * r;
+
+            //         double prop_null = lambda_null * sums[j];
+            //         loglikelihood_null -= log(r + prop_null) * r;
+            //     }
+
+            //     chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
+
+            //     if (chi_stat < 0) {
+            //         common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+            //         common::logger->error("Theta null: {}\ttheta in: {}\ttheta out: {}",
+            //                               lambda_null, lambda_in, lambda_out);
+            //         throw std::runtime_error("Test failed");
+            //     }
+            // // }
+
+            // double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
 
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
