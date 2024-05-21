@@ -378,6 +378,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         double b_null = (in_denom + out_denom) / (in_num + out_num);
         double r_null = (in_num + out_num) / b_null;
+
+
         // tsl::hopscotch_map<uint64_t, size_t> histogram;
         // for (size_t j = 0; j < groups.size(); ++j) {
         //     const auto &column = *columns_all[j];
@@ -478,69 +480,76 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 // counts[j] = c;
             }
 
-            double theta_in = (in_sum + r_in - 1) / in_kmers / (b_in + 1);
-            double theta_out = (out_sum + r_out - 1) / out_kmers / (b_out + 1);
-            double theta_null = (in_sum + out_sum + r_null - 1) / total_kmers / (b_null + 1);
+            double in_sum_shift = in_sum + r_in;
+            double out_sum_shift = out_sum + r_out;
+            double crit_val = out_sum_shift * in_kmers * (b_in + 1) / in_sum_shift / out_kmers / (b_out + 1);
+            auto f_dist = boost::math::fisher_f(in_sum_shift * 2, out_sum_shift * 2);
+            double pval = std::min(boost::math::cdf(f_dist, crit_val),
+                                   boost::math::cdf(boost::math::complement(f_dist, crit_val))) * 2.0;
 
-            double ll_in = theta_in > 0 ? in_sum * log(theta_in) - in_kmers * theta_in : 0;
-            double ll_out = theta_out > 0 ? out_sum * log(theta_out) - out_kmers * theta_out : 0;
-            double ll_null = (in_sum + out_sum) * log(theta_null) - total_kmers * theta_null;
+            // double theta_in = (in_sum + r_in - 1) / in_kmers / (b_in + 1);
+            // double theta_out = (out_sum + r_out - 1) / out_kmers / (b_out + 1);
+            // double theta_null = (in_sum + out_sum + r_null - 1) / total_kmers / (b_null + 1);
 
-            double stat = 2 * (ll_in + ll_out - ll_null);
+            // double ll_in = theta_in > 0 ? in_sum * log(theta_in) - in_kmers * theta_in : 0;
+            // double ll_out = theta_out > 0 ? out_sum * log(theta_out) - out_kmers * theta_out : 0;
+            // double ll_null = (in_sum + out_sum) * log(theta_null) - total_kmers * theta_null;
 
-            // auto make_ll_getter = [&](const auto &picker) {
-            //     double sum = 0;
-            //     for (const auto &[j, c] : row) {
-            //         if (picker(j))
-            //             sum += c;
-            //     }
+            // double stat = 2 * (ll_in + ll_out - ll_null);
 
-            //     return [&,sum](double theta) {
-            //         double dl = sum / theta;
-            //         double ddl = -sum / theta / theta;
-            //         for (size_t j = 0; j < groups.size(); ++j) {
-            //             if (picker(j)) {
-            //                 double r_shift = (r + counts[j]) * sums[j];
-            //                 double denom = r + theta * sums[j];
-            //                 dl -= r_shift / denom;
-            //                 ddl += r_shift * sums[j] / denom / denom;
-            //             }
-            //         }
+            // // auto make_ll_getter = [&](const auto &picker) {
+            // //     double sum = 0;
+            // //     for (const auto &[j, c] : row) {
+            // //         if (picker(j))
+            // //             sum += c;
+            // //     }
 
-            //         return std::make_pair(dl, ddl);
-            //     };
-            // };
+            // //     return [&,sum](double theta) {
+            // //         double dl = sum / theta;
+            // //         double ddl = -sum / theta / theta;
+            // //         for (size_t j = 0; j < groups.size(); ++j) {
+            // //             if (picker(j)) {
+            // //                 double r_shift = (r + counts[j]) * sums[j];
+            // //                 double denom = r + theta * sums[j];
+            // //                 dl -= r_shift / denom;
+            // //                 ddl += r_shift * sums[j] / denom / denom;
+            // //             }
+            // //         }
 
-            // double theta_in = boost::math::tools::newton_raphson_iterate(
-            //     make_ll_getter([&](size_t j) { return !groups[j]; }),
-            //     0.5, 0.0, 1.0, 30
-            // );
-            // double theta_out = boost::math::tools::newton_raphson_iterate(
-            //     make_ll_getter([&](size_t j) { return groups[j]; }),
-            //     0.5, 0.0, 1.0, 30
-            // );
-            // double theta_null = boost::math::tools::newton_raphson_iterate(
-            //     make_ll_getter([&](size_t) { return true; }),
-            //     0.5, 0.0, 1.0, 30
-            // );
+            // //         return std::make_pair(dl, ddl);
+            // //     };
+            // // };
 
-            // double ll_alt = 0;
-            // double ll_null = 0;
+            // // double theta_in = boost::math::tools::newton_raphson_iterate(
+            // //     make_ll_getter([&](size_t j) { return !groups[j]; }),
+            // //     0.5, 0.0, 1.0, 30
+            // // );
+            // // double theta_out = boost::math::tools::newton_raphson_iterate(
+            // //     make_ll_getter([&](size_t j) { return groups[j]; }),
+            // //     0.5, 0.0, 1.0, 30
+            // // );
+            // // double theta_null = boost::math::tools::newton_raphson_iterate(
+            // //     make_ll_getter([&](size_t) { return true; }),
+            // //     0.5, 0.0, 1.0, 30
+            // // );
 
-            // for (size_t j = 0; j < groups.size(); ++j) {
-            //     double theta = groups[j] ? theta_out : theta_in;
-            //     double denom = log(r + sums[j] * theta);
-            //     ll_alt += - r * denom + counts[j] * (log(theta) - denom);
+            // // double ll_alt = 0;
+            // // double ll_null = 0;
 
-            //     double denom_null = log(r + sums[j] * theta_null);
-            //     ll_null += - r * denom_null + counts[j] * (log(theta_null) - denom_null);
-            // }
+            // // for (size_t j = 0; j < groups.size(); ++j) {
+            // //     double theta = groups[j] ? theta_out : theta_in;
+            // //     double denom = log(r + sums[j] * theta);
+            // //     ll_alt += - r * denom + counts[j] * (log(theta) - denom);
 
-            // double stat = 2 * (ll_alt - ll_null);
-            // double pval = boost::math::cdf(boost::math::complement(dist, stat));
-            double pval = stat > 0
-                ? boost::math::cdf(boost::math::complement(dist, stat))
-                : 1.0;
+            // //     double denom_null = log(r + sums[j] * theta_null);
+            // //     ll_null += - r * denom_null + counts[j] * (log(theta_null) - denom_null);
+            // // }
+
+            // // double stat = 2 * (ll_alt - ll_null);
+            // // double pval = boost::math::cdf(boost::math::complement(dist, stat));
+            // double pval = stat > 0
+            //     ? boost::math::cdf(boost::math::complement(dist, stat))
+            //     : 1.0;
 
             // double in_sum = 0;
             // double out_sum = 0;
