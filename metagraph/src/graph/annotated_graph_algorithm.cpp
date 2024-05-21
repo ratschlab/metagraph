@@ -349,35 +349,74 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "nbinom") {
-        double in_num = 0;
-        double out_num = 0;
-        double in_denom = 0;
-        double out_denom = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            double mu = static_cast<double>(sums[j]) / nelem;
-            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
+        double in_sum_mu = in_kmers / nelem;
+        double out_sum_mu = out_kmers / nelem;
 
-            double r = mu * mu / (var - mu);
-            double p = mu / var;
-            double p_frac = (1.0 - p) / p;
-            double ab = r * p_frac;
-            double abb = ab * p_frac;
-            if (groups[j]) {
-                out_num += ab;
-                out_denom += abb;
-            } else {
-                in_num += ab;
-                in_denom += abb;
+        double in_sum_var = 0;
+        double out_sum_var = 0;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                     std::unique_ptr<ValuesContainer>,
+                     PairContainer>(columns_all, column_values_all,
+                                    [&](uint64_t row_i, const auto &raw_row) {
+            if (ignored[row_i])
+                return;
+
+            double in_sum = 0;
+            double out_sum = 0;
+            for (const auto &[j, raw_c] : raw_row) {
+                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
+                    if (groups[j]) {
+                        out_sum += c;
+                    } else {
+                        in_sum += c;
+                    }
+                }
             }
-        }
-        double b_in = in_denom / in_num;
-        double r_in = in_num / b_in;
 
-        double b_out = out_denom / out_num;
-        double r_out = out_num / b_out;
+            in_sum_var += in_sum * in_sum;
+            out_sum_var += out_sum * out_sum;
+        });
 
-        double b_null = (in_denom + out_denom) / (in_num + out_num);
-        double r_null = (in_num + out_num) / b_null;
+        double in_sum_mu2 = in_sum_mu * in_sum_mu;
+        double out_sum_mu2 = out_sum_mu * out_sum_mu;
+
+        in_sum_var = in_sum_var / nelem - in_sum_mu2;
+        out_sum_var = out_sum_var / nelem - out_sum_mu2;
+
+        double r_in = in_sum_mu2 / (in_sum_var - in_sum_mu);
+        double r_out = out_sum_mu2 / (out_sum_var - out_sum_mu);
+
+        double p_in = in_sum_mu / in_sum_var;
+        double p_out = out_sum_mu / out_sum_var;
+        // double in_num = 0;
+        // double out_num = 0;
+        // double in_denom = 0;
+        // double out_denom = 0;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     double mu = static_cast<double>(sums[j]) / nelem;
+        //     double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
+
+        //     double r = mu * mu / (var - mu);
+        //     double p = mu / var;
+        //     double p_frac = (1.0 - p) / p;
+        //     double ab = r * p_frac;
+        //     double abb = ab * p_frac;
+        //     if (groups[j]) {
+        //         out_num += ab;
+        //         out_denom += abb;
+        //     } else {
+        //         in_num += ab;
+        //         in_denom += abb;
+        //     }
+        // }
+        // double b_in = in_denom / in_num;
+        // double r_in = in_num / b_in;
+
+        // double b_out = out_denom / out_num;
+        // double r_out = out_num / b_out;
+
+        // double b_null = (in_denom + out_denom) / (in_num + out_num);
+        // double r_null = (in_num + out_num) / b_null;
 
 
         // tsl::hopscotch_map<uint64_t, size_t> histogram;
@@ -462,9 +501,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         // double r = r_low_var_sqerr < r_high_var_sqerr ? r_low : r_high;
         // common::logger->trace("r: {}", r);
 
-        boost::math::chi_squared dist(2);
+        // boost::math::chi_squared dist(2);
 
-        compute_pval = [&,r_in,r_out,r_null,b_in,b_out,b_null,dist](const auto &row) {
+        // compute_pval = [&,r_in,r_out,r_null,b_in,b_out,b_null,dist](const auto &row) {
+        compute_pval = [&,r_in,r_out,p_in,p_out](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
@@ -482,7 +522,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double in_sum_shift = in_sum + r_in;
             double out_sum_shift = out_sum + r_out;
-            double crit_val = out_sum_shift * in_kmers * (b_in + 1) / in_sum_shift / out_kmers / (b_out + 1);
+            double crit_val = out_sum_shift * (1.0 - p_out) / in_sum_shift / (1.0 - p_in);
             auto f_dist = boost::math::fisher_f(in_sum_shift * 2, out_sum_shift * 2);
             double pval = std::min(boost::math::cdf(f_dist, crit_val),
                                    boost::math::cdf(boost::math::complement(f_dist, crit_val))) * 2.0;
