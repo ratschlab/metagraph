@@ -13,6 +13,8 @@
 #include <boost/math/tools/minima.hpp>
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/distributions/fisher_f.hpp>
+#include <boost/math/special_functions/polygamma.hpp>
+#include <boost/math/special_functions/gamma.hpp>
 
 #include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
@@ -349,11 +351,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "nbinom") {
-        double in_sum_mu = in_kmers / nelem;
-        double out_sum_mu = out_kmers / nelem;
-
+        double in_sum_mu = 0;
         double in_sum_var = 0;
+        double out_sum_mu = 0;
         double out_sum_var = 0;
+        double null_sum_var = 0;
+        VectorMap<uint64_t, size_t> in_hist;
+        VectorMap<uint64_t, size_t> out_hist;
+        VectorMap<uint64_t, size_t> null_hist;
         utils::call_rows<std::unique_ptr<bit_vector>,
                      std::unique_ptr<ValuesContainer>,
                      PairContainer>(columns_all, column_values_all,
@@ -361,33 +366,78 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (ignored[row_i])
                 return;
 
-            double in_sum = 0;
-            double out_sum = 0;
+            uint64_t in_sum = 0;
+            uint64_t out_sum = 0;
             for (const auto &[j, raw_c] : raw_row) {
-                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                    if (groups[j]) {
-                        out_sum += c;
-                    } else {
-                        in_sum += c;
-                    }
+                if (groups[j]) {
+                    out_sum += adjust_count(raw_c, j, row_i);
+                } else {
+                    in_sum += adjust_count(raw_c, j, row_i);
                 }
             }
 
+            ++in_hist[in_sum];
+            ++out_hist[out_sum];
+            ++null_hist[in_sum + out_sum];
+            in_sum_mu += in_sum;
+            out_sum_mu += out_sum;
             in_sum_var += in_sum * in_sum;
             out_sum_var += out_sum * out_sum;
+            null_sum_var += pow(in_sum + out_sum, 2.0);
         });
+
+        double null_sum_mu = in_sum_mu + out_sum_mu;
+
+        in_sum_mu /= nelem;
+        out_sum_mu /= nelem;
+        null_sum_mu /= nelem;
 
         double in_sum_mu2 = in_sum_mu * in_sum_mu;
         double out_sum_mu2 = out_sum_mu * out_sum_mu;
+        double null_sum_mu2 = null_sum_mu * null_sum_mu;
 
         in_sum_var = in_sum_var / nelem - in_sum_mu2;
         out_sum_var = out_sum_var / nelem - out_sum_mu2;
+        null_sum_var = null_sum_var / nelem - null_sum_mu2;
 
-        double r_in = in_sum_mu2 / (in_sum_var - in_sum_mu);
-        double r_out = out_sum_mu2 / (out_sum_var - out_sum_mu);
+        // double r_in = in_sum_mu2 / (in_sum_var - in_sum_mu);
+        // double r_out = out_sum_mu2 / (out_sum_var - out_sum_mu);
 
-        double p_in = in_sum_mu / in_sum_var;
-        double p_out = out_sum_mu / out_sum_var;
+        auto get_params = [&](const auto &hist, double mu, double mu2, double var) {
+            double tr = mu2 / (var - mu);
+            common::logger->trace("Mean: {}\tVar: {}", mu, var);
+            common::logger->trace("Initial guess r: {}", tr);
+            tr = boost::math::tools::schroder_iterate([&](double r) {
+                double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
+                double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+                double dddl = nelem * (-1.0 / r / r + 1.0 / pow(r + mu, 2.0) - boost::math::polygamma(2, r));
+                for (const auto &[k, c] : hist) {
+                    dl += boost::math::digamma(k + r) * c;
+                    ddl += boost::math::trigamma(k + r) * c;
+                    dddl += boost::math::polygamma(2, k + r) * c;
+                }
+                return std::make_tuple(dl, ddl, dddl);
+            }, tr, 0.0, total_kmers, 10);
+
+            double p = tr / (tr + mu);
+            common::logger->trace("MLE r: {}\tp: {}", tr, p);
+            common::logger->trace("Fit mean: {}\tFit var: {}", tr * (1.0 - p) / p, tr * (1.0 - p) / p / p);
+            return std::make_pair(tr, p);
+        };
+
+        auto [tr_in, p_in] = get_params(in_hist, in_sum_mu, in_sum_mu2, in_sum_var);
+        auto [tr_out, p_out] = get_params(out_hist, out_sum_mu, out_sum_mu2, out_sum_var);
+
+        double tr_null = null_sum_mu2 / (null_sum_var - null_sum_mu);
+        double p_null = tr_null / (tr_null + null_sum_mu);
+
+        double r_in = tr_in / in_kmers;
+        double r_out = tr_out / out_kmers;
+        double r_null = tr_null / total_kmers;
+
+        // double p_in = in_sum_mu / in_sum_var;
+        // double p_out = out_sum_mu / out_sum_var;
+
         // double in_num = 0;
         // double out_num = 0;
         // double in_denom = 0;
@@ -504,9 +554,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         // boost::math::chi_squared dist(2);
 
         // compute_pval = [&,r_in,r_out,r_null,b_in,b_out,b_null,dist](const auto &row) {
-        compute_pval = [&,r_in,r_out,p_in,p_out](const auto &row) {
+        p_in = p_null;
+        p_out = p_null;
+        compute_pval = [&,r_in,r_out,r_null,p_in,p_out,p_null](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
+
 
             double in_sum = 0;
             double out_sum = 0;
@@ -520,12 +573,110 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 // counts[j] = c;
             }
 
-            double in_sum_shift = in_sum + r_in;
-            double out_sum_shift = out_sum + r_out;
-            double crit_val = out_sum_shift * (1.0 - p_out) / in_sum_shift / (1.0 - p_in);
-            auto f_dist = boost::math::fisher_f(in_sum_shift * 2, out_sum_shift * 2);
-            double pval = std::min(boost::math::cdf(f_dist, crit_val),
-                                   boost::math::cdf(boost::math::complement(f_dist, crit_val))) * 2.0;
+            auto get_llike = [&](double p, double total, double k) {
+                if (k == 0)
+                    return 0.0;
+
+                double factor = exp(log(p) + log(total) - log1p(-p));
+                double factor2 = factor * factor;
+                double th = boost::math::tools::schroder_iterate([&,factor,factor2,p,k](double th) {
+                    double base = factor * th;
+                    double dl = boost::math::digamma(base + k) - boost::math::digamma(base) + log(p);
+                    double ddl = factor * (boost::math::trigamma(base + k) - boost::math::trigamma(base));
+                    double dddl = factor2 * (boost::math::polygamma(2, base + k) - boost::math::polygamma(2, base));
+                    return std::make_tuple(dl, ddl, dddl);
+                }, k / total, std::numeric_limits<double>::min(), 1.0, 30);
+                factor *= th;
+                return lgamma(factor + k) - lgamma(factor) + factor * log(p);
+            };
+
+            auto get_llike_null = [&]() {
+                double k_in = in_sum;
+                double k_out = out_sum;
+                double factor_in = exp(log(p_in) + log(in_kmers) - log1p(-p_in));
+                double factor_out = exp(log(p_out) + log(out_kmers) - log1p(-p_out));
+                double factor2_in = factor_in * factor_in;
+                double factor2_out = factor_out * factor_out;
+                double factor3_in = factor2_in * factor_in;
+                double factor3_out = factor2_out * factor_out;
+                double th = boost::math::tools::schroder_iterate([&](double th) {
+                    double base_in = factor_in * th;
+                    double base_out = factor_out * th;
+                    double dl = factor_in * log(p_in) + factor_out * log(p_out);
+                    double ddl = 0;
+                    double dddl = 0;
+                    if (k_in > 0) {
+                        dl += factor_in * (boost::math::digamma(base_in + k_in) - boost::math::digamma(base_in));
+                        ddl += factor2_in * (boost::math::trigamma(base_in + k_in) - boost::math::trigamma(base_in));
+                        dddl += factor3_in * (boost::math::polygamma(2, base_in + k_in) - boost::math::polygamma(2, base_in));
+                    }
+
+                    if (k_out > 0) {
+                        dl += factor_out * (boost::math::digamma(base_out + k_out) - boost::math::digamma(base_out));
+                        ddl += factor2_out * (boost::math::trigamma(base_out + k_out) - boost::math::trigamma(base_out));
+                        dddl += factor3_out * (boost::math::polygamma(2, base_out + k_out) - boost::math::polygamma(2, base_out));
+                    }
+
+                    return std::make_tuple(dl, ddl, dddl);
+                }, (k_in + k_out) / total_kmers, std::numeric_limits<double>::min(), 1.0, 30);
+                factor_in *= th;
+                factor_out *= th;
+                return lgamma(factor_in + k_in) - lgamma(factor_in) + factor_in * log(p_in)
+                        + lgamma(factor_out + k_out) - lgamma(factor_out) + factor_out * log(p_out);
+            };
+
+            double llik_in = get_llike(p_in, in_kmers, in_sum);
+            double llik_out = get_llike(p_out, out_kmers, out_sum);
+            double llik_null = get_llike_null();
+
+            double pval = boost::math::cdf(boost::math::complement(
+                boost::math::chi_squared(1), 2 * (llik_in + llik_out - llik_null)
+            ));
+
+            // double in_sum_shift = in_sum + in_kmers * r_in;
+            // double out_sum_shift = out_sum + out_kmers * r_out;
+
+            // double pval;
+            // if (in_sum_shift < 1 && out_sum_shift < 1) {
+            //     pval = 1.0;
+            // } else if (in_sum_shift < 1 || out_sum_shift < 1) {
+            //     pval = 0.0;
+            // } else {
+            //     double in_sum_shift_null = in_sum + in_kmers * r_null;
+            //     double out_sum_shift_null = out_sum + out_kmers * r_null;
+
+            //     auto dist = boost::math::fisher_f(in_sum_shift_null, out_sum_shift_null);
+            //     double f_stat = exp(log(out_sum_shift) - log(in_sum_shift) + log(in_sum_shift - 1) - log(out_sum_shift - 1));
+            //     pval = std::min(boost::math::cdf(dist, f_stat),
+            //                     boost::math::cdf(boost::math::complement(dist, f_stat))) * 2.0;
+            // }
+
+            // // KS-test
+            // double sum_shift_max;
+            // double sum_shift_min;
+            // double b_max;
+            // double b_min;
+            // if (in_sum_shift > out_sum_shift) {
+            //     sum_shift_max = in_sum_shift;
+            //     b_max = exp(log(in_kmers) - log1p(-p_in));
+            //     sum_shift_min = out_sum_shift;
+            //     b_min = exp(log(out_kmers) - log1p(-p_out));
+            // } else {
+            //     sum_shift_min = in_sum_shift;
+            //     b_min = exp(log(in_kmers) - log1p(-p_in));
+            //     sum_shift_max = out_sum_shift;
+            //     b_max = exp(log(out_kmers) - log1p(-p_out));
+            // }
+
+            // double crit_x = exp((lgamma(sum_shift_max) - lgamma(sum_shift_min)) / (sum_shift_max - sum_shift_min));
+            // double ks_stat = boost::math::gamma_p(sum_shift_max, b_max * crit_x) - boost::math::gamma_p(sum_shift_min, b_min * crit_x);
+
+            // OLD: check values on F distribution
+            // double crit_val = exp(log(out_sum_shift) + log(out_kmers) - log1p(-p_out) - log(in_sum_shift) - log(in_kmers) + log1p(-p_in));
+            // auto f_dist = boost::math::fisher_f(in_sum_shift * 2, out_sum_shift * 2);
+            // // double pval = std::min(boost::math::cdf(f_dist, crit_val),
+            // //                        boost::math::cdf(boost::math::complement(f_dist, crit_val))) * 2;
+            // double pval = boost::math::pdf(f_dist, crit_val);
 
             // double theta_in = (in_sum + r_in - 1) / in_kmers / (b_in + 1);
             // double theta_out = (out_sum + r_out - 1) / out_kmers / (b_out + 1);
