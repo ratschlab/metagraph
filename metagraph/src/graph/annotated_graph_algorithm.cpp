@@ -351,506 +351,183 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "nbinom") {
-        double in_sum_mu = 0;
-        double in_sum_var = 0;
-        double out_sum_mu = 0;
-        double out_sum_var = 0;
-        double null_sum_var = 0;
-        VectorMap<uint64_t, size_t> in_hist;
-        VectorMap<uint64_t, size_t> out_hist;
-        VectorMap<uint64_t, size_t> null_hist;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                     std::unique_ptr<ValuesContainer>,
-                     PairContainer>(columns_all, column_values_all,
-                                    [&](uint64_t row_i, const auto &raw_row) {
-            if (ignored[row_i])
-                return;
-
-            uint64_t in_sum = 0;
-            uint64_t out_sum = 0;
-            for (const auto &[j, raw_c] : raw_row) {
-                if (groups[j]) {
-                    out_sum += adjust_count(raw_c, j, row_i);
-                } else {
-                    in_sum += adjust_count(raw_c, j, row_i);
-                }
-            }
-
-            ++in_hist[in_sum];
-            ++out_hist[out_sum];
-            ++null_hist[in_sum + out_sum];
-            in_sum_mu += in_sum;
-            out_sum_mu += out_sum;
-            in_sum_var += in_sum * in_sum;
-            out_sum_var += out_sum * out_sum;
-            null_sum_var += pow(in_sum + out_sum, 2.0);
-        });
-
-        double null_sum_mu = in_sum_mu + out_sum_mu;
-
-        in_sum_mu /= nelem;
-        out_sum_mu /= nelem;
-        null_sum_mu /= nelem;
-
-        double in_sum_mu2 = in_sum_mu * in_sum_mu;
-        double out_sum_mu2 = out_sum_mu * out_sum_mu;
-        double null_sum_mu2 = null_sum_mu * null_sum_mu;
-
-        in_sum_var = in_sum_var / nelem - in_sum_mu2;
-        out_sum_var = out_sum_var / nelem - out_sum_mu2;
-        null_sum_var = null_sum_var / nelem - null_sum_mu2;
-
-        // double r_in = in_sum_mu2 / (in_sum_var - in_sum_mu);
-        // double r_out = out_sum_mu2 / (out_sum_var - out_sum_mu);
-
-        auto get_params = [&](const auto &hist, double mu, double mu2, double var) {
-            double tr = mu2 / (var - mu);
-            common::logger->trace("Mean: {}\tVar: {}", mu, var);
-            common::logger->trace("Initial guess r: {}", tr);
-            tr = boost::math::tools::schroder_iterate([&](double r) {
-                double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
-                double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
-                double dddl = nelem * (-1.0 / r / r + 1.0 / pow(r + mu, 2.0) - boost::math::polygamma(2, r));
-                for (const auto &[k, c] : hist) {
-                    dl += boost::math::digamma(k + r) * c;
-                    ddl += boost::math::trigamma(k + r) * c;
-                    dddl += boost::math::polygamma(2, k + r) * c;
-                }
-                return std::make_tuple(dl, ddl, dddl);
-            }, tr, 0.0, total_kmers, 10);
-
-            double p = tr / (tr + mu);
-            common::logger->trace("MLE r: {}\tp: {}", tr, p);
-            common::logger->trace("Fit mean: {}\tFit var: {}", tr * (1.0 - p) / p, tr * (1.0 - p) / p / p);
-            return std::make_pair(tr, p);
-        };
-
-        auto [tr_in, p_in] = get_params(in_hist, in_sum_mu, in_sum_mu2, in_sum_var);
-        auto [tr_out, p_out] = get_params(out_hist, out_sum_mu, out_sum_mu2, out_sum_var);
-
-        double tr_null = null_sum_mu2 / (null_sum_var - null_sum_mu);
-        double p_null = tr_null / (tr_null + null_sum_mu);
-
-        double r_in = tr_in / in_kmers;
-        double r_out = tr_out / out_kmers;
-        double r_null = tr_null / total_kmers;
-
-        // double p_in = in_sum_mu / in_sum_var;
-        // double p_out = out_sum_mu / out_sum_var;
-
-        // double in_num = 0;
-        // double out_num = 0;
-        // double in_denom = 0;
-        // double out_denom = 0;
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     double mu = static_cast<double>(sums[j]) / nelem;
-        //     double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
-
-        //     double r = mu * mu / (var - mu);
-        //     double p = mu / var;
-        //     double p_frac = (1.0 - p) / p;
-        //     double ab = r * p_frac;
-        //     double abb = ab * p_frac;
-        //     if (groups[j]) {
-        //         out_num += ab;
-        //         out_denom += abb;
-        //     } else {
-        //         in_num += ab;
-        //         in_denom += abb;
-        //     }
-        // }
-        // double b_in = in_denom / in_num;
-        // double r_in = in_num / b_in;
-
-        // double b_out = out_denom / out_num;
-        // double r_out = out_num / b_out;
-
-        // double b_null = (in_denom + out_denom) / (in_num + out_num);
-        // double r_null = (in_num + out_num) / b_null;
-
-
-        // tsl::hopscotch_map<uint64_t, size_t> histogram;
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     const auto &column = *columns_all[j];
-        //     const auto &column_values = *column_values_all[j];
-        //     size_t i = 0;
-        //     column.call_ones([&](uint64_t row_i) {
-        //         if (!ignored[row_i])
-        //             ++histogram[adjust_count(column_values[i], j, row_i)];
-
-        //         ++i;
-        //     });
-        // }
-
-        // double r = boost::math::tools::newton_raphson_iterate([&](double r) {
-        //     double size = nelem * groups.size();
-        //     double mu = total_kmers / size;
-        //     double dl = size * (log(r) - log(r + mu) - boost::math::digamma(r));
-        //     double ddl = size * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
-        //     for (const auto &[k, c] : histogram) {
-        //         dl += boost::math::digamma(k + r) * c;
-        //         ddl += boost::math::trigamma(k + r) * c;
-        //     }
-        //     return std::make_pair(dl, ddl);
-        // }, 1.0, 0.0, static_cast<double>(total_kmers), 30);
-
-        // common::logger->trace("r: {}", r);
-
-        // // use moments to fit the r parameter of a beta negative binomial
-        // uint64_t sum_of_cubes = 0;
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     const auto &column = *columns_all[j];
-        //     const auto &column_values = *column_values_all[j];
-        //     size_t i = 0;
-        //     column.call_ones([&](uint64_t row_i) {
-        //         if (!ignored[row_i]) {
-        //             if (int64_t c = adjust_count(column_values[i], j, row_i))
-        //                 sum_of_cubes += c * (c - 1) * (c - 2);
-        //         }
-        //         ++i;
-        //     });
-        // }
-        // double mu = static_cast<double>(total_kmers) / groups.size() / nelem;
-        // double mu2 = static_cast<double>(std::accumulate(sums_of_squares.begin(),
-        //                                                  sums_of_squares.end(), uint64_t(0))) / groups.size() / nelem - mu;
-        // double mu3 = static_cast<double>(sum_of_cubes) / groups.size() / nelem;
-        // double a = mu3 * mu + mu * mu * mu2 + 2 * mu2 * mu2;
-        // double b = 2 * mu3 * mu * mu + mu3 * mu - mu2 * mu3 - mu * mu2 * mu2 + 3 * mu * mu + mu2 - 4 * mu2 * mu2;
-        // double c = -2 * mu * (mu2 * mu2 - mu * mu2 - mu3 * mu);
-
-        // auto [r_low, r_high] = boost::math::tools::quadratic_roots(a, b, c);
-
-        // common::logger->trace("mu: {}\tmu2: {}\tmu3: {}\tr_low: {}\tr_high: {}",
-        //                       mu, mu2, mu3, r_low, r_high);
-
-        // // check for NaNs
-        // // https://stackoverflow.com/questions/570669/checking-if-a-double-or-float-is-nan-in-c
-        // if (r_low != r_low && r_high != r_high) {
-        //     common::logger->error("{},{},{}", a, b, c);
-        //     throw std::runtime_error("Failed to fit, no real roots");
-        // }
-
-        // double r_low_var_sqerr = 0;
-        // double r_high_var_sqerr = 0;
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     double mu = static_cast<double>(sums[j]) / nelem;
-        //     double var = static_cast<double>(sums_of_squares[j]) / nelem - mu * mu;
-        //     double p_low = r_low / (r_low + mu);
-        //     double p_high = r_high / (r_high + mu);
-        //     double t_var_low = mu / p_low;
-        //     double t_var_high = mu / p_high;
-        //     r_low_var_sqerr += pow(t_var_low - var, 2.0);
-        //     r_high_var_sqerr += pow(t_var_high - var, 2.0);
-        //     common::logger->trace("label: {}\tmean: {}\tvar: {}\tp_low: {}\tvar_low: {}\tp_high: {}\tvar_high: {}",
-        //                           j, mu, var, p_low, t_var_low, p_high, t_var_high);
-        // }
-
-        // common::logger->trace("r low: {} (sqerr: {})\t r high: {} (sqerr: {})",
-        //                       r_low, r_low_var_sqerr, r_high, r_high_var_sqerr);
-
-        // double r = r_low_var_sqerr < r_high_var_sqerr ? r_low : r_high;
-        // common::logger->trace("r: {}", r);
-
-        // boost::math::chi_squared dist(2);
-
-        // compute_pval = [&,r_in,r_out,r_null,b_in,b_out,b_null,dist](const auto &row) {
-        p_in = p_null;
-        p_out = p_null;
-        compute_pval = [&,r_in,r_out,r_null,p_in,p_out,p_null](const auto &row) {
+        boost::math::chi_squared dist(1);
+        compute_pval = [&,dist](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
-
+            std::vector<uint64_t> counts(groups.size());
             double in_sum = 0;
             double out_sum = 0;
-            // std::vector<uint64_t> counts(groups.size());
             for (const auto &[j, c] : row) {
+                counts[j] = c;
                 if (groups[j]) {
                     out_sum += c;
                 } else {
                     in_sum += c;
                 }
-                // counts[j] = c;
             }
 
-            auto get_llike = [&](double p, double total, double k) {
-                if (k == 0)
-                    return 0.0;
+            size_t n_iter = 1000;
 
-                double factor = exp(log(p) + log(total) - log1p(-p));
-                double factor2 = factor * factor;
-                double th = boost::math::tools::schroder_iterate([&,factor,factor2,p,k](double th) {
-                    double base = factor * th;
-                    double dl = boost::math::digamma(base + k) - boost::math::digamma(base) + log(p);
-                    double ddl = factor * (boost::math::trigamma(base + k) - boost::math::trigamma(base));
-                    double dddl = factor2 * (boost::math::polygamma(2, base + k) - boost::math::polygamma(2, base));
-                    return std::make_tuple(dl, ddl, dddl);
-                }, k / total, std::numeric_limits<double>::min(), 1.0, 30);
-                factor *= th;
-                return lgamma(factor + k) - lgamma(factor) + factor * log(p);
-            };
+            auto get_llik_alt = [&]() {
+                double r = 10;
+                double th[2] = {
+                    in_sum > 0 ? in_sum / in_kmers : 0.0,
+                    out_sum > 0 ? out_sum / out_kmers : 0.0
+                };
+                for (size_t i = 0; i < n_iter; ++i) {
+                    double r_next = boost::math::tools::newton_raphson_iterate([&](double r) {
+                        double dl = 0;
+                        double ddl = 0;
 
-            auto get_llike_null = [&]() {
-                double k_in = in_sum;
-                double k_out = out_sum;
-                double factor_in = exp(log(p_in) + log(in_kmers) - log1p(-p_in));
-                double factor_out = exp(log(p_out) + log(out_kmers) - log1p(-p_out));
-                double factor2_in = factor_in * factor_in;
-                double factor2_out = factor_out * factor_out;
-                double factor3_in = factor2_in * factor_in;
-                double factor3_out = factor2_out * factor_out;
-                double th = boost::math::tools::schroder_iterate([&](double th) {
-                    double base_in = factor_in * th;
-                    double base_out = factor_out * th;
-                    double dl = factor_in * log(p_in) + factor_out * log(p_out);
-                    double ddl = 0;
-                    double dddl = 0;
-                    if (k_in > 0) {
-                        dl += factor_in * (boost::math::digamma(base_in + k_in) - boost::math::digamma(base_in));
-                        ddl += factor2_in * (boost::math::trigamma(base_in + k_in) - boost::math::trigamma(base_in));
-                        dddl += factor3_in * (boost::math::polygamma(2, base_in + k_in) - boost::math::polygamma(2, base_in));
+                        double dl_base = log(r) + 1 - boost::math::digamma(r);
+                        double ddl_base = 1.0 / r - boost::math::trigamma(r);
+                        for (size_t j = 0; j < groups.size(); ++j) {
+                            if (th[groups[j]]) {
+                                double r_shift = r + sums[j] * th[groups[j]];
+                                double c_shift = r + counts[j];
+                                dl += dl_base + boost::math::digamma(c_shift) - c_shift / r_shift - log(r_shift);
+                                ddl += ddl_base + boost::math::trigamma(c_shift) - 2.0 / r_shift + c_shift / r_shift / r_shift;
+                            }
+                        }
+
+                        return std::make_pair(dl, ddl);
+                    }, r, 0.0, total_kmers, 30);
+
+                    double th_0_next = in_sum > 0 ? boost::math::tools::newton_raphson_iterate([&](double th) {
+                        double dl = in_sum / th;
+                        double ddl = -in_sum / th / th;
+                        for (size_t j = 0; j < groups.size(); ++j) {
+                            if (!groups[j]) {
+                                double c_shift = r_next + counts[j];
+                                double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
+                                dl -= c_shift * r_shift;
+                                ddl += c_shift * r_shift * r_shift;
+                            }
+                        }
+
+                        return std::make_pair(dl, ddl);
+                    }, th[0], std::numeric_limits<double>::min(), 1.0, 30) : 0.0;
+
+                    double th_1_next = out_sum > 0 ? boost::math::tools::newton_raphson_iterate([&](double th) {
+                        double dl = out_sum / th;
+                        double ddl = -out_sum / th / th;
+                        for (size_t j = 0; j < groups.size(); ++j) {
+                            if (groups[j]) {
+                                double c_shift = r_next + counts[j];
+                                double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
+                                dl -= c_shift * r_shift;
+                                ddl += c_shift * r_shift * r_shift;
+                            }
+                        }
+
+                        return std::make_pair(dl, ddl);
+                    }, th[1], std::numeric_limits<double>::min(), 1.0, 30) : 0.0;
+
+                    if (abs(r_next - r) / r_next < 1e-5
+                            && (th_0_next == th[0] || abs(th_0_next - th[0]) / th_0_next < 1e-5)
+                            && (th_1_next == th[1] || abs(th_1_next - th[1]) / th_1_next < 1e-5)) {
+                        std::swap(r, r_next);
+                        std::swap(th_0_next, th[0]);
+                        std::swap(th_1_next, th[1]);
+                        break;
                     }
 
-                    if (k_out > 0) {
-                        dl += factor_out * (boost::math::digamma(base_out + k_out) - boost::math::digamma(base_out));
-                        ddl += factor2_out * (boost::math::trigamma(base_out + k_out) - boost::math::trigamma(base_out));
-                        dddl += factor3_out * (boost::math::polygamma(2, base_out + k_out) - boost::math::polygamma(2, base_out));
-                    }
+                    std::swap(r, r_next);
+                    std::swap(th_0_next, th[0]);
+                    std::swap(th_1_next, th[1]);
 
-                    return std::make_tuple(dl, ddl, dddl);
-                }, (k_in + k_out) / total_kmers, std::numeric_limits<double>::min(), 1.0, 30);
-                factor_in *= th;
-                factor_out *= th;
-                return lgamma(factor_in + k_in) - lgamma(factor_in) + factor_in * log(p_in)
-                        + lgamma(factor_out + k_out) - lgamma(factor_out) + factor_out * log(p_out);
+                    if (i + 1 == n_iter) {
+                        common::logger->error("Failed to converge: {}, {}, {}", r, th[0], th[1]);
+                        throw std::runtime_error("Fail");
+                    }
+                }
+
+                double llik = r * log(r) - lgamma(r);
+                if (th[0] != 0.0)
+                    llik += in_sum * log(th[0]);
+
+                if (th[1] != 0.0)
+                    llik += out_sum * log(th[1]);
+
+                llik *= groups.size();
+
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    llik += lgamma(r + counts[j]) - (r + counts[j]) * log(r + th[groups[j]] * sums[j]);
+
+                    if (th[groups[j]] != 0.0)
+                        llik += log(th[groups[j]]) * counts[j];
+                }
+
+                return std::make_tuple(llik, r, th[0], th[1]);
             };
 
-            double llik_in = get_llike(p_in, in_kmers, in_sum);
-            double llik_out = get_llike(p_out, out_kmers, out_sum);
-            double llik_null = get_llike_null();
+            auto get_llik_null = [&]() {
+                double r = 10;
+                double th = (in_sum + out_sum) / total_kmers;
+                for (size_t i = 0; i < n_iter; ++i) {
+                    double r_next = boost::math::tools::newton_raphson_iterate([&](double r) {
+                        double dl = (log(r) + 1 - boost::math::digamma(r)) * groups.size();
+                        double ddl = (1.0 / r - boost::math::trigamma(r)) * groups.size();
+                        for (size_t j = 0; j < groups.size(); ++j) {
+                            double r_shift = r + sums[j] * th;
+                            double c_shift = r + counts[j];
+                            dl += boost::math::digamma(c_shift) - c_shift / r_shift - log(r_shift);
+                            ddl += boost::math::trigamma(c_shift) - 2.0 / r_shift + c_shift / r_shift / r_shift;
+                        }
 
-            double pval = boost::math::cdf(boost::math::complement(
-                boost::math::chi_squared(1), 2 * (llik_in + llik_out - llik_null)
-            ));
+                        return std::make_pair(dl, ddl);
+                    }, r, 0.0, total_kmers, 30);
 
-            // double in_sum_shift = in_sum + in_kmers * r_in;
-            // double out_sum_shift = out_sum + out_kmers * r_out;
+                    double th_next = boost::math::tools::newton_raphson_iterate([&](double th) {
+                        double dl = (in_sum + out_sum) / th;
+                        double ddl = -(in_sum + out_sum) / th / th;
+                        for (size_t j = 0; j < groups.size(); ++j) {
+                            double c_shift = r_next + counts[j];
+                            double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
+                            dl -= c_shift * r_shift;
+                            ddl += c_shift * r_shift * r_shift;
+                        }
 
-            // double pval;
-            // if (in_sum_shift < 1 && out_sum_shift < 1) {
-            //     pval = 1.0;
-            // } else if (in_sum_shift < 1 || out_sum_shift < 1) {
-            //     pval = 0.0;
-            // } else {
-            //     double in_sum_shift_null = in_sum + in_kmers * r_null;
-            //     double out_sum_shift_null = out_sum + out_kmers * r_null;
+                        return std::make_pair(dl, ddl);
+                    }, th, std::numeric_limits<double>::min(), 1.0, 30);
 
-            //     auto dist = boost::math::fisher_f(in_sum_shift_null, out_sum_shift_null);
-            //     double f_stat = exp(log(out_sum_shift) - log(in_sum_shift) + log(in_sum_shift - 1) - log(out_sum_shift - 1));
-            //     pval = std::min(boost::math::cdf(dist, f_stat),
-            //                     boost::math::cdf(boost::math::complement(dist, f_stat))) * 2.0;
-            // }
+                    if (abs(r_next - r) / r_next < 1e-5
+                            && abs(th_next - th) / th_next < 1e-5) {
+                        std::swap(r, r_next);
+                        std::swap(th_next, th);
+                        break;
+                    }
 
-            // // KS-test
-            // double sum_shift_max;
-            // double sum_shift_min;
-            // double b_max;
-            // double b_min;
-            // if (in_sum_shift > out_sum_shift) {
-            //     sum_shift_max = in_sum_shift;
-            //     b_max = exp(log(in_kmers) - log1p(-p_in));
-            //     sum_shift_min = out_sum_shift;
-            //     b_min = exp(log(out_kmers) - log1p(-p_out));
-            // } else {
-            //     sum_shift_min = in_sum_shift;
-            //     b_min = exp(log(in_kmers) - log1p(-p_in));
-            //     sum_shift_max = out_sum_shift;
-            //     b_max = exp(log(out_kmers) - log1p(-p_out));
-            // }
+                    std::swap(r, r_next);
+                    std::swap(th_next, th);
 
-            // double crit_x = exp((lgamma(sum_shift_max) - lgamma(sum_shift_min)) / (sum_shift_max - sum_shift_min));
-            // double ks_stat = boost::math::gamma_p(sum_shift_max, b_max * crit_x) - boost::math::gamma_p(sum_shift_min, b_min * crit_x);
+                    if (i + 1 == n_iter) {
+                        common::logger->error("Failed to converge: {}, {}", r, th);
+                        throw std::runtime_error("Fail");
+                    }
+                }
 
-            // OLD: check values on F distribution
-            // double crit_val = exp(log(out_sum_shift) + log(out_kmers) - log1p(-p_out) - log(in_sum_shift) - log(in_kmers) + log1p(-p_in));
-            // auto f_dist = boost::math::fisher_f(in_sum_shift * 2, out_sum_shift * 2);
-            // // double pval = std::min(boost::math::cdf(f_dist, crit_val),
-            // //                        boost::math::cdf(boost::math::complement(f_dist, crit_val))) * 2;
-            // double pval = boost::math::pdf(f_dist, crit_val);
+                double llik = ((in_sum + out_sum) * log(th) + r * log(r) - lgamma(r)) * groups.size();
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    llik += lgamma(r + counts[j]) + log(th) * counts[j] - (r + counts[j]) * log(r + th * sums[j]);
+                }
 
-            // double theta_in = (in_sum + r_in - 1) / in_kmers / (b_in + 1);
-            // double theta_out = (out_sum + r_out - 1) / out_kmers / (b_out + 1);
-            // double theta_null = (in_sum + out_sum + r_null - 1) / total_kmers / (b_null + 1);
+                return std::make_tuple(llik, r, th);
+            };
 
-            // double ll_in = theta_in > 0 ? in_sum * log(theta_in) - in_kmers * theta_in : 0;
-            // double ll_out = theta_out > 0 ? out_sum * log(theta_out) - out_kmers * theta_out : 0;
-            // double ll_null = (in_sum + out_sum) * log(theta_null) - total_kmers * theta_null;
+            auto [llik_alt, r_alt, th_0_alt, th_1_alt] = get_llik_alt();
+            auto [llik_null, r_null, th_null] = get_llik_null();
+            double lstat = 2 * (llik_alt - llik_null);
 
-            // double stat = 2 * (ll_in + ll_out - ll_null);
+            if (lstat <= 0) {
+                common::logger->error("Failed to optimize:\tcounts: {}\talt: {},{},{}\tnull: {},{}",
+                                      fmt::join(counts, ","), r_alt,th_0_alt,th_1_alt,r_null,th_null);
+                throw std::runtime_error("Fail");
+            }
 
-            // // auto make_ll_getter = [&](const auto &picker) {
-            // //     double sum = 0;
-            // //     for (const auto &[j, c] : row) {
-            // //         if (picker(j))
-            // //             sum += c;
-            // //     }
-
-            // //     return [&,sum](double theta) {
-            // //         double dl = sum / theta;
-            // //         double ddl = -sum / theta / theta;
-            // //         for (size_t j = 0; j < groups.size(); ++j) {
-            // //             if (picker(j)) {
-            // //                 double r_shift = (r + counts[j]) * sums[j];
-            // //                 double denom = r + theta * sums[j];
-            // //                 dl -= r_shift / denom;
-            // //                 ddl += r_shift * sums[j] / denom / denom;
-            // //             }
-            // //         }
-
-            // //         return std::make_pair(dl, ddl);
-            // //     };
-            // // };
-
-            // // double theta_in = boost::math::tools::newton_raphson_iterate(
-            // //     make_ll_getter([&](size_t j) { return !groups[j]; }),
-            // //     0.5, 0.0, 1.0, 30
-            // // );
-            // // double theta_out = boost::math::tools::newton_raphson_iterate(
-            // //     make_ll_getter([&](size_t j) { return groups[j]; }),
-            // //     0.5, 0.0, 1.0, 30
-            // // );
-            // // double theta_null = boost::math::tools::newton_raphson_iterate(
-            // //     make_ll_getter([&](size_t) { return true; }),
-            // //     0.5, 0.0, 1.0, 30
-            // // );
-
-            // // double ll_alt = 0;
-            // // double ll_null = 0;
-
-            // // for (size_t j = 0; j < groups.size(); ++j) {
-            // //     double theta = groups[j] ? theta_out : theta_in;
-            // //     double denom = log(r + sums[j] * theta);
-            // //     ll_alt += - r * denom + counts[j] * (log(theta) - denom);
-
-            // //     double denom_null = log(r + sums[j] * theta_null);
-            // //     ll_null += - r * denom_null + counts[j] * (log(theta_null) - denom_null);
-            // // }
-
-            // // double stat = 2 * (ll_alt - ll_null);
-            // // double pval = boost::math::cdf(boost::math::complement(dist, stat));
-            // double pval = stat > 0
-            //     ? boost::math::cdf(boost::math::complement(dist, stat))
-            //     : 1.0;
-
-            // double in_sum = 0;
-            // double out_sum = 0;
-            // sdsl::bit_vector found(groups.size());
-            // for (const auto &[j, c] : row) {
-            //     found[j] = true;
-            //     if (groups[j]) {
-            //         out_sum += c;
-            //     } else {
-            //         in_sum += c;
-            //     }
-            // }
-
-            // std::vector<size_t> unfound;
-            // for (size_t i = 0; i < found.size(); ++i) {
-            //     if (!found[i])
-            //         unfound.emplace_back(i);
-            // }
-
-            // double total_sum = in_sum + out_sum;
-            // size_t ndigits = 30;
-
-            // auto ll_dx_ddx_pick = [&](const auto &picker) {
-            //     return [&](double lambda) {
-            //         double val = 0;
-            //         double dval = 0;
-            //         for (const auto &[j, c] : row) {
-            //             if (picker(j)) {
-            //                 double prop = static_cast<double>(sums[j]) * lambda;
-            //                 double shift_prop = r + prop;
-            //                 val += (c - prop) / shift_prop;
-            //                 dval -= (r + c) / shift_prop / shift_prop * sums[j];
-            //             }
-            //         }
-
-            //         for (size_t j : unfound) {
-            //             if (picker(j)) {
-            //                 double prop = static_cast<double>(sums[j]) * lambda;
-            //                 double shift_prop = r + prop;
-            //                 val -= prop / shift_prop;
-            //                 dval -= r / shift_prop / shift_prop * sums[j];
-            //             }
-            //         }
-
-            //         return std::make_pair(val, dval);
-            //     };
-            // };
-
-            // double lambda_null = boost::math::tools::newton_raphson_iterate(
-            //     ll_dx_ddx_pick([&](size_t) { return true; }),
-            //     total_sum / total_kmers, -0.01, 1.01, ndigits
-            // );
-
-            // double chi_stat = 0;
-            // double loglikelihood_null = 0;
-            // // if (false) {
-            // //     // score test
-            // //     auto [val_in, dval_in] = ll_dx_ddx_in(lambda_null);
-            // //     auto [val_out, dval_out] = ll_dx_ddx_out(lambda_null);
-
-            // //     val_in *= r / lambda_null;
-            // //     val_out *= r / lambda_null;
-
-            // //     dval_in = (val_in / lambda_null - dval_in * r / lambda_null) / labels_in.size();
-            // //     dval_out = (val_out / lambda_null - dval_out * r / lambda_null) / labels_out.size();
-            // //     chi_stat = val_in * val_in / dval_in + val_out * val_out / dval_out;
-            // // } else {
-            //     // log likelihood test
-            //     double lambda_in = boost::math::tools::newton_raphson_iterate(
-            //         ll_dx_ddx_pick([&](size_t j) { return !groups[j]; }),
-            //         in_sum / in_kmers, -0.01, 1.01, ndigits
-            //     );
-
-            //     double lambda_out = boost::math::tools::newton_raphson_iterate(
-            //         ll_dx_ddx_pick([&](size_t j) { return groups[j]; }),
-            //         out_sum / out_kmers, -0.01, 1.01, ndigits
-            //     );
-
-            //     double loglikelihood_alt = 0;
-
-            //     for (const auto &[j, c] : row) {
-            //         double lambda = groups[j] ? lambda_out : lambda_in;
-            //         double prop = lambda * sums[j];
-            //         loglikelihood_alt += log(lambda) * c - log(r + prop) * (r + c);
-
-            //         double prop_null = lambda_null * sums[j];
-            //         loglikelihood_null += log(lambda_null) * c - log(r + prop_null) * (r + c);
-            //     }
-
-            //     for (size_t j : unfound) {
-            //         double lambda = groups[j] ? lambda_out : lambda_in;
-            //         double prop = lambda * sums[j];
-            //         loglikelihood_alt -= log(r + prop) * r;
-
-            //         double prop_null = lambda_null * sums[j];
-            //         loglikelihood_null -= log(r + prop_null) * r;
-            //     }
-
-            //     chi_stat = (loglikelihood_alt - loglikelihood_null) * 2;
-
-            //     if (chi_stat < 0) {
-            //         common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-            //         common::logger->error("Theta null: {}\ttheta in: {}\ttheta out: {}",
-            //                               lambda_null, lambda_in, lambda_out);
-            //         throw std::runtime_error("Test failed");
-            //     }
-            // // }
-
-            // double pval = chi_stat > 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
-
+            double pval = boost::math::cdf(boost::math::complement(dist, lstat));
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "bp" || config.test_type == "lnp") {
