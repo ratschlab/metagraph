@@ -269,7 +269,6 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
-  external-libraries/simde-no-tests
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -277,6 +276,7 @@ include_directories(
 include_directories(
   PUBLIC SYSTEM
   external-libraries/asio/asio/include
+  external-libraries/simde-no-tests
 )
 
 add_library(ips4o INTERFACE)
