@@ -350,16 +350,79 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers);
         };
     } else if (config.test_type == "nbinom") {
+        VectorMap<uint64_t, size_t> in_hist;
+        VectorMap<uint64_t, size_t> out_hist;
+        utils::call_rows<std::unique_ptr<bit_vector>,
+                         std::unique_ptr<ValuesContainer>,
+                         PairContainer>(columns_all, column_values_all,
+                                        [&](uint64_t row_i, const auto &raw_row) {
+            if (!ignored[row_i]) {
+                uint64_t in_sum = 0;
+                uint64_t out_sum = 0;
+                for (const auto &[j, raw_c] : raw_row) {
+                    uint64_t c = adjust_count(raw_c, j, row_i);
+                    if (groups[j]) {
+                        out_sum += c;
+                    } else {
+                        in_sum += c;
+                    }
+                }
+
+                ++in_hist[in_sum];
+                ++out_hist[out_sum];
+            }
+        });
+
+        auto hist = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(in_hist.values_container());
+        size_t in_size = hist.size();
+        auto out_hist_v = const_cast<std::vector<std::pair<uint64_t, size_t>>&>(out_hist.values_container());
+        std::copy(std::make_move_iterator(out_hist_v.begin()),
+                  std::make_move_iterator(out_hist_v.end()),
+                  std::back_inserter(hist));
+        auto in_end = hist.begin() + in_size;
+
+        auto get_rp = [&](auto begin, auto end, double total, double nelem) {
+            uint64_t sum = std::accumulate(begin, end, uint64_t(0),
+                                           [&](uint64_t s, const auto &a) { return s + a.first * a.second; });
+            if (sum != total) {
+                common::logger->error("{} != {}", sum, total);
+                throw std::runtime_error("Incorrect sum");
+            }
+            uint64_t sqsum = std::accumulate(begin, end, uint64_t(0),
+                                             [&](uint64_t s, const auto &a) { return s + a.first * a.first * a.second; });
+            double mu = sum / nelem;
+            double mu2 = mu * mu;
+            double var = sqsum / nelem - mu2;
+
+            double r = mu2 / (var - mu);
+            r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
+                double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+                std::for_each(begin, end, [&](const auto &a) {
+                    const auto &[k, c] = a;
+                    dl += boost::math::digamma(k + r) * c;
+                    ddl += boost::math::trigamma(k + r) * c;
+                });
+                return std::make_pair(dl, ddl);
+            }, r, std::numeric_limits<double>::min(), total_kmers, 30);
+
+            double p = r / (r + mu);
+            common::logger->trace("Fit: {},{}", r, p);
+            return std::make_pair(r, p);
+        };
+
+        auto [r_in, p_in] = get_rp(hist.begin(), in_end, in_kmers, nelem);
+        auto [r_out, p_out] = get_rp(in_end, hist.end(), out_kmers, nelem);
+        auto [r_null, p_null] = get_rp(hist.begin(), hist.end(), total_kmers, nelem * 2.0);
+
         boost::math::chi_squared dist(1);
-        compute_pval = [&,dist](const auto &row) {
+        compute_pval = [&,dist,r_in,p_in,r_out,p_out,r_null,p_null](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0);
 
-            std::vector<uint64_t> counts(groups.size());
             double in_sum = 0;
             double out_sum = 0;
             for (const auto &[j, c] : row) {
-                counts[j] = c;
                 if (groups[j]) {
                     out_sum += c;
                 } else {
@@ -367,124 +430,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            size_t n_iter = 1000;
-
-            auto get_llik_null = [&]() {
-                double r = 10;
-                double th = (in_sum + out_sum) / total_kmers;
-                for (size_t i = 0; i < n_iter; ++i) {
-                    double r_next = boost::math::tools::schroder_iterate([&](double r) {
-                        double dl = (log(r) + 1 - boost::math::digamma(r)) * groups.size();
-                        double ddl = (1.0 / r - boost::math::trigamma(r)) * groups.size();
-                        double dddl = (-1.0 / r / r - boost::math::polygamma(2, r)) * groups.size();
-                        for (size_t j = 0; j < groups.size(); ++j) {
-                            double r_shift = r + sums[j] * th;
-                            double c_shift = r + counts[j];
-                            dl += boost::math::digamma(c_shift) - c_shift / r_shift - log(r_shift);
-                            ddl += boost::math::trigamma(c_shift) - 2.0 / r_shift + c_shift / r_shift / r_shift;
-                            dddl += boost::math::polygamma(2, c_shift) + 2.0 / r_shift / r_shift + 1.0 / r_shift / r_shift - 2.0 * c_shift / r_shift / r_shift / r_shift;
-                        }
-
-                        return std::make_tuple(dl, ddl, dddl);
-                    }, r, std::numeric_limits<double>::min(), total_kmers, 30);
-
-                    double th_next = boost::math::tools::newton_raphson_iterate([&](double th) {
-                        double dl = (in_sum + out_sum) / th;
-                        double ddl = -(in_sum + out_sum) / th / th;
-                        for (size_t j = 0; j < groups.size(); ++j) {
-                            double c_shift = r_next + counts[j];
-                            double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
-                            dl -= c_shift * r_shift;
-                            ddl += c_shift * r_shift * r_shift;
-                        }
-
-                        return std::make_pair(dl, ddl);
-                    }, th, std::numeric_limits<double>::min(), 1.0, 30);
-
-                    if (abs(r_next - r) / r_next < 1e-5
-                            && abs(th_next - th) / th_next < 1e-5) {
-                        std::swap(r, r_next);
-                        std::swap(th_next, th);
-                        break;
-                    }
-
-                    std::swap(r, r_next);
-                    std::swap(th_next, th);
-
-                    if (i + 1 == n_iter) {
-                        common::logger->error("Failed to converge: {}, {}", r, th);
-                        throw std::runtime_error("Fail");
-                    }
-                }
-
-                return std::make_pair(r, th);
+            auto get_llik = [&](double sum, double r, double p) {
+                return lgamma(sum + r) - lgamma(r) + sum * log1p(-p) + r * log(p);
             };
 
-            auto [r_null, th_null] = get_llik_null();
+            double llik_in = get_llik(in_sum, r_in, p_in);
+            double llik_out = get_llik(out_sum, r_out, p_out);
+            double llik_null = get_llik(in_sum, r_null, p_null) + get_llik(out_sum, r_null, p_null);
+            double score = (llik_in + llik_out - llik_null) * 2.0;
 
-            auto eval_r_d = [&](double th0, double th1, double r) {
-                double dl = 0;
-                double ddl = 0;
-                double th[2] = { th0, th1 };
-
-                double dl_base = log(r) + 1 - boost::math::digamma(r);
-                double ddl_base = 1.0 / r - boost::math::trigamma(r);
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    if (th[groups[j]]) {
-                        double r_shift = r + sums[j] * th[groups[j]];
-                        double c_shift = r + counts[j];
-                        dl += dl_base + boost::math::digamma(c_shift) - c_shift / r_shift - log(r_shift);
-                        ddl += ddl_base + boost::math::trigamma(c_shift) - 2.0 / r_shift + c_shift / r_shift / r_shift;
-                    }
-                }
-
-                return std::make_pair(dl, ddl);
-            };
-
-            auto eval_th0_d = [&](double r_next, double th) {
-                double dl = in_sum / th;
-                double ddl = -in_sum / th / th;
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    if (!groups[j]) {
-                        double c_shift = r_next + counts[j];
-                        double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
-                        dl -= c_shift * r_shift;
-                        ddl += c_shift * r_shift * r_shift;
-                    }
-                }
-
-                return std::make_pair(dl, ddl);
-            };
-            auto eval_th1_d = [&](double r_next, double th) {
-                double dl = out_sum / th;
-                double ddl = -out_sum / th / th;
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    if (groups[j]) {
-                        double c_shift = r_next + counts[j];
-                        double r_shift = static_cast<double>(sums[j]) / (r_next + th * sums[j]);
-                        dl -= c_shift * r_shift;
-                        ddl += c_shift * r_shift * r_shift;
-                    }
-                }
-
-                return std::make_pair(dl, ddl);
-            };
-            auto [dl_r, ddl_r] = eval_r_d(th_null, th_null, r_null);
-            auto [dl_th0, ddl_th0] = eval_th0_d(r_null, th_null);
-            auto [dl_th1, ddl_th1] = eval_th1_d(r_null, th_null);
-            double nscore = dl_r * dl_r / ddl_r + dl_th0 * dl_th0 / ddl_th0 + dl_th1 * dl_th1 / ddl_th1;
-            double score = -nscore * groups.size();
-
-            // if (score <= 0) {
-            //     common::logger->error("{}\t{}\t{},{}\t{},{},{},{},{},{}",
-            //                           fmt::join(counts, ","),
-            //                           score,
-            //                           r_null,th_null,
-            //                           dl_r, ddl_r,
-            //                           dl_th0, ddl_th0,
-            //                           dl_th1, ddl_th1);
-            //     throw std::runtime_error("Fail");
-            // }
+            if (score < 0) {
+                common::logger->error("llik < 0: {}", score);
+                throw std::runtime_error("Fail");
+            }
 
             double pval = score > 0 ? boost::math::cdf(boost::math::complement(dist, score)) : 1.0;
 
