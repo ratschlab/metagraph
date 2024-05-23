@@ -52,9 +52,9 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
     }
 }
 
-void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)>& callback,
-                                           const std::function<bool()>& terminate) const {
+void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
+                                          const std::function<void(node_index)>& callback,
+                                          const std::function<bool()>& terminate) const {
     if (terminate() || sequence.size() < k_)
         return;
 
@@ -67,9 +67,9 @@ void DBGSSHash ::map_to_nodes_sequentially(std::string_view sequence,
     }
 }
 
-void DBGSSHash ::map_to_nodes_with_rc(std::string_view sequence,
-                                      const std::function<void(node_index, bool)>& callback,
-                                      const std::function<bool()>& terminate) const {
+void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
+                                     const std::function<void(node_index, bool)>& callback,
+                                     const std::function<bool()>& terminate) const {
     sshash::streaming_query_regular_parsing<kmer_t> streamer(&dict_);
     streamer.start();
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
@@ -99,20 +99,20 @@ DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) 
     return sshash_to_graph_index(sshash_id);
 }
 
-void DBGSSHash ::adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)>& callback) const {
+void DBGSSHash::adjacent_outgoing_nodes(node_index node,
+                                        const std::function<void(node_index)>& callback) const {
     assert(node > 0 && node <= num_nodes());
     call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
 
-void DBGSSHash ::adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)>& callback) const {
+void DBGSSHash::adjacent_incoming_nodes(node_index node,
+                                        const std::function<void(node_index)>& callback) const {
     assert(node > 0 && node <= num_nodes());
     call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
-void DBGSSHash ::call_outgoing_kmers(node_index node,
-                                     const OutgoingEdgeCallback& callback) const {
+void DBGSSHash::call_outgoing_kmers(node_index node,
+                                    const OutgoingEdgeCallback& callback) const {
     assert(node > 0 && node <= num_nodes());
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), false);
@@ -123,8 +123,8 @@ void DBGSSHash ::call_outgoing_kmers(node_index node,
     }
 }
 
-void DBGSSHash ::call_incoming_kmers(node_index node,
-                                     const IncomingEdgeCallback& callback) const {
+void DBGSSHash::call_incoming_kmers(node_index node,
+                                    const IncomingEdgeCallback& callback) const {
     assert(node > 0 && node <= num_nodes());
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), false);
@@ -135,7 +135,7 @@ void DBGSSHash ::call_incoming_kmers(node_index node,
     }
 }
 
-void DBGSSHash ::call_outgoing_kmers_with_rc(
+void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
     assert(node > 0 && node <= num_nodes());
@@ -150,7 +150,7 @@ void DBGSSHash ::call_outgoing_kmers_with_rc(
 }
 
 
-void DBGSSHash ::call_incoming_kmers_with_rc(
+void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
     assert(node > 0 && node <= num_nodes());
@@ -218,6 +218,8 @@ void DBGSSHash::serialize(const std::string& filename) const {
     // TODO: fix this in the essentials library. for some reason, it's saver takes a non-const ref
     essentials::save(const_cast<sshash::dictionary<kmer_t>&>(dict_),
                      suffixed_filename.c_str());
+    essentials::save(const_cast<size_t&>(k_), suffixed_filename.c_str());
+    essentials::save(const_cast<Mode&>(mode_), suffixed_filename.c_str());
 }
 
 bool DBGSSHash::load(std::istream& in) {
@@ -234,7 +236,8 @@ bool DBGSSHash::load(const std::string& filename) {
                   << std::endl;
         dict_.print_info();
     }
-    k_ = dict_.k();
+    essentials::load(k_, suffixed_filename.c_str());
+    essentials::load(mode_, suffixed_filename.c_str());
     return true;
 }
 
