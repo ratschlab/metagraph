@@ -240,15 +240,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::vector<uint64_t> vals;
         vals.reserve(column_values.size());
         column.call_ones([&](uint64_t row_i) {
-            if (!ignored[row_i])
-                return;
-
-            uint64_t c = adjust_count(column_values[i], j, row_i);
-            if (c) {
-                vals.emplace_back(c);
-                sum += c;
-                sum_of_squares += c * c;
-                ++n;
+            if (!ignored[row_i]) {
+                uint64_t c = adjust_count(column_values[i], j, row_i);
+                if (c) {
+                    vals.emplace_back(c);
+                    sum += c;
+                    sum_of_squares += c * c;
+                    ++n;
+                }
             }
             ++i;
         });
