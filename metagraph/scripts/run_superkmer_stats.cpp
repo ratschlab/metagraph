@@ -19,12 +19,12 @@ int main (int argc, char *argv[]){
     using namespace mtg::cli;
 
     if(argc <3){
-    	std::cerr<<"missing input files!\n" ;//<< "graph path, annotation path, superkmer mask path\n";
+    	std::cerr<<"missing input files!\n" ;//<< "graph path, annotation path\n";
 	return EXIT_FAILURE;
     }
     std::string graph_path = argv[1];
     std::string anno_path = argv[2];
-    //std::string sk_mask_path = argv[3];
+
     std::shared_ptr<mtg::graph::DBGSSHash> graph_ptr = std::make_shared<mtg::graph::DBGSSHash>(31);
     graph_ptr->load(graph_path);
     
@@ -32,36 +32,14 @@ int main (int argc, char *argv[]){
 
 
     Config::AnnotationType config = parse_annotation_type(anno_path);
-    /*
-    Types of annotations:
-    ColumnCompressed = 1,
-        RowCompressed,
-        BRWT,
-        BinRelWT,
-        RowDiff,
-        RowDiffBRWT,
-        RowDiffRowFlat,
-        RowDiffRowSparse,
-        RowDiffDisk,
-        RowFlat,
-        RowSparse,
-        RBFish,
-        RbBRWT,
-        IntBRWT,
-        IntRowDiffBRWT,
-        IntRowDiffDisk,
-        ColumnCoord,
-        BRWTCoord,
-        RowDiffCoord,
-        RowDiffBRWTCoord,
-        RowDiffDiskCoord,
-        */
     assert(config == Config::AnnotationType::RowFlat);
-    //std::unique_ptr<ColumnCompressed<>> anno_ptr =  std::make_unique<ColumnCompressed<>> (); 
+
     std::unique_ptr<RowFlatAnnotator> anno_ptr = std::make_unique<RowFlatAnnotator>();
     anno_ptr->load(anno_path);
     std::unique_ptr<AnnotatedDBG> anno_graph = std::make_unique<AnnotatedDBG>(graph_ptr, std::move(anno_ptr), false);
-    graph_ptr->superkmer_statistics(anno_graph, sk_mask_path);
+    
+    //graph_ptr->superkmer_stats(anno_graph);
+    graph_ptr->superkmer_bv(anno_graph, sk_mask_path);
 
     return 0;
 }

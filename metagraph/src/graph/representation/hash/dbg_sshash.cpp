@@ -12,7 +12,7 @@ DBGSSHash::DBGSSHash(size_t k):k_(k) {
 
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k):k_(k){
     sshash::build_configuration build_config;
-    build_config.k = k;//
+    build_config.k = k;
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_+1)/2;
     if(build_config.m % 2 == 0) build_config.m++;
@@ -25,7 +25,6 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k):k_(k){
 
 void DBGSSHash::add_sequence(std::string_view sequence,
                              const std::function<void(node_index)> &on_insertion) {
-    // TODO: throw exception? :)
         throw std::runtime_error("adding sequences not implemented");
 
 }
@@ -151,7 +150,7 @@ void DBGSSHash ::call_incoming_kmers(node_index node,
 size_t DBGSSHash::outdegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_->kmer_forward_neighbours(&kmer[0]);
-    size_t out_deg = bool(nb.forward_A.kmer_id + 1) // change to loop?
+    size_t out_deg = bool(nb.forward_A.kmer_id + 1)
                     + bool(nb.forward_C.kmer_id + 1)
                     + bool(nb.forward_G.kmer_id + 1)
                     + bool(nb.forward_T.kmer_id + 1);
@@ -169,7 +168,7 @@ bool DBGSSHash::has_multiple_outgoing(node_index node) const {
 size_t DBGSSHash::indegree(node_index node) const {
     std::string kmer = DBGSSHash::get_node_sequence(node);
     sshash::neighbourhood nb = dict_->kmer_backward_neighbours(&kmer[0]);
-    size_t in_deg = bool(nb.backward_A.kmer_id + 1) // change to loop?
+    size_t in_deg = bool(nb.backward_A.kmer_id + 1)
                     + bool(nb.backward_C.kmer_id + 1)
                     + bool(nb.backward_G.kmer_id + 1)
                     + bool(nb.backward_T.kmer_id + 1);
@@ -201,13 +200,12 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     return ssh_idx + 1;
 }
 
-// superkmer experiment: use minimizer to get superkmer positions (offsets) -> get superkmer that contains kmer 
 std::tuple<uint64_t, uint64_t, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
-    //auto [k_ssh_idx, s_ssh_idx, superkmer_id]  = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     auto [kmer_idx, superkmer_idx, superkmer_id] = dict_->kmer_to_superkmer_idx(kmer.begin(), true);
     if(kmer_idx == sshash::constants::invalid_uint64){
         return {npos, npos, sshash::constants::invalid_uint64};
     }
+    // switch to DBG index
     return {kmer_idx + 1, superkmer_idx + 1, superkmer_id};
 }
 
@@ -268,22 +266,7 @@ const std::string &DBGSSHash::alphabet() const {
 }
 
 uint64_t DBGSSHash::num_nodes() const { return dict_->size(); }
-void write_stats_to_file(const std::vector<uint64_t>& km_skmer, const std::vector<uint64_t>& cc_skmer){
-    std::ofstream output_file_kmers("./superkmer_stats_kmers.txt");
-    output_file_kmers << "kmers_per_superkmer: "<<'\n';
 
-    for(auto const& x : km_skmer){
-        output_file_kmers << x << '\n';
-    }
-    output_file_kmers.close();
-    
-    std::ofstream output_file_colors("./superkmer_stats_color.txt");
-    output_file_colors << "color_changes_per_superkmer: "<<'\n';
-    for(auto const& y : cc_skmer){
-        output_file_colors << y << '\n';
-    }
-    output_file_colors.close();
-}
 sdsl::bit_vector mask_into_bit_vec(const std::vector<bool>& mask){
     sdsl::bit_vector bv (mask.size());
     for(size_t idx = 0; idx < mask.size(); idx++){
@@ -297,12 +280,18 @@ void DBGSSHash::load_superkmer_mask(std::string file){
     std::cout<< " successfully loaded " << file<<"?: " <<loaded_mask << std::endl;
 }
 
-void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
+void DBGSSHash::superkmer_stats(const std::unique_ptr<AnnotatedDBG>& anno_graph) const{
     if(annotation_mode != 0){
-        throw std::runtime_error("Computing superkmer stats in wrong annotation mode!");
+        throw std::runtime_error("Computing super-k-mer stats in wrong annotation mode!");
     }
-    std::cout<< "Computing superkmer statistics and building super kmer bit vector... \n";   
-    
+    std::cout<< "Computing super-k-mer statistics ... \n";   
+    dict_->make_superkmer_stats(([&anno_graph](std::string_view str){return anno_graph->get_labels(str);}));
+}
+void DBGSSHash::superkmer_bv(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
+    if(annotation_mode != 0){
+        throw std::runtime_error("Building super-k-mer bit vector in wrong annotation mode!");
+    }
+    std::cout<< "Building super-k-mer bit vector... \n";   
     //getting labels in batches
     size_t num_labels = anno_graph->get_annotator().num_labels();
     std::vector<uint64_t> superkmer_idxs = dict_->build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence){
@@ -318,7 +307,7 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
                     return true;
          });
     
-    // elias fano encoding and serialize
+    // elias fano encoding
     sdsl::sd_vector<> ef_bv (superkmer_idxs.begin(), superkmer_idxs.end()); 
     
     std::cout << "serializing bit vector..." << std::endl;
@@ -326,29 +315,5 @@ void DBGSSHash::superkmer_statistics(const std::unique_ptr<AnnotatedDBG>& anno_g
     std::cout<< " successfully stored " << file_sk_mask<<"?: " <<check<<std::endl;
 
 }
-
-bool DBGSSHash::equal(const std::vector<std::string>& input1, const std::vector<std::string>& input2)const {
-    if(input1.size() != input2.size()){
-        return false;
-    }
-    for(size_t i = 0; i < input1.size(); i++){
-        if(input1.at(i) != input2.at(i)){
-            return false;
-        }
-    }
-    return true; 
-}
-
-void DBGSSHash::sanity_check_1(const std::vector<uint64_t>& cc_skmer, const std::vector<uint64_t>& km_skmer, uint64_t num_super_kmers)const {
-    std::cout << "length of color changes vector: "<<cc_skmer.size()<< std::endl;
-    std::cout << "length of kmers vector: "<<km_skmer.size()<< std::endl;
-    std::cout << "number of superkmers: "<<num_super_kmers<< std::endl;
-}
-void DBGSSHash::sanity_check_2(const std::vector<uint64_t>& km_skmer, uint64_t num_kmers)const{
-    uint64_t sum = std::accumulate(km_skmer.begin(), km_skmer.end(),0);
-    std::cout << "sum of kmers in superkmers vector: "<<sum<< std::endl;
-    std::cout << "total number of kmers: "<<num_kmers<< std::endl;
-}
-
 } // namespace graph
 } // namespace mtg

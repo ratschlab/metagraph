@@ -544,7 +544,7 @@ target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph
 target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
 #-------------------
-# superkmer stats
+# superkmer bit vector
 #-------------------
 add_executable(superkmer_stats scripts/run_superkmer_stats.cpp)
 target_include_directories(superkmer_stats PRIVATE src/graph/representation/hash
