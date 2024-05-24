@@ -352,32 +352,37 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers, 1.1);
         };
     } else if (config.test_type == "dmn") {
-        double target_size = 0;
+        std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
+
+        double target_p = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
             double s = static_cast<double>(sums[j]);
-            target_size += log(s);
+            double mu = s / nelem;
+            double mu2 = mu * mu;
+            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
+            target_p += log(s) - log(nelem) - log(var);
         }
-        target_size = exp(target_size / groups.size());
+        double log_p_est = target_p / groups.size();
+        target_p = exp(log_p_est);
 
-        std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         for (size_t j = 0; j < groups.size(); ++j) {
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
 
-            // approx nb params
+            // approx in nb params
             double r = mu2 / (var - mu);
             double p = mu / var;
+
+            // approx out nb params
+            double r_out = exp(log(mu) + log_p_est - log1p(-target_p));
+
+            common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
+                                  j, r, p, r_out, target_p);
+
             boost::math::negative_binomial nb(r, p);
-
-            // approx gamma params
-            double th = var / mu;
-            double k = mu2 / var;
-            boost::math::gamma_distribution<> gamma(k, th * target_size / s);
-
-            common::logger->trace("{}\tApproximating NB({}, {}) with Gamma({}, {})",
-                                  j, r, p, k, th);
+            boost::math::negative_binomial nb_out(r_out, target_p);
 
             const auto &column = *columns_all[j];
             const auto &column_values = *column_values_all[j];
@@ -386,16 +391,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (!ignored[row_i]) {
                     uint64_t c = adjust_count(column_values[i], j, row_i);
                     if (!count_maps[j].count(c)) {
-                        if (c == 0) {
-                            count_maps[j][c] = std::make_pair(0, 1);
+                        double cdf = boost::math::cdf(nb, c);
+                        if (cdf == 1.0 || cdf == 0.0) {
+                            double ccdf = boost::math::cdf(boost::math::complement(nb, c));
+                            count_maps[j][c] = std::make_pair(round(boost::math::quantile(boost::math::complement(nb_out, ccdf))), 1);
                         } else {
-                            double cdf = boost::math::cdf(nb, c);
-                            if (cdf == 1.0 || cdf == 0.0) {
-                                double ccdf = boost::math::cdf(boost::math::complement(nb, c));
-                                count_maps[j][c] = std::make_pair(round(boost::math::quantile(boost::math::complement(gamma, ccdf))), 1);
-                            } else {
-                                count_maps[j][c] = std::make_pair(round(boost::math::quantile(gamma, cdf)), 1);
-                            }
+                            count_maps[j][c] = std::make_pair(round(boost::math::quantile(nb_out, cdf)), 1);
                         }
                     } else {
                         ++count_maps[j][c].second;
@@ -450,26 +451,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         });
 
-        double mu = (in_kmers_adj + out_kmers_adj) / nelem;
-        double mu2 = mu * mu;
-        double var = row_sqsum_null / nelem - mu2;
+        double r_in = exp(log(in_kmers_adj) - log(nelem) + log_p_est - log1p(-target_p));
+        double r_out = exp(log(out_kmers_adj) - log(nelem) + log_p_est - log1p(-target_p));
 
-        double r_null = boost::math::tools::newton_raphson_iterate([&](double r) {
-            double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
-            double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
-            for (const auto &[k, c] : null_hist) {
-                dl += boost::math::digamma(r + k) * c;
-                ddl += boost::math::trigamma(r + k) * c;
-            }
-            return std::make_pair(dl, ddl);
-        }, mu2 / (var - mu), std::numeric_limits<double>::min(), in_kmers_adj + out_kmers_adj, 30);
-        double log_p_est = log(r_null) - log(r_null + mu);
-
-
-        double r_in = exp(log(in_kmers_adj) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
-        double r_out = exp(log(out_kmers_adj) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
-
-        common::logger->trace("Fits: in: {}\tout: {}\tp: {}\t{} vs. {}", r_in, r_out, exp(log_p_est), r_in + r_out, r_null);
+        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         compute_pval = [&,r_in,r_out,count_maps](const auto &row) {
             if (row.empty())
@@ -485,22 +470,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            double scaled_outsum = out_sum;
-
             double a[2] = { r_in, r_out };
             double a0 = a[0] + a[1];
             int64_t n = in_sum + out_sum;
-            int64_t d = abs(in_sum - scaled_outsum);
+            int64_t d = abs(in_sum - out_sum);
             double max_diff = d;
 
             double lscaling = lgamma(a0) + lgamma(n + 1) - lgamma(a0 + n);
             double pval = 0;
             double pval_min = 0;
             for (int64_t s = 0; s <= n; ++s) {
-                double cur_in_sum = s;
-                double cur_scaled_out_sum = n - s;
-                // double cur_scaled_out_sum = static_cast<double>(n - s) / out_kmers * in_kmers;
-                double cur_diff = abs(cur_in_sum - cur_scaled_out_sum);
+                double cur_diff = abs(2 * s - n);
 
                 if (cur_diff >= d) {
                     double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
@@ -514,12 +494,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            // if (pval > 1.0) {
-            //     common::logger->error("{} > 1.0\t{},{}", pval, in_sum, out_sum);
-            //     throw std::runtime_error("Fail");
-            // }
-
-            return std::make_tuple(std::min(pval, 1.0), in_sum, scaled_outsum, std::min(pval_min, 1.0));
+            return std::make_tuple(std::min(pval, 1.0), in_sum, out_sum / out_kmers * in_kmers, std::min(pval_min, 1.0));
         };
     } else if (config.test_type == "nbinom") {
         boost::math::chi_squared dist(1);
