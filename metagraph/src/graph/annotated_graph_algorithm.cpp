@@ -491,6 +491,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double a0 = a[0] + a[1];
             int64_t n = in_sum + out_sum;
             int64_t d = abs(in_sum - scaled_outsum);
+            double max_diff = d;
 
             double lscaling = lgamma(a0) + lgamma(n + 1) - lgamma(a0 + n);
             double pval = 0;
@@ -499,12 +500,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double cur_in_sum = s;
                 double cur_scaled_out_sum = n - s;
                 // double cur_scaled_out_sum = static_cast<double>(n - s) / out_kmers * in_kmers;
+                double cur_diff = abs(cur_in_sum - cur_scaled_out_sum);
 
-                if (abs(cur_in_sum - cur_scaled_out_sum) >= d) {
+                if (cur_diff >= d) {
                     double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
                     pval += pmf;
-                    if (s == 0 || s == n)
+                    if (cur_diff > max_diff) {
+                        max_diff = cur_diff;
+                        pval_min = pmf;
+                    } else if (cur_diff == max_diff) {
                         pval_min += pmf;
+                    }
                 }
             }
 
