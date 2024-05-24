@@ -6,6 +6,8 @@
 
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/distributions/poisson.hpp>
+#include <boost/math/distributions/negative_binomial.hpp>
+#include <boost/math/distributions/gamma.hpp>
 #include <boost/math/statistics/univariate_statistics.hpp>
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
@@ -350,6 +352,72 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers, 1.1);
         };
     } else if (config.test_type == "dmn") {
+        double target_size = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            double s = static_cast<double>(sums[j]);
+            target_size += log(s);
+        }
+        target_size = exp(target_size / groups.size());
+
+        std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
+        for (size_t j = 0; j < groups.size(); ++j) {
+            double s = static_cast<double>(sums[j]);
+            double mu = s / nelem;
+            double mu2 = mu * mu;
+            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
+
+            // approx nb params
+            double r = mu2 / (var - mu);
+            double p = mu / var;
+            boost::math::negative_binomial nb(r, p);
+
+            // approx gamma params
+            double th = var / mu;
+            double k = mu2 / var;
+            boost::math::gamma_distribution<> gamma(k, th * target_size / s);
+
+            common::logger->trace("{}\tApproximating NB({}, {}) with Gamma({}, {})",
+                                  j, r, p, k, th);
+
+            const auto &column = *columns_all[j];
+            const auto &column_values = *column_values_all[j];
+            size_t i = 0;
+            column.call_ones([&](uint64_t row_i) {
+                if (!ignored[row_i]) {
+                    uint64_t c = adjust_count(column_values[i], j, row_i);
+                    if (!count_maps[j].count(c)) {
+                        if (c == 0) {
+                            count_maps[j][c] = std::make_pair(0, 1);
+                        } else {
+                            double cdf = boost::math::cdf(nb, c);
+                            if (cdf == 1.0 || cdf == 0.0) {
+                                double ccdf = boost::math::cdf(boost::math::complement(nb, c));
+                                count_maps[j][c] = std::make_pair(round(boost::math::quantile(boost::math::complement(gamma, ccdf))), 1);
+                            } else {
+                                count_maps[j][c] = std::make_pair(round(boost::math::quantile(gamma, cdf)), 1);
+                            }
+                        }
+                    } else {
+                        ++count_maps[j][c].second;
+                    }
+                }
+                ++i;
+            });
+        }
+
+        double in_kmers_adj = 0;
+        double out_kmers_adj = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            for (const auto &[k, m] : count_maps[j]) {
+                const auto &[v, c] = m;
+                if (groups[j]) {
+                    out_kmers_adj += v * c;
+                } else {
+                    in_kmers_adj += v * c;
+                }
+            }
+        }
+
         double row_sqsum_in = 0;
         double row_sqsum_out = 0;
         double row_sqsum_null = 0;
@@ -365,6 +433,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double sum_out = 0;
                 for (const auto &[j, raw_c] : raw_row) {
                     if (uint64_t c = adjust_count(raw_c, j, row_i)) {
+                        c = count_maps[j].find(c)->second.first;
                         if (groups[j]) {
                             sum_out += c;
                         } else {
@@ -381,7 +450,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         });
 
-        double mu = (in_kmers + out_kmers) / nelem;
+        double mu = (in_kmers_adj + out_kmers_adj) / nelem;
         double mu2 = mu * mu;
         double var = row_sqsum_null / nelem - mu2;
 
@@ -393,16 +462,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ddl += boost::math::trigamma(r + k) * c;
             }
             return std::make_pair(dl, ddl);
-        }, mu2 / (var - mu), std::numeric_limits<double>::min(), total_kmers, 30);
+        }, mu2 / (var - mu), std::numeric_limits<double>::min(), in_kmers_adj + out_kmers_adj, 30);
         double log_p_est = log(r_null) - log(r_null + mu);
 
 
-        double r_in = exp(log(in_kmers) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
-        double r_out = exp(log(out_kmers) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
+        double r_in = exp(log(in_kmers_adj) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
+        double r_out = exp(log(out_kmers_adj) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
 
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}\t{} vs. {}", r_in, r_out, exp(log_p_est), r_in + r_out, r_null);
 
-        compute_pval = [&,r_in,r_out](const auto &row) {
+        compute_pval = [&,r_in,r_out,count_maps](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
@@ -410,13 +479,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double out_sum = 0;
             for (const auto &[j, c] : row) {
                 if (groups[j]) {
-                    out_sum += c;
+                    out_sum += count_maps[j].find(c)->second.first;
                 } else {
-                    in_sum += c;
+                    in_sum += count_maps[j].find(c)->second.first;
                 }
             }
 
-            double scaled_outsum = out_sum / out_kmers * in_kmers;
+            double scaled_outsum = out_sum;
 
             double a[2] = { r_in, r_out };
             double a0 = a[0] + a[1];
@@ -428,7 +497,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double pval_min = 0;
             for (int64_t s = 0; s <= n; ++s) {
                 double cur_in_sum = s;
-                double cur_scaled_out_sum = static_cast<double>(n - s) / out_kmers * in_kmers;
+                double cur_scaled_out_sum = n - s;
+                // double cur_scaled_out_sum = static_cast<double>(n - s) / out_kmers * in_kmers;
 
                 if (abs(cur_in_sum - cur_scaled_out_sum) >= d) {
                     double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
