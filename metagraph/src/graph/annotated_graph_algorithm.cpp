@@ -352,8 +352,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     } else if (config.test_type == "dmn") {
         double row_sqsum_in = 0;
         double row_sqsum_out = 0;
+        double row_sqsum_null = 0;
         VectorMap<uint64_t, size_t> in_hist;
         VectorMap<uint64_t, size_t> out_hist;
+        VectorMap<uint64_t, size_t> null_hist;
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
                          PairContainer>(columns_all, column_values_all,
@@ -372,35 +374,33 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
                 ++in_hist[sum_in];
                 ++out_hist[sum_out];
+                ++null_hist[sum_in + sum_out];
                 row_sqsum_in += sum_in * sum_in;
                 row_sqsum_out += sum_out * sum_out;
+                row_sqsum_null += pow(sum_in + sum_out, 2.0);
             }
         });
 
-        auto get_r = [&](double sum, double sqsum, const auto &hist) {
-            double mu = sum / nelem;
-            double mu2 = mu * mu;
-            double var = sqsum / nelem - mu2;
+        double mu = (in_kmers + out_kmers) / nelem;
+        double mu2 = mu * mu;
+        double var = row_sqsum_null / nelem - mu2;
 
-            double r_est = mu2 / (var - mu);
-            double p_est = mu / var;
+        double r_null = boost::math::tools::newton_raphson_iterate([&](double r) {
+            double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
+            double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+            for (const auto &[k, c] : null_hist) {
+                dl += boost::math::digamma(r + k) * c;
+                ddl += boost::math::trigamma(r + k) * c;
+            }
+            return std::make_pair(dl, ddl);
+        }, mu2 / (var - mu), std::numeric_limits<double>::min(), total_kmers, 30);
+        double log_p_est = log(r_null) - log(r_null + mu);
 
-            double r = boost::math::tools::newton_raphson_iterate([&](double r) {
-                double dl = -nelem * (log(2.0) + boost::math::digamma(r));
-                double ddl = -nelem * boost::math::trigamma(r);
-                for (const auto &[k, c] : hist) {
-                    dl += boost::math::digamma(r + k) * c;
-                    ddl += boost::math::trigamma(r + k) * c;
-                }
-                return std::make_pair(dl, ddl);
-            }, p_est / (1.0 - p_est) * r_est, std::numeric_limits<double>::min(), total_kmers, 30);
 
-            return r;
-        };
+        double r_in = exp(log(in_kmers) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
+        double r_out = exp(log(out_kmers) - log(nelem) + log_p_est - log1p(-exp(log_p_est)));
 
-        double r_in = get_r(in_kmers, row_sqsum_in, in_hist);
-        double r_out = get_r(out_kmers, row_sqsum_out, out_hist);
-        common::logger->trace("Fits: in: {}\tout: {}", r_in, r_out);
+        common::logger->trace("Fits: in: {}\tout: {}\tp: {}\t{} vs. {}", r_in, r_out, exp(log_p_est), r_in + r_out, r_null);
 
         compute_pval = [&,r_in,r_out](const auto &row) {
             if (row.empty())
