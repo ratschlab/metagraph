@@ -376,7 +376,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double p = mu / var;
 
             // approx out nb params
-            double r_out = exp(log(mu) + log_p_est - log1p(-target_p));
+            double r_out = exp(log(mu) + log(p) - log1p(-target_p));
 
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
                                   j, r, p, r_out, target_p);
