@@ -352,58 +352,83 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers, 1.1);
         };
     } else if (config.test_type == "dmn") {
-        std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
+        auto get_rp = [&](double mu, double var, const auto &hist) {
+            double r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
+                double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+                for (const auto &[k, c] : hist) {
+                    dl += boost::math::digamma(k + r) * c;
+                    ddl += boost::math::trigamma(k + r) * c;
+                }
+                return std::make_pair(dl, ddl);
+            }, mu * mu / (var - mu), std::numeric_limits<double>::min(), mu * nelem, 30);
+
+            return std::make_pair(r, r / (r + mu));
+        };
 
         double target_p = 0.0;
+        std::vector<std::pair<double, double>> nb_params;
+        std::vector<VectorMap<uint64_t, size_t>> hists;
+        nb_params.reserve(groups.size());
+        hists.reserve(groups.size());
         for (size_t j = 0; j < groups.size(); ++j) {
+            auto &hist = hists.emplace_back();
+            size_t i = 0;
+            const auto &column = *columns_all[j];
+            const auto &column_values = *column_values_all[j];
+            column.call_ones([&](uint64_t row_i) {
+                if (!ignored[row_i]) {
+                    uint64_t c = adjust_count(column_values[i], j, row_i);
+                    ++hist[c];
+                }
+                ++i;
+            });
+
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
-            target_p += log(s) - log(nelem) - log(var);
+            auto [r, p] = get_rp(mu, var, hist);
+            target_p += log(p);
+            nb_params.emplace_back(r, p);
         }
         double log_p_est = target_p / groups.size();
         target_p = exp(log_p_est);
 
+        std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
+        double r_in = 0;
+        double r_out = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            double s = static_cast<double>(sums[j]);
-            double mu = s / nelem;
-            double mu2 = mu * mu;
-            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
-
-            // approx in nb params
-            double r = mu2 / (var - mu);
-            double p = mu / var;
+            const auto &[r, p] = nb_params[j];
 
             // approx out nb params
-            double r_out = exp(log(mu) + log(p) - log1p(-target_p));
+            double r_map = exp(log(r) + log1p(-p) - log1p(-target_p));
 
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
-                                  j, r, p, r_out, target_p);
+                                  j, r, p, r_map, target_p);
+
+            if (groups[j]) {
+                r_out += r_map;
+            } else {
+                r_in += r_map;
+            }
 
             boost::math::negative_binomial nb(r, p);
-            boost::math::negative_binomial nb_out(r_out, target_p);
+            boost::math::negative_binomial nb_out(r_map, target_p);
 
-            const auto &column = *columns_all[j];
-            const auto &column_values = *column_values_all[j];
-            size_t i = 0;
-            column.call_ones([&](uint64_t row_i) {
-                if (!ignored[row_i]) {
-                    uint64_t c = adjust_count(column_values[i], j, row_i);
-                    if (!count_maps[j].count(c)) {
-                        double cdf = boost::math::cdf(nb, c);
-                        if (cdf == 1.0 || cdf == 0.0) {
-                            double ccdf = boost::math::cdf(boost::math::complement(nb, c));
-                            count_maps[j][c] = std::make_pair(round(boost::math::quantile(boost::math::complement(nb_out, ccdf))), 1);
-                        } else {
-                            count_maps[j][c] = std::make_pair(round(boost::math::quantile(nb_out, cdf)), 1);
-                        }
+            for (const auto &[k, c] : hists[j]) {
+                if (!count_maps[j].count(k)) {
+                    double cdf = boost::math::cdf(nb, k);
+                    if (cdf == 1.0 || cdf == 0.0) {
+                        double ccdf = boost::math::cdf(boost::math::complement(nb, k));
+                        count_maps[j][k] = std::make_pair(round(boost::math::quantile(boost::math::complement(nb_out, ccdf))), c);
                     } else {
-                        ++count_maps[j][c].second;
+                        count_maps[j][k] = std::make_pair(round(boost::math::quantile(nb_out, cdf)), c);
                     }
+                } else {
+                    count_maps[j][k].second += c;
                 }
-                ++i;
-            });
+            }
         }
 
         double in_kmers_adj = 0;
@@ -418,41 +443,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
         }
-
-        double row_sqsum_in = 0;
-        double row_sqsum_out = 0;
-        double row_sqsum_null = 0;
-        VectorMap<uint64_t, size_t> in_hist;
-        VectorMap<uint64_t, size_t> out_hist;
-        VectorMap<uint64_t, size_t> null_hist;
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all,
-                                        [&](uint64_t row_i, const auto &raw_row) {
-            if (!ignored[row_i]) {
-                double sum_in = 0;
-                double sum_out = 0;
-                for (const auto &[j, raw_c] : raw_row) {
-                    if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                        c = count_maps[j].find(c)->second.first;
-                        if (groups[j]) {
-                            sum_out += c;
-                        } else {
-                            sum_in += c;
-                        }
-                    }
-                }
-                ++in_hist[sum_in];
-                ++out_hist[sum_out];
-                ++null_hist[sum_in + sum_out];
-                row_sqsum_in += sum_in * sum_in;
-                row_sqsum_out += sum_out * sum_out;
-                row_sqsum_null += pow(sum_in + sum_out, 2.0);
-            }
-        });
-
-        double r_in = exp(log(in_kmers_adj) - log(nelem) + log_p_est - log1p(-target_p));
-        double r_out = exp(log(out_kmers_adj) - log(nelem) + log_p_est - log1p(-target_p));
 
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
@@ -494,7 +484,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            return std::make_tuple(std::min(pval, 1.0), in_sum, out_sum / out_kmers * in_kmers, std::min(pval_min, 1.0));
+            return std::make_tuple(std::min(pval, 1.0), in_sum, out_sum / out_kmers_adj * in_kmers_adj, std::min(pval_min, 1.0));
         };
     } else if (config.test_type == "nbinom") {
         boost::math::chi_squared dist(1);
