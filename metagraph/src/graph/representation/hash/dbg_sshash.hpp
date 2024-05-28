@@ -45,7 +45,7 @@ class DBGSSHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;
 
-    uint64_t num_nodes() const override;
+    uint64_t num_nodes() const override final { return num_nodes_; }
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -59,10 +59,9 @@ class DBGSSHash : public DeBruijnGraph {
     std::string get_node_sequence(node_index node) const override;
 
     // DeBruijnGraph overrides
-    size_t get_k() const override;
+    size_t get_k() const override final { return k_; }
 
-    // TODO: add the support for the canonical mode
-    Mode get_mode() const override;
+    Mode get_mode() const override final { return mode_; }
 
     node_index traverse(node_index node, char next_char) const override;
     node_index traverse_back(node_index node, char prev_char) const override;
@@ -101,6 +100,7 @@ class DBGSSHash : public DeBruijnGraph {
     static const std::string alphabet_;
     sshash::dictionary<kmer_t> dict_;
     size_t k_;
+    size_t num_nodes_;
     Mode mode_;
 };
 

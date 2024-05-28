@@ -13,7 +13,7 @@ constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
     return idx - 1;
 }
 
-DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), mode_(mode) {}
+DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {}
 
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     : k_(k), mode_(mode) {
@@ -24,16 +24,11 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     if (build_config.m % 2 == 0)
         build_config.m++;
     dict_.build(input_filename, build_config);
+    num_nodes_ = dict_.size();
 }
 
 std::string DBGSSHash::file_extension() const {
     return kExtension;
-}
-size_t DBGSSHash::get_k() const {
-    return k_;
-}
-DeBruijnGraph::Mode DBGSSHash::get_mode() const {
-    return mode_;
 }
 
 void DBGSSHash::add_sequence(std::string_view sequence,
@@ -231,12 +226,15 @@ void DBGSSHash::serialize(std::ostream& out) const {
 
 void DBGSSHash::serialize(const std::string& filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
+    essentials::saver saver(suffixed_filename.c_str());
 
-    // TODO: fix this in the essentials library. for some reason, it's saver takes a non-const ref
-    essentials::save(const_cast<sshash::dictionary<kmer_t>&>(dict_),
-                     suffixed_filename.c_str());
-    essentials::save(const_cast<size_t&>(k_), suffixed_filename.c_str());
-    essentials::save(const_cast<Mode&>(mode_), suffixed_filename.c_str());
+    // TODO: fix this in the essentials library. for some reason, its saver takes a non-const ref
+    saver.visit(const_cast<size_t&>(num_nodes_));
+    saver.visit(const_cast<size_t&>(k_));
+    saver.visit(const_cast<Mode&>(mode_));
+
+    if (num_nodes())
+        const_cast<sshash::dictionary<kmer_t>&>(dict_).visit(saver);
 }
 
 bool DBGSSHash::load(std::istream& in) {
@@ -246,15 +244,14 @@ bool DBGSSHash::load(std::istream& in) {
 
 bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    uint64_t num_bytes_read = essentials::load(dict_, suffixed_filename.c_str());
-    if (common::get_verbose()) {
-        std::cerr << "index size: " << essentials::convert(num_bytes_read, essentials::MB)
-                  << " [MB] (" << (num_bytes_read * 8.0) / dict_.size() << " [bits/kmer])"
-                  << std::endl;
-        dict_.print_info();
-    }
-    essentials::load(k_, suffixed_filename.c_str());
-    essentials::load(mode_, suffixed_filename.c_str());
+    essentials::loader loader(suffixed_filename.c_str());
+    loader.visit(num_nodes_);
+    loader.visit(k_);
+    loader.visit(mode_);
+
+    if (num_nodes_)
+        dict_.visit(loader);
+
     return true;
 }
 
@@ -268,8 +265,5 @@ const std::string& DBGSSHash::alphabet() const {
     return alphabet_;
 }
 
-uint64_t DBGSSHash::num_nodes() const {
-    return dict_.size();
-}
 } // namespace graph
 } // namespace mtg
