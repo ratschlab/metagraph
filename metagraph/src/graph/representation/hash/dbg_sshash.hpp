@@ -16,7 +16,7 @@ class DBGSSHash : public DeBruijnGraph {
     using kmer_t = sshash::dna_uint_kmer_t<uint64_t>;
 
   public:
-    explicit DBGSSHash(size_t k);
+    explicit DBGSSHash(size_t k, Mode mode = BASIC);
     DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
 
     // SequenceGraph overrides

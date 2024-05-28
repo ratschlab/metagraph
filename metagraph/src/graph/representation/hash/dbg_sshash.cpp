@@ -13,7 +13,7 @@ constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
     return idx - 1;
 }
 
-DBGSSHash::DBGSSHash(size_t k) : k_(k) {}
+DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), mode_(mode) {}
 
 DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     : k_(k), mode_(mode) {
@@ -58,6 +58,13 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     if (terminate() || sequence.size() < k_)
         return;
 
+    if (!num_nodes()) {
+        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
+            callback(npos);
+        }
+        return;
+    }
+
     kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
     uint_kmer.pad_char();
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
@@ -70,6 +77,16 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
 void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
+    if (terminate() || sequence.size() < k_)
+        return;
+
+    if (!num_nodes()) {
+        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
+            callback(npos, false);
+        }
+        return;
+    }
+
     sshash::streaming_query_regular_parsing<kmer_t> streamer(&dict_);
     streamer.start();
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
