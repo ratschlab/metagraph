@@ -23,7 +23,15 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     build_config.m = (k_ + 1) / 2;
     if (build_config.m % 2 == 0)
         build_config.m++;
+
+    // silence verbose sshash construction messages
+    if (!common::get_verbose())
+        std::cout.setstate(std::ios_base::failbit);
+
     dict_.build(input_filename, build_config);
+    if (!common::get_verbose())
+        std::cout.clear();
+
     num_nodes_ = dict_.size();
 }
 
