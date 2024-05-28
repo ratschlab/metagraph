@@ -150,14 +150,11 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSSHash>(uint64_t k,
                        std::vector<std::string> sequences,
                        DeBruijnGraph::Mode mode) {
-
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-
     // use DBGHashString to get contigs for SSHash
-    auto string_graph = build_graph<DBGHashString>(k, sequences,
-                           mode);
+    auto string_graph = build_graph<DBGHashString>(k, sequences, mode);
 
     std::vector<std::string> contigs;
     string_graph->call_sequences([&](const std::string &contig, const auto &) {
@@ -169,7 +166,12 @@ build_graph<DBGSSHash>(uint64_t k,
 
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, dump_path);
-    auto graph = std::make_shared<DBGSSHash>(dump_path, k);
+
+    auto graph = std::make_shared<DBGSSHash>(dump_path, k, mode);
+
+    if (mode == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(
+                std::static_pointer_cast<DeBruijnGraph>(graph), 2 /* cache size */);
 
     return graph;
 }
