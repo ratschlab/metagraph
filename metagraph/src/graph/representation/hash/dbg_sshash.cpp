@@ -233,16 +233,25 @@ size_t DBGSSHash::indegree(node_index node) const {
     });
 }
 
-void DBGSSHash::call_kmers(
-        const std::function<void(node_index, const std::string&)>& callback) const {
-    for (size_t node_idx = 1; node_idx <= dict_.size(); ++node_idx) {
-        callback(node_idx, get_node_sequence(node_idx));
-        if (mode_ == CANONICAL) {
+void DBGSSHash::call_nodes(
+        const std::function<void(node_index)>& callback,
+        const std::function<bool()> &terminate) const {
+    for (size_t node_idx = 1; !terminate() && node_idx <= dict_.size(); ++node_idx) {
+        callback(node_idx);
+        if (mode_ == CANONICAL && !terminate()) {
             size_t rc_node_idx = reverse_complement(node_idx);
             if (rc_node_idx != node_idx)
-                callback(rc_node_idx, get_node_sequence(rc_node_idx));
+                callback(rc_node_idx);
         }
     }
+}
+
+
+void DBGSSHash::call_kmers(
+        const std::function<void(node_index, const std::string&)>& callback) const {
+    call_nodes([&](node_index node) {
+        callback(node, get_node_sequence(node));
+    });
 }
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
