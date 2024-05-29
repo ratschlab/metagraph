@@ -16,10 +16,6 @@ TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, get_outdegree_single_node) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A') + 'C' });
         EXPECT_EQ(1ull, graph->num_nodes());
@@ -28,10 +24,6 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_single_node) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, get_maximum_outdegree) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(k - 1, 'A') + 'A',
@@ -111,10 +103,6 @@ TYPED_TEST(DeBruijnGraphTest, get_outdegree_loop) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, get_indegree_single_node) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(k - 1, 'A') + 'C' });
 
@@ -305,10 +293,6 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_simple) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     size_t k = 4;
     std::string reference = "CATC";
 

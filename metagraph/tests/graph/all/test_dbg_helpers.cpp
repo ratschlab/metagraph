@@ -158,8 +158,10 @@ build_graph<DBGSSHash>(uint64_t k,
     auto string_graph = build_graph<DBGHashString>(k, sequences, mode);
 
     std::vector<std::string> contigs;
-    string_graph->call_sequences([&](const std::string &contig, const auto &) {
+    size_t num_kmers = 0;
+    string_graph->call_sequences([&](const std::string &contig, const auto &path) {
         contigs.push_back(contig);
+        num_kmers += path.size();
     }, 1, mode != DeBruijnGraph::BASIC);
 
     if (contigs.empty())
@@ -168,7 +170,16 @@ build_graph<DBGSSHash>(uint64_t k,
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, dump_path);
 
-    auto graph = std::make_shared<DBGSSHash>(dump_path, k, mode);
+    std::shared_ptr<DBGSSHash> graph;
+    try {
+        graph = std::make_shared<DBGSSHash>(dump_path, k, mode);
+    } catch (const std::runtime_error &e) {
+        if (strcmp(e.what(), "each partition must contain more than one key: use less partitions") == 0) {
+            return build_graph<DBGHashOrdered>(k, sequences, mode);
+        } else {
+            throw e;
+        }
+    }
 
     if (mode == DeBruijnGraph::PRIMARY)
         return std::make_shared<CanonicalDBG>(
