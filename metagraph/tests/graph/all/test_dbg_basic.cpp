@@ -179,6 +179,12 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
+    auto graph1 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+    auto graph2 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
+
+    EXPECT_EQ(graph1->num_nodes() * 2, graph2->num_nodes());
+
     auto graph = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
                                               "CATGTACTAGCTGATCGTAGCTAGCTAGC" });
@@ -189,12 +195,6 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
     EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
     EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
-
-    auto graph1 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
-    auto graph2 = build_graph<TypeParam>(12, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
-
-    EXPECT_EQ(graph1->num_nodes() * 2, graph2->num_nodes());
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
@@ -251,6 +251,21 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
 
 TYPED_TEST(DeBruijnGraphTest, AddSequences) {
     {
+        std::vector<std::string> sequences { "AAAC", "CAAC" };
+        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
+    {
+        std::vector<std::string> sequences { "AAAC", "CAAC", "GAAC" };
+        EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
+    {
+        std::vector<std::string> sequences { "AAAC", "AACG" };
+        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
+        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
+    }
+    {
         // TODO: add version with N at the ends of these
         std::vector<std::string> sequences { "AGACT", "GACTT", "ACTAT" };
         EXPECT_EQ(3u, build_graph<TypeParam>(5, sequences)->num_nodes());
@@ -260,21 +275,6 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
         std::vector<std::string> sequences { "AGAC", "GACT", "ACTA" };
         EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
         EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "CAAC", "GAAC" };
-        EXPECT_EQ(3u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(3u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "CAAC" };
-        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
-    }
-    {
-        std::vector<std::string> sequences { "AAAC", "AACG" };
-        EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
-        EXPECT_EQ(2u, build_graph_batch<TypeParam>(4, sequences)->num_nodes());
     }
 }
 
