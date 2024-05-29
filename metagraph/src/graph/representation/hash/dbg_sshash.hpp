@@ -68,7 +68,6 @@ class DBGSSHash : public DeBruijnGraph {
 
     void call_nodes(const std::function<void(node_index)>& callback,
                     const std::function<bool()> &terminate = [](){ return false; }) const override;
-    void call_kmers(const std::function<void(node_index, const std::string&)>& callback) const override;
 
     size_t outdegree(node_index) const override;
 

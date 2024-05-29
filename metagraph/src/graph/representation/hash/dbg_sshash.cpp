@@ -246,14 +246,6 @@ void DBGSSHash::call_nodes(
     }
 }
 
-
-void DBGSSHash::call_kmers(
-        const std::function<void(node_index, const std::string&)>& callback) const {
-    call_nodes([&](node_index node) {
-        callback(node, get_node_sequence(node));
-    });
-}
-
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     if (!num_nodes())
         return npos;
