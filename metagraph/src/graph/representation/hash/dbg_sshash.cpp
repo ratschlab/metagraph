@@ -76,7 +76,7 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     return str_kmer != rc_str_kmer ? node + dict_.size() : node;
 }
 
-size_t DBGSSHash::num_nodes() const {
+uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_.size() : dict_.size() * 2;
 }
 
