@@ -6,6 +6,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include <cassert>
 
 namespace mtg {

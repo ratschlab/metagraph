@@ -45,7 +45,7 @@ class DBGSSHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;
 
-    uint64_t num_nodes() const override final { return num_nodes_; }
+    uint64_t num_nodes() const override;
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -95,6 +95,8 @@ class DBGSSHash : public DeBruijnGraph {
     const std::string& alphabet() const override;
 
     const sshash::dictionary<kmer_t>& data() const { return dict_; }
+
+    node_index reverse_complement(node_index node) const;
 
   private:
     static const std::string alphabet_;
