@@ -15,9 +15,7 @@ namespace mtg::graph {
 
 class DBGSSHash : public DeBruijnGraph {
 #if _PROTEIN_GRAPH
-    using kmer_t = sshash::alpha_kmer_t<uint64_t,
-                                        kmer::KmerExtractor2Bit::bits_per_char,
-                                        kmer::alphabets::kAlphabetProtein>;
+    using kmer_t = sshash::aa_uint_kmer_t<uint64_t>;
 #else
     using kmer_t = sshash::dna_uint_kmer_t<uint64_t>;
 #endif

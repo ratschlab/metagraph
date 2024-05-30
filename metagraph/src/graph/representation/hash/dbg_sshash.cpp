@@ -107,11 +107,7 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
         uint_kmer.drop_char();
         uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-#if _PROTEIN_GRAPH
-        callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer)));
-#else
         callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer, false)));
-#endif
     }
 }
 
@@ -133,12 +129,8 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
         uint_kmer.drop_char();
         uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-#if _PROTEIN_GRAPH
-        callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer)), false);
-#else
         auto res = dict_.lookup_advanced_uint(uint_kmer, true);
         callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
-#endif
     }
 }
 
@@ -147,13 +139,9 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
     kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
     new_kmer.drop_char();
     new_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(next_char));
-#if _PROTEIN_GRAPH
-    return sshash_to_graph_index(dict_.lookup_uint(new_kmer));
-#else
     auto res = dict_.lookup_advanced_uint(new_kmer, mode_ == CANONICAL);
     node_index next = sshash_to_graph_index(res.kmer_id);
     return res.kmer_orientation ? reverse_complement(next) : next;
-#endif
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
@@ -161,13 +149,9 @@ DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) 
     kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
     new_kmer.append_char(kmer_t::char_to_uint(prev_char));
     new_kmer.take_chars(k_);
-#if _PROTEIN_GRAPH
-    return sshash_to_graph_index(dict_.lookup_uint(new_kmer));
-#else
     auto res = dict_.lookup_advanced_uint(new_kmer, mode_ == CANONICAL);
     node_index prev = sshash_to_graph_index(res.kmer_id);
     return res.kmer_orientation ? reverse_complement(prev) : prev;
-#endif
 }
 
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
@@ -269,13 +253,9 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     if (!num_nodes())
         return npos;
 
-#if _PROTEIN_GRAPH
-    return sshash_to_graph_index(dict_.lookup(kmer.data()));
-#else
     auto res = dict_.lookup_advanced(kmer.data(), mode_ == CANONICAL);
     node_index node = sshash_to_graph_index(res.kmer_id);
     return res.kmer_orientation ? reverse_complement(node) : node;
-#endif
 }
 
 std::pair<DBGSSHash::node_index, bool>
@@ -283,12 +263,8 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
     if (!num_nodes())
         return std::make_pair(npos, false);
 
-#if _PROTEIN_GRAPH
-    return std::make_pair(sshash_to_graph_index(dict_.lookup(kmer.data())), false);
-#else
     auto res = dict_.lookup_advanced(kmer.data(), true);
     return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
-#endif
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
