@@ -41,7 +41,7 @@ template<> size_t max_test_k<DBGHashString>() {
     return 100;
 }
 template<> size_t max_test_k<DBGSSHash>() {
-    return 31;
+    return DBGSSHash::kmer_t::max_k;
 }
 
 template <class Graph>
