@@ -266,7 +266,7 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
         return npos;
 
 #if _PROTEIN_GRAPH
-    return dict_.lookup(kmer.data());
+    return sshash_to_graph_index(dict_.lookup(kmer.data()));
 #else
     auto res = dict_.lookup_advanced(kmer.data(), mode_ == CANONICAL);
     node_index node = sshash_to_graph_index(res.kmer_id);
@@ -280,7 +280,7 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
         return std::make_pair(npos, false);
 
 #if _PROTEIN_GRAPH
-    return dict_.lookup(kmer.data());
+    return std::make_pair(sshash_to_graph_index(dict_.lookup(kmer.data())), false);
 #else
     auto res = dict_.lookup_advanced(kmer.data(), true);
     return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
