@@ -107,7 +107,11 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
         uint_kmer.drop_char();
         uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
+#if _PROTEIN_GRAPH
+        callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer)));
+#else
         callback(sshash_to_graph_index(dict_.lookup_uint(uint_kmer, false)));
+#endif
     }
 }
 
