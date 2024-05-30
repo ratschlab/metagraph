@@ -133,7 +133,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
-    std::string string_kmer = DBGSSHash::get_node_sequence(node);
+    std::string string_kmer = get_node_sequence(node);
     kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
     new_kmer.drop_char();
     new_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(next_char));
@@ -143,7 +143,7 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
-    std::string string_kmer = DBGSSHash::get_node_sequence(node);
+    std::string string_kmer = get_node_sequence(node);
     kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
     new_kmer.append_char(kmer_t::char_to_uint(prev_char));
     new_kmer.take_chars(k_);
@@ -167,7 +167,7 @@ void DBGSSHash::adjacent_incoming_nodes(node_index node,
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
     assert(node > 0 && node <= num_nodes());
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), mode_ == CANONICAL);
     for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
         if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
@@ -180,7 +180,7 @@ void DBGSSHash::call_outgoing_kmers(node_index node,
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
     assert(node > 0 && node <= num_nodes());
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), mode_ == CANONICAL);
     for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
         if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
@@ -194,7 +194,7 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
     assert(node > 0 && node <= num_nodes());
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), true);
     for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
         if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
@@ -208,7 +208,7 @@ void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
     assert(node > 0 && node <= num_nodes());
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), true);
     for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
         if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
@@ -219,7 +219,7 @@ void DBGSSHash::call_incoming_kmers_with_rc(
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_forward_neighbours(kmer.c_str(), mode_ == CANONICAL);
     return std::count_if(begin(nb.forward), end(nb.forward), [](auto const& lookup_result) {
         return lookup_result.kmer_id != sshash::constants::invalid_uint64;
@@ -227,7 +227,7 @@ size_t DBGSSHash::outdegree(node_index node) const {
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
-    std::string kmer = DBGSSHash::get_node_sequence(node);
+    std::string kmer = get_node_sequence(node);
     sshash::neighbourhood<kmer_t> nb = dict_.kmer_backward_neighbours(kmer.c_str(), mode_ == CANONICAL);
     return std::count_if(begin(nb.backward), end(nb.backward), [](auto const& lookup_result) {
         return lookup_result.kmer_id != sshash::constants::invalid_uint64;
