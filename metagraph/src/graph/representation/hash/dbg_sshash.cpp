@@ -3,6 +3,7 @@
 #include <query/streaming_query_regular_parsing.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/threads/threading.hpp"
 
 
 namespace mtg {
@@ -24,6 +25,7 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     // quick fix for value of m... k/2 but odd
     build_config.m = (k_ + 1) / 2;
     build_config.verbose = common::get_verbose();
+    build_config.num_threads = get_num_threads();
     if (build_config.m % 2 == 0)
         build_config.m++;
 
