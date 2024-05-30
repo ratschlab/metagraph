@@ -1,7 +1,5 @@
 #include "dbg_sshash.hpp"
 
-#include <query/streaming_query_regular_parsing.hpp>
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 
@@ -124,11 +122,12 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
         return;
     }
 
-    sshash::streaming_query_regular_parsing<kmer_t> streamer(&dict_);
-    streamer.start();
-    for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        const char* kmer = sequence.data() + i;
-        auto res = streamer.lookup_advanced(kmer);
+    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
+    uint_kmer.pad_char();
+    for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
+        uint_kmer.drop_char();
+        uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
+        auto res = dict_.lookup_advanced_uint(uint_kmer, true);
         callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
     }
 }
