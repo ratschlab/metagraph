@@ -2,10 +2,13 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 namespace mtg {
 namespace graph {
+
+const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
 constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) {
     return idx + 1;
@@ -329,11 +332,6 @@ bool DBGSSHash::operator==(const DeBruijnGraph& other) const {
     }
 
     return true;
-}
-
-const std::string DBGSSHash::alphabet_ = "ACGT";
-const std::string& DBGSSHash::alphabet() const {
-    return alphabet_;
 }
 
 } // namespace graph

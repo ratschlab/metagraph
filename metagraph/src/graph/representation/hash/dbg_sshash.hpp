@@ -93,7 +93,7 @@ class DBGSSHash : public DeBruijnGraph {
 
     bool operator==(const DeBruijnGraph& other) const override;
 
-    const std::string& alphabet() const override;
+    const std::string& alphabet() const override final { return alphabet_; }
 
     const sshash::dictionary<kmer_t>& data() const { return dict_; }
 
