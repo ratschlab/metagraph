@@ -24,14 +24,16 @@ constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
 }
 
 DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
-    if (k_ * IDictionary::bits_per_char <= 64) {
+    size_t odd_k = k_ % 2 == 0 ? k_ + 1 : k_;
+
+    if (odd_k * IDictionary::bits_per_char <= 64) {
         dict_ = std::make_unique<Dictionary<Kmer64>>();
-    } else if (k_ * IDictionary::bits_per_char <= 128) {
+    } else if (odd_k * IDictionary::bits_per_char <= 128) {
         dict_ = std::make_unique<Dictionary<Kmer128>>();
-    } else if (k_ * IDictionary::bits_per_char <= 256) {
+    } else if (odd_k * IDictionary::bits_per_char <= 256) {
         dict_ = std::make_unique<Dictionary<Kmer256>>();
     } else {
-        common::logger->error("foo");
+        common::logger->error("k too big: {} > {}", odd_k, 256 / IDictionary::bits_per_char);
         throw std::runtime_error("k fail");
     }
 }
@@ -41,7 +43,7 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     sshash::build_configuration build_config;
     build_config.k = k;
     // quick fix for value of m... k/2 but odd
-    build_config.m = (k_ + 1) / 2;
+    build_config.m = std::min(uint64_t((k_ + 1) / 2), sshash::constants::max_m);
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
     if (build_config.m % 2 == 0)
