@@ -181,55 +181,20 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
-    std::string string_kmer = get_node_sequence(node);
-    auto traverse_impl = [&](const auto &dict) {
-        using kmer_t = typename std::remove_reference<decltype(dict)>::type::kmer_t;
-        kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
-        new_kmer.drop_char();
-        new_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(next_char));
-        return dict.lookup_advanced_uint(new_kmer, mode_ == CANONICAL);
-    };
-
-    sshash::lookup_result res;
-    if (auto dict64 = dynamic_cast<Dictionary<Kmer64>*>(dict_.get())) {
-        res = traverse_impl(*dict64);
-    } else if (auto dict128 = dynamic_cast<Dictionary<Kmer128>*>(dict_.get())) {
-        res = traverse_impl(*dict128);
-    } else if (auto dict256 = dynamic_cast<Dictionary<Kmer256>*>(dict_.get())) {
-        res = traverse_impl(*dict256);
-    } else {
-        common::logger->error("");
-        throw std::runtime_error("k fail");
-    }
-
-    node_index next = sshash_to_graph_index(res.kmer_id);
-    return res.kmer_orientation ? reverse_complement(next) : next;
+    // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
+    std::string string_kmer = get_node_sequence(node).substr(1) + next_char;
+    node_index next = npos;
+    map_to_nodes_sequentially(string_kmer, [&](node_index found_next) { next = found_next; });
+    return next;
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
-    std::string string_kmer = get_node_sequence(node);
-    auto traverse_back_impl = [&](const auto &dict) {
-        using kmer_t = typename std::remove_reference<decltype(dict)>::type::kmer_t;
-        kmer_t new_kmer = sshash::util::string_to_uint_kmer<kmer_t>(string_kmer.c_str(), k_);
-        new_kmer.append_char(kmer_t::char_to_uint(prev_char));
-        new_kmer.take_chars(k_);
-        return dict.lookup_advanced_uint(new_kmer, mode_ == CANONICAL);
-    };
-
-    sshash::lookup_result res;
-    if (auto dict64 = dynamic_cast<Dictionary<Kmer64>*>(dict_.get())) {
-        res = traverse_back_impl(*dict64);
-    } else if (auto dict128 = dynamic_cast<Dictionary<Kmer128>*>(dict_.get())) {
-        res = traverse_back_impl(*dict128);
-    } else if (auto dict256 = dynamic_cast<Dictionary<Kmer256>*>(dict_.get())) {
-        res = traverse_back_impl(*dict256);
-    } else {
-        common::logger->error("");
-        throw std::runtime_error("k fail");
-    }
-
-    node_index prev = sshash_to_graph_index(res.kmer_id);
-    return res.kmer_orientation ? reverse_complement(prev) : prev;
+    // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
+    std::string string_kmer = std::string(1, prev_char) + get_node_sequence(node);
+    string_kmer.pop_back();
+    node_index prev = npos;
+    map_to_nodes_sequentially(string_kmer, [&](node_index found_prev) { prev = found_prev; });
+    return prev;
 }
 
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
