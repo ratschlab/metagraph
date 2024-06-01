@@ -435,9 +435,16 @@ bool DBGSSHash::load(std::istream& in) {
 bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     essentials::loader loader(suffixed_filename.c_str());
-    loader.visit(num_nodes_);
-    loader.visit(k_);
-    loader.visit(mode_);
+
+    size_t num_nodes;
+    size_t k;
+    Mode mode;
+    loader.visit(num_nodes);
+    loader.visit(k);
+    loader.visit(mode);
+
+    *this = DBGSSHash(k, mode);
+    num_nodes_ = num_nodes;
 
     if (num_nodes_)
         dict_->visit(loader);
