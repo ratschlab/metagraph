@@ -13,13 +13,86 @@
 
 namespace mtg::graph {
 
-class DBGSSHash : public DeBruijnGraph {
+class IDictionary {
+  public:
+    virtual ~IDictionary() {}
+#if _PROTEIN_GRAPH
+    static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
+#else
+    static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
+#endif
+
+    virtual size_t size() const = 0;
+
+    virtual void visit(essentials::loader &loader) = 0;
+    virtual void visit(essentials::saver &saver) const = 0;
+    virtual void access(uint64_t kmer_id, char* string_kmer) const = 0;
+    virtual void build(std::string const& input_filename, sshash::build_configuration const& build_config) = 0;
+    virtual uint64_t lookup(char const* string_kmer, bool check_reverse_complement = true) const = 0;
+    virtual sshash::lookup_result lookup_advanced(
+            char const* string_kmer,
+            bool check_reverse_complement = true) const = 0;
+};
+
+template <typename KmerInt>
+class Dictionary : public IDictionary {
   public:
 #if _PROTEIN_GRAPH
-    using kmer_t = sshash::aa_uint_kmer_t<uint64_t>;
+    using kmer_t = sshash::aa_uint_kmer_t<KmerInt>;
 #else
-    using kmer_t = sshash::dna_uint_kmer_t<uint64_t>;
+    using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;
 #endif
+
+    const sshash::dictionary<kmer_t>& data() const { return dict_; }
+    size_t size() const { return dict_.size(); }
+
+    void visit(essentials::loader &loader) { dict_.visit(loader); }
+    void visit(essentials::saver &saver) const { dict_.visit(saver); }
+
+    void access(uint64_t kmer_id, char* string_kmer) const { dict_.access(kmer_id, string_kmer); }
+    void build(std::string const& input_filename, sshash::build_configuration const& build_config) {
+        dict_.build(input_filename, build_config);
+    }
+
+    uint64_t lookup(char const* string_kmer, bool check_reverse_complement = true) const {
+        return dict_.lookup(string_kmer, check_reverse_complement);
+    }
+
+    uint64_t lookup_uint(kmer_t uint_kmer, bool check_reverse_complement = true) const {
+        return dict_.lookup_uint(uint_kmer, check_reverse_complement);
+    }
+
+    sshash::lookup_result lookup_advanced(
+            char const* string_kmer,
+            bool check_reverse_complement = true) const {
+        return dict_.lookup_advanced(string_kmer, check_reverse_complement);
+    }
+
+    sshash::lookup_result lookup_advanced_uint(
+            kmer_t uint_kmer,
+            bool check_reverse_complement = true) const {
+        return dict_.lookup_advanced_uint(uint_kmer, check_reverse_complement);
+    }
+
+    sshash::neighbourhood<kmer_t> kmer_forward_neighbours(
+            char const* string_kmer,
+            bool check_reverse_complement = true) const {
+        return dict_.kmer_forward_neighbours(string_kmer, check_reverse_complement);
+    }
+
+    sshash::neighbourhood<kmer_t> kmer_backward_neighbours(
+            char const* string_kmer,
+            bool check_reverse_complement = true) const {
+        return dict_.kmer_backward_neighbours(string_kmer, check_reverse_complement);
+    }
+
+  private:
+    // TODO: this is a hack since sshash::dictionary<kmer_t>::visit is always non-const
+    mutable sshash::dictionary<kmer_t> dict_;
+};
+
+class DBGSSHash : public DeBruijnGraph {
+  public:
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
     DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
 
@@ -99,13 +172,13 @@ class DBGSSHash : public DeBruijnGraph {
 
     const std::string& alphabet() const override final { return alphabet_; }
 
-    const sshash::dictionary<kmer_t>& data() const { return dict_; }
+    const IDictionary& data() const { return *dict_; }
 
     node_index reverse_complement(node_index node) const;
 
   private:
     static const std::string alphabet_;
-    sshash::dictionary<kmer_t> dict_;
+    std::unique_ptr<IDictionary> dict_;
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
