@@ -184,19 +184,14 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
     // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
-    std::string string_kmer = get_node_sequence(node).substr(1) + next_char;
-    node_index next = npos;
-    map_to_nodes_sequentially(string_kmer, [&](node_index found_next) { next = found_next; });
-    return next;
+    return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
     // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
     std::string string_kmer = std::string(1, prev_char) + get_node_sequence(node);
     string_kmer.pop_back();
-    node_index prev = npos;
-    map_to_nodes_sequentially(string_kmer, [&](node_index found_prev) { prev = found_prev; });
-    return prev;
+    return kmer_to_node(string_kmer);
 }
 
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
