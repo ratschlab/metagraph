@@ -40,6 +40,7 @@ struct DifferentialAssemblyConfig {
     std::string test_type = "brunner_munzel"; // default is "brunner_munzel", alternatives are: "likelihoodratio", "binary"
     bool evaluate_assembly = false; // Myrthe temporary : evaluate an assembly
     bool filter = true;
+    bool assemble_shared = false;
     uint64_t min_count = 1;
     uint64_t min_recurrence = 1;
     uint64_t min_in_recurrence = 0;

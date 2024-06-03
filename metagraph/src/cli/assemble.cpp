@@ -62,6 +62,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.min_recurrence = experiment.get("min_in_recurrence", 0).asInt();
     diff_config.min_recurrence = experiment.get("min_out_recurrence", 0).asInt();
     diff_config.num_tests = experiment.get("num_tests", 0).asInt();
+    diff_config.assemble_shared = experiment.get("assemble_shared", false).asBool();
 
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
@@ -231,17 +232,19 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             ingraph.reset();
 
             callback(*outgraph, exp_name + "out.");
-            if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(outgraph)) {
-                std::unique_ptr<bitmap_vector> outmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
-                outmask->add_to(&mask);
-                outmask.reset();
-                mask.flip();
-                auto masked_graph_null = std::make_shared<MaskedDeBruijnGraph>(
-                    graph_ptr, std::make_unique<bitmap_vector>(std::move(mask)), true,
-                    graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-                );
-                masked_graph_null->likelihood_ratios = std::move(masked_graph->likelihood_ratios);
-                callback(*masked_graph_null, exp_name + "shared.");
+            if (diff_config.assemble_shared) {
+                if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(outgraph)) {
+                    std::unique_ptr<bitmap_vector> outmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                    outmask->add_to(&mask);
+                    outmask.reset();
+                    mask.flip();
+                    auto masked_graph_null = std::make_shared<MaskedDeBruijnGraph>(
+                        graph_ptr, std::make_unique<bitmap_vector>(std::move(mask)), true,
+                        graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+                    );
+                    masked_graph_null->likelihood_ratios = std::move(masked_graph->likelihood_ratios);
+                    callback(*masked_graph_null, exp_name + "shared.");
+                }
             }
             outgraph.reset();
         }
