@@ -208,11 +208,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ignored[row_i] = true;
             } else if (config.clean || config.min_count) {
                 size_t count = 0;
+                size_t count_in = 0;
+                size_t count_out = 0;
                 for (const auto &[j, raw_c] : row) {
                     if (adjust_count(raw_c, j, row_i)) {
                         ++count;
-                        if (count >= config.min_recurrence)
+
+                        if (groups[j]) {
+                            ++count_out;
+                        } else {
+                            ++count_in;
+                        }
+
+                        if (count >= config.min_recurrence
+                                && count_in >= config.min_in_recurrence
+                                && count_out >= config.min_out_recurrence) {
                             return;
+                        }
                     }
                 }
 
@@ -289,14 +301,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
+            || config.test_type == "binomial"
             || config.test_type == "fisher") {
         boost::math::chi_squared dist(1);
         compute_pval = [&,dist](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
-            double in_sum = 0;
-            double out_sum = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
 
             for (const auto &[j, c] : row) {
                 if (groups[j]) {
@@ -306,50 +319,78 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            double chi_stat = 0;
-            double pval = -1;
-            if (config.test_type == "cmh") {
-                if (in_sum + out_sum == total_kmers || total_kmers <= 1 || in_sum + out_sum == 0) {
-                    common::logger->error("Invalid counts: in_sum: {}\tout_sum: {}\ttotal_kmers: {}",
-                                          in_sum, out_sum, total_kmers);
+            if (config.test_type == "binomial") {
+                int64_t n = in_sum + out_sum;
+                double p = static_cast<double>(in_kmers) / total_kmers;
+                double pval = 0;
+                double p_min = 0;
+                double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
+                double max_d = d;
+                for (int64_t s = 0; s <= n; ++s) {
+                    int64_t t = n - s;
+                    double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
+                    double pdf = exp(lgamma(n) - lgamma(s + 1) - lgamma(n - s + 1) + log(p) * in_sum + log1p(-p) * out_sum);
+                    if (cur_d > max_d) {
+                        max_d = cur_d;
+                        p_min = pdf;
+                    } else if (cur_d == max_d) {
+                        p_min += pdf;
+                    }
+                    if (cur_d >= d) {
+                        pval += pdf;
+                    }
                 }
 
-                double xi = in_sum * out_kmers - out_sum * in_kmers;
-                xi *= xi * (total_kmers - 1) / in_kmers / out_kmers / (in_sum + out_sum) / (total_kmers - in_sum - out_sum);
-                chi_stat = xi;
-            } else if (config.test_type == "fisher") {
-                double lp_base = lgamma(in_kmers + 1) - lgamma(in_kmers - in_sum + 1) - lgamma(in_sum + 1);
-                lp_base += lgamma(out_kmers + 1) - lgamma(out_kmers - out_sum + 1) - lgamma(out_sum + 1);
-
-                double denom_in = lgamma(total_kmers + 1) - lgamma(total_kmers - in_sum - out_sum + 1) - lgamma(in_sum + out_sum + 1);
-
-                pval = exp(lp_base - denom_in);
-                chi_stat = boost::math::quantile(boost::math::complement(dist, pval));
+                return std::make_tuple(pval,
+                                       static_cast<double>(in_sum),
+                                       static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                       p_min);
             } else {
-                double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(in_sum) : 0.0;
-                double log_likelihood_out = out_sum > 0 ? -out_sum + out_sum * log(out_sum) : 0.0;
+                double chi_stat = 0;
+                double pval = -1;
+                if (config.test_type == "cmh") {
+                    if (in_sum + out_sum == total_kmers || total_kmers <= 1 || in_sum + out_sum == 0) {
+                        common::logger->error("Invalid counts: in_sum: {}\tout_sum: {}\ttotal_kmers: {}",
+                                            in_sum, out_sum, total_kmers);
+                    }
 
-                double theta = (in_sum + out_sum) / total_kmers;
-                double mean_denom_in = theta * in_kmers;
-                double mean_denom_out = theta * out_kmers;
-                double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
-                log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
+                    double xi = in_sum * out_kmers - out_sum * in_kmers;
+                    xi *= xi * (total_kmers - 1) / in_kmers / out_kmers / (in_sum + out_sum) / (total_kmers - in_sum - out_sum);
+                    chi_stat = xi;
+                } else if (config.test_type == "fisher") {
+                    double lp_base = lgamma(in_kmers + 1) - lgamma(in_kmers - in_sum + 1) - lgamma(in_sum + 1);
+                    lp_base += lgamma(out_kmers + 1) - lgamma(out_kmers - out_sum + 1) - lgamma(out_sum + 1);
 
-                chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+                    double denom_in = lgamma(total_kmers + 1) - lgamma(total_kmers - in_sum - out_sum + 1) - lgamma(in_sum + out_sum + 1);
+
+                    pval = exp(lp_base - denom_in);
+                    chi_stat = boost::math::quantile(boost::math::complement(dist, pval));
+                } else {
+                    double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(static_cast<double>(in_sum)) * in_sum : 0.0;
+                    double log_likelihood_out = out_sum > 0 ? -out_sum + log(static_cast<double>(out_sum)) * out_sum : 0.0;
+
+                    double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
+                    double mean_denom_in = theta * in_kmers;
+                    double mean_denom_out = theta * out_kmers;
+                    double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
+                    log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
+
+                    chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+                }
+
+                if (chi_stat == 0)
+                    return std::make_tuple(1.0, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
+
+                if (chi_stat < 0) {
+                    common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                    throw std::runtime_error("Test failed");
+                }
+
+                if (pval == -1)
+                    pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+
+                return std::make_tuple(pval, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
             }
-
-            if (chi_stat == 0)
-                return std::make_tuple(1.0, in_sum, out_sum, 1.1);
-
-            if (chi_stat < 0) {
-                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                throw std::runtime_error("Test failed");
-            }
-
-            if (pval == -1)
-                pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
-
-            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers, 1.1);
         };
     } else if (config.test_type == "dmn") {
         auto get_rp = [&](double mu, double var, const auto &hist) {
@@ -366,7 +407,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_pair(r, r / (r + mu));
         };
 
-        double target_p = 0.0;
+        double target_size = 0.0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            target_size += log(static_cast<double>(sums[j]));
+        }
+        target_size = exp(target_size / groups.size());
+
+        double target_p_num = 0.0;
+        double target_p_denom = 0.0;
         std::vector<std::pair<double, double>> nb_params;
         std::vector<VectorMap<uint64_t, size_t>> hists;
         nb_params.reserve(groups.size());
@@ -389,11 +437,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             auto [r, p] = get_rp(mu, var, hist);
-            target_p += log(p);
             nb_params.emplace_back(r, p);
+
+            target_p_num += p * p;
+            target_p_denom += p / s;
         }
-        double log_p_est = target_p / groups.size();
-        target_p = exp(log_p_est);
+        double target_p = target_p_num / target_size / target_p_denom;
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
@@ -416,6 +465,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             boost::math::negative_binomial nb(r, p);
             boost::math::negative_binomial nb_out(r_map, target_p);
 
+            // ensure that 0 maps to 0
+            count_maps[j][0] = std::make_pair(0, 0);
+
             for (const auto &[k, c] : hists[j]) {
                 if (!count_maps[j].count(k)) {
                     double cdf = boost::math::cdf(nb, k);
@@ -431,9 +483,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
+        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
+
+        common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
+
         double in_kmers_adj = 0;
         double out_kmers_adj = 0;
+        double in_kmers_adj_exp = 0;
+        double out_kmers_adj_exp = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
+            double exp_size = sums[j] * nb_params[j].second / target_p;
+            if (groups[j]) {
+                out_kmers_adj_exp += exp_size;
+            } else {
+                in_kmers_adj_exp += exp_size;
+            }
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
                 if (groups[j]) {
@@ -443,15 +507,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
         }
+        common::logger->trace("Expected Scaled Totals: in: {}\tout: {}", in_kmers_adj_exp, out_kmers_adj_exp);
+        common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers_adj, out_kmers_adj);
 
-        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
-
-        compute_pval = [&,r_in,r_out,count_maps](const auto &row) {
+        compute_pval = [&,r_in,r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
-            double in_sum = 0;
-            double out_sum = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
             for (const auto &[j, c] : row) {
                 if (groups[j]) {
                     out_sum += count_maps[j].find(c)->second.first;
@@ -463,28 +527,70 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double a[2] = { r_in, r_out };
             double a0 = a[0] + a[1];
             int64_t n = in_sum + out_sum;
-            int64_t d = abs(in_sum - out_sum);
-            double max_diff = d;
 
-            double lscaling = lgamma(a0) + lgamma(n + 1) - lgamma(a0 + n);
-            double pval = 0;
+            double lscaling = lgamma(a0) + lgamma(n + 1) - lgamma(a0 + static_cast<double>(n));
+            auto get_pmf = [&](int64_t s) {
+                int64_t t = n - s;
+                double sd = s;
+                double td = t;
+                return exp(lscaling + lgamma(sd + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(td + a[1]) - lgamma(a[1]) - lgamma(t + 1));
+            };
             double pval_min = 0;
-            for (int64_t s = 0; s <= n; ++s) {
-                double cur_diff = abs(2 * s - n);
 
-                if (cur_diff >= d) {
-                    double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
+            double pval = 0;
+            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
+            double max_d = d;
+            for (int64_t s = 0; s <= n; ++s) {
+                int64_t t = n - s;
+                double cur_d = abs(static_cast<double>(s) / in_kmers_adj - static_cast<double>(t) / out_kmers_adj);
+                if (cur_d >= d) {
+                    double pmf = get_pmf(s);
                     pval += pmf;
-                    if (cur_diff > max_diff) {
-                        max_diff = cur_diff;
+                    if (cur_d > max_d) {
                         pval_min = pmf;
-                    } else if (cur_diff == max_diff) {
+                        max_d = cur_d;
+                    } else if (cur_d == max_d) {
                         pval_min += pmf;
                     }
                 }
             }
 
-            return std::make_tuple(std::min(pval, 1.0), in_sum, out_sum / out_kmers_adj * in_kmers_adj, std::min(pval_min, 1.0));
+            // double pval_in = 0;
+            // for (int64_t s = 0; s < in_sum; ++s) {
+            //     pval_in += get_pmf(s);
+            // }
+            // pval_in = std::min(pval_in, 1.0 - pval_in);
+
+            // double pval_out = 0;
+            // for (int64_t t = 0; t < out_sum; ++t) {
+            //     pval_out += get_pmf(n - t);
+            // }
+            // pval_out = std::min(pval_out, 1.0 - pval_out);
+
+            // double pmf = get_pmf(in_sum);
+
+            // double pval = pval_in + pval_out + pmf;
+            // double pval = 0;
+            // double pval_min = 0;
+            // for (int64_t s = 0; s <= n; ++s) {
+            //     double cur_diff = abs(2 * s - n);
+
+            //     if (cur_diff >= d) {
+            //         double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
+            //         pval += pmf;
+            //         if (cur_diff > max_diff) {
+            //             max_diff = cur_diff;
+            //             pval_min = pmf;
+            //         } else if (cur_diff == max_diff) {
+            //             pval_min += pmf;
+            //         }
+            //     }
+            // }
+
+            return std::make_tuple(std::min(pval, 1.0),
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
+                                   std::min(pval_min, 1.0));
         };
     } else if (config.test_type == "nbinom") {
         boost::math::chi_squared dist(1);
@@ -1235,10 +1341,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (k == 0) {
             common::logger->trace("Falling back to Benjamini-Yekutieli");
-            double k_b = total_tests;
-            common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
             for (size_t i = 0; i < pvals.size(); ++i) {
-                if (pvals[i] < 0.05 && pvals[i] * std::min(k_b, pval_map[pvals[i]]) >= 0.05) {
+                if (pvals[i] < 0.05 && pvals[i] * pval_map[pvals[i]] >= 0.05) {
                     indicator_in[i] = false;
                     indicator_out[i] = false;
                 }
