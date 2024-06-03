@@ -6,6 +6,7 @@
 
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/distributions/poisson.hpp>
+#include <boost/math/distributions/binomial.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
 #include <boost/math/statistics/univariate_statistics.hpp>
 #include <boost/math/tools/roots.hpp>
@@ -311,7 +312,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             if (config.test_type == "binomial") {
                 int64_t n = in_sum + out_sum;
-                double p = static_cast<double>(in_kmers) / total_kmers;
+                auto bdist = boost::math::binomial(n, static_cast<double>(in_kmers) / total_kmers);
                 double pval = 0;
                 double p_min = 0;
                 double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
@@ -319,7 +320,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 for (int64_t s = 0; s <= n; ++s) {
                     int64_t t = n - s;
                     double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
-                    double pdf = exp(lgamma(n) - lgamma(s + 1) - lgamma(n - s + 1) + log(p) * in_sum + log1p(-p) * out_sum);
+                    double pdf = boost::math::pdf(bdist, s);
                     if (cur_d > max_d) {
                         max_d = cur_d;
                         p_min = pdf;
@@ -329,6 +330,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     if (cur_d >= d) {
                         pval += pdf;
                     }
+                }
+
+                if (pval >= 1.1) {
+                    common::logger->error("{} >= 1.1\t{}\t{},{}", pval, p_min, in_sum, out_sum);
+                    throw std::runtime_error("pval fail");
                 }
 
                 return std::make_tuple(pval,
@@ -545,95 +551,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            // double pval_in = 0;
-            // for (int64_t s = 0; s < in_sum; ++s) {
-            //     pval_in += get_pmf(s);
-            // }
-            // pval_in = std::min(pval_in, 1.0 - pval_in);
-
-            // double pval_out = 0;
-            // for (int64_t t = 0; t < out_sum; ++t) {
-            //     pval_out += get_pmf(n - t);
-            // }
-            // pval_out = std::min(pval_out, 1.0 - pval_out);
-
-            // double pmf = get_pmf(in_sum);
-
-            // double pval = pval_in + pval_out + pmf;
-            // double pval = 0;
-            // double pval_min = 0;
-            // for (int64_t s = 0; s <= n; ++s) {
-            //     double cur_diff = abs(2 * s - n);
-
-            //     if (cur_diff >= d) {
-            //         double pmf = exp(lscaling + lgamma(s + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(n - s + a[1]) - lgamma(a[1]) - lgamma(n - s + 1));
-            //         pval += pmf;
-            //         if (cur_diff > max_diff) {
-            //             max_diff = cur_diff;
-            //             pval_min = pmf;
-            //         } else if (cur_diff == max_diff) {
-            //             pval_min += pmf;
-            //         }
-            //     }
-            // }
+            if (pval >= 1.1) {
+                common::logger->error("{} >= 1.1\t{}\t{},{}", pval, pval_min, in_sum, out_sum);
+                throw std::runtime_error("pval fail");
+            }
 
             return std::make_tuple(std::min(pval, 1.0),
                                    static_cast<double>(in_sum),
                                    static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
                                    std::min(pval_min, 1.0));
-        };
-    } else if (config.test_type == "nbinom") {
-        boost::math::chi_squared dist(1);
-        compute_pval = [&,dist](const auto &row) {
-            if (row.empty())
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            double in_sum = 0;
-            double out_sum = 0;
-            for (const auto &[j, c] : row) {
-                if (groups[j]) {
-                    out_sum += c;
-                } else {
-                    in_sum += c;
-                }
-            }
-
-            auto get_dls = [&](double r1, double r2) {
-                double dl1 = boost::math::digamma(r1 + in_sum) - boost::math::digamma(r1) - log(2.0);
-                double dl2 = boost::math::digamma(r2 + out_sum) - boost::math::digamma(r2) - log(2.0);
-                double ddl1 = boost::math::trigamma(r1 + in_sum) - boost::math::trigamma(r1);
-                double ddl2 = boost::math::trigamma(r2 + out_sum) - boost::math::trigamma(r2);
-                return std::make_tuple(dl1, dl2, ddl1, ddl2);
-            };
-
-            double r_null = boost::math::tools::newton_raphson_iterate([&](double r) {
-                auto [dl1, dl2, ddl1, ddl2] = get_dls(r, r);
-                return std::make_pair(dl1 + dl2, ddl1 + ddl2);
-            }, 1.0, std::numeric_limits<double>::min(), total_kmers, 30);
-
-            double r_1 = in_sum > 0 ? boost::math::tools::newton_raphson_iterate([&](double r) {
-                auto [dl1, dl2, ddl1, ddl2] = get_dls(r, r);
-                return std::make_pair(dl1, ddl1);
-            }, 1.0, std::numeric_limits<double>::min(), total_kmers, 30) : 0.0;
-            double r_2 = out_sum > 0 ? boost::math::tools::newton_raphson_iterate([&](double r) {
-                auto [dl1, dl2, ddl1, ddl2] = get_dls(r, r);
-                return std::make_pair(dl2, ddl2);
-            }, 1.0, std::numeric_limits<double>::min(), total_kmers, 30) : 0.0;
-            double score = (lgamma(r_1 + in_sum) + lgamma(r_2 + out_sum) - lgamma(r_null + in_sum) - lgamma(r_null + out_sum)
-                            - lgamma(r_1) - lgamma(r_2) + lgamma(r_null) * 2.0
-                            - (r_1 + r_2 - r_null * 2.0) * log(2.0)) * 2.0;
-
-            // auto [dl1, dl2, ddl1, ddl2] = get_dls(r_null, r_null);
-            // double score = -(dl1 * dl1 / ddl1 + dl2 * dl2 / ddl2) * 2.0;
-
-            if (score <= 0) {
-                common::logger->error("score <= 0: {}", score);
-                throw std::runtime_error("Fail");
-            }
-
-            double pval = boost::math::cdf(boost::math::complement(dist, score));
-
-            return std::make_tuple(pval, in_sum, out_sum / out_kmers * in_kmers, 1.1);
         };
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
         compute_pval = [&](const auto &row) {
@@ -832,6 +758,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
     size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
                                  [](size_t sum, const auto &a) { return sum + a.second.size(); });
+    if (acc != nelem) {
+        common::logger->error("acc != nelem: {} != {}", acc, nelem);
+        throw std::runtime_error("internal failure");
+    }
     size_t total_tests = acc;
     common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
