@@ -561,16 +561,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            double a[2] = { r_in, r_out };
-            double a0 = a[0] + a[1];
             int64_t n = in_sum + out_sum;
 
-            double lscaling = lgamma(a0) + lgamma(n + 1) - lgamma(a0 + static_cast<double>(n));
+            double lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
             auto get_pmf = [&](int64_t s) {
                 int64_t t = n - s;
-                double sd = s;
-                double td = t;
-                return exp(lscaling + lgamma(sd + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(td + a[1]) - lgamma(a[1]) - lgamma(t + 1));
+                double rs = r_in + s;
+                double rt = r_out + t;
+                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
 
             double d_0 = static_cast<double>(n) / out_kmers_adj;
@@ -587,8 +585,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double pval = 0;
             double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
             for (int64_t s = 0; s <= n; ++s) {
-                int64_t t = n - s;
-                double cur_d = abs(static_cast<double>(s) / in_kmers_adj - static_cast<double>(t) / out_kmers_adj);
+                double cur_d = abs(static_cast<double>(s) / in_kmers_adj - static_cast<double>(n - s) / out_kmers_adj);
                 if (cur_d >= d)
                     pval += get_pmf(s);
             }

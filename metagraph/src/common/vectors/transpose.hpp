@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <progress_bar.hpp>
+#include <sdsl/int_vector_buffer.hpp>
 
 #include "bit_vector_sdsl.hpp"
 
@@ -89,11 +90,16 @@ void call_rows(const std::vector<BitmapPtr> &columns,
         rows.resize(end - begin);
 
         for (size_t j = 0; j < columns.size(); ++j) {
-            columns[j]->call_ones_in_range(begin, end,
-                [&](uint64_t i) {
-                    rows[i - begin].emplace_back(j, (*column_values[j])[columns[j]->rank1(i) - 1]);
-                }
-            );
+            const sdsl::int_vector_buffer<> *col = column_values[j].get();
+            std::unique_ptr<sdsl::int_vector_buffer<>> in_col;
+            if constexpr(std::is_same_v<ValuesPtr, std::unique_ptr<sdsl::int_vector_buffer<>>>) {
+                in_col = std::make_unique<sdsl::int_vector_buffer<>>(in_col->filename(), std::ios::in, in_col->buffersize());
+                col = in_col.get();
+            }
+
+            columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                rows[i - begin].emplace_back(j, (*col)[columns[j]->rank1(i) - 1]);
+            });
         }
         #pragma omp ordered
         {
