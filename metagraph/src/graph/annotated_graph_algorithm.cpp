@@ -296,12 +296,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
 
-    if (config.test_type == "likelihoodratio_unitig"
-            || config.test_type == "cmh"
-            || config.test_type == "binomial"
-            || config.test_type == "fisher") {
-        boost::math::chi_squared dist(1);
-        compute_pval = [&,dist](const auto &row) {
+    if (config.test_type == "binomial") {
+        compute_pval = [&](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
@@ -316,83 +312,122 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (config.test_type == "binomial") {
-                int64_t n = in_sum + out_sum;
-                auto bdist = boost::math::binomial(n, static_cast<double>(in_kmers) / total_kmers);
-                double pval = 0;
-                double p_min = 0;
-                double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
-                double max_d = d;
-                for (int64_t s = 0; s <= n; ++s) {
-                    int64_t t = n - s;
-                    double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
-                    double pdf = boost::math::pdf(bdist, s);
-                    if (cur_d > max_d) {
-                        max_d = cur_d;
-                        p_min = pdf;
-                    } else if (cur_d == max_d) {
-                        p_min += pdf;
-                    }
-                    if (cur_d >= d) {
-                        pval += pdf;
-                    }
-                }
+            int64_t n = in_sum + out_sum;
+            auto bdist = boost::math::binomial(n, static_cast<double>(in_kmers) / total_kmers);
+            double pval = 0;
 
-                if (pval >= 1.1) {
-                    common::logger->error("{} >= 1.1\t{}\t{},{}", pval, p_min, in_sum, out_sum);
-                    throw std::runtime_error("pval fail");
-                }
-
-                return std::make_tuple(pval,
-                                       static_cast<double>(in_sum),
-                                       static_cast<double>(out_sum) / out_kmers * in_kmers,
-                                       p_min);
+            double d_0 = static_cast<double>(n) / out_kmers;
+            double d_n = static_cast<double>(n) / in_kmers;
+            double p_min = 0;
+            if (d_0 > d_n) {
+                p_min = boost::math::pdf(bdist, 0);
+            } else if (d_0 < d_n) {
+                p_min = boost::math::pdf(bdist, n);
             } else {
-                double chi_stat = 0;
-                double pval = -1;
-                if (config.test_type == "cmh") {
-                    if (in_sum + out_sum == total_kmers || total_kmers <= 1 || in_sum + out_sum == 0) {
-                        common::logger->error("Invalid counts: in_sum: {}\tout_sum: {}\ttotal_kmers: {}",
-                                            in_sum, out_sum, total_kmers);
-                    }
+                p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
+            }
 
-                    double xi = in_sum * out_kmers - out_sum * in_kmers;
-                    xi *= xi * (total_kmers - 1) / in_kmers / out_kmers / (in_sum + out_sum) / (total_kmers - in_sum - out_sum);
-                    chi_stat = xi;
-                } else if (config.test_type == "fisher") {
-                    double lp_base = lgamma(in_kmers + 1) - lgamma(in_kmers - in_sum + 1) - lgamma(in_sum + 1);
-                    lp_base += lgamma(out_kmers + 1) - lgamma(out_kmers - out_sum + 1) - lgamma(out_sum + 1);
+            double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
 
-                    double denom_in = lgamma(total_kmers + 1) - lgamma(total_kmers - in_sum - out_sum + 1) - lgamma(in_sum + out_sum + 1);
+            // lower tail
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                int64_t t = n - s;
+                double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
+                if (cur_d < d)
+                    break;
+            }
 
-                    pval = exp(lp_base - denom_in);
-                    chi_stat = boost::math::quantile(boost::math::complement(dist, pval));
-                } else {
-                    double log_likelihood_in = in_sum > 0 ? -in_sum + in_sum * log(static_cast<double>(in_sum)) * in_sum : 0.0;
-                    double log_likelihood_out = out_sum > 0 ? -out_sum + log(static_cast<double>(out_sum)) * out_sum : 0.0;
+            if (s == n + 1) {
+                pval = 1.0;
+            } else {
+                if (s > 0)
+                    pval = boost::math::cdf(bdist, s - 1);
 
-                    double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-                    double mean_denom_in = theta * in_kmers;
-                    double mean_denom_out = theta * out_kmers;
-                    double log_likelihood_null = mean_denom_in > 0 && in_sum >= 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
-                    log_likelihood_null += mean_denom_out > 0 && out_sum >= 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
-
-                    chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+                // upper tail
+                int64_t s_u = n;
+                for ( ; s_u >= s; --s_u) {
+                    int64_t t = n - s_u;
+                    double cur_d = abs(static_cast<double>(s_u) / in_kmers - static_cast<double>(t) / out_kmers);
+                    if (cur_d < d)
+                        break;
                 }
 
-                if (chi_stat == 0)
-                    return std::make_tuple(1.0, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
+                assert(s_u >= s - 1);
 
-                if (chi_stat < 0) {
-                    common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                if (s_u + 1 <= n)
+                    pval += boost::math::cdf(boost::math::complement(bdist, s_u + 1));
+            }
+
+            if (pval > 1.0) {
+                common::logger->error("{} > 1.0\t{}\t{},{}", pval, p_min, in_sum, out_sum);
+                throw std::runtime_error("pval fail");
+            }
+
+            return std::make_tuple(pval,
+                                    static_cast<double>(in_sum),
+                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                    p_min);
+        };
+    } else if (config.test_type == "poisson_likelihoodratio" || config.test_type == "cmh") {
+        compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+
+            for (const auto &[j, c] : row) {
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
+            }
+
+            double chi_stat = 0;
+            if (config.test_type == "cmh") {
+                double xi = in_sum * out_kmers - out_sum * in_kmers;
+                xi *= xi * (total_kmers - 1) / in_kmers / out_kmers / (in_sum + out_sum) / (total_kmers - in_sum - out_sum);
+                chi_stat = xi;
+            } else {
+                if (in_sum == 0 || out_sum == 0 || in_kmers == 0 || out_kmers == 0) {
+                    common::logger->error("Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
                     throw std::runtime_error("Test failed");
                 }
 
-                if (pval == -1)
-                    pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+                double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
+                double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
 
-                return std::make_tuple(pval, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
+                double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
+                double mean_denom_in = theta * in_kmers;
+                double mean_denom_out = theta * out_kmers;
+
+                if (mean_denom_in == 0 || mean_denom_out == 0) {
+                    common::logger->error("Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
+                    throw std::runtime_error("Test failed");
+                }
+
+                double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
+                log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
+
+                chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
             }
+
+            if (chi_stat == 0)
+                return std::make_tuple(1.0, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
+
+            if (chi_stat < 0) {
+                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                throw std::runtime_error("Test failed");
+            }
+
+            double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+
+            return std::make_tuple(pval,
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   1.1);
         };
     } else if (config.test_type == "dmn") {
         common::logger->trace("Fitting negative binomial distributions");
@@ -537,35 +572,36 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double td = t;
                 return exp(lscaling + lgamma(sd + a[0]) - lgamma(a[0]) - lgamma(s + 1) + lgamma(td + a[1]) - lgamma(a[1]) - lgamma(t + 1));
             };
-            double pval_min = 0;
+
+            double d_0 = static_cast<double>(n) / out_kmers_adj;
+            double d_n = static_cast<double>(n) / in_kmers_adj;
+            double p_min = 0;
+            if (d_0 > d_n) {
+                p_min = get_pmf(0);
+            } else if (d_0 < d_n) {
+                p_min = get_pmf(n);
+            } else {
+                p_min = get_pmf(0) + get_pmf(n);
+            }
 
             double pval = 0;
             double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
-            double max_d = d;
             for (int64_t s = 0; s <= n; ++s) {
                 int64_t t = n - s;
                 double cur_d = abs(static_cast<double>(s) / in_kmers_adj - static_cast<double>(t) / out_kmers_adj);
-                if (cur_d >= d) {
-                    double pmf = get_pmf(s);
-                    pval += pmf;
-                    if (cur_d > max_d) {
-                        pval_min = pmf;
-                        max_d = cur_d;
-                    } else if (cur_d == max_d) {
-                        pval_min += pmf;
-                    }
-                }
+                if (cur_d >= d)
+                    pval += get_pmf(s);
             }
 
             if (pval >= 1.1) {
-                common::logger->error("{} >= 1.1\t{}\t{},{}", pval, pval_min, in_sum, out_sum);
+                common::logger->error("{} >= 1.1\t{}\t{},{}", pval, p_min, in_sum, out_sum);
                 throw std::runtime_error("pval fail");
             }
 
             return std::make_tuple(std::min(pval, 1.0),
                                    static_cast<double>(in_sum),
                                    static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
-                                   std::min(pval_min, 1.0));
+                                   std::min(p_min, 1.0));
         };
     } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
         compute_pval = [&](const auto &row) {
