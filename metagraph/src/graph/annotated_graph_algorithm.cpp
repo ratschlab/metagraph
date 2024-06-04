@@ -133,6 +133,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
                          size_t num_parallel_files) {
+    num_parallel_files = std::min(num_parallel_files, num_threads);
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
 
@@ -158,7 +159,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             : 0;
     };
 
-    if (config.clean) {
+    if (config.clean && column_values_all.empty())
+        common::logger->warn("Can't clean when no counts provided, skipping cleaning");
+
+    if (config.clean && column_values_all.size()) {
         common::logger->trace("Cleaning count columns");
 
         #pragma omp parallel for num_threads(num_parallel_files)
@@ -266,18 +270,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     #pragma omp parallel for num_threads(num_parallel_files)
     for (size_t j = 0; j < groups.size(); ++j) {
         const auto &column = *columns_all[j];
-        const auto &column_values = *column_values_all[j];
+        size_t num_vals = column_values_all.size()
+            ? column_values_all[j]->size()
+            : column.num_set_bits();
+
         uint64_t sum = 0;
         uint64_t sum_of_squares = 0;
         size_t i = 0;
         size_t n = 0;
 
         std::vector<uint64_t> vals;
-        vals.reserve(column_values.size());
+        vals.reserve(num_vals);
         column.call_ones([&](uint64_t row_i) {
             if (!ignored[row_i]) {
-                uint64_t c = adjust_count(column_values[i], j, row_i);
-                if (c) {
+                if (uint64_t c = adjust_count(column_values_all.size() ? (*column_values_all[j])[i] : 1, j, row_i)) {
                     vals.emplace_back(c);
                     sum += c;
                     sum_of_squares += c * c;
@@ -356,9 +362,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for ( ; s <= n; ++s) {
                 int64_t t = n - s;
                 double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
+                common::logger->info("bar: {}\t{} vs. {}", s, d, cur_d);
                 if (cur_d < d)
                     break;
             }
+
+            common::logger->info("bars: {} / {}", s, n);
 
             if (s == n + 1) {
                 pval = 1.0;
@@ -371,6 +380,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 for ( ; s_u >= s; --s_u) {
                     int64_t t = n - s_u;
                     double cur_d = abs(static_cast<double>(s_u) / in_kmers - static_cast<double>(t) / out_kmers);
+                    common::logger->info("bar: {}\t{} vs. {}", s_u, d, cur_d);
                     if (cur_d < d)
                         break;
                 }
@@ -385,6 +395,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->error("{} > 1.0\t{}\t{},{}", pval, p_min, in_sum, out_sum);
                 throw std::runtime_error("pval fail");
             }
+
+            common::logger->info("foo: {}/{}\t{}/{}\t{}\t{}", in_sum, in_kmers, out_sum, out_kmers, pval, p_min);
 
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
@@ -477,14 +489,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto &hist = hists[j];
             size_t i = 0;
             const auto &column = *columns_all[j];
-            const auto &column_values = *column_values_all[j];
-            column.call_ones([&](uint64_t row_i) {
-                if (!ignored[row_i]) {
-                    uint64_t c = adjust_count(column_values[i], j, row_i);
-                    ++hist[c];
-                }
-                ++i;
-            });
+            if (column_values_all.size()) {
+                const auto &column_values = *column_values_all[j];
+                column.call_ones([&](uint64_t row_i) {
+                    if (!ignored[row_i])
+                        ++hist[adjust_count(column_values[i], j, row_i)];
+
+                    ++i;
+                });
+            } else {
+                column.call_ones([&](uint64_t row_i) {
+                    if (!ignored[row_i])
+                        ++hist[adjust_count(1, j, row_i)];
+
+                    ++i;
+                });
+            }
 
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;

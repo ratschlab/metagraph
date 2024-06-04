@@ -9,6 +9,7 @@
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 
 
 namespace {
@@ -23,9 +24,7 @@ template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 // test with DBGBitmap and DBGHashFast to have k-mers in different order
 typedef ::testing::Types<std::pair<DBGBitmap, ColumnCompressed<>>,
-                         std::pair<DBGHashFast, ColumnCompressed<>>,
-                         std::pair<DBGBitmap, RowFlatAnnotator>,
-                         std::pair<DBGHashFast, RowFlatAnnotator>
+                         std::pair<DBGHashFast, ColumnCompressed<>>
                         > GraphAnnoTypes;
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 
@@ -33,9 +32,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     typedef typename TypeParam::first_type Graph;
     typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads : { 1, 4 }) {
-        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
-        const tsl::hopscotch_set<std::string> outgroup { "A" };
-
         size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
         for (size_t k = 3; k < max_k; ++k) {
             const std::vector<std::string> sequences {
@@ -47,7 +43,22 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             };
             const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
 
+            // ingroup: B, C
+            // outgroup: A
+            std::vector<bool> groups = { true, false, false };
+
             auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
+
+            const auto &in_columns = static_cast<const Annotation&>(anno_graph->get_annotator()).get_matrix().data();
+            std::vector<std::unique_ptr<const bit_vector>> columns;
+            columns.reserve(in_columns.size());
+            std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
+                           [&](const auto &a) {
+                               return std::make_unique<const bit_vector_stat>(a->to_vector());
+                           });
+
+            std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values_all;
 
             std::unordered_set<std::string> obs_labels, obs_kmers;
             const std::unordered_set<std::string> ref_kmers {
@@ -58,20 +69,21 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             };
 
             DifferentialAssemblyConfig config {
-                .label_mask_in_unitig_fraction = 0.0,
-                .label_mask_in_kmer_fraction = 1.0,
-                .label_mask_out_unitig_fraction = 1.0,
-                .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = 1.0,
+                .test_type = "binomial",
+                .min_count = 1,
+                .min_in_recurrence = 2,
                 .outfbase = "",
             };
 
-            auto masked_dbg = mask_nodes_by_label(*anno_graph,
-                                                  ingroup, outgroup,
-                                                  {}, {},
-                                                  config, num_threads);
+            auto [masked_dbg_in, masked_dbg_out] = mask_nodes_by_label_dual<sdsl::int_vector<>>(
+                graph_ptr,
+                columns,
+                column_values_all,
+                groups,
+                config, num_threads
+            );
 
-            masked_dbg->call_kmers([&](auto, const std::string &kmer) {
+            masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
                 auto cur_labels = anno_graph->get_labels(kmer, 0.0);
                 obs_labels.insert(cur_labels.begin(), cur_labels.end());
                 obs_kmers.insert(kmer);
