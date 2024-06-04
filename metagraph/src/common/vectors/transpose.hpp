@@ -61,7 +61,7 @@ void call_rows(const std::vector<BitmapPtr> &columns,
 
 // Transpose all columns and call all rows.
 // If there are no columns, call `num_rows` empty rows.
-template <class BitmapPtr, class ValuesPtr, typename PairVector = std::vector<std::pair<uint64_t, uint8_t>>>
+template <class BitmapPtr, class ValuesPtr, typename PairVector = std::vector<std::pair<uint64_t, uint8_t>>, bool ordered = true>
 void call_rows(const std::vector<BitmapPtr> &columns,
                const std::vector<ValuesPtr> &column_values,
                const std::function<void(uint64_t, const PairVector &)> &callback,
@@ -90,25 +90,36 @@ void call_rows(const std::vector<BitmapPtr> &columns,
         rows.resize(end - begin);
 
         for (size_t j = 0; j < columns.size(); ++j) {
-            const sdsl::int_vector_buffer<> *col = column_values[j].get();
-            std::unique_ptr<sdsl::int_vector_buffer<>> in_col;
+            const auto &col = *column_values[j];
             if constexpr(std::is_same_v<ValuesPtr, std::unique_ptr<sdsl::int_vector_buffer<>>>) {
-                in_col = std::make_unique<sdsl::int_vector_buffer<>>(in_col->filename(), std::ios::in, in_col->buffersize());
-                col = in_col.get();
+                sdsl::int_vector_buffer<> cur_col(col.filename(), std::ios::in, col.buffersize());
+                columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                    rows[i - begin].emplace_back(j, cur_col[columns[j]->rank1(i) - 1]);
+                });
+            } else {
+                columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                    rows[i - begin].emplace_back(j, col[columns[j]->rank1(i) - 1]);
+                });
             }
-
-            columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
-                rows[i - begin].emplace_back(j, (*col)[columns[j]->rank1(i) - 1]);
-            });
         }
-        #pragma omp ordered
-        {
+
+        if constexpr(ordered) {
+            #pragma omp ordered
+            {
+                for (uint64_t j = 0; j < rows.size(); ++j) {
+                    callback(j + begin, rows[j]);
+                    ++progress_bar;
+                    rows[j].resize(0);
+                }
+            }
+        } else {
             for (uint64_t j = 0; j < rows.size(); ++j) {
                 callback(j + begin, rows[j]);
                 ++progress_bar;
                 rows[j].resize(0);
             }
         }
+
     }
 }
 

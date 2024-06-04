@@ -505,13 +505,6 @@ void DeBruijnGraph
 }
 
 
-void DeBruijnGraph::lrt_resize(size_t size){
-    lrs.reserve(size);
-}; // Myrthe
-void DeBruijnGraph::lrt_set_value(double value, size_t index){
-    lrs[index] = value;
-};
-
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);
     return out;
