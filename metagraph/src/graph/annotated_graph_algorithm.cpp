@@ -34,7 +34,6 @@ typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
 using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
-using ValuesContainer = sdsl::int_vector_buffer<>;
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 double CDF_CUTOFF = 0.95;
@@ -91,7 +90,6 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     return n > 0;
 }
 
-
 std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<std::string> &files,
@@ -100,31 +98,55 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
                          size_t num_parallel_files) {
-    bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
-    bool parallel = num_parallel_files > 1;
-    common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
+    using ValuesContainer = sdsl::int_vector_buffer<>;
+
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
-    std::vector<bool> groups(labels_in.size() + labels_out.size());
-    std::vector<std::unique_ptr<bit_vector>> columns_all(groups.size());
-    std::vector<std::unique_ptr<ValuesContainer>> column_values_all(groups.size());
-
-    uint8_t max_width = 0;
-
-    sdsl::bit_vector ignored(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), false);
+    size_t total_labels = labels_in.size() + labels_out.size();
+    std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
+    std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
+    std::vector<bool> groups(total_labels);
 
     annot::ColumnCompressed<>::load_columns_and_values(
         files,
         [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
             groups[offset] = labels_out.count(label);
-            max_width = std::max(max_width, column_values.width());
-            std::swap(columns_all[offset], column);
+            columns_all[offset].reset(column.release());
             column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
         },
         num_parallel_files
     );
 
+    return mask_nodes_by_label_dual<ValuesContainer>(
+        graph_ptr, columns_all, column_values_all, groups,
+        config, num_threads, num_parallel_files
+    );
+}
+
+template <class ValuesContainer>
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                         std::vector<std::unique_ptr<const bit_vector>> &columns_all,
+                         std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
+                         const std::vector<bool> &groups,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads,
+                         size_t num_parallel_files) {
+    bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
+    bool parallel = num_parallel_files > 1;
+
+    size_t num_labels_out = std::count(groups.begin(), groups.end(), true);
+    size_t num_labels_in = groups.size() - num_labels_out;
+
+    common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
+
+    uint8_t max_width = 0;
+    for (const auto &col_vals : column_values_all) {
+        max_width = std::max(max_width, col_vals->width());
+    }
+
+    sdsl::bit_vector ignored(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), false);
 
     std::vector<uint64_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
@@ -196,10 +218,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Marking discarded k-mers");
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
-        utils::call_rows<std::unique_ptr<bit_vector>,
-                         std::unique_ptr<ValuesContainer>,
-                         PairContainer>(columns_all, column_values_all,
-                                        [&](uint64_t row_i, const auto &row) {
+        utils::call_rows<std::unique_ptr<const bit_vector>,
+                         std::unique_ptr<const ValuesContainer>,
+                         PairContainer, false>(columns_all, column_values_all,
+                                               [&](uint64_t row_i, const auto &row) {
             if (row.empty()) {
                 set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
             } else if (config.clean || config.min_count) {
@@ -365,9 +387,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             return std::make_tuple(pval,
-                                    static_cast<double>(in_sum),
-                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
-                                    p_min);
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   p_min);
         };
     } else if (config.test_type == "poisson_likelihoodratio" || config.test_type == "cmh") {
         compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
@@ -626,17 +648,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             };
 
             std::vector<double> in_counts;
-            in_counts.reserve(labels_in.size());
+            in_counts.reserve(num_labels_in);
             std::vector<double> out_counts;
-            out_counts.reserve(labels_out.size());
+            out_counts.reserve(num_labels_out);
 
             for (const auto &[j, c] : row) {
                 auto &bucket = groups[j] ? out_counts : in_counts;
                 bucket.emplace_back(static_cast<double>(c) / medians[j]);
             }
 
-            in_counts.resize(labels_in.size());
-            out_counts.resize(labels_out.size());
+            in_counts.resize(num_labels_in);
+            out_counts.resize(num_labels_out);
 
             double p = 0.0;
             size_t nx = in_counts.size();
@@ -712,7 +734,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::make_tuple(p, rankcx_mean, rankcy_mean,
                                    config.test_type == "nonparametric_u"
-                                       ? 2.0 / exp(lgamma(groups.size() + 1) - lgamma(labels_in.size() + 1) - lgamma(labels_out.size() + 1))
+                                       ? 2.0 / exp(lgamma(groups.size() + 1) - lgamma(num_labels_in + 1) - lgamma(num_labels_out + 1))
                                        : 1.1);
         };
     } else {
@@ -722,10 +744,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::mutex pval_mu;
     std::atomic_thread_fence(std::memory_order_release);
 
-    utils::call_rows<std::unique_ptr<bit_vector>,
-                     std::unique_ptr<ValuesContainer>,
-                     PairContainer>(columns_all, column_values_all,
-                                    [&](uint64_t row_i, const auto &raw_row) {
+    utils::call_rows<std::unique_ptr<const bit_vector>,
+                     std::unique_ptr<const ValuesContainer>,
+                     PairContainer, false>(columns_all, column_values_all,
+                                           [&](uint64_t row_i, const auto &raw_row) {
         PairContainer row;
         if (!ignored[row_i]) {
             for (const auto &[j, raw_c] : raw_row) {
@@ -877,7 +899,24 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     return std::make_pair(masked_graph_in, masked_graph_out);
 }
 
-
+template
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual<sdsl::int_vector_buffer<>>(std::shared_ptr<const DeBruijnGraph>,
+                         std::vector<std::unique_ptr<const bit_vector>> &,
+                         std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
+                         const std::vector<bool> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         size_t);
+template
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual<sdsl::int_vector<>>(std::shared_ptr<const DeBruijnGraph>,
+                         std::vector<std::unique_ptr<const bit_vector>> &,
+                         std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+                         const std::vector<bool> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         size_t);
 
 typedef std::function<size_t()> LabelCountCallback;
 
@@ -1080,9 +1119,9 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     // calculate the p-value for the brunner munzel test
     auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, 0, 0, 0);
     utils::call_rows<std::unique_ptr<bit_vector>,
-                    std::unique_ptr<sdsl::int_vector_buffer<>>,
-                    std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                               [&](uint64_t row_id, const auto &row) {
+                     std::unique_ptr<sdsl::int_vector_buffer<>>,
+                     std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
+                                                                [&](uint64_t row_id, const auto &row) {
                         // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
                         if (row.size() == 0) { // if the kmer is not present in any sample
                             mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;

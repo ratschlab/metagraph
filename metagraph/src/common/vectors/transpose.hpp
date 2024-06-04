@@ -8,6 +8,7 @@
 #include <sdsl/int_vector_buffer.hpp>
 
 #include "bit_vector_sdsl.hpp"
+#include "common/logger.hpp"
 
 
 namespace utils {
@@ -76,6 +77,9 @@ void call_rows(const std::vector<BitmapPtr> &columns,
         return;
     }
 
+    if (column_values.empty())
+        mtg::common::logger->warn("No column values provided, using default value of 1");
+
     num_rows = columns[0]->size();
     std::vector<PairVector> rows;
 
@@ -90,16 +94,22 @@ void call_rows(const std::vector<BitmapPtr> &columns,
         rows.resize(end - begin);
 
         for (size_t j = 0; j < columns.size(); ++j) {
-            const auto &col = *column_values[j];
-            if constexpr(std::is_same_v<ValuesPtr, std::unique_ptr<sdsl::int_vector_buffer<>>>) {
-                sdsl::int_vector_buffer<> cur_col(col.filename(), std::ios::in, col.buffersize());
+            if (column_values.empty()) {
                 columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
-                    rows[i - begin].emplace_back(j, cur_col[columns[j]->rank1(i) - 1]);
+                    rows[i - begin].emplace_back(j, 1);
                 });
             } else {
-                columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
-                    rows[i - begin].emplace_back(j, col[columns[j]->rank1(i) - 1]);
-                });
+                const auto &col = *column_values[j];
+                if constexpr(std::is_same_v<ValuesPtr, std::unique_ptr<sdsl::int_vector_buffer<>>>) {
+                    sdsl::int_vector_buffer<> cur_col(col.filename(), std::ios::in, col.buffersize());
+                    columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                        rows[i - begin].emplace_back(j, cur_col[columns[j]->rank1(i) - 1]);
+                    });
+                } else {
+                    columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                        rows[i - begin].emplace_back(j, col[columns[j]->rank1(i) - 1]);
+                    });
+                }
             }
         }
 

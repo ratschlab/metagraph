@@ -4,6 +4,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "common/vectors/bit_vector.hpp"
 
 
 namespace mtg {
@@ -87,6 +88,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<std::string> &files,
                          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
                          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads = 1,
+                         size_t num_parallel_files = std::numeric_limits<size_t>::max());
+
+template <class ValuesContainer>
+std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                         std::vector<std::unique_ptr<const bit_vector>> &columns_all,
+                         std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
+                         const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
                          size_t num_parallel_files = std::numeric_limits<size_t>::max());
