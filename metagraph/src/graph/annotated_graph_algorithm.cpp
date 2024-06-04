@@ -1,6 +1,7 @@
 #include "annotated_graph_algorithm.hpp"
 
 #include <typeinfo>
+#include <mutex>
 
 #include <sdust.h>
 
@@ -33,8 +34,8 @@ typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
 using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
-// using ValuesContainer = sdsl::int_vector_buffer<>;
-using ValuesContainer = sdsl::int_vector<>;
+using ValuesContainer = sdsl::int_vector_buffer<>;
+constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 double CDF_CUTOFF = 0.95;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
@@ -100,6 +101,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_threads,
                          size_t num_parallel_files) {
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
+    bool parallel = num_parallel_files > 1;
     common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
@@ -136,6 +138,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (config.clean) {
         common::logger->trace("Cleaning count columns");
+
+        #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &column_values = *column_values_all[j];
 
@@ -191,12 +195,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Marking discarded k-mers");
     if (groups.size()) {
+        std::atomic_thread_fence(std::memory_order_release);
         utils::call_rows<std::unique_ptr<bit_vector>,
                          std::unique_ptr<ValuesContainer>,
                          PairContainer>(columns_all, column_values_all,
                                         [&](uint64_t row_i, const auto &row) {
             if (row.empty()) {
-                ignored[row_i] = true;
+                set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
             } else if (config.clean || config.min_count) {
                 size_t count = 0;
                 size_t count_in = 0;
@@ -219,9 +224,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
 
-                ignored[row_i] = true;
+                set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
             }
         });
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
@@ -229,11 +235,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Computing aggregate statistics");
     double in_kmers = 0;
     double out_kmers = 0;
-    std::vector<double> medians;
-    std::vector<uint64_t> max_obs_vals;
-    std::vector<size_t> n_kmers;
-    std::vector<uint64_t> sums;
-    std::vector<uint64_t> sums_of_squares;
+    std::vector<double> medians(groups.size());
+    std::vector<uint64_t> max_obs_vals(groups.size());
+    std::vector<size_t> n_kmers(groups.size());
+    std::vector<uint64_t> sums(groups.size());
+    std::vector<uint64_t> sums_of_squares(groups.size());
+
+    #pragma omp parallel for num_threads(num_parallel_files)
     for (size_t j = 0; j < groups.size(); ++j) {
         const auto &column = *columns_all[j];
         const auto &column_values = *column_values_all[j];
@@ -257,17 +265,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             ++i;
         });
 
-        max_obs_vals.emplace_back(*std::max_element(vals.begin(), vals.end()));
-        medians.push_back(boost::math::statistics::median(vals));
+        max_obs_vals[j] = *std::max_element(vals.begin(), vals.end());
+        medians[j] = boost::math::statistics::median(vals);
 
-        sums.push_back(sum);
+        sums[j] = sum;
         if (groups[j]) {
             out_kmers += sum;
         } else {
             in_kmers += sum;
         }
-        sums_of_squares.push_back(sum_of_squares);
-        n_kmers.push_back(n);
+        sums_of_squares[j] = sum_of_squares;
+        n_kmers[j] = n;
 
         common::logger->trace("{}: kept: {} / {}\tsum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
                               j, n, i, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
@@ -282,15 +290,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     sdsl::bit_vector indicator_in(graph_ptr->max_index() + 1, false);
     sdsl::bit_vector indicator_out(graph_ptr->max_index() + 1, false);
 
-    std::vector<double> pvals;
-    pvals.reserve(graph_ptr->max_index() + 1);
-    pvals.emplace_back(1.1);
+    std::vector<double> pvals(graph_ptr->max_index() + 1, 1.1);
 
     VectorMap<size_t, std::vector<uint64_t>> m;
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
 
-    if (config.test_type == "likelihoodratio" || config.test_type == "likelihoodratio_unitig"
+    if (config.test_type == "likelihoodratio_unitig"
             || config.test_type == "cmh"
             || config.test_type == "binomial"
             || config.test_type == "fisher") {
@@ -389,6 +395,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         };
     } else if (config.test_type == "dmn") {
+        common::logger->trace("Fitting negative binomial distributions");
         auto get_rp = [&](double mu, double var, const auto &hist) {
             double r = boost::math::tools::newton_raphson_iterate([&](double r) {
                 double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
@@ -405,12 +412,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         double target_p_num = 0.0;
         double target_p_denom = 0.0;
-        std::vector<std::pair<double, double>> nb_params;
-        std::vector<VectorMap<uint64_t, size_t>> hists;
-        nb_params.reserve(groups.size());
-        hists.reserve(groups.size());
+        std::vector<std::pair<double, double>> nb_params(groups.size());
+        std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
+
+        #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
-            auto &hist = hists.emplace_back();
+            auto &hist = hists[j];
             size_t i = 0;
             const auto &column = *columns_all[j];
             const auto &column_values = *column_values_all[j];
@@ -426,8 +433,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu = s / nelem;
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
-            auto [r, p] = get_rp(mu, var, hist);
-            nb_params.emplace_back(r, p);
+            nb_params[j] = get_rp(mu, var, hist);
+            double p = nb_params[j].second;
 
             target_p_num += p * p;
             target_p_denom += p;
@@ -437,6 +444,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
         double r_out = 0;
+        std::mutex r_mu;
+
+        #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
 
@@ -445,12 +455,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
                                   j, r, p, r_map, target_p);
-
-            if (groups[j]) {
-                r_out += r_map;
-            } else {
-                r_in += r_map;
-            }
 
             boost::math::negative_binomial nb(r, p);
             boost::math::negative_binomial nb_out(r_map, target_p);
@@ -470,6 +474,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 } else {
                     count_maps[j][k].second += c;
                 }
+            }
+
+            std::lock_guard<std::mutex> lock(r_mu);
+            if (groups[j]) {
+                r_out += r_map;
+            } else {
+                r_in += r_map;
             }
         }
 
@@ -497,6 +508,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
         }
+
         common::logger->trace("Expected Scaled Totals: in: {}\tout: {}", in_kmers_adj_exp, out_kmers_adj_exp);
         common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers_adj, out_kmers_adj);
 
@@ -674,6 +686,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         throw std::runtime_error("Test not implemented");
     }
 
+    std::mutex pval_mu;
+    std::atomic_thread_fence(std::memory_order_release);
+
     utils::call_rows<std::unique_ptr<bit_vector>,
                      std::unique_ptr<ValuesContainer>,
                      PairContainer>(columns_all, column_values_all,
@@ -686,8 +701,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
+        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+
         auto [pval, in_stat, out_stat, pval_min] = compute_pval(row);
-        pvals.emplace_back(pval);
+        pvals[node] = pval;
 
         if (pval >= 1.1)
             return;
@@ -728,15 +745,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-        m[k].emplace_back(node);
-        if (in_stat == out_stat)
-            return;
+        if (in_stat != out_stat && pval < 0.05)
+            set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
 
-        auto &indicator = in_kmer ? indicator_in : indicator_out;
-        if (pval < 0.05)
-            indicator[node] = true;
+        std::lock_guard<std::mutex> lock(pval_mu);
+        m[k].emplace_back(node);
     });
+
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     for (auto &col : columns_all) {
         col.reset();
@@ -831,8 +847,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 
 typedef std::function<size_t()> LabelCountCallback;
-
-constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
                       uint64_t i,
