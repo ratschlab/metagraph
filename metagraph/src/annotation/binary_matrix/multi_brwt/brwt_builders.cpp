@@ -310,8 +310,11 @@ BRWT BRWTBottomUpBuilder::build(
     num_nodes_parallel = std::min(num_nodes_parallel, done.size());
     // initialize buffers for merging columns
     // these may be huge, so we keep only a few of them
+    size_t num_buffers = std::max(num_nodes_parallel, size_t(1));
+    logger->trace("Initializing {} column buffers, in total {:.2} GB", num_buffers,
+                  num_buffers * ((num_rows + 63) / 64 * 8) / 1e9);
     std::vector<sdsl::bit_vector> buffers;
-    for (size_t i = 0; i < std::max(num_nodes_parallel, size_t(1)); ++i) {
+    for (size_t i = 0; i < num_buffers; ++i) {
         buffers.emplace_back(num_rows);
     }
 

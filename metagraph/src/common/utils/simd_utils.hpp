@@ -87,13 +87,13 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
 
 SIMDE_FUNCTION_ATTRIBUTES simde__m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, simde__m256i mask) {
     // TODO: is there a vectorized way of doing this?
-    return simde_mm256_and_si256(
-        simde_mm256_setr_epi64x(restrict_to(hashes[0], size),
-                                restrict_to(hashes[1], size),
-                                restrict_to(hashes[2], size),
-                                restrict_to(hashes[3], size)),
-        mask
-    );
+    uint64_t mask_words[4] __attribute__ ((aligned (32)));
+    simde_mm256_store_si256((simde__m256i*)mask_words, mask);
+    mask_words[0] &= restrict_to(hashes[0], size);
+    mask_words[1] &= restrict_to(hashes[1], size);
+    mask_words[2] &= restrict_to(hashes[2], size);
+    mask_words[3] &= restrict_to(hashes[3], size);
+    return simde_mm256_load_si256((const simde__m256i*)mask_words);
 }
 
 

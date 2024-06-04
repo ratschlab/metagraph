@@ -16,6 +16,13 @@ if [ -f ${VENV_DIR}/DONE ]; then
 fi
 echo "Setting up virtual environment in ${VENV_DIR}"
 python3 -m venv ${VENV_DIR}
+if [ -f /etc/pip.conf ]; then
+    mkdir -p ${VENV_DIR}/pip.conf.d/
+    cp /etc/pip.conf ${VENV_DIR}/pip.conf.d/
+    echo "/etc/pip.conf exists and has been copied to the virtual environment"
+else
+    echo "/etc/pip.conf doesn't exist. Continuing without copying pip configuration"
+fi
 source ${VENV_DIR}/bin/activate
 
 echo "Installing required packages"

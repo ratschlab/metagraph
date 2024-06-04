@@ -42,7 +42,8 @@ class SequenceGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const = 0;
@@ -146,9 +147,6 @@ class SequenceGraph {
 
 
 class DeBruijnGraph : public SequenceGraph {
-  private:
-    std::vector<double> lrs1{}; // likelihood ratios
-
   public:
     enum Mode { BASIC = 0, CANONICAL, PRIMARY };
 
@@ -162,15 +160,6 @@ class DeBruijnGraph : public SequenceGraph {
     virtual node_index traverse(node_index node, char next_char) const = 0;
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
-
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Given a starting node and a sequence of edge labels, traverse the graph
     // forward. The traversal is terminated once terminate() returns true or
@@ -193,10 +182,7 @@ class DeBruijnGraph : public SequenceGraph {
      */
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false
-//                              ,  const std::function<bool(node_index, node_index)> &pick_edge
-//                                = [](node_index, node_index){ return false; }
-            ) const; //Myrthe
+                                bool kmers_in_single_form = false) const;
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
@@ -245,11 +231,6 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
-
-    void lrt_resize(size_t size); // Myrthe
-    void lrt_set_value(double value, size_t index);
-    mutable std::vector<double> lrs{}; // likelihood ratios
-
 };
 
 

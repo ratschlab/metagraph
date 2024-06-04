@@ -31,10 +31,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    // get all selected rows appended with -1 and concatenated
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     // query row and get ranks of each set bit in its column
-    Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
 
@@ -48,17 +45,17 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     double avg_arity() const;
     uint64_t num_nodes() const;
     double shrinking_rate() const;
-    uint64_t total_column_size() const;
-    uint64_t total_num_set_bits() const;
 
     void print_tree_structure(std::ostream &os) const;
 
   private:
     // breadth-first traversal
     void BFT(std::function<void(const BRWT &node)> callback) const;
+    // get all selected rows appended with -1 and concatenated
     // helper function for querying rows in batches
+    // appends to `slice`
     template <typename T>
-    Vector<T> slice_rows(const std::vector<Row> &rows) const;
+    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
