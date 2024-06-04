@@ -57,10 +57,12 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.test_type = experiment.get("test_type", "brunner_munzel").asString();
     diff_config.filter = experiment.get("filter", true).asBool();
     diff_config.clean = experiment.get("clean", false).asBool();
-    diff_config.min_count = experiment.get("min_count", 0).asInt();
-    diff_config.min_recurrence = experiment.get("min_recurrence", 1).asInt();
-    diff_config.min_in_recurrence = experiment.get("min_in_recurrence", 0).asInt();
-    diff_config.min_out_recurrence = experiment.get("min_out_recurrence", 0).asInt();
+    diff_config.min_count = experiment.get("min_count", 0).asUInt64();
+    diff_config.min_recurrence = experiment.get("min_recurrence", 1).asUInt64();
+    diff_config.min_in_recurrence = experiment.get("min_in_recurrence", 0).asUInt64();
+    diff_config.min_out_recurrence = experiment.get("min_out_recurrence", 0).asUInt64();
+    diff_config.max_in_recurrence = experiment.get("max_in_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
+    diff_config.max_out_recurrence = experiment.get("max_out_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
     diff_config.num_tests = experiment.get("num_tests", 0).asInt();
     diff_config.assemble_shared = experiment.get("assemble_shared", false).asBool();
 

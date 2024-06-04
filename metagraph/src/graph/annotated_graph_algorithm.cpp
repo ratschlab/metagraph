@@ -13,6 +13,7 @@
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
+#include <boost/math/special_functions/beta.hpp>
 
 #include "common/logger.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -221,6 +222,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Marking discarded k-mers");
     if (groups.size()) {
+        bool filter_rows = config.clean || config.min_count || config.min_recurrence
+                            || config.min_in_recurrence || config.min_out_recurrence
+                            || config.max_in_recurrence || config.max_out_recurrence;
         std::atomic_thread_fence(std::memory_order_release);
         utils::call_rows<std::unique_ptr<const bit_vector>,
                          std::unique_ptr<const ValuesContainer>,
@@ -228,10 +232,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                [&](uint64_t row_i, const auto &row) {
             if (row.empty()) {
                 set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
-            } else if (config.clean || config.min_count) {
+            } else if (filter_rows) {
                 size_t count = 0;
                 size_t count_in = 0;
                 size_t count_out = 0;
+                bool keep_row = false;
                 for (const auto &[j, raw_c] : row) {
                     if (adjust_count(raw_c, j, row_i)) {
                         ++count;
@@ -245,12 +250,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         if (count >= config.min_recurrence
                                 && count_in >= config.min_in_recurrence
                                 && count_out >= config.min_out_recurrence) {
-                            return;
+                            keep_row = true;;
+                        }
+
+                        if (count_in > config.max_in_recurrence || count_out > config.max_out_recurrence) {
+                            keep_row = false;
+                            break;
                         }
                     }
                 }
 
-                set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
+                if (!keep_row)
+                    set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
             }
         });
         std::atomic_thread_fence(std::memory_order_acquire);
@@ -266,6 +277,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<size_t> n_kmers(groups.size());
     std::vector<uint64_t> sums(groups.size());
     std::vector<uint64_t> sums_of_squares(groups.size());
+
+    bool compute_median = (config.test_type.substr(0, 13) == "nonparametric");
 
     #pragma omp parallel for num_threads(num_parallel_files)
     for (size_t j = 0; j < groups.size(); ++j) {
@@ -294,7 +307,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         });
 
         max_obs_vals[j] = *std::max_element(vals.begin(), vals.end());
-        medians[j] = boost::math::statistics::median(vals);
+
+        if (compute_median)
+            medians[j] = boost::math::statistics::median(vals);
 
         sums[j] = sum;
         if (groups[j]) {
@@ -341,62 +356,29 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             int64_t n = in_sum + out_sum;
-            auto bdist = boost::math::binomial(n, static_cast<double>(in_kmers) / total_kmers);
-            double pval = 0;
+            double p = static_cast<double>(in_kmers) / total_kmers;
 
-            double d_0 = static_cast<double>(n) / out_kmers;
-            double d_n = static_cast<double>(n) / in_kmers;
-            double p_min = 0;
-            if (d_0 > d_n) {
-                p_min = boost::math::pdf(bdist, 0);
-            } else if (d_0 < d_n) {
-                p_min = boost::math::pdf(bdist, n);
-            } else {
-                p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
-            }
+            auto bdist = boost::math::binomial(n, p);
+            double p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
 
-            double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
-
-            // lower tail
-            int64_t s = 0;
-            for ( ; s <= n; ++s) {
-                int64_t t = n - s;
-                double cur_d = abs(static_cast<double>(s) / in_kmers - static_cast<double>(t) / out_kmers);
-                common::logger->info("bar: {}\t{} vs. {}", s, d, cur_d);
-                if (cur_d < d)
-                    break;
-            }
-
-            common::logger->info("bars: {} / {}", s, n);
-
-            if (s == n + 1) {
-                pval = 1.0;
-            } else {
-                if (s > 0)
-                    pval = boost::math::cdf(bdist, s - 1);
-
-                // upper tail
-                int64_t s_u = n;
-                for ( ; s_u >= s; --s_u) {
-                    int64_t t = n - s_u;
-                    double cur_d = abs(static_cast<double>(s_u) / in_kmers - static_cast<double>(t) / out_kmers);
-                    common::logger->info("bar: {}\t{} vs. {}", s_u, d, cur_d);
-                    if (cur_d < d)
-                        break;
-                }
-
-                assert(s_u >= s - 1);
-
-                if (s_u + 1 <= n)
-                    pval += boost::math::cdf(boost::math::complement(bdist, s_u + 1));
-            }
+            // we want |2s - n| >= d, so
+            // 2s - n >= d || n - 2s >= d
+            // s >= (d + n) / 2 || (n - d) / 2 >= s
+            uint64_t d = abs(in_sum - out_sum);
+            int64_t lower = (n - d) / 2;
+            int64_t upper = ceil(static_cast<double>(n + d) / 2);
+            double pval = boost::math::cdf(bdist, lower)
+                            + boost::math::cdf(boost::math::complement(bdist, upper - 1));
 
             if (pval > 1.0) {
                 common::logger->error("{} > 1.0\t{}\t{},{}", pval, p_min, in_sum, out_sum);
                 throw std::runtime_error("pval fail");
             }
 
-            common::logger->info("foo: {}/{}\t{}/{}\t{}\t{}", in_sum, in_kmers, out_sum, out_kmers, pval, p_min);
+            if (pval < p_min) {
+                common::logger->error("{} < {}\t{},{}", pval, p_min, in_sum, out_sum);
+                throw std::runtime_error("pval fail");
+            }
 
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
@@ -757,6 +739,27 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                        ? 2.0 / exp(lgamma(groups.size() + 1) - lgamma(num_labels_in + 1) - lgamma(num_labels_out + 1))
                                        : 1.1);
         };
+    } else if (config.test_type == "notest") {
+        compute_pval = [&](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+
+            for (const auto &[j, c] : row) {
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
+            }
+
+            return std::make_tuple(0.0,
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   0.0);
+        };
     } else {
         throw std::runtime_error("Test not implemented");
     }
@@ -784,8 +787,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (pval >= 1.1)
             return;
 
-        bool in_kmer = in_stat > out_stat;
-        bool out_kmer = in_stat < out_stat;
+        bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
+        bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
         uint64_t k = std::numeric_limits<uint64_t>::max();
 
         if (pval_min > 1.0) {
@@ -823,8 +826,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (in_stat != out_stat && pval < 0.05)
             set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
 
-        std::lock_guard<std::mutex> lock(pval_mu);
-        m[k].emplace_back(node);
+        if (config.test_type != "notest") {
+            std::lock_guard<std::mutex> lock(pval_mu);
+            m[k].emplace_back(node);
+        }
     });
 
     std::atomic_thread_fence(std::memory_order_acquire);
@@ -837,67 +842,69 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         col_vals.reset();
     }
 
-    uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
-    auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
+    if (config.test_type != "notest") {
+        uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
+        auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
 
-    std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
-    size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                 [](size_t sum, const auto &a) { return sum + a.second.size(); });
-    if (acc != nelem) {
-        common::logger->error("acc != nelem: {} != {}", acc, nelem);
-        throw std::runtime_error("internal failure");
-    }
-    size_t total_tests = acc;
-    common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
-
-    if (total_sig) {
-        auto begin = m_data.begin();
-        size_t k = 0;
-        size_t last_k = 0;
-        for ( ; begin != m_data.end(); ++begin) {
-            const auto &[cur_k, bucket] = *begin;
-            common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
-            if (acc <= cur_k) {
-                k = std::max(acc, last_k + 1);
-                break;
-            }
-
-            last_k = cur_k;
-            acc -= bucket.size();
+        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
+        size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
+                                    [](size_t sum, const auto &a) { return sum + a.second.size(); });
+        if (acc != nelem) {
+            common::logger->error("acc != nelem: {} != {}", acc, nelem);
+            throw std::runtime_error("internal failure");
         }
+        size_t total_tests = acc;
+        common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
-        VectorMap<double, double> pval_map;
-        for (double p : pvals) {
-            if (p <= 1.0)
-                ++pval_map[p];
-        }
-        auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
-        std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
-
-        double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
-        pval_map = decltype(pval_map)();
-        size_t cur_rank = 0;
-        for (const auto &[p, c] : p_data) {
-            cur_rank += c;
-            pval_map[p] = cm * cur_rank;
-        }
-
-        if (k == 0) {
-            common::logger->trace("Falling back to Benjamini-Yekutieli");
-            for (size_t i = 0; i < pvals.size(); ++i) {
-                if (pvals[i] < 0.05 && pvals[i] * pval_map[pvals[i]] >= 0.05) {
-                    indicator_in[i] = false;
-                    indicator_out[i] = false;
+        if (total_sig) {
+            auto begin = m_data.begin();
+            size_t k = 0;
+            size_t last_k = 0;
+            for ( ; begin != m_data.end(); ++begin) {
+                const auto &[cur_k, bucket] = *begin;
+                common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
+                if (acc <= cur_k) {
+                    k = std::max(acc, last_k + 1);
+                    break;
                 }
+
+                last_k = cur_k;
+                acc -= bucket.size();
             }
-        } else {
-            common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
-            for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
-                const auto &[cur_k, bucket] = *jt;
-                for (uint64_t i : bucket) {
-                    if (jt < begin || pvals[i] * k >= 0.05) {
+
+            VectorMap<double, double> pval_map;
+            for (double p : pvals) {
+                if (p <= 1.0)
+                    ++pval_map[p];
+            }
+            auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
+            std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
+
+            double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
+            pval_map = decltype(pval_map)();
+            size_t cur_rank = 0;
+            for (const auto &[p, c] : p_data) {
+                cur_rank += c;
+                pval_map[p] = cm * cur_rank;
+            }
+
+            if (k == 0) {
+                common::logger->trace("Falling back to Benjamini-Yekutieli");
+                for (size_t i = 0; i < pvals.size(); ++i) {
+                    if (pvals[i] < 0.05 && pvals[i] * pval_map[pvals[i]] >= 0.05) {
                         indicator_in[i] = false;
                         indicator_out[i] = false;
+                    }
+                }
+            } else {
+                common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
+                for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
+                    const auto &[cur_k, bucket] = *jt;
+                    for (uint64_t i : bucket) {
+                        if (jt < begin || pvals[i] * k >= 0.05) {
+                            indicator_in[i] = false;
+                            indicator_out[i] = false;
+                        }
                     }
                 }
             }

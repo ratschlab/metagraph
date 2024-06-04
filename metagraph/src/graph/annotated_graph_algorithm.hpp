@@ -46,6 +46,8 @@ struct DifferentialAssemblyConfig {
     uint64_t min_recurrence = 1;
     uint64_t min_in_recurrence = 0;
     uint64_t min_out_recurrence = 0;
+    uint64_t max_in_recurrence = std::numeric_limits<uint64_t>::max();
+    uint64_t max_out_recurrence = std::numeric_limits<uint64_t>::max();
     uint64_t num_tests = 0;
     std::string outfbase;
 };

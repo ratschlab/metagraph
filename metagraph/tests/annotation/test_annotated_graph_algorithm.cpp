@@ -69,9 +69,10 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             };
 
             DifferentialAssemblyConfig config {
-                .test_type = "binomial",
+                .test_type = "notest",
                 .min_count = 1,
                 .min_in_recurrence = 2,
+                .max_out_recurrence = 0,
                 .outfbase = "",
             };
 
