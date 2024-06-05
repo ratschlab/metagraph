@@ -187,7 +187,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                     .outfbase = "",
                 };
 
-                if (test_type != "poisson_likelihoodratio") {
+                try {
                     auto [masked_dbg_in, masked_dbg_out] = mask_nodes_by_label_dual<sdsl::int_vector<>>(
                         graph_ptr,
                         columns,
@@ -197,36 +197,25 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                         false
                     );
 
-                    try {
+                    if (test_type != "poisson_likelihoodratio") {
                         masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
                             auto cur_labels = anno_graph->get_labels(kmer, 0.0);
                             obs_labels.insert(cur_labels.begin(), cur_labels.end());
                             obs_kmers.insert(kmer);
                         });
-                    } catch (std::domain_error &e) {
-                        EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
-                        continue;
-                    }
-
-                    EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
-                    EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
-                } else {
-                    try {
-                        mask_nodes_by_label_dual<sdsl::int_vector<>>(
-                            graph_ptr,
-                            columns,
-                            column_values_all,
-                            groups,
-                            config, num_threads, num_threads,
-                            false
-                        );
-
+                        EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
+                        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
+                    } else {
                         EXPECT_TRUE(false) << k << "\t" << test_type;
-                    } catch (std::domain_error&) {
-                        continue;
-                    } catch (std::exception &e) {
-                        EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
                     }
+                } catch (std::domain_error &e) {
+                    if (test_type == "poisson_likelihoodratio")
+                        continue;
+
+                    EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
+                    continue;
+                } catch (std::exception &e) {
+                    EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
                 }
             }
         }
