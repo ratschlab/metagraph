@@ -177,7 +177,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                 "poisson_exact",
                 "nbinom_exact",
                 "poisson_likelihoodratio",
-                "fisher"
+                "fisher",
+                "cmh"
             };
 
             for (const auto &test_type : test_types) {
@@ -196,11 +197,16 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                         false
                     );
 
-                    masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                        auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                        obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                        obs_kmers.insert(kmer);
-                    });
+                    try {
+                        masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                            auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                            obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                            obs_kmers.insert(kmer);
+                        });
+                    } catch (std::domain_error &e) {
+                        EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
+                        continue;
+                    }
 
                     EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
                     EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
@@ -215,11 +221,11 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                             false
                         );
 
-                        FAIL() << k << "\t" << test_type;
+                        EXPECT_TRUE(false) << k << "\t" << test_type;
                     } catch (std::domain_error&) {
                         continue;
                     } catch (std::exception &e) {
-                        FAIL() << k << "\t" << test_type << "\t" << e.what();
+                        EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
                     }
                 }
             }

@@ -271,6 +271,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
 
     common::logger->trace("Computing aggregate statistics");
+    std::mutex agg_mu;
     double in_kmers = 0;
     double out_kmers = 0;
     std::vector<double> medians(groups.size());
@@ -311,16 +312,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             medians[j] = boost::math::statistics::median(vals);
 
         sums[j] = sum;
-        if (groups[j]) {
-            out_kmers += sum;
-        } else {
-            in_kmers += sum;
-        }
         sums_of_squares[j] = sum_of_squares;
         n_kmers[j] = n;
 
         common::logger->trace("{}: kept: {} / {}\tsum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
                               j, n, i, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+
+        std::lock_guard<std::mutex> lock(agg_mu);
+        if (groups[j]) {
+            out_kmers += sum;
+        } else {
+            in_kmers += sum;
+        }
     }
 
     double total_kmers = in_kmers + out_kmers;
@@ -450,25 +453,96 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 int64_t d = m2 - b;
                 assert(d == n2 - c);
 
-                return b < 0 || c < 0 || d < 0 ? 1.0 : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
+                return b < 0 || c < 0 || d < 0
+                    ? 1.0
+                    : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
             };
 
             double pval = get_pval(in_sum);
-            double pmin = std::min({ get_pval(0), get_pval(n1), get_pval(m1) });
+            double pmin = std::min(get_pval(0), get_pval(std::min(n1, m1)));
 
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
                                    pmin);
         };
-    } else if (config.test_type == "poisson_likelihoodratio"
-            || config.test_type == "cmh") {
-        if (in_kmers == 0 || out_kmers == 0) {
-            if (config.test_type == "poisson_likelihoodratio") {
-                common::logger->error("Test invalid, try poisson_exact instead");
-            } else {
-                common::logger->error("Test invalid, try fisher instead");
+    } else if (config.test_type == "cmh") {
+        if (in_kmers == 0 || out_kmers == 0 || total_kmers == 1) {
+            common::logger->error("Test invalid, try fisher instead");
+            throw std::domain_error("Test fail");
+        }
+
+        int64_t t = total_kmers;
+        int64_t n1 = in_kmers;
+        int64_t n2 = out_kmers;
+
+        compute_pval = [&,t,n1,n2,dist=boost::math::chi_squared(1)](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+
+            for (const auto &[j, c] : row) {
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
             }
+
+            int64_t m1 = in_sum + out_sum;
+            int64_t m2 = t - m1;
+            assert(m2 >= 0);
+
+            if (m2 == 0) {
+                common::logger->error("This row has all counts. Too few data points. Use fisher instead");
+                throw std::domain_error("Test failed");
+            }
+
+            double lbase = log(n1) + log(n2) + log(m1) + log(m2) - log(t) * 2 - log(t - 1);
+            double factor = static_cast<double>(n1 * m1) / t;
+
+            auto get_chi_stat = [&](int64_t a) {
+                int64_t b = n1 - a;
+                int64_t c = m1 - a;
+                int64_t d = m2 - b;
+                assert(d == n2 - c);
+
+                if (b < 0 || c < 0 || d < 0)
+                    return 0.0;
+
+                double a_shift = static_cast<double>(a) - factor;
+
+                if (a_shift > 0)
+                    return exp(log(a_shift) * 2.0 - lbase);
+
+                return a_shift * a_shift / exp(lbase);
+            };
+
+            double chi_stat = get_chi_stat(in_sum);
+            if (chi_stat <= 0) {
+                common::logger->error("Test statistic {} <= 0, too few data points. Use fisher instead.\t{}\t{},{},{},{}\t{}\t{}", chi_stat, in_sum, n1,n2,m1,m2, t, factor);
+                throw std::domain_error("Test failed");
+            }
+
+            double max_chi_stat = std::max(get_chi_stat(0), get_chi_stat(std::min(n1, m1)));
+            if (max_chi_stat <= 0) {
+                common::logger->error("Best test statistic {} <= 0, too few data points. Use fisher instead.\t{},{},{},{}\t{}\t{}", max_chi_stat, n1,n2,m1,m2, t, factor);
+                throw std::domain_error("Test failed");
+            }
+
+            double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+            double pmin = boost::math::cdf(boost::math::complement(dist, max_chi_stat));
+
+            return std::make_tuple(pval,
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   pmin);
+        };
+    } else if (config.test_type == "poisson_likelihoodratio") {
+        if (in_kmers == 0 || out_kmers == 0) {
+            common::logger->error("Test invalid, try poisson_exact instead");
             throw std::domain_error("Test fail");
         }
         compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
@@ -486,59 +560,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            double chi_stat = 0;
-            if (config.test_type == "cmh") {
-                double a = in_sum;
-                double b = in_kmers - in_sum;
-                double c = out_sum;
-                double d = out_kmers - out_sum;
-                double n1 = a + b;
-                double n2 = c + d;
-                double m1 = a + c;
-                double m2 = b + d;
-                double t = n1 + n2;
+            if (in_sum == 0 || out_sum == 0) {
+                common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
+                throw std::domain_error("Test failed");
+            }
 
-                assert(t == total_kmers);
-                assert(n1 == in_kmers);
-                assert(n2 == out_kmers);
+            double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
+            double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
 
-                if (m1 == 0 || m2 == 0) {
-                    common::logger->error("Test invalid, try fisher instead");
-                    throw std::domain_error("Test fail");
-                }
+            double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
+            double mean_denom_in = theta * in_kmers;
+            double mean_denom_out = theta * out_kmers;
 
-                chi_stat = pow(a - n1 * m1 / t, 2.0) * t * t * (t - 1) / (n1 * n2 * m1 * m2);
-                if (chi_stat < 0) {
-                    common::logger->error("Test statistic {} < 0, too few data points. Use fisher instead", chi_stat);
-                    throw std::domain_error("Test failed");
-                }
-            } else {
-                if (in_sum == 0 || out_sum == 0) {
-                    common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-                    throw std::domain_error("Test failed");
-                }
+            if (mean_denom_in == 0 || mean_denom_out == 0) {
+                common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
+                throw std::domain_error("Test failed");
+            }
 
-                double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
-                double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
+            double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
+            log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
 
-                double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-                double mean_denom_in = theta * in_kmers;
-                double mean_denom_out = theta * out_kmers;
+            double chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
 
-                if (mean_denom_in == 0 || mean_denom_out == 0) {
-                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-                    throw std::domain_error("Test failed");
-                }
-
-                double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
-                log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
-
-                chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
-
-                if (chi_stat < 0) {
-                    common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                    throw std::runtime_error("Test failed");
-                }
+            if (chi_stat < 0) {
+                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                throw std::runtime_error("Test failed");
             }
 
             if (chi_stat == 0)
@@ -547,11 +593,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             assert(chi_stat > 0);
 
             double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
+            double pmin = 1.1;
 
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
-                                   1.1);
+                                   pmin);
         };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting negative binomial distributions");
