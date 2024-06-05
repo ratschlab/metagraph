@@ -358,27 +358,46 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double p = static_cast<double>(in_kmers) / total_kmers;
 
             auto bdist = boost::math::binomial(n, p);
-
             double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
 
-            double d0 = static_cast<double>(n) / out_kmers;
-            double dn = static_cast<double>(n) / in_kmers;
+            // we want all s s.t. | s/in - (n-s)/out | >= d, so
+            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
+            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
+            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
+            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
+            double factor = 1.0 / in_kmers + 1.0 / out_kmers;
+            double lower_d = (static_cast<double>(n) / out_kmers - d) / factor;
+            double upper_d = (d + static_cast<double>(n) / out_kmers) / factor;
+
+            // correct for floating-point errors
+            if (abs(lower_d - round(lower_d)) < 1e-10)
+                lower_d = round(lower_d);
+
+            if (abs(upper_d - round(upper_d)) < 1e-10)
+                upper_d = round(upper_d);
+
+            int64_t lower = floor(lower_d);
+            int64_t upper = ceil(upper_d);
+
+            assert(upper >= lower);
+            assert(d == 0 || upper > lower);
+            assert(in_sum <= lower || in_sum >= upper);
+
+            double d_0 = static_cast<double>(n) / out_kmers;
+            double d_n = static_cast<double>(n) / in_kmers;
+            assert(d_0 >= d || d_n >= d);
+
+            assert(d_0 < d || 0 <= lower || 0 >= upper);
+            assert(d_n < d || n <= lower || n >= upper);
 
             double p_min = 0;
-            if (d0 > dn) {
+            if (d_0 > d_n) {
                 p_min = boost::math::pdf(bdist, 0);
-            } else if (d0 < dn) {
+            } else if (d_0 < d_n) {
                 p_min = boost::math::pdf(bdist, n);
             } else {
                 p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
             }
-
-            // we want |s / in - t / out| >= d, so
-            // s / in - t / out >= d || t / out - s / in >= d
-            // P(s <= t/out*in - d*in) + P(s >= d*in + t/out*in)
-            // P(s <= lower) + P(s >= upper)
-            int64_t lower = static_cast<double>(out_sum) / out_kmers * in_kmers - d * in_kmers;
-            int64_t upper = ceil(d * in_kmers + static_cast<double>(out_sum) / out_kmers * in_kmers);
 
             double pval = 0;
             if (upper <= 0 || lower >= n) {
@@ -638,8 +657,38 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
 
+            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
+
+            // we want all s s.t. | s/in - (n-s)/out | >= d, so
+            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
+            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
+            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
+            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
+            double factor = 1.0 / in_kmers_adj + 1.0 / out_kmers_adj;
+            double lower_d = (static_cast<double>(n) / out_kmers_adj - d) / factor;
+            double upper_d = (d + static_cast<double>(n) / out_kmers_adj) / factor;
+
+            // correct for floating-point errors
+            if (abs(lower_d - round(lower_d)) < 1e-10)
+                lower_d = round(lower_d);
+
+            if (abs(upper_d - round(upper_d)) < 1e-10)
+                upper_d = round(upper_d);
+
+            int64_t lower = floor(lower_d);
+            int64_t upper = ceil(upper_d);
+
+            assert(upper >= lower);
+            assert(d == 0 || upper > lower);
+            assert(in_sum <= lower || in_sum >= upper);
+
             double d_0 = static_cast<double>(n) / out_kmers_adj;
             double d_n = static_cast<double>(n) / in_kmers_adj;
+            assert(d_0 >= d || d_n >= d);
+
+            assert(d_0 < d || 0 <= lower || 0 >= upper);
+            assert(d_n < d || n <= lower || n >= upper);
+
             double p_min = 0;
             if (d_0 > d_n) {
                 p_min = get_pmf(0);
@@ -648,15 +697,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             } else {
                 p_min = get_pmf(0) + get_pmf(n);
             }
-
-            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
-
-            // we want |s / in - t / out| >= d, so
-            // s / in - t / out >= d || t / out - s / in >= d
-            // P(s <= t/out*in - d*in) + P(s >= d*in + t/out*in)
-            // P(s <= lower) + P(s >= upper)
-            int64_t lower = static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj - d * in_kmers_adj;
-            int64_t upper = ceil(d * in_kmers_adj + static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj);
 
             double pval = 0;
             if (upper <= 0 || lower >= n) {
@@ -669,8 +709,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     pval += get_pmf(s);
             }
 
+            if (p_min > pval) {
+                common::logger->error("{}\t{},{}", n, lower, upper);
+            }
+
             if (pval >= 1.1) {
-                common::logger->error("{} >= 1.1\t{}\t{},{}", pval, p_min, in_sum, out_sum);
+                common::logger->error("{} >= 1.1\t{}\t{},{}\t{},{}", pval, p_min, in_sum, out_sum, lower, upper);
                 throw std::runtime_error("pval fail");
             }
 
