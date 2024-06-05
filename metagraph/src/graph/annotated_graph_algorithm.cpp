@@ -121,7 +121,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     return mask_nodes_by_label_dual<ValuesContainer>(
         graph_ptr, columns_all, column_values_all, groups,
-        config, num_threads, num_parallel_files
+        config, num_threads, num_parallel_files, true
     );
 }
 
@@ -133,7 +133,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
-                         size_t num_parallel_files) {
+                         size_t num_parallel_files,
+                         bool deallocate) {
     num_parallel_files = std::min(num_parallel_files, num_threads);
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
@@ -278,8 +279,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> sums(groups.size());
     std::vector<uint64_t> sums_of_squares(groups.size());
 
-    bool compute_median = (config.test_type.substr(0, 13) == "nonparametric");
-
     #pragma omp parallel for num_threads(num_parallel_files)
     for (size_t j = 0; j < groups.size(); ++j) {
         const auto &column = *columns_all[j];
@@ -308,7 +307,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         max_obs_vals[j] = *std::max_element(vals.begin(), vals.end());
 
-        if (compute_median)
+        if (vals.size())
             medians[j] = boost::math::statistics::median(vals);
 
         sums[j] = sum;
@@ -375,17 +374,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::runtime_error("pval fail");
             }
 
-            if (pval < p_min) {
-                common::logger->error("{} < {}\t{},{}", pval, p_min, in_sum, out_sum);
-                throw std::runtime_error("pval fail");
-            }
-
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
                                    p_min);
         };
     } else if (config.test_type == "poisson_likelihoodratio" || config.test_type == "cmh") {
+        if (in_kmers == 0 || out_kmers == 0) {
+            common::logger->error("Test invalid, try binomial instead");
+            throw std::domain_error("Test fail");
+        }
         compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
@@ -403,13 +401,34 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double chi_stat = 0;
             if (config.test_type == "cmh") {
-                double xi = in_sum * out_kmers - out_sum * in_kmers;
-                xi *= xi * (total_kmers - 1) / in_kmers / out_kmers / (in_sum + out_sum) / (total_kmers - in_sum - out_sum);
-                chi_stat = xi;
+                double a = in_sum;
+                double b = in_kmers - in_sum;
+                double c = out_sum;
+                double d = out_kmers - out_sum;
+                double n1 = a + b;
+                double n2 = c + d;
+                double m1 = a + c;
+                double m2 = b + d;
+                double t = n1 + n2;
+
+                assert(t == total_kmers);
+                assert(n1 == in_kmers);
+                assert(n2 == out_kmers);
+
+                if (m1 == 0 || m2 == 0) {
+                    common::logger->error("Test invalid, try binomial instead");
+                    throw std::domain_error("Test fail");
+                }
+
+                chi_stat = pow(a - n1 * m1 / t, 2.0) * t * t * (t - 1) / (n1 * n2 * m1 * m2);
+                if (chi_stat < 0) {
+                    common::logger->error("Test statistic {} < 0, too few data points. Use binomial instead", chi_stat);
+                    throw std::domain_error("Test failed");
+                }
             } else {
-                if (in_sum == 0 || out_sum == 0 || in_kmers == 0 || out_kmers == 0) {
-                    common::logger->error("Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
-                    throw std::runtime_error("Test failed");
+                if (in_sum == 0 || out_sum == 0) {
+                    common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
+                    throw std::domain_error("Test failed");
                 }
 
                 double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
@@ -420,23 +439,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double mean_denom_out = theta * out_kmers;
 
                 if (mean_denom_in == 0 || mean_denom_out == 0) {
-                    common::logger->error("Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
-                    throw std::runtime_error("Test failed");
+                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
+                    throw std::domain_error("Test failed");
                 }
 
                 double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
                 log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
 
                 chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+
+                if (chi_stat < 0) {
+                    common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
+                    throw std::runtime_error("Test failed");
+                }
             }
 
             if (chi_stat == 0)
                 return std::make_tuple(1.0, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
 
-            if (chi_stat < 0) {
-                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                throw std::runtime_error("Test failed");
-            }
+            assert(chi_stat > 0);
 
             double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
 
@@ -674,6 +695,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
             double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
 
+            double p_min = 1.1;
+
             if (config.test_type == "nonparametric") {
                 if (nx > 1 && ny > 1) {
                     auto [rankx, countsx] = rankdata(in_counts);
@@ -706,6 +729,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
             } else {
+                p_min = 2.0 / exp(lgamma(groups.size() + 1) - lgamma(num_labels_in + 1) - lgamma(num_labels_out + 1));
                 if (!nx || !ny) {
                     p = 1.0;
                 } else {
@@ -734,10 +758,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            return std::make_tuple(p, rankcx_mean, rankcy_mean,
-                                   config.test_type == "nonparametric_u"
-                                       ? 2.0 / exp(lgamma(groups.size() + 1) - lgamma(num_labels_in + 1) - lgamma(num_labels_out + 1))
-                                       : 1.1);
+            return std::make_tuple(p, rankcx_mean, rankcy_mean, p_min);
         };
     } else if (config.test_type == "notest") {
         compute_pval = [&](const auto &row) {
@@ -764,6 +785,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         throw std::runtime_error("Test not implemented");
     }
 
+    std::exception_ptr ex = nullptr;
+
     std::mutex pval_mu;
     std::atomic_thread_fence(std::memory_order_release);
 
@@ -771,6 +794,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                      std::unique_ptr<const ValuesContainer>,
                      PairContainer, false>(columns_all, column_values_all,
                                            [&](uint64_t row_i, const auto &raw_row) {
+        if (ex)
+            return;
+
         PairContainer row;
         if (!ignored[row_i]) {
             for (const auto &[j, raw_c] : raw_row) {
@@ -781,7 +807,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
 
-        auto [pval, in_stat, out_stat, pval_min] = compute_pval(row);
+        double pval;
+        double in_stat;
+        double out_stat;
+        double pval_min;
+        try {
+            std::tie(pval, in_stat, out_stat, pval_min) = compute_pval(row);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(pval_mu);
+            ex = std::current_exception();
+            return;
+        }
+
         pvals[node] = pval;
 
         if (pval >= 1.1)
@@ -803,11 +840,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto [pm, in_sum_m, out_sum_m, pm_m] = compute_pval(best);
             pval_min = pm;
+        }
 
-            if (pval_min > pval) {
-                common::logger->error("Min p-val estimate too high: min {} > cur {}", pval_min, pval);
-                throw std::runtime_error("Test failed");
-            }
+        if (pval_min - pval > 1e-10) {
+            common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
+            throw std::runtime_error("Test failed");
         }
 
         if (pval_min >= 0.05) {
@@ -834,13 +871,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    for (auto &col : columns_all) {
-        col.reset();
+    if (deallocate) {
+        for (auto &col : columns_all) {
+            col.reset();
+        }
+
+        for (auto &col_vals : column_values_all) {
+            col_vals.reset();
+        }
     }
 
-    for (auto &col_vals : column_values_all) {
-        col_vals.reset();
-    }
+    if (ex)
+        std::rethrow_exception(ex);
 
     if (config.test_type != "notest") {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
@@ -934,7 +976,8 @@ mask_nodes_by_label_dual<sdsl::int_vector_buffer<>>(std::shared_ptr<const DeBrui
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
-                         size_t);
+                         size_t,
+                         bool);
 template
 std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
 mask_nodes_by_label_dual<sdsl::int_vector<>>(std::shared_ptr<const DeBruijnGraph>,
@@ -943,7 +986,8 @@ mask_nodes_by_label_dual<sdsl::int_vector<>>(std::shared_ptr<const DeBruijnGraph
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
-                         size_t);
+                         size_t,
+                         bool);
 
 typedef std::function<size_t()> LabelCountCallback;
 

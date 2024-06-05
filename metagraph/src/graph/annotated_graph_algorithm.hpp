@@ -102,7 +102,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
-                         size_t num_parallel_files = std::numeric_limits<size_t>::max());
+                         size_t num_parallel_files = std::numeric_limits<size_t>::max(),
+                         bool deallocate = false);
 
 } // namespace graph
 } // namespace mtg
