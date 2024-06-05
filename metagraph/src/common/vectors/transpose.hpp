@@ -99,8 +99,10 @@ void call_rows(const std::vector<BitmapPtr> &columns,
                     rows[i - begin].emplace_back(j, 1);
                 });
             } else {
-                const auto &col = *column_values[j];
-                if constexpr(std::is_same_v<ValuesPtr, std::unique_ptr<sdsl::int_vector_buffer<>>>) {
+                using Container = std::remove_const_t<typename ValuesPtr::element_type>;
+                const Container &col = *column_values[j];
+
+                if constexpr(std::is_same_v<Container, sdsl::int_vector_buffer<>>) {
                     sdsl::int_vector_buffer<> cur_col(col.filename(), std::ios::in, col.buffersize());
                     columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
                         rows[i - begin].emplace_back(j, cur_col[columns[j]->rank1(i) - 1]);

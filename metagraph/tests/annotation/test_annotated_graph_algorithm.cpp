@@ -174,8 +174,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
             column_values_all.resize(groups.size());
 
             std::vector<std::string> test_types = {
-                "binomial",
-                "dmn",
+                "poisson_exact",
+                "nbinom_exact",
                 "poisson_likelihoodratio",
             };
 

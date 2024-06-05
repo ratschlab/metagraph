@@ -251,7 +251,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         if (count >= config.min_recurrence
                                 && count_in >= config.min_in_recurrence
                                 && count_out >= config.min_out_recurrence) {
-                            keep_row = true;;
+                            keep_row = true;
                         }
 
                         if (count_in > config.max_in_recurrence || count_out > config.max_out_recurrence) {
@@ -338,7 +338,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
 
-    if (config.test_type == "binomial") {
+    if (config.test_type == "poisson_exact") {
         compute_pval = [&](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
@@ -422,7 +422,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "poisson_likelihoodratio" || config.test_type == "cmh") {
         if (in_kmers == 0 || out_kmers == 0) {
-            common::logger->error("Test invalid, try binomial instead");
+            common::logger->error("Test invalid, try poisson_exact instead");
             throw std::domain_error("Test fail");
         }
         compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
@@ -457,18 +457,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 assert(n2 == out_kmers);
 
                 if (m1 == 0 || m2 == 0) {
-                    common::logger->error("Test invalid, try binomial instead");
+                    common::logger->error("Test invalid, try poisson_exact instead");
                     throw std::domain_error("Test fail");
                 }
 
                 chi_stat = pow(a - n1 * m1 / t, 2.0) * t * t * (t - 1) / (n1 * n2 * m1 * m2);
                 if (chi_stat < 0) {
-                    common::logger->error("Test statistic {} < 0, too few data points. Use binomial instead", chi_stat);
+                    common::logger->error("Test statistic {} < 0, too few data points. Use poisson_exact instead", chi_stat);
                     throw std::domain_error("Test failed");
                 }
             } else {
                 if (in_sum == 0 || out_sum == 0) {
-                    common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
+                    common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
                     throw std::domain_error("Test failed");
                 }
 
@@ -480,7 +480,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double mean_denom_out = theta * out_kmers;
 
                 if (mean_denom_in == 0 || mean_denom_out == 0) {
-                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'binomial' instead");
+                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
                     throw std::domain_error("Test failed");
                 }
 
@@ -507,7 +507,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
                                    1.1);
         };
-    } else if (config.test_type == "dmn") {
+    } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting negative binomial distributions");
         auto get_rp = [&](double mu, double var, const auto &hist) {
             double r = boost::math::tools::newton_raphson_iterate([&](double r) {
