@@ -420,9 +420,55 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
                                    p_min);
         };
-    } else if (config.test_type == "poisson_likelihoodratio" || config.test_type == "cmh") {
+    } else if (config.test_type == "fisher") {
+        compute_pval = [&](const auto &row) {
+            if (row.empty())
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+
+            for (const auto &[j, c] : row) {
+                if (groups[j]) {
+                    out_sum += c;
+                } else {
+                    in_sum += c;
+                }
+            }
+
+            int64_t t = total_kmers;
+            int64_t n1 = in_kmers;
+            int64_t n2 = out_kmers;
+            int64_t m1 = in_sum + out_sum;
+            int64_t m2 = t - m1;
+
+            double lbase = lgamma(n1 + 1) + lgamma(n2 + 1) + lgamma(m1 + 1) + lgamma(m2 + 1) - lgamma(t + 1);
+
+            auto get_pval = [&](int64_t a) {
+                int64_t b = n1 - a;
+                int64_t c = m1 - a;
+                int64_t d = m2 - b;
+                assert(d == n2 - c);
+
+                return b < 0 || c < 0 || d < 0 ? 1.0 : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
+            };
+
+            double pval = get_pval(in_sum);
+            double pmin = std::min({ get_pval(0), get_pval(n1), get_pval(m1) });
+
+            return std::make_tuple(pval,
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   pmin);
+        };
+    } else if (config.test_type == "poisson_likelihoodratio"
+            || config.test_type == "cmh") {
         if (in_kmers == 0 || out_kmers == 0) {
-            common::logger->error("Test invalid, try poisson_exact instead");
+            if (config.test_type == "poisson_likelihoodratio") {
+                common::logger->error("Test invalid, try poisson_exact instead");
+            } else {
+                common::logger->error("Test invalid, try fisher instead");
+            }
             throw std::domain_error("Test fail");
         }
         compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
@@ -457,13 +503,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 assert(n2 == out_kmers);
 
                 if (m1 == 0 || m2 == 0) {
-                    common::logger->error("Test invalid, try poisson_exact instead");
+                    common::logger->error("Test invalid, try fisher instead");
                     throw std::domain_error("Test fail");
                 }
 
                 chi_stat = pow(a - n1 * m1 / t, 2.0) * t * t * (t - 1) / (n1 * n2 * m1 * m2);
                 if (chi_stat < 0) {
-                    common::logger->error("Test statistic {} < 0, too few data points. Use poisson_exact instead", chi_stat);
+                    common::logger->error("Test statistic {} < 0, too few data points. Use fisher instead", chi_stat);
                     throw std::domain_error("Test failed");
                 }
             } else {

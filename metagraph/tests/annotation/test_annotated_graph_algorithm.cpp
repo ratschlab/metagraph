@@ -177,6 +177,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                 "poisson_exact",
                 "nbinom_exact",
                 "poisson_likelihoodratio",
+                "fisher"
             };
 
             for (const auto &test_type : test_types) {
