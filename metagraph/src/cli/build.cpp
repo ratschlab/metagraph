@@ -258,7 +258,7 @@ int build_graph(Config *config) {
             exit(1);
         }
 
-    }else {
+    } else {
         //slower method
         switch (config->graph_type) {
 
