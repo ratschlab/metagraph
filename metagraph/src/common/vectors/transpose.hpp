@@ -65,14 +65,14 @@ void call_rows(const std::vector<BitmapPtr> &columns,
 template <class BitmapPtr, class ValuesPtr, typename PairVector = std::vector<std::pair<uint64_t, uint8_t>>, bool ordered = true>
 void call_rows(const std::vector<BitmapPtr> &columns,
                const std::vector<ValuesPtr> &column_values,
-               const std::function<void(uint64_t, const PairVector &)> &callback,
+               const std::function<void(uint64_t, const PairVector &, size_t)> &callback,
                uint64_t num_rows = 0,
                bool show_progress = mtg::common::get_verbose()) {
     if (!columns.size()) {
         ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !show_progress);
         PairVector empty;
         for (uint64_t i = 0; i < num_rows; ++i) {
-            callback(i, empty);
+            callback(i, empty, 0);
         }
         return;
     }
@@ -119,14 +119,14 @@ void call_rows(const std::vector<BitmapPtr> &columns,
             #pragma omp ordered
             {
                 for (uint64_t j = 0; j < rows.size(); ++j) {
-                    callback(j + begin, rows[j]);
+                    callback(j + begin, rows[j], begin);
                     ++progress_bar;
                     rows[j].resize(0);
                 }
             }
         } else {
             for (uint64_t j = 0; j < rows.size(); ++j) {
-                callback(j + begin, rows[j]);
+                callback(j + begin, rows[j], begin);
                 ++progress_bar;
                 rows[j].resize(0);
             }

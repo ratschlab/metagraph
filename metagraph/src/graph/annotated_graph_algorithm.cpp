@@ -91,13 +91,34 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     return n > 0;
 }
 
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+template<class To, class From>
+std::enable_if_t<
+    sizeof(To) == sizeof(From) &&
+    std::is_trivially_copyable_v<From> &&
+    std::is_trivially_copyable_v<To>,
+    To>
+// constexpr support needs compiler magic
+bit_cast(const From& src) noexcept
+{
+    static_assert(std::is_trivially_constructible_v<To>,
+        "This implementation additionally requires "
+        "destination type to be trivially constructible");
+
+    static_assert(sizeof(To) == sizeof(From));
+    To dst;
+    std::memcpy(&dst, &src, sizeof(To));
+    return dst;
+}
+
+template <class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<std::string> &files,
                          const tsl::hopscotch_set<Label> &labels_in,
                          const tsl::hopscotch_set<Label> &labels_out,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
+                         std::filesystem::path tmp_dir,
                          size_t num_parallel_files) {
     using ValuesContainer = sdsl::int_vector_buffer<>;
 
@@ -119,20 +140,42 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         num_parallel_files
     );
 
-    return mask_nodes_by_label_dual<ValuesContainer>(
+    return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
         graph_ptr, columns_all, column_values_all, groups,
-        config, num_threads, num_parallel_files, true
+        config, num_threads, tmp_dir, num_parallel_files, true
     );
 }
 
-template <class ValuesContainer>
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
+                         const std::vector<std::string> &,
+                         const tsl::hopscotch_set<Label> &,
+                         const tsl::hopscotch_set<Label> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path,
+                         size_t);
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
+                         const std::vector<std::string> &,
+                         const tsl::hopscotch_set<Label> &,
+                         const tsl::hopscotch_set<Label> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path,
+                         size_t);
+
+template <class ValuesContainer, class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::unique_ptr<const bit_vector>> &columns_all,
                          std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
+                         std::filesystem::path tmp_dir,
                          size_t num_parallel_files,
                          bool deallocate) {
     num_parallel_files = std::min(num_parallel_files, num_threads);
@@ -230,7 +273,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         utils::call_rows<std::unique_ptr<const bit_vector>,
                          std::unique_ptr<const ValuesContainer>,
                          PairContainer, false>(columns_all, column_values_all,
-                                               [&](uint64_t row_i, const auto &row) {
+                                               [&](uint64_t row_i, const auto &row, size_t) {
             if (row.empty()) {
                 set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
             } else if (filter_rows) {
@@ -342,7 +385,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     sdsl::bit_vector indicator_in(graph_ptr->max_index() + 1, false);
     sdsl::bit_vector indicator_out(graph_ptr->max_index() + 1, false);
 
-    std::vector<double> pvals(graph_ptr->max_index() + 1, 1.1);
+    auto nullpval = bit_cast<uint64_t>(double(1.1));
+
+    std::unique_ptr<utils::TempFile> tmp_file;
+    PValStorage pvals;
+    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+        tmp_file = std::make_unique<utils::TempFile>(tmp_dir);
+        pvals = sdsl::int_vector_buffer<64>(tmp_file->name(), std::ios::out);
+    }
+
+    for (size_t i = 0; i <= graph_ptr->max_index(); ++i) {
+        pvals.push_back(nullpval);
+    }
 
     VectorMap<size_t, std::vector<uint64_t>> m;
     using RowStats = std::tuple<double, double, double, double>;
@@ -567,29 +621,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (in_sum == 0 || out_sum == 0) {
-                common::logger->error("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-                throw std::domain_error("Test failed");
-            }
+            if (in_sum == 0 || out_sum == 0)
+                common::logger->warn("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
 
             int64_t total_sum = in_sum + out_sum;
 
             auto get_chi_stat = [&](int64_t in_sum) {
                 int64_t out_sum = total_sum - in_sum;
-                double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
-                double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
+                double log_likelihood_in = in_sum > 0 ? -in_sum + log(static_cast<double>(in_sum)) * in_sum : 0.0;
+                double log_likelihood_out = out_sum > 0 ? -out_sum + log(static_cast<double>(out_sum)) * out_sum : 0.0;
 
                 double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
                 double mean_denom_in = theta * in_kmers;
                 double mean_denom_out = theta * out_kmers;
 
-                if (mean_denom_in == 0 || mean_denom_out == 0) {
-                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-                    throw std::domain_error("Test failed");
-                }
+                if (mean_denom_in == 0 || mean_denom_out == 0)
+                    common::logger->warn("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
 
-                double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
-                log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
+                double log_likelihood_null = mean_denom_in > 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
+                log_likelihood_null += mean_denom_out > 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
 
                 return (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
             };
@@ -603,7 +653,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double pval = chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
 
-            double max_chi_stat = std::max(get_chi_stat(1), get_chi_stat(std::min(total_sum - 1, static_cast<int64_t>(in_kmers))));
+            double max_chi_stat = std::max(get_chi_stat(0),
+                                           get_chi_stat(std::min(total_sum, static_cast<int64_t>(in_kmers))));
             assert(max_chi_stat >= chi_stat);
 
             double pmin = max_chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, max_chi_stat)) : 1.0;
@@ -1030,8 +1081,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     utils::call_rows<std::unique_ptr<const bit_vector>,
                      std::unique_ptr<const ValuesContainer>,
-                     PairContainer, false>(columns_all, column_values_all,
-                                           [&](uint64_t row_i, const auto &raw_row) {
+                     PairContainer, true>(columns_all, column_values_all,
+                                          [&](uint64_t row_i, const auto &raw_row, size_t batch_id) {
         if (ex)
             return;
 
@@ -1056,8 +1107,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             ex = std::current_exception();
             return;
         }
-
-        pvals[node] = pval;
 
         if (pval >= 1.1)
             return;
@@ -1090,6 +1139,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (config.test_type != "notest") {
             std::lock_guard<std::mutex> lock(pval_mu);
             m[k].emplace_back(node);
+            pvals[node] = bit_cast<uint64_t>(pval);
         }
     });
 
@@ -1139,7 +1189,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             VectorMap<double, double> pval_map;
-            for (double p : pvals) {
+            for (uint64_t p_u : pvals) {
+                auto p = bit_cast<double>(p_u);
                 if (p <= 1.0)
                     ++pval_map[p];
             }
@@ -1157,7 +1208,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (k == 0) {
                 common::logger->trace("Falling back to Benjamini-Yekutieli");
                 for (size_t i = 0; i < pvals.size(); ++i) {
-                    if (pvals[i] < 0.05 && pvals[i] * pval_map[pvals[i]] >= 0.05) {
+                    double p = bit_cast<double, uint64_t>(pvals[i]);
+                    if (p < 0.05 && p * pval_map[p] >= 0.05) {
                         indicator_in[i] = false;
                         indicator_out[i] = false;
                     }
@@ -1167,7 +1219,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
                     const auto &[cur_k, bucket] = *jt;
                     for (uint64_t i : bucket) {
-                        if (jt < begin || pvals[i] * k >= 0.05) {
+                        if (jt < begin || bit_cast<double, uint64_t>(pvals[i]) * k >= 0.05) {
                             indicator_in[i] = false;
                             indicator_out[i] = false;
                         }
@@ -1181,35 +1233,58 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
         is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
     );
-    masked_graph_in->likelihood_ratios = pvals;
 
     auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_out)), true,
         is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
     );
-    masked_graph_out->likelihood_ratios = std::move(pvals);
 
-    return std::make_pair(masked_graph_in, masked_graph_out);
+    return std::make_tuple(masked_graph_in, masked_graph_out, std::move(pvals), std::move(tmp_file));
 }
 
 template
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
-mask_nodes_by_label_dual<sdsl::int_vector_buffer<>>(std::shared_ptr<const DeBruijnGraph>,
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
+                         std::filesystem::path,
                          size_t,
                          bool);
 template
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
-mask_nodes_by_label_dual<sdsl::int_vector<>>(std::shared_ptr<const DeBruijnGraph>,
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
+                         std::filesystem::path,
+                         size_t,
+                         bool);
+
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
+                         std::vector<std::unique_ptr<const bit_vector>> &,
+                         std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
+                         const std::vector<bool> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path,
+                         size_t,
+                         bool);
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
+                         std::vector<std::unique_ptr<const bit_vector>> &,
+                         std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+                         const std::vector<bool> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path,
                          size_t,
                          bool);
 
@@ -1416,7 +1491,7 @@ std::shared_ptr<MaskedDeBruijnGraph> brunner_munzel_test(std::shared_ptr<const D
     utils::call_rows<std::unique_ptr<bit_vector>,
                      std::unique_ptr<sdsl::int_vector_buffer<>>,
                      std::vector<std::pair<uint64_t, uint8_t>>>(columns_all, column_values_all,
-                                                                [&](uint64_t row_id, const auto &row) {
+                                                                [&](uint64_t row_id, const auto &row, size_t) {
                         // auto kmer_string = graph_ptr->get_node_sequence(AnnotatedDBG::anno_to_graph_index(row_id));
                         if (row.size() == 0) { // if the kmer is not present in any sample
                             mask[AnnotatedDBG::anno_to_graph_index(row_id)] = false;

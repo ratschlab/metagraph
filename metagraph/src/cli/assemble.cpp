@@ -213,23 +213,33 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto filenames = (config->infbase_annotators.size() > 1) ? config->infbase_annotators : config->fnames;
 
-            auto [ingraph, outgraph] = mask_nodes_by_label_dual(graph_ptr,
+            auto [ingraph, outgraph, pvals, tmp_file] = graph::mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(graph_ptr,
                                         filenames,
                                         foreground_labels,
                                         background_labels,
                                         diff_config, num_threads,
+                                        config->tmp_dir,
                                         config->parallel_nodes);
+
+            {
+                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                for (uint64_t pval : pvals) {
+                    static_assert(sizeof(double) == sizeof(pval));
+                    double pval_d;
+                    memcpy(&pval_d, &pval, sizeof(pval));
+                    fout_all << pval_d << "\n";
+                }
+                pvals.close();
+            }
 
             sdsl::bit_vector mask;
             callback(*ingraph, exp_name + "in.");
-            if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(ingraph)) {
-                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
-                for (double pval : masked_graph->likelihood_ratios) {
-                    fout_all << pval << "\n";
+            if (diff_config.assemble_shared) {
+                if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(ingraph)) {
+                    std::unique_ptr<bitmap_vector> inmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                    mask = const_cast<sdsl::bit_vector&&>(inmask->data());
+                    inmask.reset();
                 }
-                std::unique_ptr<bitmap_vector> inmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
-                mask = const_cast<sdsl::bit_vector&&>(inmask->data());
-                inmask.reset();
             }
             ingraph.reset();
 
@@ -289,27 +299,17 @@ int assemble(Config *config) {
         std::filesystem::remove(config->outfbase + ".all.pvals");
 
         auto graph_callback = [&](const graph::DeBruijnGraph &graph, const std::string &header) {
-            const auto *masked_graph = dynamic_cast<const graph::MaskedDeBruijnGraph*>(&graph);
             seq_io::FastaWriter writer(config->outfbase,
                                        header,
                                        config->enumerate_out_sequences,
                                        num_threads > 1, /* async write */
                                        "a" /* append mode */);
-            std::ofstream fout(config->outfbase + ".pvals", ios::out | ios::app);
 
             if (config->unitigs || config->min_tip_size > 1) {
                 graph.call_unitigs(
                     [&](const std::string &unitig, auto&& path) {
-                        std::vector<double> pvals;
-                        pvals.reserve(path.size());
-                        for (auto node : path) {
-                            pvals.emplace_back(masked_graph->likelihood_ratios[node]);
-                        }
                         std::lock_guard<std::mutex> lock(write_mutex);
                         writer.write(unitig);
-                        for (double p : pvals) {
-                            fout << p << "\n";
-                        }
                     },
                     num_threads, config->min_tip_size,
                     config->kmers_in_single_form
@@ -317,16 +317,8 @@ int assemble(Config *config) {
             } else {
                 graph.call_sequences(
                     [&](const std::string &seq, auto&& path) {
-                        std::vector<double> pvals;
-                        pvals.reserve(path.size());
-                        for (auto node : path) {
-                            pvals.emplace_back(masked_graph->likelihood_ratios[node]);
-                        }
                         std::lock_guard<std::mutex> lock(write_mutex);
                         writer.write(seq);
-                        for (double p : pvals) {
-                            fout << p << "\n";
-                        }
                     },
                     num_threads, config->kmers_in_single_form
                 );

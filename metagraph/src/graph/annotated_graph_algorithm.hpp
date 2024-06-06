@@ -5,6 +5,7 @@
 
 #include "graph/annotated_dbg.hpp"
 #include "common/vectors/bit_vector.hpp"
+#include "common/utils/file_utils.hpp"
 
 
 namespace mtg {
@@ -85,23 +86,26 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     size_t num_threads = 1,
                     size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+template <class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const std::vector<std::string> &files,
                          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
                          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
+                         std::filesystem::path = "",
                          size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
-template <class ValuesContainer>
-std::pair<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>>
+template <class ValuesContainer, class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::unique_ptr<const bit_vector>> &columns_all,
                          std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
+                         std::filesystem::path = "",
                          size_t num_parallel_files = std::numeric_limits<size_t>::max(),
                          bool deallocate = false);
 

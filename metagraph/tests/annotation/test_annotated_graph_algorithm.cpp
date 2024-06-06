@@ -20,6 +20,9 @@ using namespace mtg::graph;
 using namespace mtg::annot;
 using namespace mtg::test;
 
+const std::string test_data_dir = "../tests/data";
+const std::string test_dump_basename = test_data_dir + "/dump_test";
+
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
@@ -79,7 +82,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             std::vector<bool> groups = { true, false, false };
             columns.resize(groups.size());
 
-            auto [masked_dbg_in, masked_dbg_out] = mask_nodes_by_label_dual<sdsl::int_vector<>>(
+            auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(
                 graph_ptr,
                 columns,
                 column_values_all,
@@ -189,36 +192,22 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                     .outfbase = "",
                 };
 
-                try {
-                    auto [masked_dbg_in, masked_dbg_out] = mask_nodes_by_label_dual<sdsl::int_vector<>>(
-                        graph_ptr,
-                        columns,
-                        column_values_all,
-                        groups,
-                        config, num_threads, num_threads,
-                        false
-                    );
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(
+                    graph_ptr,
+                    columns,
+                    column_values_all,
+                    groups,
+                    config, num_threads, test_dump_basename, num_threads,
+                    false
+                );
 
-                    if (test_type != "poisson_likelihoodratio") {
-                        masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                            auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                            obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                            obs_kmers.insert(kmer);
-                        });
-                        EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
-                        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
-                    } else {
-                        EXPECT_TRUE(false) << k << "\t" << test_type;
-                    }
-                } catch (std::domain_error &e) {
-                    if (test_type == "poisson_likelihoodratio")
-                        continue;
-
-                    EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
-                    continue;
-                } catch (std::exception &e) {
-                    EXPECT_TRUE(false) << k << "\t" << test_type << "\t" << e.what();
-                }
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+                EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
             }
         }
     }
