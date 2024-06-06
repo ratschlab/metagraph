@@ -250,7 +250,7 @@ int build_graph(Config *config) {
                                                              get_verbose()));
         }
 
-    } else if (config->graph_type == Config::GraphType::SSHASH){
+    } else if (config->graph_type == Config::GraphType::SSHASH) {
 
         graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode));
         if(files.size() > 1){
