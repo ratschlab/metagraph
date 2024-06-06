@@ -141,7 +141,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
     }
 
     for (size_t i = 0; i < sequences.size(); ++i) {
-        fastaFile << ">"<< "\n" << sequences[i] << "\n";
+        fastaFile << ">" << "\n" << sequences[i] << "\n";
     }
 
     fastaFile.close();
