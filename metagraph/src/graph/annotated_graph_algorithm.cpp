@@ -280,6 +280,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> sums(groups.size());
     std::vector<uint64_t> sums_of_squares(groups.size());
 
+    bool compute_medians = (config.test_type == "mannwhitney_u" || config.test_type == "brunnermunzel");
+
     #pragma omp parallel for num_threads(num_parallel_files)
     for (size_t j = 0; j < groups.size(); ++j) {
         const auto &column = *columns_all[j];
@@ -291,22 +293,27 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         uint64_t sum_of_squares = 0;
         size_t i = 0;
         size_t n = 0;
+        uint64_t max_obs_val = 0;
 
         std::vector<uint64_t> vals;
-        vals.reserve(num_vals);
+        if (compute_medians)
+            vals.reserve(num_vals);
+
         column.call_ones([&](uint64_t row_i) {
             if (!ignored[row_i]) {
                 if (uint64_t c = adjust_count(column_values_all.size() ? (*column_values_all[j])[i] : 1, j, row_i)) {
-                    vals.emplace_back(c);
+                    max_obs_val = std::max(max_obs_val, c);
                     sum += c;
                     sum_of_squares += c * c;
                     ++n;
+                    if (compute_medians)
+                        vals.emplace_back(c);
                 }
             }
             ++i;
         });
 
-        max_obs_vals[j] = *std::max_element(vals.begin(), vals.end());
+        max_obs_vals[j] = max_obs_val;
 
         if (vals.size())
             medians[j] = boost::math::statistics::median(vals);
@@ -315,8 +322,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         sums_of_squares[j] = sum_of_squares;
         n_kmers[j] = n;
 
-        common::logger->trace("{}: kept: {} / {}\tsum: {}\tmedian: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
-                              j, n, i, sum, medians[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+        common::logger->trace("{}: kept: {} / {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
+                              j, n, i, sum, max_obs_vals[j], min_counts[j], check_cutoff[j]);
 
         std::lock_guard<std::mutex> lock(agg_mu);
         if (groups[j]) {
@@ -565,35 +572,41 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::domain_error("Test failed");
             }
 
-            double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
-            double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
+            int64_t total_sum = in_sum + out_sum;
 
-            double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-            double mean_denom_in = theta * in_kmers;
-            double mean_denom_out = theta * out_kmers;
+            auto get_chi_stat = [&](int64_t in_sum) {
+                int64_t out_sum = total_sum - in_sum;
+                double log_likelihood_in = -in_sum + log(static_cast<double>(in_sum)) * in_sum;
+                double log_likelihood_out = -out_sum + log(static_cast<double>(out_sum)) * out_sum;
 
-            if (mean_denom_in == 0 || mean_denom_out == 0) {
-                common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-                throw std::domain_error("Test failed");
-            }
+                double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
+                double mean_denom_in = theta * in_kmers;
+                double mean_denom_out = theta * out_kmers;
 
-            double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
-            log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
+                if (mean_denom_in == 0 || mean_denom_out == 0) {
+                    common::logger->error("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
+                    throw std::domain_error("Test failed");
+                }
 
-            double chi_stat = (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+                double log_likelihood_null = -mean_denom_in + in_sum * log(mean_denom_in);
+                log_likelihood_null += -mean_denom_out + out_sum * log(mean_denom_out);
+
+                return (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
+            };
+
+            double chi_stat = get_chi_stat(in_sum);
 
             if (chi_stat < 0) {
                 common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
                 throw std::runtime_error("Test failed");
             }
 
-            if (chi_stat == 0)
-                return std::make_tuple(1.0, static_cast<double>(in_sum), static_cast<double>(out_sum) / out_kmers * in_kmers, 1.1);
+            double pval = chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
 
-            assert(chi_stat > 0);
+            double max_chi_stat = std::max(get_chi_stat(1), get_chi_stat(std::min(total_sum - 1, static_cast<int64_t>(in_kmers))));
+            assert(max_chi_stat >= chi_stat);
 
-            double pval = boost::math::cdf(boost::math::complement(dist, chi_stat));
-            double pmin = 1.1;
+            double pmin = max_chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, max_chi_stat)) : 1.0;
 
             return std::make_tuple(pval,
                                    static_cast<double>(in_sum),
@@ -1053,20 +1066,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
         uint64_t k = std::numeric_limits<uint64_t>::max();
 
-        if (pval_min > 1.0) {
-            PairContainer best;
-            for (const auto &[j, c] : row) {
-                if ((in_kmer && !groups[j]) || (out_kmer && groups[j])) {
-                    best.emplace_back(j, max_obs_vals[j]);
-                } else {
-                    best.emplace_back(j, 1);
-                }
-            }
-
-            auto [pm, in_sum_m, out_sum_m, pm_m] = compute_pval(best);
-            pval_min = pm;
-        }
-
         if (pval_min - pval > 1e-10) {
             common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
             throw std::runtime_error("Test failed");
@@ -1085,7 +1084,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        if (in_stat != out_stat && pval < 0.05)
+        if (in_kmer != out_kmer && pval < 0.05)
             set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
 
         if (config.test_type != "notest") {
