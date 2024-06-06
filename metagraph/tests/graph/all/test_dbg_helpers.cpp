@@ -136,7 +136,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
     std::ofstream fastaFile(outputFilename);
 
     if (!fastaFile.is_open()) {
-        std::cerr << "Error: Unable to open the output file." << std::endl;
+        common::logger->error("Unable to open output file {}", outputFilename);
         return;
     }
 
