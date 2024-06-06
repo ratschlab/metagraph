@@ -816,11 +816,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
                                    std::min(p_min, 1.0));
         };
-    } else if (config.test_type == "nonparametric" || config.test_type == "nonparametric_u") {
-        compute_pval = [&](const auto &row) {
+    } else if (config.test_type == "brunnermunzel" || config.test_type == "mannwhitney_u") {
+        size_t nx = num_labels_in;
+        size_t ny = num_labels_out;
+
+        compute_pval = [&,nx,ny](const auto &row) {
             if (row.empty())
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
+            double p_min = 1.1;
             auto norm = boost::math::normal_distribution();
             auto rankdata = [&](const std::vector<double> &c) {
                 auto c_p = c;
@@ -855,8 +859,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             out_counts.resize(num_labels_out);
 
             double p = 0.0;
-            size_t nx = in_counts.size();
-            size_t ny = out_counts.size();
 
             std::vector<double> c;
             c.reserve(in_counts.size() + out_counts.size());
@@ -866,66 +868,118 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
             double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
 
-            double p_min = 1.1;
-
-            if (config.test_type == "nonparametric") {
+            if (config.test_type == "bunnermunzel") {
                 if (nx > 1 && ny > 1) {
-                    auto [rankx, countsx] = rankdata(in_counts);
-                    auto [ranky, countsy] = rankdata(out_counts);
-                    double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
-                    double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
+                    auto get_p = [&]() {
+                        double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
+                        double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
+                        auto [rankx, countsx] = rankdata(in_counts);
+                        auto [ranky, countsy] = rankdata(out_counts);
+                        double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
+                        double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
 
-                    double Sx = 0;
-                    for (size_t i = 0; i < nx; ++i) {
-                        Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
-                    }
-                    Sx /= nx - 1;
-                    double Sy = 0;
-                    for (size_t i = 0; i < ny; ++i) {
-                        Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
-                    }
-                    Sy /= ny - 1;
+                        double Sx = 0;
+                        for (size_t i = 0; i < nx; ++i) {
+                            Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
+                        }
+                        Sx /= nx - 1;
+                        double Sy = 0;
+                        for (size_t i = 0; i < ny; ++i) {
+                            Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
+                        }
+                        Sy /= ny - 1;
 
-                    double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
-                    wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
+                        double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
+                        wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
 
-                    double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
-                    double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
+                        double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
+                        double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
 
-                    if (df_denom != 0) {
-                        wbfn = abs(wbfn);
-                        double df = df_numer / df_denom;
-                        boost::math::students_t dist(df);
-                        p = 2 * boost::math::cdf(boost::math::complement(dist, wbfn));
-                    }
+                        if (df_denom != 0) {
+                            wbfn = abs(wbfn);
+                            double df = df_numer / df_denom;
+                            boost::math::students_t dist(df);
+                            return 2 * boost::math::cdf(boost::math::complement(dist, wbfn));
+                        }
+
+                        return 0.0;
+                    };
+
+                    p = get_p();
+
+                    std::sort(rankc.begin(), rankc.end());
+                    std::copy(rankc.begin(), rankc.begin() + nx, in_counts.begin());
+                    std::copy(rankc.begin() + nx, rankc.end(), out_counts.begin());
+                    p_min = get_p();
+
+                    std::sort(rankc.begin(), rankc.end(), std::greater<double>());
+                    std::copy(rankc.begin(), rankc.begin() + nx, in_counts.begin());
+                    std::copy(rankc.begin() + nx, rankc.end(), out_counts.begin());
+                    p_min = std::min(p_min, get_p());
+                } else {
+                    p_min = 0.0;
                 }
             } else {
-                p_min = 2.0 / exp(lgamma(groups.size() + 1) - lgamma(num_labels_in + 1) - lgamma(num_labels_out + 1));
-                if (!nx || !ny) {
-                    p = 1.0;
-                } else {
-                    // https://datatab.net/tutorial/mann-whitney-u-test
+                // https://datatab.net/tutorial/mann-whitney-u-test
+                double u1_f = nx * ny + static_cast<double>(nx * (nx + 1))/2;
+                double u2_f = nx * ny + static_cast<double>(ny * (ny + 1))/2;
+                auto get_u = [&]() {
                     double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
                     double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
-                    double u1 = nx * ny + static_cast<double>(nx * (nx + 1))/2 - rankcx_sum;
-                    double u2 = nx * ny + static_cast<double>(ny * (ny + 1))/2 - rankcy_sum;
-                    double u = std::min(u1, u2);
+                    double u1 = u1_f - rankcx_sum;
+                    double u2 = u2_f - rankcy_sum;
+                    return std::min(u1, u2);
+                };
 
-                    double n = nx + ny;
-                    // normal approximation
-                    double mu = static_cast<double>(nx * ny) / 2;
-                    double corr = 0;
-                    for (const auto &[val,rks] : countsc) {
-                        const auto &[rk, c] = rks;
-                        if (c > 1)
-                            corr += c * c * c - c;
+                double u = get_u();
+
+                if (nx + ny < 20) {
+                    std::sort(rankc.begin(), rankc.end());
+                    size_t num_better = 0;
+                    size_t num_max = 0;
+                    double max_u = -std::numeric_limits<double>::infinity();
+                    while (std::next_permutation(rankc.begin(), rankc.end())) {
+                        double cur_u = get_u();
+                        num_better += (cur_u >= u);
+                        if (cur_u > max_u) {
+                            max_u = cur_u;
+                            num_max = 1;
+                        } else if (cur_u == max_u) {
+                            ++num_max;
+                        }
                     }
-                    double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
 
-                    double z = abs((u - mu) / sd);
+                    p = exp(log(static_cast<double>(num_better)) - lgamma(nx + ny + 1)) * 2.0;
+                    p_min = exp(log(static_cast<double>(num_max)) - lgamma(nx + ny + 1)) * 2.0;
+                } else {
+                    // normal approximation
+                    if (!nx || !ny) {
+                        p = 1.0;
+                        p_min = 1.0;
+                    } else {
+                        double n = nx + ny;
+                        double mu = static_cast<double>(nx * ny) / 2;
+                        double corr = 0;
+                        for (const auto &[val,rks] : countsc) {
+                            const auto &[rk, c] = rks;
+                            if (c > 1)
+                                corr += c * c * c - c;
+                        }
+                        double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
 
-                    // hack just in case sd == 0
-                    p = u != mu ? boost::math::cdf(boost::math::complement(norm, z)) * 2 : 1.0;
+                        auto get_p = [&](double u) {
+                            double z = abs((u - mu) / sd);
+
+                            // hack just in case sd == 0
+                            return u != mu ? boost::math::cdf(boost::math::complement(norm, z)) * 2 : 1.0;
+                        };
+
+                        p = get_p(u);
+                        std::sort(rankc.begin(), rankc.end());
+                        p_min = get_p(get_u());
+                        std::sort(rankc.begin(), rankc.end(), std::greater<double>());
+                        p_min = std::min(p_min, get_p(get_u()));
+                    }
                 }
             }
 
