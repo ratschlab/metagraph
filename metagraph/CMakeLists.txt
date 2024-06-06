@@ -324,7 +324,6 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
 add_subdirectory(external-libraries/sshash SYSTEM)
-target_compile_options(test_alphabet PRIVATE -Wno-strict-aliasing)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
