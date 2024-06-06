@@ -815,7 +815,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
 
-    } else if (string == "sshash"){
+    } else if (string == "sshash") {
         return GraphType::SSHASH;
     }
      else {
