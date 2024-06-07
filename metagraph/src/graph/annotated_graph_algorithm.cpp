@@ -680,8 +680,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_pair(r, r / (r + mu));
         };
 
-        double target_p_num = 0.0;
-        double target_p_denom = 0.0;
         std::vector<std::pair<double, double>> nb_params(groups.size());
         std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
 
@@ -712,12 +710,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(mu, var, hist);
-            double p = nb_params[j].second;
-
-            target_p_num += p * p;
-            target_p_denom += p;
         }
-        double target_p = target_p_num / target_p_denom;
+
+        double c_a = 0;
+        double c_b = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            double p = nb_params[j].second;
+            if (groups[j]) {
+                c_b += p * sums[j];
+            } else {
+                c_a += p * sums[j];
+            }
+        }
+
+        double target_p = 2.0 / total_kmers * (c_a * c_a + c_b * c_b) / (c_a + c_b);
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
