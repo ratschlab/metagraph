@@ -1184,25 +1184,24 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 acc -= bucket.size();
             }
 
-            VectorMap<double, double> pval_map;
-            for (uint64_t p_u : pvals) {
-                auto p = bit_cast<double>(p_u);
-                if (p <= 1.0)
-                    ++pval_map[p];
-            }
-            auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
-            std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
-
-            double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
-            pval_map = decltype(pval_map)();
-            size_t cur_rank = 0;
-            for (const auto &[p, c] : p_data) {
-                cur_rank += c;
-                pval_map[p] = cm * cur_rank;
-            }
-
             if (k == 0) {
                 common::logger->trace("Falling back to Benjamini-Yekutieli");
+                VectorMap<double, double> pval_map;
+                for (uint64_t p_u : pvals) {
+                    auto p = bit_cast<double>(p_u);
+                    if (p <= 1.0)
+                        ++pval_map[p];
+                }
+                auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
+                std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
+
+                double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
+                pval_map = decltype(pval_map)();
+                size_t cur_rank = 0;
+                for (const auto &[p, c] : p_data) {
+                    cur_rank += c;
+                    pval_map[p] = cm * cur_rank;
+                }
                 for (size_t i = 0; i < pvals.size(); ++i) {
                     double p = bit_cast<double, uint64_t>(pvals[i]);
                     if (p < 0.05 && p * pval_map[p] >= 0.05) {
