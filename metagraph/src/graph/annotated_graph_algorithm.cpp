@@ -40,56 +40,6 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 double CDF_CUTOFF = 0.95;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
 
-template <typename ForwardIterator>
-inline auto quartiles(ForwardIterator first, ForwardIterator last)
-{
-    auto m = std::distance(first,last);
-    BOOST_MATH_ASSERT_MSG(m >= 3, "At least 3 samples are required to compute the interquartile range.");
-    auto k = m/4;
-    auto j = m - (4*k);
-    // m = 4k+j.
-    // If j = 0 or j = 1, then there are an even number of samples below the median, and an even number above the median.
-    //    Then we must average adjacent elements to get the quartiles.
-    // If j = 2 or j = 3, there are an odd number of samples above and below the median, these elements may be directly extracted to get the quartiles.
-
-    double Q1;
-    double Q3;
-    if (j==2 || j==3)
-    {
-        auto q1 = first + k;
-        auto q3 = first + 3*k + j - 1;
-        std::nth_element(first, q1, last);
-        Q1 = *q1;
-        std::nth_element(q1, q3, last);
-        Q3 = *q3;
-    } else {
-        // j == 0 or j==1:
-        auto q1 = first + k - 1;
-        auto q3 = first + 3*k - 1 + j;
-        std::nth_element(first, q1, last);
-        double a = *q1;
-        std::nth_element(q1, q1 + 1, last);
-        double b = *(q1 + 1);
-        Q1 = (a+b)/2;
-        std::nth_element(q1, q3, last);
-        a = *q3;
-        std::nth_element(q3, q3 + 1, last);
-        b = *(q3 + 1);
-        Q3 = (a+b)/2;
-    }
-
-    // return std::make_tuple(Q1, boost::math::statistics::median(first, last), Q3);
-    return std::make_pair(Q1, Q3);
-}
-
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
-    int n;
-    std::unique_ptr<uint64_t, decltype(std::free)*> r {
-        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
-        std::free
-    };
-    return n > 0;
-}
 
 template<class To, class From>
 std::enable_if_t<
@@ -230,37 +180,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             min_counts[j] = boost::math::quantile(
                 boost::math::poisson(mean_est), exp(-mean_est) - CDF_CUTOFF * expm1(-mean_est)
             );
-
-            // quartile calculation modifies the underlying vector, so we have to make a copy
-            std::vector<uint64_t> vals;
-            vals.reserve(column_values.size());
-            for (size_t i = 0; i < column_values.size(); ++i) {
-                if (column_values[i] >= min_counts[j])
-                    vals.emplace_back(column_values[i]);
-            }
-
-            // set cutoff for upper end of distribution
-            auto [q1, q3] = quartiles(vals.begin(), vals.end());
-            double outlier_cutoff = q3 + 1.5 * (q3 - q1);
-            double repeats_mu = 0;
-            double repeats_cutoff = 0;
-            size_t num_large = 0;
-            for (uint64_t c : vals) {
-                if (c >= outlier_cutoff) {
-                    repeats_mu += c;
-                    ++num_large;
-                }
-            }
-            if (num_large) {
-                repeats_mu /= num_large;
-
-                repeats_cutoff = boost::math::quantile(boost::math::complement(
-                    boost::math::poisson(repeats_mu), CDF_CUTOFF
-                ));
-
-                // if (repeats_cutoff > outlier_cutoff)
-                //     check_cutoff[j] = repeats_cutoff;
-            }
         }
     }
 
@@ -1282,6 +1201,16 @@ mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::s
                          std::filesystem::path,
                          size_t,
                          bool);
+
+inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+    int n;
+    std::unique_ptr<uint64_t, decltype(std::free)*> r {
+        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
+        std::free
+    };
+    return n > 0;
+}
+
 
 typedef std::function<size_t()> LabelCountCallback;
 
