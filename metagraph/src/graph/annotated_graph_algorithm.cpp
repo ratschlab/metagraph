@@ -258,8 +258,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     boost::math::poisson(repeats_mu), CDF_CUTOFF
                 ));
 
-                if (repeats_cutoff > outlier_cutoff)
-                    check_cutoff[j] = repeats_cutoff;
+                // if (repeats_cutoff > outlier_cutoff)
+                //     check_cutoff[j] = repeats_cutoff;
             }
         }
     }
@@ -652,7 +652,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         std::vector<std::pair<double, double>> nb_params(groups.size());
         std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
-        std::vector<double> scales(groups.size());
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -681,13 +680,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(mu, var, hist);
-
-            scales[j] = total_kmers / 2.0 / sums[j];
-            if (groups[j]) {
-                scales[j] /= num_labels_out;
-            } else {
-                scales[j] /= num_labels_in;
-            }
         }
 
         double c_a = 0;
@@ -720,6 +712,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             boost::math::negative_binomial nb(r, p);
             boost::math::negative_binomial nb_out(r_map, target_p);
+            double scale = exp(log(p) - log(target_p));
 
             // ensure that 0 maps to 0
             count_maps[j][0] = std::make_pair(0, 0);
@@ -727,12 +720,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (const auto &[k, c] : hists[j]) {
                 if (!count_maps[j].count(k)) {
                     double cdf = boost::math::cdf(nb, k);
-                    if (cdf == 1.0 || cdf == 0.0) {
-                        double ccdf = boost::math::cdf(boost::math::complement(nb, k));
-                        count_maps[j][k] = std::make_pair(round(boost::math::quantile(boost::math::complement(nb_out, ccdf))), c);
+
+                    uint64_t new_k = 0;
+                    if (cdf < 1.0) {
+                        new_k = boost::math::quantile(nb_out, cdf);
                     } else {
-                        count_maps[j][k] = std::make_pair(round(boost::math::quantile(nb_out, cdf)), c);
+                        double ccdf = boost::math::cdf(boost::math::complement(nb, k));
+                        if (ccdf > 0.0) {
+                            new_k = boost::math::quantile(boost::math::complement(nb_out, ccdf));
+                        } else {
+                            new_k = ceil(scale * k);
+                        }
                     }
+                    count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
                 } else {
                     count_maps[j][k].second += c;
                 }
@@ -851,7 +851,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (p_min > pval) {
-                common::logger->error("{}\t{},{}", n, lower, upper);
+                common::logger->error("pmin fail\t{} > {}\t{}\t{},{}", p_min, pval, n, lower, upper);
             }
 
             if (pval >= 1.1) {
