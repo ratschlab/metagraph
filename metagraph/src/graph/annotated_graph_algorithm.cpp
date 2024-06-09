@@ -571,6 +571,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         std::vector<std::pair<double, double>> nb_params(groups.size());
         std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
+        std::vector<double> target_scale(groups.size());
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -599,6 +600,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(mu, var, hist);
+
+            target_scale[j] = total_kmers / 2.0 / sums[j];
+            if (groups[j]) {
+                target_scale[j] /= num_labels_out;
+            } else {
+                target_scale[j] /= num_labels_in;
+            }
         }
 
         double c_a = 0;
@@ -612,7 +620,34 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        double target_p = 2.0 / total_kmers * (c_a * c_a + c_b * c_b) / (c_a + c_b);
+        std::vector<double> r_maps(groups.size(), 1.0);
+        double target_p = boost::math::tools::newton_raphson_iterate([&](double p) {
+            double dl = 0;
+            double ddl = 0;
+            for (size_t j = 0; j < groups.size(); ++j) {
+                double f = target_scale[j];
+                double &r = r_maps[j];
+                r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                    double dl = nelem * (log(p) - boost::math::digamma(r));
+                    double ddl = -nelem * boost::math::trigamma(r);
+                    for (const auto &[k, c] : hists[j]) {
+                        dl += boost::math::digamma(k * f + r) * c;
+                        ddl += boost::math::trigamma(k * f + r) * c;
+                    }
+                    return std::make_pair(dl, ddl);
+                }, r, std::numeric_limits<double>::min(), f * sums[j], 30);
+                double factor = nelem * r / p;
+                dl += factor;
+                ddl -= factor / p;
+                for (const auto &[k, c] : hists[j]) {
+                    double factor = k * f * c / (1 - p);
+                    dl -= factor;
+                    ddl -= factor / (1 - p);
+                }
+            }
+
+            return std::make_pair(dl, ddl);
+        }, 2.0 / total_kmers * (c_a * c_a + c_b * c_b) / (c_a + c_b), std::numeric_limits<double>::min(), 1.0, 30);
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
@@ -623,8 +658,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
 
-            // approx out nb params
-            double r_map = exp(log(r) + log1p(-p) - log1p(-target_p));
+            double r_map = r_maps[j];
 
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
                                   j, r, p, r_map, target_p);
