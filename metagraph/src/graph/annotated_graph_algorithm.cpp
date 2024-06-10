@@ -328,142 +328,30 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             int64_t n = in_sum + out_sum;
+            double pval = 1.0;
+            double p_min = 1.0;
+
             double p = static_cast<double>(in_kmers) / total_kmers;
-
             auto bdist = boost::math::binomial(n, p);
-            double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
 
-            // we want all s s.t. | s/in - (n-s)/out | >= d, so
-            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
-            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
-            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
-            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
-            double factor = 1.0 / in_kmers + 1.0 / out_kmers;
-            double lower_d = (static_cast<double>(n) / out_kmers - d) / factor;
-            double upper_d = (d + static_cast<double>(n) / out_kmers) / factor;
-
-            // correct for floating-point errors
-            if (abs(lower_d - round(lower_d)) < 1e-10)
-                lower_d = round(lower_d);
-
-            if (abs(upper_d - round(upper_d)) < 1e-10)
-                upper_d = round(upper_d);
-
-            int64_t lower = floor(lower_d);
-            int64_t upper = ceil(upper_d);
-
-            assert(upper >= lower);
-            assert(d == 0 || upper > lower);
-            assert(in_sum <= lower || in_sum >= upper);
-
-            double d_0 = static_cast<double>(n) / out_kmers;
-            double d_n = static_cast<double>(n) / in_kmers;
-            assert(d_0 >= d || d_n >= d);
-
-            assert(d_0 < d || 0 <= lower || 0 >= upper);
-            assert(d_n < d || n <= lower || n >= upper);
-
-            double p_min = 0;
-            if (d_0 > d_n) {
-                p_min = boost::math::pdf(bdist, 0);
-            } else if (d_0 < d_n) {
-                p_min = boost::math::pdf(bdist, n);
-            } else {
+            if (num_labels_in == num_labels_out) {
                 p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
-            }
-
-            double pval = 0;
-            if (upper <= 0 || lower >= n) {
-                pval = 1.0;
-            } else {
-                if (lower >= 0)
-                    pval += boost::math::cdf(bdist, lower);
-
-                if (upper <= n)
-                    pval += boost::math::cdf(boost::math::complement(bdist, upper - 1 + (upper == lower)));
-            }
-
-            if (pval > 1.0) {
-                common::logger->error("{} > 1.0\t{}\t{},{}", pval, p_min, in_sum, out_sum);
-                throw std::runtime_error("pval fail");
-            }
-
-            return std::make_tuple(pval,
-                                   static_cast<double>(in_sum),
-                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
-                                   p_min);
-        };
-
-        compute_pval_unitig = [&](const auto &rows) {
-            if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            int64_t in_sum = 0;
-            int64_t out_sum = 0;
-            for (const auto &row : rows) {
-                for (const auto &[j, c] : row) {
-                    if (groups[j]) {
-                        out_sum += c;
-                    } else {
-                        in_sum += c;
-                    }
+                if (in_sum != out_sum) {
+                    int64_t d = std::min(in_sum, out_sum);
+                    pval = boost::math::cdf(bdist, d) + boost::math::cdf(boost::math::complement(bdist, n - d - 1));
                 }
-            }
-
-            int64_t n = in_sum + out_sum;
-            double p = static_cast<double>(in_kmers) / total_kmers;
-
-            auto bdist = boost::math::binomial(n, p);
-            double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
-
-            // we want all s s.t. | s/in - (n-s)/out | >= d, so
-            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
-            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
-            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
-            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
-            double factor = 1.0 / in_kmers + 1.0 / out_kmers;
-            double lower_d = (static_cast<double>(n) / out_kmers - d) / factor;
-            double upper_d = (d + static_cast<double>(n) / out_kmers) / factor;
-
-            // correct for floating-point errors
-            if (abs(lower_d - round(lower_d)) < 1e-10)
-                lower_d = round(lower_d);
-
-            if (abs(upper_d - round(upper_d)) < 1e-10)
-                upper_d = round(upper_d);
-
-            int64_t lower = floor(lower_d);
-            int64_t upper = ceil(upper_d);
-
-            assert(upper >= lower);
-            assert(d == 0 || upper > lower);
-            assert(in_sum <= lower || in_sum >= upper);
-
-            double d_0 = static_cast<double>(n) / out_kmers;
-            double d_n = static_cast<double>(n) / in_kmers;
-            assert(d_0 >= d || d_n >= d);
-
-            assert(d_0 < d || 0 <= lower || 0 >= upper);
-            assert(d_n < d || n <= lower || n >= upper);
-
-            double p_min = 0;
-            if (d_0 > d_n) {
-                p_min = boost::math::pdf(bdist, 0);
-            } else if (d_0 < d_n) {
-                p_min = boost::math::pdf(bdist, n);
             } else {
-                p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
-            }
-
-            double pval = 0;
-            if (upper <= 0 || lower >= n) {
-                pval = 1.0;
-            } else {
-                if (lower >= 0)
-                    pval += boost::math::cdf(bdist, lower);
-
-                if (upper <= n)
-                    pval += boost::math::cdf(boost::math::complement(bdist, upper - 1 + (upper == lower)));
+                p_min = std::min(boost::math::pdf(bdist, 0), boost::math::pdf(bdist, n));
+                double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
+                if (d > 0) {
+                    // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
+                    // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
+                    // s/num_labels_in + s/num_labels_out >= d + n/num_labels_out || n/num_labels_out - d >= s/num_labels_in + s/num_labels_out
+                    double factor = double(1.0) / num_labels_in + double(1.0) / num_labels_out;
+                    int64_t lower = (static_cast<double>(n) / num_labels_out - d) / factor;
+                    int64_t upper = (d + static_cast<double>(n) / num_labels_out) / factor;
+                    pval = boost::math::cdf(bdist, lower) + boost::math::cdf(boost::math::complement(bdist, upper - 1));
+                }
             }
 
             if (pval > 1.0) {
@@ -679,7 +567,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         std::vector<std::pair<double, double>> nb_params(groups.size());
         std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
-        std::vector<double> target_scale(groups.size());
+
+        // geometric mean
+        double target_sum = 0.0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            target_sum += log(static_cast<double>(sums[j]));
+        }
+        target_sum = exp(target_sum / groups.size());
+
+        double min_p = 1.0;
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -710,24 +606,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(j, mu, var, hist);
-
-            target_scale[j] = total_kmers / 2.0 / sums[j];
-            if (groups[j]) {
-                target_scale[j] /= num_labels_out;
-            } else {
-                target_scale[j] /= num_labels_in;
-            }
-        }
-
-        double c_a = 0;
-        double c_b = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            double p = nb_params[j].second;
-            if (groups[j]) {
-                c_b += p * sums[j];
-            } else {
-                c_a += p * sums[j];
-            }
+            min_p = std::min(min_p, nb_params[j].second);
         }
 
         std::vector<double> r_maps(groups.size(), 1.0);
@@ -735,7 +614,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double dl = 0;
             double ddl = 0;
             for (size_t j = 0; j < groups.size(); ++j) {
-                double f = target_scale[j];
+                double f = target_sum / sums[j];
                 double &r = r_maps[j];
                 r = boost::math::tools::newton_raphson_iterate([&](double r) {
                     double dl = nelem * (log(p) - boost::math::digamma(r));
@@ -757,7 +636,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             return std::make_pair(dl, ddl);
-        }, 2.0 / total_kmers * (c_a * c_a + c_b * c_b) / (c_a + c_b), std::numeric_limits<double>::min(), 1.0, 30);
+        }, min_p, std::numeric_limits<double>::min(), 1.0, 30);
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
@@ -852,6 +731,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             int64_t n = in_sum + out_sum;
+            double p_min = 1.0;
+            double pval = 1.0;
 
             double lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
             auto get_pmf = [&](int64_t s) {
@@ -861,164 +742,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
 
-            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
-
-            // we want all s s.t. | s/in - (n-s)/out | >= d, so
-            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
-            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
-            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
-            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
-            double factor = 1.0 / in_kmers_adj + 1.0 / out_kmers_adj;
-            double lower_d = (static_cast<double>(n) / out_kmers_adj - d) / factor;
-            double upper_d = (d + static_cast<double>(n) / out_kmers_adj) / factor;
-
-            // correct for floating-point errors
-            if (abs(lower_d - round(lower_d)) < 1e-10)
-                lower_d = round(lower_d);
-
-            if (abs(upper_d - round(upper_d)) < 1e-10)
-                upper_d = round(upper_d);
-
-            int64_t lower = floor(lower_d);
-            int64_t upper = ceil(upper_d);
-
-            assert(upper >= lower);
-            assert(d == 0 || upper > lower);
-            assert(in_sum <= lower || in_sum >= upper);
-
-            double d_0 = static_cast<double>(n) / out_kmers_adj;
-            double d_n = static_cast<double>(n) / in_kmers_adj;
-            assert(d_0 >= d || d_n >= d);
-
-            assert(d_0 < d || 0 <= lower || 0 >= upper);
-            assert(d_n < d || n <= lower || n >= upper);
-
-            double p_min = 0;
-            if (d_0 > d_n) {
-                p_min = get_pmf(0);
-            } else if (d_0 < d_n) {
-                p_min = get_pmf(n);
-            } else {
+            if (num_labels_in == num_labels_out) {
                 p_min = get_pmf(0) + get_pmf(n);
-            }
-
-            double pval = 0;
-            if (upper <= 0 || lower >= n) {
-                pval = 1.0;
+                if (in_sum != out_sum) {
+                    lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+                    int64_t d = std::min(in_sum, out_sum);
+                    pval = p_min;
+                    for (int64_t s = 1; s <= d; ++s) {
+                        pval += get_pmf(s) + get_pmf(n - s);
+                    }
+                }
             } else {
-                for (int64_t s = 0; s <= lower; ++s)
-                    pval += get_pmf(s);
+                p_min = std::min(get_pmf(0), get_pmf(n));
+                double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
+                if (d > 0) {
+                    // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
+                    // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
+                    // s/num_labels_in + s/num_labels_out >= d + n/num_labels_out || n/num_labels_out - d >= s/num_labels_in + s/num_labels_out
+                    double factor = double(1.0) / num_labels_in + double(1.0) / num_labels_out;
+                    int64_t lower = (static_cast<double>(n) / num_labels_out - d) / factor;
+                    int64_t upper = (d + static_cast<double>(n) / num_labels_out) / factor;
 
-                for (int64_t s = upper + (upper == lower); s <= n; ++s)
-                    pval += get_pmf(s);
-            }
+                    pval = 0;
+                    for (int64_t s = 0; s <= lower; ++s) {
+                        pval += get_pmf(s);
+                    }
 
-            if (p_min > pval) {
-                common::logger->error("pmin fail\t{} > {}\t{}\t{},{}", p_min, pval, n, lower, upper);
-            }
-
-            if (pval >= 1.1) {
-                common::logger->error("{} >= 1.1\t{}\t{},{}\t{},{}", pval, p_min, in_sum, out_sum, lower, upper);
-                throw std::runtime_error("pval fail");
-            }
-
-            return std::make_tuple(std::min(pval, 1.0),
-                                   static_cast<double>(in_sum),
-                                   static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
-                                   std::min(p_min, 1.0));
-        };
-
-        compute_pval_unitig = [&,r_in_row=r_in,r_out_row=r_out,count_maps,in_kmers_adj_row=in_kmers_adj,out_kmers_adj_row=out_kmers_adj](const auto &rows) {
-            if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            int64_t in_sum = 0;
-            int64_t out_sum = 0;
-            for (const auto &row : rows) {
-                for (const auto &[j, c] : row) {
-                    if (groups[j]) {
-                        out_sum += count_maps[j].find(c)->second.first;
-                    } else {
-                        in_sum += count_maps[j].find(c)->second.first;
+                    for (int64_t s = upper; s <= n; ++s) {
+                        pval += get_pmf(s);
                     }
                 }
             }
 
-            double r_in = r_in_row * rows.size();
-            double r_out = r_out_row * rows.size();
-            double in_kmers_adj = in_kmers_adj_row * rows.size();
-            double out_kmers_adj = out_kmers_adj_row * rows.size();
-
-            int64_t n = in_sum + out_sum;
-
-            double lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-            auto get_pmf = [&](int64_t s) {
-                int64_t t = n - s;
-                double rs = r_in + s;
-                double rt = r_out + t;
-                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
-            };
-
-            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
-
-            // we want all s s.t. | s/in - (n-s)/out | >= d, so
-            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
-            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
-            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
-            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
-            double factor = 1.0 / in_kmers_adj + 1.0 / out_kmers_adj;
-            double lower_d = (static_cast<double>(n) / out_kmers_adj - d) / factor;
-            double upper_d = (d + static_cast<double>(n) / out_kmers_adj) / factor;
-
-            // correct for floating-point errors
-            if (abs(lower_d - round(lower_d)) < 1e-10)
-                lower_d = round(lower_d);
-
-            if (abs(upper_d - round(upper_d)) < 1e-10)
-                upper_d = round(upper_d);
-
-            int64_t lower = floor(lower_d);
-            int64_t upper = ceil(upper_d);
-
-            assert(upper >= lower);
-            assert(d == 0 || upper > lower);
-            assert(in_sum <= lower || in_sum >= upper);
-
-            double d_0 = static_cast<double>(n) / out_kmers_adj;
-            double d_n = static_cast<double>(n) / in_kmers_adj;
-            assert(d_0 >= d || d_n >= d);
-
-            assert(d_0 < d || 0 <= lower || 0 >= upper);
-            assert(d_n < d || n <= lower || n >= upper);
-
-            double p_min = 0;
-            if (d_0 > d_n) {
-                p_min = get_pmf(0);
-            } else if (d_0 < d_n) {
-                p_min = get_pmf(n);
-            } else {
-                p_min = get_pmf(0) + get_pmf(n);
-            }
-
-            double pval = 0;
-            if (upper <= 0 || lower >= n) {
-                pval = 1.0;
-            } else {
-                for (int64_t s = 0; s <= lower; ++s)
-                    pval += get_pmf(s);
-
-                for (int64_t s = upper + (upper == lower); s <= n; ++s)
-                    pval += get_pmf(s);
-            }
-
-            if (p_min > pval) {
-                common::logger->error("pmin fail\t{} > {}\t{}\t{},{}", p_min, pval, n, lower, upper);
-            }
-
-            if (pval >= 1.1) {
-                common::logger->error("{} >= 1.1\t{}\t{},{}\t{},{}", pval, p_min, in_sum, out_sum, lower, upper);
+            if (pval >= 1.1)
                 throw std::runtime_error("pval fail");
-            }
 
             return std::make_tuple(std::min(pval, 1.0),
                                    static_cast<double>(in_sum),
@@ -1302,8 +1059,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (config.test_type != "notest") {
                 std::lock_guard<std::mutex> lock(pval_mu);
                 auto &bucket = m[k];
-                // ++bucket.first;
-                bucket.first += path.size();
+                ++bucket.first;
                 for (size_t i = 0; i < path.size(); ++i) {
                     bucket.second.emplace_back(path[i]);
                     pvals[path[i]] = bit_cast<uint64_t>(pval);
