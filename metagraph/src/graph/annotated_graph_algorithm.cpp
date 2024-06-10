@@ -1038,7 +1038,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (count_in + count_out < config.min_count
+            if (count_in + count_out < config.min_recurrence
                     || count_in < config.min_in_recurrence
                     || count_out < config.min_out_recurrence
                     || count_in > config.max_in_recurrence
