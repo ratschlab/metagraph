@@ -54,7 +54,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
     diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
     diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
-    diff_config.test_type = experiment.get("test_type", "brunner_munzel").asString();
+    diff_config.test_type = experiment.get("test_type", "nbinom_exact").asString();
     diff_config.filter = experiment.get("filter", true).asBool();
     diff_config.clean = experiment.get("clean", false).asBool();
     diff_config.min_count = experiment.get("min_count", 0).asUInt64();
@@ -213,15 +213,40 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto filenames = (config->infbase_annotators.size() > 1) ? config->infbase_annotators : config->fnames;
 
-            auto [ingraph, outgraph, pvals, tmp_file] = graph::mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(graph_ptr,
+            std::shared_ptr<DeBruijnGraph> ingraph;
+            std::shared_ptr<DeBruijnGraph> outgraph;
+
+            if (diff_config.test_by_unitig) {
+                auto [cur_ingraph, cur_outgraph, pvals, tmp_file] =
+                    graph::mask_nodes_by_label_dual<std::vector<uint64_t>>(graph_ptr,
                                         filenames,
                                         foreground_labels,
                                         background_labels,
                                         diff_config, num_threads,
                                         config->tmp_dir,
                                         config->parallel_nodes);
+                std::swap(ingraph, cur_ingraph);
+                std::swap(outgraph, cur_outgraph);
 
-            {
+                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                for (uint64_t pval : pvals) {
+                    static_assert(sizeof(double) == sizeof(pval));
+                    double pval_d;
+                    memcpy(&pval_d, &pval, sizeof(pval));
+                    fout_all << pval_d << "\n";
+                }
+            } else {
+                auto [cur_ingraph, cur_outgraph, pvals, tmp_file] =
+                    graph::mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(graph_ptr,
+                                        filenames,
+                                        foreground_labels,
+                                        background_labels,
+                                        diff_config, num_threads,
+                                        config->tmp_dir,
+                                        config->parallel_nodes);
+                std::swap(ingraph, cur_ingraph);
+                std::swap(outgraph, cur_outgraph);
+
                 std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
                 for (uint64_t pval : pvals) {
                     static_assert(sizeof(double) == sizeof(pval));

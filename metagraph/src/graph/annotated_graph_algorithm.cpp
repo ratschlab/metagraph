@@ -70,30 +70,48 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_threads,
                          std::filesystem::path tmp_dir,
                          size_t num_parallel_files) {
-    using ValuesContainer = sdsl::int_vector_buffer<>;
-
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
     size_t total_labels = labels_in.size() + labels_out.size();
     std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
-    std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
     std::vector<bool> groups(total_labels);
 
-    annot::ColumnCompressed<>::load_columns_and_values(
-        files,
-        [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
-            groups[offset] = labels_out.count(label);
-            columns_all[offset].reset(column.release());
-            column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
-        },
-        num_parallel_files
-    );
+    if (config.test_by_unitig) {
+        using ValuesContainer = sdsl::int_vector<>;
+        std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
+        annot::ColumnCompressed<>::load_columns_and_values(
+            files,
+            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
+                groups[offset] = labels_out.count(label);
+                columns_all[offset].reset(column.release());
+                column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
+            },
+            num_parallel_files
+        );
 
-    return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
-        graph_ptr, columns_all, column_values_all, groups,
-        config, num_threads, tmp_dir, num_parallel_files, true
-    );
+        return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
+            graph_ptr, columns_all, column_values_all, groups,
+            config, num_threads, tmp_dir, num_parallel_files, true
+        );
+    } else {
+        using ValuesContainer = sdsl::int_vector_buffer<>;
+        std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
+        annot::ColumnCompressed<>::load_columns_and_values(
+            files,
+            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
+                groups[offset] = labels_out.count(label);
+                columns_all[offset].reset(column.release());
+                column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
+            },
+            num_parallel_files
+        );
+
+        return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
+            graph_ptr, columns_all, column_values_all, groups,
+            config, num_threads, tmp_dir, num_parallel_files, true
+        );
+    }
 }
 
 template
@@ -142,7 +160,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         max_width = std::max(max_width, col_vals->width());
     }
 
-    sdsl::bit_vector ignored(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), false);
+    sdsl::bit_vector kept(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
 
     std::vector<uint64_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
@@ -195,12 +213,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return;
             }
 
-            set_bit(ignored.data(), row_i, parallel, MO_RELAXED);
+            unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
         });
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 
-    double nelem = ignored.size() - sdsl::util::cnt_one_bits(ignored);
+    double nelem = sdsl::util::cnt_one_bits(kept);
 
     common::logger->trace("Computing aggregate statistics");
     std::mutex agg_mu;
@@ -232,8 +250,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             vals.reserve(num_vals);
 
         column.call_ones([&](uint64_t row_i) {
-            if (!ignored[row_i]) {
-                if (uint64_t c = adjust_count(column_values_all.size() ? (*column_values_all[j])[i] : 1, j, row_i)) {
+            if (kept[row_i]) {
+                if (uint64_t c = column_values_all.size() ? (*column_values_all[j])[i] : 1) {
+                // if (uint64_t c = adjust_count(column_values_all.size() ? (*column_values_all[j])[i] : 1, j, row_i)) {
                     max_obs_val = std::max(max_obs_val, c);
                     sum += c;
                     sum_of_squares += c * c;
@@ -287,9 +306,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         pvals.push_back(nullpval);
     }
 
-    VectorMap<size_t, std::vector<uint64_t>> m;
+    VectorMap<size_t, std::pair<size_t, std::vector<uint64_t>>> m;
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
+    std::function<RowStats(const std::vector<PairContainer>&)> compute_pval_unitig;
 
     if (config.test_type == "poisson_exact") {
         compute_pval = [&](const auto &row) {
@@ -304,6 +324,89 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     out_sum += c;
                 } else {
                     in_sum += c;
+                }
+            }
+
+            int64_t n = in_sum + out_sum;
+            double p = static_cast<double>(in_kmers) / total_kmers;
+
+            auto bdist = boost::math::binomial(n, p);
+            double d = abs(static_cast<double>(in_sum) / in_kmers - static_cast<double>(out_sum) / out_kmers);
+
+            // we want all s s.t. | s/in - (n-s)/out | >= d, so
+            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
+            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
+            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
+            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
+            double factor = 1.0 / in_kmers + 1.0 / out_kmers;
+            double lower_d = (static_cast<double>(n) / out_kmers - d) / factor;
+            double upper_d = (d + static_cast<double>(n) / out_kmers) / factor;
+
+            // correct for floating-point errors
+            if (abs(lower_d - round(lower_d)) < 1e-10)
+                lower_d = round(lower_d);
+
+            if (abs(upper_d - round(upper_d)) < 1e-10)
+                upper_d = round(upper_d);
+
+            int64_t lower = floor(lower_d);
+            int64_t upper = ceil(upper_d);
+
+            assert(upper >= lower);
+            assert(d == 0 || upper > lower);
+            assert(in_sum <= lower || in_sum >= upper);
+
+            double d_0 = static_cast<double>(n) / out_kmers;
+            double d_n = static_cast<double>(n) / in_kmers;
+            assert(d_0 >= d || d_n >= d);
+
+            assert(d_0 < d || 0 <= lower || 0 >= upper);
+            assert(d_n < d || n <= lower || n >= upper);
+
+            double p_min = 0;
+            if (d_0 > d_n) {
+                p_min = boost::math::pdf(bdist, 0);
+            } else if (d_0 < d_n) {
+                p_min = boost::math::pdf(bdist, n);
+            } else {
+                p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
+            }
+
+            double pval = 0;
+            if (upper <= 0 || lower >= n) {
+                pval = 1.0;
+            } else {
+                if (lower >= 0)
+                    pval += boost::math::cdf(bdist, lower);
+
+                if (upper <= n)
+                    pval += boost::math::cdf(boost::math::complement(bdist, upper - 1 + (upper == lower)));
+            }
+
+            if (pval > 1.0) {
+                common::logger->error("{} > 1.0\t{}\t{},{}", pval, p_min, in_sum, out_sum);
+                throw std::runtime_error("pval fail");
+            }
+
+            return std::make_tuple(pval,
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
+                                   p_min);
+        };
+
+        compute_pval_unitig = [&](const auto &rows) {
+            if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto &row : rows) {
+                for (const auto &[j, c] : row) {
+                    if (groups[j]) {
+                        out_sum += c;
+                    } else {
+                        in_sum += c;
+                    }
                 }
             }
 
@@ -555,7 +658,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting negative binomial distributions");
-        auto get_rp = [&](double mu, double var, const auto &hist, double f = 1.0) {
+        auto get_rp = [&](size_t j, double mu, double var, const auto &hist, double f = 1.0) {
+            double var_orig = var;
+            var = std::max(var, mu + 0.1);
+            double r_guess = f * f * mu * mu / (var - mu * f);
+            common::logger->trace("{}: initial guess:\tmu: {}\tvar: {}\tr: {}\tp: {}\t",
+                                  j, mu, var_orig, r_guess, mu / var);
             double r = boost::math::tools::newton_raphson_iterate([&](double r) {
                 double dl = nelem * (log(r) - log(r + mu * f) - boost::math::digamma(r));
                 double ddl = nelem * (1.0 / r - 1.0 / (r + mu * f) - boost::math::trigamma(r));
@@ -564,7 +672,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     ddl += boost::math::trigamma(k * f + r) * c;
                 }
                 return std::make_pair(dl, ddl);
-            }, f * f * mu * mu / (var - mu * f), std::numeric_limits<double>::min(), f * mu * nelem, 30);
+            }, r_guess, std::numeric_limits<double>::min(), f * mu * nelem, 30);
 
             return std::make_pair(r, r / (r + mu * f));
         };
@@ -581,15 +689,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (column_values_all.size()) {
                 const auto &column_values = *column_values_all[j];
                 column.call_ones([&](uint64_t row_i) {
-                    if (!ignored[row_i])
-                        ++hist[adjust_count(column_values[i], j, row_i)];
+                    if (kept[row_i])
+                        ++hist[column_values[i]];
+                        // ++hist[adjust_count(column_values[i], j, row_i)];
 
                     ++i;
                 });
             } else {
                 column.call_ones([&](uint64_t row_i) {
-                    if (!ignored[row_i])
-                        ++hist[adjust_count(1, j, row_i)];
+                    if (kept[row_i])
+                        ++hist[1];
+                        // ++hist[adjust_count(1, j, row_i)];
 
                     ++i;
                 });
@@ -599,7 +709,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu = s / nelem;
             double mu2 = mu * mu;
             double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
-            nb_params[j] = get_rp(mu, var, hist);
+            nb_params[j] = get_rp(j, mu, var, hist);
 
             target_scale[j] = total_kmers / 2.0 / sums[j];
             if (groups[j]) {
@@ -740,6 +850,104 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     in_sum += count_maps[j].find(c)->second.first;
                 }
             }
+
+            int64_t n = in_sum + out_sum;
+
+            double lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+            auto get_pmf = [&](int64_t s) {
+                int64_t t = n - s;
+                double rs = r_in + s;
+                double rt = r_out + t;
+                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
+            };
+
+            double d = abs(static_cast<double>(in_sum) / in_kmers_adj - static_cast<double>(out_sum) / out_kmers_adj);
+
+            // we want all s s.t. | s/in - (n-s)/out | >= d, so
+            // s/in - (n-s)/out >= d || (n-s)/out - s/in >= d
+            // s/in - n/out + s/out >= d || n/out - s/out - s/in >= d
+            // s/in + s/out >= d + n/out || n/out - d >= s/in + s/out
+            // s >= (d + n/out) / (1/in + 1/out) || s <= (n/out - d) / (1/in + 1/out)
+            double factor = 1.0 / in_kmers_adj + 1.0 / out_kmers_adj;
+            double lower_d = (static_cast<double>(n) / out_kmers_adj - d) / factor;
+            double upper_d = (d + static_cast<double>(n) / out_kmers_adj) / factor;
+
+            // correct for floating-point errors
+            if (abs(lower_d - round(lower_d)) < 1e-10)
+                lower_d = round(lower_d);
+
+            if (abs(upper_d - round(upper_d)) < 1e-10)
+                upper_d = round(upper_d);
+
+            int64_t lower = floor(lower_d);
+            int64_t upper = ceil(upper_d);
+
+            assert(upper >= lower);
+            assert(d == 0 || upper > lower);
+            assert(in_sum <= lower || in_sum >= upper);
+
+            double d_0 = static_cast<double>(n) / out_kmers_adj;
+            double d_n = static_cast<double>(n) / in_kmers_adj;
+            assert(d_0 >= d || d_n >= d);
+
+            assert(d_0 < d || 0 <= lower || 0 >= upper);
+            assert(d_n < d || n <= lower || n >= upper);
+
+            double p_min = 0;
+            if (d_0 > d_n) {
+                p_min = get_pmf(0);
+            } else if (d_0 < d_n) {
+                p_min = get_pmf(n);
+            } else {
+                p_min = get_pmf(0) + get_pmf(n);
+            }
+
+            double pval = 0;
+            if (upper <= 0 || lower >= n) {
+                pval = 1.0;
+            } else {
+                for (int64_t s = 0; s <= lower; ++s)
+                    pval += get_pmf(s);
+
+                for (int64_t s = upper + (upper == lower); s <= n; ++s)
+                    pval += get_pmf(s);
+            }
+
+            if (p_min > pval) {
+                common::logger->error("pmin fail\t{} > {}\t{}\t{},{}", p_min, pval, n, lower, upper);
+            }
+
+            if (pval >= 1.1) {
+                common::logger->error("{} >= 1.1\t{}\t{},{}\t{},{}", pval, p_min, in_sum, out_sum, lower, upper);
+                throw std::runtime_error("pval fail");
+            }
+
+            return std::make_tuple(std::min(pval, 1.0),
+                                   static_cast<double>(in_sum),
+                                   static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
+                                   std::min(p_min, 1.0));
+        };
+
+        compute_pval_unitig = [&,r_in_row=r_in,r_out_row=r_out,count_maps,in_kmers_adj_row=in_kmers_adj,out_kmers_adj_row=out_kmers_adj](const auto &rows) {
+            if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
+                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
+
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto &row : rows) {
+                for (const auto &[j, c] : row) {
+                    if (groups[j]) {
+                        out_sum += count_maps[j].find(c)->second.first;
+                    } else {
+                        in_sum += count_maps[j].find(c)->second.first;
+                    }
+                }
+            }
+
+            double r_in = r_in_row * rows.size();
+            double r_out = r_out_row * rows.size();
+            double in_kmers_adj = in_kmers_adj_row * rows.size();
+            double out_kmers_adj = out_kmers_adj_row * rows.size();
 
             int64_t n = in_sum + out_sum;
 
@@ -1016,84 +1224,175 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::mutex pval_mu;
     std::atomic_thread_fence(std::memory_order_release);
 
-    utils::call_rows<std::unique_ptr<const bit_vector>,
-                     std::unique_ptr<const ValuesContainer>,
-                     PairContainer, true>(columns_all, column_values_all,
-                                          [&](uint64_t row_i, const auto &raw_row, size_t batch_id) {
-        if (ex)
-            return;
+    if (config.test_by_unitig) {
+        MaskedDeBruijnGraph clean_masked_graph(
+            graph_ptr,
+            [&](node_index node) {
+                return node != DeBruijnGraph::npos
+                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
+            },
+            true,
+            is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+        );
 
-        PairContainer row;
-        if (!ignored[row_i]) {
-            size_t count_in = 0;
-            size_t count_out = 0;
-            for (const auto &[j, raw_c] : raw_row) {
-                if (uint64_t c = adjust_count(raw_c, j, row_i)) {
-                    row.emplace_back(j, c);
-                    if (groups[j]) {
-                        ++count_out;
-                    } else {
-                        ++count_in;
+        clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
+            if (ex)
+                return;
+
+            std::vector<PairContainer> rows;
+            rows.reserve(path.size());
+            for (node_index node : path) {
+                auto &row = rows.emplace_back();
+                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    const auto &col = *columns_all[j];
+                    const auto &col_vals = *column_values_all[j];
+                    if (uint64_t r = col.conditional_rank1(row_i)) {
+                        row.emplace_back(j, col_vals[r - 1]);
+                        // uint64_t raw_c = col_vals[r - 1];
+                        // if (uint64_t c = adjust_count(raw_c, j, row_i))
+                            // row.emplace_back(j, c);
                     }
                 }
             }
 
-            if (count_in + count_out < config.min_recurrence
-                    || count_in < config.min_in_recurrence
-                    || count_out < config.min_out_recurrence
-                    || count_in > config.max_in_recurrence
-                    || count_out > config.max_out_recurrence)
-                row.clear();
-        }
-
-        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-
-        double pval;
-        double in_stat;
-        double out_stat;
-        double pval_min;
-        try {
-            std::tie(pval, in_stat, out_stat, pval_min) = compute_pval(row);
-        } catch (...) {
-            std::lock_guard<std::mutex> lock(pval_mu);
-            ex = std::current_exception();
-            return;
-        }
-
-        if (pval >= 1.1)
-            return;
-
-        bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
-        bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
-        uint64_t k = std::numeric_limits<uint64_t>::max();
-
-        if (pval_min - pval > 1e-10) {
-            common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
-            throw std::runtime_error("Test failed");
-        }
-
-        if (pval_min >= 0.05) {
-            k = 0;
-        } else if (pval_min > 0) {
-            double lkd = log2(0.05) - log2(pval_min);
-            if (lkd <= 64)
-                k = pow(2.0, lkd);
-
-            if (k == 0) {
-                common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
-                throw std::runtime_error("Min failed");
+            double pval;
+            double in_stat;
+            double out_stat;
+            double pval_min;
+            try {
+                std::tie(pval, in_stat, out_stat, pval_min) = compute_pval_unitig(rows);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                ex = std::current_exception();
+                return;
             }
-        }
 
-        if (in_kmer != out_kmer && pval < 0.05)
-            set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
+            if (pval >= 1.1)
+                return;
 
-        if (config.test_type != "notest") {
-            std::lock_guard<std::mutex> lock(pval_mu);
-            m[k].emplace_back(node);
-            pvals[node] = bit_cast<uint64_t>(pval);
-        }
-    });
+            bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
+            bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
+            uint64_t k = std::numeric_limits<uint64_t>::max();
+
+            if (pval_min - pval > 1e-10) {
+                common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
+                throw std::runtime_error("Test failed");
+            }
+
+            if (pval_min >= 0.05) {
+                k = 0;
+            } else if (pval_min > 0) {
+                double lkd = log2(0.05) - log2(pval_min);
+                if (lkd <= 64)
+                    k = pow(2.0, lkd);
+
+                if (k == 0) {
+                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                    throw std::runtime_error("Min failed");
+                }
+            }
+
+            if (in_kmer != out_kmer && pval < 0.05) {
+                for (size_t i = 0; i < path.size(); ++i) {
+                    set_bit((in_kmer ? indicator_in : indicator_out).data(), path[i], parallel, MO_RELAXED);
+                }
+            }
+
+            if (config.test_type != "notest") {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                auto &bucket = m[k];
+                // ++bucket.first;
+                bucket.first += path.size();
+                for (size_t i = 0; i < path.size(); ++i) {
+                    bucket.second.emplace_back(path[i]);
+                    pvals[path[i]] = bit_cast<uint64_t>(pval);
+                }
+            }
+        }, num_threads);
+    } else {
+        utils::call_rows<std::unique_ptr<const bit_vector>,
+                         std::unique_ptr<const ValuesContainer>,
+                         PairContainer, true>(columns_all, column_values_all,
+                                              [&](uint64_t row_i, const auto &raw_row, size_t batch_id) {
+            if (ex)
+                return;
+
+            PairContainer row;
+            if (kept[row_i]) {
+                size_t count_in = 0;
+                size_t count_out = 0;
+                for (const auto &[j, raw_c] : raw_row) {
+                    if (uint64_t c = raw_c) {
+                    // if (uint64_t c = adjust_count(raw_c, j, row_i)) {
+                        row.emplace_back(j, c);
+                        if (groups[j]) {
+                            ++count_out;
+                        } else {
+                            ++count_in;
+                        }
+                    }
+                }
+
+                if (count_in + count_out < config.min_recurrence
+                        || count_in < config.min_in_recurrence
+                        || count_out < config.min_out_recurrence
+                        || count_in > config.max_in_recurrence
+                        || count_out > config.max_out_recurrence)
+                    row.clear();
+            }
+
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+
+            double pval;
+            double in_stat;
+            double out_stat;
+            double pval_min;
+            try {
+                std::tie(pval, in_stat, out_stat, pval_min) = compute_pval(row);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                ex = std::current_exception();
+                return;
+            }
+
+            if (pval >= 1.1)
+                return;
+
+            bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
+            bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
+            uint64_t k = std::numeric_limits<uint64_t>::max();
+
+            if (pval_min - pval > 1e-10) {
+                common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
+                throw std::runtime_error("Test failed");
+            }
+
+            if (pval_min >= 0.05) {
+                k = 0;
+            } else if (pval_min > 0) {
+                double lkd = log2(0.05) - log2(pval_min);
+                if (lkd <= 64)
+                    k = pow(2.0, lkd);
+
+                if (k == 0) {
+                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                    throw std::runtime_error("Min failed");
+                }
+            }
+
+            if (in_kmer != out_kmer && pval < 0.05)
+                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
+
+            if (config.test_type != "notest") {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                auto &bucket = m[k];
+                ++bucket.first;
+                bucket.second.emplace_back(node);
+                pvals[node] = bit_cast<uint64_t>(pval);
+            }
+        });
+    }
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -1112,11 +1411,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (config.test_type != "notest") {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
-        auto m_data = const_cast<std::vector<std::pair<size_t, std::vector<uint64_t>>>&&>(m.values_container());
+        auto m_data = const_cast<std::vector<std::pair<size_t, std::pair<size_t, std::vector<uint64_t>>>>&&>(m.values_container());
 
         std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
         size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                    [](size_t sum, const auto &a) { return sum + a.second.size(); });
+                                     [](size_t sum, const auto &a) { return sum + a.second.first; });
         common::logger->trace("Performed {}/{} tests", acc, nelem);
         size_t total_tests = acc;
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
@@ -1126,7 +1425,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t k = 0;
             size_t last_k = 0;
             for ( ; begin != m_data.end(); ++begin) {
-                const auto &[cur_k, bucket] = *begin;
+                const auto &[cur_k, s_bucket] = *begin;
+                const auto &[s, bucket] = s_bucket;
                 common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
                 if (acc <= cur_k) {
                     k = std::max(acc, last_k + 1);
@@ -1134,10 +1434,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 last_k = cur_k;
-                acc -= bucket.size();
+                acc -= s;
             }
 
             if (k == 0) {
+                // TODO: fix for unitig
                 common::logger->trace("Falling back to Benjamini-Yekutieli");
                 VectorMap<double, double> pval_map;
                 for (uint64_t p_u : pvals) {
@@ -1165,7 +1466,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             } else {
                 common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
                 for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
-                    const auto &[cur_k, bucket] = *jt;
+                    const auto &[cur_k, s_bucket] = *jt;
+                    const auto &[s, bucket] = s_bucket;
                     for (uint64_t i : bucket) {
                         if (jt < begin || bit_cast<double, uint64_t>(pvals[i]) * k >= 0.05) {
                             indicator_in[i] = false;
