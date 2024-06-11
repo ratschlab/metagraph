@@ -429,9 +429,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
-        auto get_rp = [&](size_t j, double mu, double var, const auto &hist) {
+        auto get_rp = [&](size_t j, double mu, double var, const auto &hist, double f = 1.0) {
             double var_orig = var;
             var = std::max(var, mu + 0.1);
+            mu *= f;
+            var *= f * f;
+
             double r_guess = mu * mu / (var - mu);
             double p_guess = mu / var;
             double r = r_guess;
@@ -440,8 +443,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
                     double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
                     for (const auto &[k, c] : hist) {
-                        dl += boost::math::digamma(k + r) * c;
-                        ddl += boost::math::trigamma(k + r) * c;
+                        dl += boost::math::digamma(f * k + r) * c;
+                        ddl += boost::math::trigamma(f * k + r) * c;
                     }
                     return std::make_pair(dl, ddl);
                 }, r_guess, std::numeric_limits<double>::min(), mu * nelem, 30);
@@ -452,13 +455,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double p = r / (r + mu);
-            common::logger->trace("{}: mu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
-                                  j, mu, var_orig, r_guess, p_guess, r, p);
+            common::logger->trace("{}: scale: {}\tmu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
+                                  j, f, mu, var_orig, r_guess, p_guess, r, p);
 
             return std::make_pair(r, p);
         };
 
+        common::logger->trace("Scaling distributions");
+        // geometric mean
+        double target_sum = 0.0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            target_sum += log(static_cast<double>(sums[j]));
+        }
+        target_sum = exp(target_sum / groups.size());
+
         std::vector<std::pair<double, double>> nb_params(groups.size());
+        std::vector<std::pair<double, double>> scaled_nb_params(groups.size());
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -468,22 +480,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             double var = static_cast<double>(config.test_by_unitig ? sums_of_squares_unitigs[j] : sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(j, mu, var, hist);
+            scaled_nb_params[j] = get_rp(j, mu, var, hist, target_sum / s);
         }
 
-        // geometric mean
+        common::logger->trace("Finding common p");
         double p_guess = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            p_guess += log(nb_params[j].second);
+            p_guess += log(scaled_nb_params[j].second);
         }
         p_guess = exp(p_guess / groups.size());
 
-        common::logger->trace("Fitting common p");
-        std::vector<double> r_maps(groups.size(), 1.0);
         double target_p = p_guess;
-        double r_map_base = target_p / nelem / (1 - target_p);
-        for (size_t j = 0; j < groups.size(); ++j) {
-            r_maps[j] = r_map_base * sums[j];
-        }
+        double r_map_base = target_p / nelem / (1 - target_p) * target_sum;
+        std::vector<double> r_maps(groups.size(), r_map_base);
+
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
