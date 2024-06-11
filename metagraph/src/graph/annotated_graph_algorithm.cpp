@@ -305,7 +305,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     sdsl::bit_vector indicator_in(graph_ptr->max_index() + 1, false);
     sdsl::bit_vector indicator_out(graph_ptr->max_index() + 1, false);
 
-    VectorMap<size_t, std::pair<size_t, std::vector<uint64_t>>> m;
+    VectorMap<size_t, size_t> m;
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
     std::function<RowStats(const std::vector<PairContainer>&)> compute_pval_unitig;
@@ -794,10 +794,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::runtime_error("Test failed");
             }
 
-            if (pval_min >= 0.05) {
+            if (pval_min >= config.family_wise_error_rate) {
                 k = 0;
             } else if (pval_min > 0) {
-                double lkd = log2(0.05) - log2(pval_min);
+                double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
                 if (lkd <= 64)
                     k = pow(2.0, lkd);
 
@@ -807,7 +807,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (in_kmer != out_kmer && pval < 0.05) {
+            if (in_kmer != out_kmer && pval < config.family_wise_error_rate) {
                 for (size_t i = 0; i < path.size(); ++i) {
                     set_bit((in_kmer ? indicator_in : indicator_out).data(), path[i], parallel, MO_RELAXED);
                 }
@@ -815,10 +815,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             if (config.test_type != "notest") {
                 std::lock_guard<std::mutex> lock(pval_mu);
-                auto &bucket = m[k];
-                ++bucket.first;
+                ++m[k];
                 for (size_t i = 0; i < path.size(); ++i) {
-                    bucket.second.emplace_back(path[i]);
                     pvals[path[i]] = bit_cast<uint64_t>(pval);
                 }
             }
@@ -880,10 +878,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 throw std::runtime_error("Test failed");
             }
 
-            if (pval_min >= 0.05) {
+            if (pval_min >= config.family_wise_error_rate) {
                 k = 0;
             } else if (pval_min > 0) {
-                double lkd = log2(0.05) - log2(pval_min);
+                double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
                 if (lkd <= 64)
                     k = pow(2.0, lkd);
 
@@ -893,14 +891,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (in_kmer != out_kmer && pval < 0.05)
+            if (in_kmer != out_kmer && pval < config.family_wise_error_rate)
                 set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
 
             if (config.test_type != "notest") {
                 std::lock_guard<std::mutex> lock(pval_mu);
-                auto &bucket = m[k];
-                ++bucket.first;
-                bucket.second.emplace_back(node);
+                ++m[k];
                 pvals[node] = bit_cast<uint64_t>(pval);
             }
         });
@@ -923,22 +919,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (config.test_type != "notest") {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
-        auto m_data = const_cast<std::vector<std::pair<size_t, std::pair<size_t, std::vector<uint64_t>>>>&&>(m.values_container());
+        auto m_data = const_cast<std::vector<std::pair<size_t, size_t>>&&>(m.values_container());
 
         std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
         size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                     [](size_t sum, const auto &a) { return sum + a.second.first; });
+                                     [](size_t sum, const auto &a) { return sum + a.second; });
         common::logger->trace("Performed {}/{} tests", acc, nelem);
         size_t total_tests = acc;
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
         if (total_sig) {
-            auto begin = m_data.begin();
             size_t k = 0;
             size_t last_k = 0;
-            for ( ; begin != m_data.end(); ++begin) {
-                const auto &[cur_k, s_bucket] = *begin;
-                const auto &[s, bucket] = s_bucket;
+            for (const auto &[cur_k, s] : m_data) {
                 common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
                 if (acc <= cur_k) {
                     k = std::max(acc, last_k + 1);
@@ -970,21 +963,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
                 for (size_t i = 0; i < pvals.size(); ++i) {
                     double p = bit_cast<double, uint64_t>(pvals[i]);
-                    if (p < 0.05 && p * pval_map[p] >= 0.05) {
+                    if (p < config.family_wise_error_rate && p * pval_map[p] >= config.family_wise_error_rate) {
                         indicator_in[i] = false;
                         indicator_out[i] = false;
                     }
                 }
             } else {
-                common::logger->trace("k: {}\talpha_corr: {}", k, 0.05 / k);
-                for (auto jt = m_data.begin(); jt != m_data.end(); ++jt) {
-                    const auto &[cur_k, s_bucket] = *jt;
-                    const auto &[s, bucket] = s_bucket;
-                    for (uint64_t i : bucket) {
-                        if (jt < begin || bit_cast<double, uint64_t>(pvals[i]) * k >= 0.05) {
-                            indicator_in[i] = false;
-                            indicator_out[i] = false;
-                        }
+                common::logger->trace("k: {}\talpha_corr: {}", k, config.family_wise_error_rate / k);
+                for (size_t i = 0; i < indicator_in.size(); ++i) {
+                    double p = bit_cast<double, uint64_t>(pvals[i]);
+                    if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
+                        indicator_in[i] = false;
+                        indicator_out[i] = false;
                     }
                 }
             }
