@@ -471,13 +471,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         // geometric mean
-        double target_sum = 0.0;
         double p_guess = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            target_sum += log(static_cast<double>(sums[j]));
             p_guess += log(nb_params[j].second);
         }
-        target_sum = exp(target_sum / groups.size());
         p_guess = exp(p_guess / groups.size());
 
         common::logger->trace("Fitting common p");
