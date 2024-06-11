@@ -9,21 +9,17 @@
 #include <boost/math/distributions/poisson.hpp>
 #include <boost/math/distributions/binomial.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
-#include <boost/math/statistics/univariate_statistics.hpp>
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
-#include <boost/math/special_functions/beta.hpp>
 
 #include "common/logger.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/vector_map.hpp"
 #include "common/vectors/transpose.hpp"
 #include "graph/representation/masked_graph.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/graph_cleaning.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "differential_tests.hpp"
 
 namespace mtg {
 namespace graph {
