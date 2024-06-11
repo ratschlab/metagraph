@@ -15,7 +15,6 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
-#include "graph/representation/hash/dbg_hash_fast.hpp"
 
 namespace mtg {
 namespace cli {
@@ -86,42 +85,7 @@ void map_sequences_in_file(const std::string &file,
 
     Timer data_reading_timer;
 
-    sdsl::bit_vector visited;
-    size_t num_testable_kmers = graph.max_index();
-    const auto *graph_ptr = &graph;
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-
-    if (canonical)
-        graph_ptr = &canonical->get_graph();
-
-    if (config.count_testable_kmers) {
-        if (const auto *succ = dynamic_cast<const DBGSuccinct*>(graph_ptr)) {
-            visited = succ->get_boss().mark_all_dummy_edges(get_num_threads());
-            num_testable_kmers = visited.size() - sdsl::util::cnt_one_bits(visited);
-        } else {
-            visited = sdsl::bit_vector(graph_ptr->max_index(), false);
-            num_testable_kmers = visited.size();
-        }
-    }
-
-    size_t total_kmers = num_testable_kmers;
-
     seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        if (config.count_testable_kmers) {
-            auto nodes = canonical
-                ? map_to_nodes(graph, read_stream->seq.s)
-                : map_to_nodes_sequentially(graph, read_stream->seq.s);
-
-            for (size_t i = 0; i + 1 < nodes.size(); ++i) {
-                if (!visited[nodes[i + 1]])
-                    --num_testable_kmers;
-
-                visited[nodes[i + 1]] = true;
-            }
-
-            return;
-        }
-
         logger->trace("Sequence: {}", read_stream->seq.s);
 
         if (config.query_presence
@@ -209,11 +173,6 @@ void map_sequences_in_file(const std::string &file,
         }
 
     }, config.forward_and_reverse);
-
-    if (config.count_testable_kmers) {
-        logger->info("Num k-mers:\t{}\tNum testable k-mers:\t{}",
-                     total_kmers, num_testable_kmers);
-    }
 
     logger->trace("File {} processed in {} sec, current mem usage: {} MB, total time {} sec",
                   file, data_reading_timer.elapsed(), get_curr_RSS() / 1e6, timer.elapsed());
@@ -355,7 +314,7 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (config->map_sequences || config->count_testable_kmers) {
+    if (config->map_sequences) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
             graph = std::make_shared<CanonicalDBG>(graph);
             logger->trace("Primary graph wrapped into canonical");
