@@ -488,7 +488,7 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {  // TODO Myrthe: QUESTION how does this partial streaming exactly work?
+bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
@@ -774,9 +774,6 @@ void ColumnCompressed<Label>
                 }
                 if (column_values.size() != column->num_set_bits())
                     throw std::ifstream::failure("inconsistent size of the value vector");
-
-//                 for (auto &item: column_values) { std::string out_string = std::to_string(item); out = out + x + ", "; }
-//                    std::cout << out_string << ' ' << std::endl; }// Myrthe: temporary for debugging
 
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),

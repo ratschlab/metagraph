@@ -1,7 +1,6 @@
 #include "stats.hpp"
 
 #include <ips4o/ips4o.hpp>
-#include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
@@ -11,8 +10,6 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
-#include "graph/annotated_dbg.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -387,62 +384,6 @@ int print_stats(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
-
-    if (config->count_testable_kmers) {
-        auto graph = load_critical_dbg(files[0]);
-
-        uint64_t num_testable_kmers = graph->max_index();
-        if (auto dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
-            const auto &boss_graph = dbg_succ->get_boss();
-            uint64_t num_source_dummy_edges
-                = boss_graph.mark_source_dummy_edges(NULL, get_num_threads());
-            uint64_t num_sink_dummy_edges = boss_graph.mark_sink_dummy_edges(NULL);
-            num_testable_kmers -= num_source_dummy_edges + num_sink_dummy_edges;
-        }
-
-        uint64_t total_kmers = num_testable_kmers;
-
-        std::shared_ptr<graph::CanonicalDBG> canonical;
-        if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
-            canonical = std::make_shared<graph::CanonicalDBG>(graph);
-            graph = canonical;
-            logger->trace("Primary graph wrapped into canonical");
-        }
-
-        using ValuesContainer = sdsl::int_vector<>;
-        sdsl::bit_vector visited(graph->max_index(), false);
-        annot::ColumnCompressed<>::load_columns_and_values(config->infbase_annotators,
-            [&](uint64_t, const auto&, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
-                uint64_t rk = 0;
-                ProgressBar progress(column_values.size(),
-                                    "Testing k-mers",
-                                    std::cerr, !common::get_verbose());
-                column->call_ones([&](uint64_t row_i) {
-                    ++progress;
-                    uint64_t cur_count = column_values[rk++];
-                    auto node = graph::AnnotatedDBG::anno_to_graph_index(row_i);
-                    graph->adjacent_outgoing_nodes(node, [&](auto next) {
-                        if (canonical)
-                            next = canonical->get_base_node(next);
-
-                        uint64_t row_j = graph::AnnotatedDBG::graph_to_anno_index(next);
-                        if (uint64_t rk_next = column->conditional_rank1(row_j)) {
-                            uint64_t next_count = column_values[rk_next];
-                            if (cur_count == next_count && !visited[next])
-                                --num_testable_kmers;
-
-                            visited[next] = true;
-                        }
-                    });
-                });
-            }
-        );
-
-        common::logger->info("Total k-mers:\t{}\tNum testable k-mers:\t{}",
-                             total_kmers, num_testable_kmers);
-
-        return 0;
-    }
 
     for (const auto &file : files) {
         if (utils::ends_with(file, ".annodbg")) {
