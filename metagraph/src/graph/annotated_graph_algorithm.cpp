@@ -161,13 +161,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
-    auto adjust_count = [&](uint64_t raw_count, size_t j, uint64_t row_i) -> uint64_t {
-        std::ignore = row_i;
-        return raw_count >= min_counts[j] && raw_count <= check_cutoff[j]
-            ? raw_count
-            : 0;
-    };
-
     if (config.clean && column_values_all.empty())
         common::logger->warn("Can't clean when no counts provided, skipping cleaning");
 
