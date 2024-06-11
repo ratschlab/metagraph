@@ -491,9 +491,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         p_guess = exp(p_guess / groups.size());
 
         double target_p = p_guess;
-        double r_map_base = target_p / nelem / (1 - target_p) * target_sum;
-        std::vector<double> r_maps(groups.size(), r_map_base);
-
+        double r_map = target_p / nelem / (1 - target_p) * target_sum;
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
@@ -504,8 +502,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
-
-            double r_map = r_maps[j];
 
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
                                   j, r, p, r_map, target_p);
