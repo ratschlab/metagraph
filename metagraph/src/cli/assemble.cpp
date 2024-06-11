@@ -44,18 +44,10 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
 
 DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
-    diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
-    diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
-    diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
-    diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
-    diff_config.add_complement = experiment.get("forward_and_reverse", false).asBool();
     diff_config.count_kmers = experiment.get("count_kmers", false).asBool();
     diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
     diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
-    diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
     diff_config.test_type = experiment.get("test_type", "nbinom_exact").asString();
-    diff_config.filter = experiment.get("filter", true).asBool();
     diff_config.clean = experiment.get("clean", false).asBool();
     diff_config.min_count = experiment.get("min_count", 0).asUInt64();
     diff_config.min_recurrence = experiment.get("min_recurrence", 1).asUInt64();
@@ -63,105 +55,12 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.min_out_recurrence = experiment.get("min_out_recurrence", 0).asUInt64();
     diff_config.max_in_recurrence = experiment.get("max_in_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
     diff_config.max_out_recurrence = experiment.get("max_out_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
-    diff_config.num_tests = experiment.get("num_tests", 0).asInt();
     diff_config.assemble_shared = experiment.get("assemble_shared", false).asBool();
-
-
-    logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
-    logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);
-    logger->trace("Per-kmer mask out fraction:\t\t{}", diff_config.label_mask_out_kmer_fraction);
-    logger->trace("Per-unitig mask out fraction:\t\t{}", diff_config.label_mask_out_unitig_fraction);
-    logger->trace("Per-unitig other label fraction:\t{}", diff_config.label_mask_other_unitig_fraction);
-    logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
-    logger->trace("Include k-mer counts if preseadd_complementnt in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
-    logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
-    logger->trace("count_kmers:\t{}", diff_config.count_kmers);
-    logger->trace("Test type:\t{}", diff_config.test_type);
-    logger->trace("Filter:\t{}", diff_config.filter);
-    logger->trace("Min count:\t{}", diff_config.min_count);
-
-
-    // TODO get the folder with the annotation columns from the .json or command, because it is redundant to have to give all of them as an input.
-            //  How to? For all the in_labels and out_labels, collect the folder/<filename>.column.annodbg file and push them in the list of config->infbase_annotators.
-//    config->enumerate_out_sequences;
-//    config->infbase_annotators = ;
-    // but you would still need to match them?
     return diff_config;
 }
 
 typedef std::function<void(const graph::DeBruijnGraph&,
                            const std::string& /* header */)> CallMaskedGraphHeader;
-
-void call_masked_graphs(const AnnotatedDBG &anno_graph,
-                        Config *config,
-                        const CallMaskedGraphHeader &callback) {
-    if (!std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()).get())
-        throw std::runtime_error("Masking only supported for DeBruijnGraph");
-
-    assert(!config->assembly_config_file.empty());
-
-    std::ifstream fin(config->assembly_config_file);
-    if (!fin.good())
-        throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
-
-    size_t num_threads = std::max(1u, get_num_threads());
-
-    Json::Value diff_json;
-    fin >> diff_json;
-
-    for (const Json::Value &group : diff_json["groups"]) {
-        tsl::hopscotch_set<std::string> shared_foreground_labels;
-        tsl::hopscotch_set<std::string> shared_background_labels;
-
-        if (group["shared_labels"]) {
-            for (const Json::Value &in_label : group["shared_labels"]["in"]) {
-                shared_foreground_labels.emplace(in_label.asString());
-            }
-
-            for (const Json::Value &out_label : group["shared_labels"]["out"]) {
-                shared_background_labels.emplace(out_label.asString());
-            }
-
-            check_labels(shared_foreground_labels, anno_graph);
-            check_labels(shared_background_labels, anno_graph);
-        }
-
-        if (!group["experiments"])
-            throw std::runtime_error("Missing experiments in group");
-
-        for (const Json::Value &experiment : group["experiments"]) {
-            tsl::hopscotch_set<std::string> foreground_labels;
-            tsl::hopscotch_set<std::string> background_labels;
-
-            DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
-            diff_config.outfbase = config->outfbase;
-
-            std::string exp_name = experiment["name"].asString()
-                                    + (config->enumerate_out_sequences ? "." : "");
-
-            for (const Json::Value &in_label : experiment["in"]) {
-                foreground_labels.emplace(in_label.asString());
-            }
-
-            for (const Json::Value &out_label : experiment["out"]) {
-                background_labels.emplace(out_label.asString());
-            }
-
-            check_labels(foreground_labels, anno_graph);
-            check_labels(background_labels, anno_graph);
-
-            logger->trace("Running assembly: {}", exp_name);
-
-            callback(*mask_nodes_by_label(anno_graph,
-                                          foreground_labels,
-                                          background_labels,
-                                          shared_foreground_labels,
-                                          shared_background_labels,
-                                          diff_config, num_threads,
-                                          config->parallel_nodes), exp_name);
-        }
-    }
-}
 
 void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         Config *config,
@@ -184,10 +83,6 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     fin >> diff_json;
 
     for (const Json::Value &group : diff_json["groups"]) {
-        if (group["shared_labels"]) {
-            throw std::runtime_error("Shared labels not supported with multiple annotation files");
-        }
-
         if (!group["experiments"])
             throw std::runtime_error("Missing experiments in group");
 
@@ -279,7 +174,6 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         graph_ptr, std::make_unique<bitmap_vector>(std::move(mask)), true,
                         graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
                     );
-                    masked_graph_null->likelihood_ratios = std::move(masked_graph->likelihood_ratios);
                     callback(*masked_graph_null, exp_name + "shared.");
                 }
             }
@@ -311,7 +205,7 @@ int assemble(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    if (config->infbase_annotators.size() || files.size() > 1) {
+    if (config->infbase_annotators.size() > 1 || files.size() > 1) {
         logger->trace("Generating masked graphs...");
         std::mutex write_mutex;
         size_t num_threads = std::max(1u, get_num_threads());
@@ -350,14 +244,8 @@ int assemble(Config *config) {
             }
         };
 
-        if (files.size() > 1 or config->infbase_annotators.size() > 1) { // Checks the infbase_annotators in the case that annotation columns are provided in the commandline using '-a' or '--annotator'
-            config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
-            call_masked_graphs(graph, config, graph_callback); // Does NOT support kmer-counts assembly
-        } else {
-            config->infbase = files.at(0);
-            auto anno_graph = initialize_annotated_dbg(graph, *config);
-            call_masked_graphs(*anno_graph, config, graph_callback); // Does support kmer-counts assembly
-        }
+        config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
+        call_masked_graphs(graph, config, graph_callback);
 
         return 0;
     }

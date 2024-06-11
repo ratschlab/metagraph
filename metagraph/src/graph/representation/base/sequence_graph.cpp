@@ -129,9 +129,6 @@ void call_sequences_from(const DeBruijnGraph &graph,
     std::string sequence;
 
     std::vector<std::pair<node_index, char>> targets;
-    const mtg::graph::MaskedDeBruijnGraph *downcasted_graph = // Create a downcasted graph object, such that the likelihood ratio vector can be accessed.
-            // dynamic_cast<const mtg::graph::MaskedDeBruijnGraph*>(&graph);
-            nullptr;
 
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {
@@ -210,7 +207,6 @@ void call_sequences_from(const DeBruijnGraph &graph,
                         queue.push_back(next); // The queue grows a bit faster compared to the original case.
                         // TODO: make sure that the selected node is not added to the queue --> problems if run on  multiple threads.
                     }
-                    std::ignore = downcasted_graph;
                     // if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
                     //     && downcasted_graph // TODO feature is temporary
                     //     && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood

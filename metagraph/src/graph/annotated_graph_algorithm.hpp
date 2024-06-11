@@ -15,33 +15,14 @@ namespace graph {
 class MaskedDeBruijnGraph;
 
 /**
- * A container for differential assembly parameters. These are:
- * label_mask_in_kmer_fraction: minimum fraction of in-labels which should be
- *                              present for a node to be kept
- * label_mask_in_unitig_fraction: minimum fraction of nodes within a unitig which
- *                                must satisfy the in-label criteria
- * label_mask_out_kmer_fraction: maximum fraction of out-labels which can be
- *                               present in a kept node
- * label_mask_out_unitig_fraction: maximum fraction of nodes within a unitig which
- *                                 can satisfy the out-label criteria
- * label_mask_other_unitig_fraction: maximum fraction of nodes within a unitig which
- *                                   can contain labels not in the in- and out-groups
- * add_complement: also consider the reverse complements of nodes
+ * A container for differential assembly parameters.
  */
 struct DifferentialAssemblyConfig {
-    double label_mask_in_unitig_fraction = 1.0;
-    double label_mask_in_kmer_fraction = 1.0;
-    double label_mask_out_unitig_fraction = 0.0;
-    double label_mask_out_kmer_fraction = 0.0;
-    double label_mask_other_unitig_fraction = 1.0;
-    bool add_complement = false;
-    bool count_kmers = false; // Myrthe
+    bool count_kmers = false;
     bool clean = false;
-    double family_wise_error_rate = 0.05; //Myrthe: differential assembly statistical tests, or the family wise rate for bonferonni or a p-value
-    bool test_by_unitig = false; // Myrthe
-    std::string test_type = "brunner_munzel"; // default is "brunner_munzel", alternatives are: "likelihoodratio", "binary"
-    bool evaluate_assembly = false; // Myrthe temporary : evaluate an assembly
-    bool filter = true;
+    double family_wise_error_rate = 0.05;
+    bool test_by_unitig = false;
+    std::string test_type = "nbinom_exact";
     bool assemble_shared = false;
     uint64_t min_count = 1;
     uint64_t min_recurrence = 1;
@@ -49,42 +30,8 @@ struct DifferentialAssemblyConfig {
     uint64_t min_out_recurrence = 0;
     uint64_t max_in_recurrence = std::numeric_limits<uint64_t>::max();
     uint64_t max_out_recurrence = std::numeric_limits<uint64_t>::max();
-    uint64_t num_tests = 0;
     std::string outfbase;
 };
-
-/**
- * Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
- * return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
- * the parameters specified by config. In round 1, a masked graph is constructed
- * containing the nodes corresponding to labels_in and labels_out, with a vector
- * counting how many of labels_in and labels_out correspond to each node,
- * respectively.
- * In round 2, if any of the sequences of the initial masked graph have the
- * labels in labels_in_round2 or labels_out_round2, or if they have other labels,
- * the count
- * vector is updated accordingly.
- * In round 3, the config rules are used to discard (i.e., mask out) nodes from
- * the masked graph. The resulting graph is returned.
- */
-std::shared_ptr<MaskedDeBruijnGraph>
-mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in_round2,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
-                    const DifferentialAssemblyConfig &config,
-                    size_t num_threads = 1,
-                    size_t num_parallel_files = std::numeric_limits<size_t>::max());
-
-std::shared_ptr<DeBruijnGraph>
-mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                    const std::vector<std::string> &files,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                    const DifferentialAssemblyConfig &config,
-                    size_t num_threads = 1,
-                    size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
 template <class PValStorage>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
