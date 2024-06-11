@@ -77,7 +77,7 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
 }
 
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
-                               const std::function<void(size_t, const bitmap_generator&)> &callback,
+                               const std::function<void(size_t, const bitmap&)> &callback,
                                size_t num_threads) const {
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < columns.size(); ++j) {

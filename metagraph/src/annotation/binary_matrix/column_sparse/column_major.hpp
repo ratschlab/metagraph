@@ -29,7 +29,7 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
     std::vector<Row> get_column(Column column) const override;
 
     void call_columns(const std::vector<Column> &columns,
-                      const std::function<void(size_t, const bitmap_generator&)> &callback,
+                      const std::function<void(size_t, const bitmap&)> &callback,
                       size_t num_threads = 1) const override;
 
     bool load(std::istream &in) override;
