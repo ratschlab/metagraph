@@ -339,8 +339,6 @@ Config::Config(int argc, char *argv[]) {
             output_compacted = true;
         } else if (!strcmp(argv[i], "--clean-ztp")) {
             clean_ztp = true;
-        } else if (!strcmp(argv[i], "--count-testable-kmers")) {
-            count_testable_kmers = true;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {

@@ -2109,10 +2109,7 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
     ThreadPool thread_pool(num_threads ? num_threads : 1, TASK_POOL_SIZE);
     bool async = true;
 
-    size_t num_starts = 0;
-
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
-        ++num_starts;
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
                     *this, EdgeQueue(start), callback,
@@ -2220,7 +2217,6 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
         // Ensures that call_path is called only once for each cycle
         auto rep = std::min_element(path.begin(), path.end());
         if (!fetch_bit(visited.data(), *rep, async)) {
-            __atomic_add_fetch(&num_starts, 1, __ATOMIC_SEQ_CST);
             EdgeQueue queue;
             queue.emplace_back(*rep,
                                sequence.begin() + (rep - path.begin()),
@@ -2266,8 +2262,6 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
 #ifndef NDEBUG
     assert_no_leftovers(*this, visited);
 #endif
-
-    common::logger->trace("Starts:\t{}", num_starts);
 }
 
 void call_paths(const BOSS &boss,

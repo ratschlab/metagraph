@@ -62,7 +62,6 @@ class Config {
     bool coordinates = false;
     bool advanced = false;
     bool clean_ztp = false;
-    bool count_testable_kmers = false;
 
     unsigned int k = 3;
 

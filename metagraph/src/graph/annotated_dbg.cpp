@@ -697,7 +697,7 @@ bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
     return annotator_->get_label_encoder().label_exists(label);
 }
 
-void AnnotatedSequenceGraph //TODO Myrthe: Create such a function that supports count annotation?
+void AnnotatedSequenceGraph
 ::call_annotated_nodes(const Label &label,
                        std::function<void(node_index)> callback) const {
     assert(check_compatibility());
