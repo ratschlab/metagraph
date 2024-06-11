@@ -179,11 +179,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
             std::vector<std::string> test_types = {
                 "poisson_exact",
                 "nbinom_exact",
-                "poisson_likelihoodratio",
                 "fisher",
                 "cmh",
-                "mannwhitney_u",
-                "brunnermunzel"
             };
 
             for (const auto &test_type : test_types) {

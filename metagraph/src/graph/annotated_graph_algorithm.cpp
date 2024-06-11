@@ -212,7 +212,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          PairContainer, false>(columns_all, column_values_all,
                                                [&](uint64_t row_i, const auto &row, size_t) {
             for (const auto &[j, raw_c] : row) {
-                if (adjust_count(raw_c, j, row_i)) {
+                if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j]) {
                     std::lock_guard<std::mutex> lock(agg_mu);
                     for (const auto &[j, raw_c] : row) {
                         ++hists[j][raw_c];
@@ -473,69 +473,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    static_cast<double>(out_sum) / out_kmers * in_kmers,
                                    pmin);
         };
-    } else if (config.test_type == "poisson_likelihoodratio") {
-        if (in_kmers == 0 || out_kmers == 0) {
-            common::logger->error("Test invalid, try poisson_exact instead");
-            throw std::domain_error("Test fail");
-        }
-        compute_pval = [&,dist=boost::math::chi_squared(1)](const auto &row) {
-            if (row.empty())
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            int64_t in_sum = 0;
-            int64_t out_sum = 0;
-
-            for (const auto &[j, c] : row) {
-                if (groups[j]) {
-                    out_sum += c;
-                } else {
-                    in_sum += c;
-                }
-            }
-
-            if (in_sum == 0 || out_sum == 0)
-                common::logger->warn("Empty row: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-
-            int64_t total_sum = in_sum + out_sum;
-
-            auto get_chi_stat = [&](int64_t in_sum) {
-                int64_t out_sum = total_sum - in_sum;
-                double log_likelihood_in = in_sum > 0 ? -in_sum + log(static_cast<double>(in_sum)) * in_sum : 0.0;
-                double log_likelihood_out = out_sum > 0 ? -out_sum + log(static_cast<double>(out_sum)) * out_sum : 0.0;
-
-                double theta = static_cast<double>(in_sum + out_sum) / total_kmers;
-                double mean_denom_in = theta * in_kmers;
-                double mean_denom_out = theta * out_kmers;
-
-                if (mean_denom_in == 0 || mean_denom_out == 0)
-                    common::logger->warn("Empty null hypothesis: Poisson likelihood ratio test not valid at boundary conditions (i.e., counts equal to 0), please set test type to 'poisson_exact' instead");
-
-                double log_likelihood_null = mean_denom_in > 0 ? -mean_denom_in + in_sum * log(mean_denom_in) : 0.0;
-                log_likelihood_null += mean_denom_out > 0 ? -mean_denom_out + out_sum * log(mean_denom_out) : 0.0;
-
-                return (log_likelihood_in + log_likelihood_out - log_likelihood_null) * 2;
-            };
-
-            double chi_stat = get_chi_stat(in_sum);
-
-            if (chi_stat < 0) {
-                common::logger->error("Detected likelihood ratio {} < 0", chi_stat);
-                throw std::runtime_error("Test failed");
-            }
-
-            double pval = chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, chi_stat)) : 1.0;
-
-            double max_chi_stat = std::max(get_chi_stat(0),
-                                           get_chi_stat(std::min(total_sum, static_cast<int64_t>(in_kmers))));
-            assert(max_chi_stat >= chi_stat);
-
-            double pmin = max_chi_stat != 0 ? boost::math::cdf(boost::math::complement(dist, max_chi_stat)) : 1.0;
-
-            return std::make_tuple(pval,
-                                   static_cast<double>(in_sum),
-                                   static_cast<double>(out_sum) / out_kmers * in_kmers,
-                                   pmin);
-        };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting negative binomial distributions");
         auto get_rp = [&](size_t j, double mu, double var, const auto &hist, double f = 1.0) {
@@ -659,20 +596,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
-
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
         double in_kmers_adj = 0;
         double out_kmers_adj = 0;
-        double in_kmers_adj_exp = 0;
-        double out_kmers_adj_exp = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            double exp_size = sums[j] * nb_params[j].second / target_p;
-            if (groups[j]) {
-                out_kmers_adj_exp += exp_size;
-            } else {
-                in_kmers_adj_exp += exp_size;
-            }
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
                 if (groups[j]) {
@@ -683,7 +611,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        common::logger->trace("Expected Scaled Totals: in: {}\tout: {}", in_kmers_adj_exp, out_kmers_adj_exp);
         common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers_adj, out_kmers_adj);
 
         compute_pval = [&,r_in,r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &row) {
@@ -850,175 +777,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
                                    std::min(p_min, 1.0));
         };
-    } else if (config.test_type == "brunnermunzel" || config.test_type == "mannwhitney_u") {
-        size_t nx = num_labels_in;
-        size_t ny = num_labels_out;
-
-        compute_pval = [&,nx,ny](const auto &row) {
-            if (row.empty())
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            double p_min = 1.1;
-            auto norm = boost::math::normal_distribution();
-            auto rankdata = [&](const std::vector<double> &c) {
-                auto c_p = c;
-                std::sort(c_p.begin(), c_p.end());
-                tsl::hopscotch_map<double, std::pair<size_t, size_t>> counts;
-                for (size_t i = 0; i < c_p.size(); ++i) {
-                    auto &[rank_sum, nranks] = counts[c_p[i]];
-                    rank_sum += i + 1;
-                    ++nranks;
-                }
-
-                std::vector<double> ranks;
-                ranks.reserve(c.size());
-                for (double v : c) {
-                    ranks.emplace_back(static_cast<double>(counts[v].first)/counts[v].second);
-                }
-
-                return std::make_pair(std::move(ranks), std::move(counts));
-            };
-
-            std::vector<double> in_counts;
-            in_counts.reserve(num_labels_in);
-            std::vector<double> out_counts;
-            out_counts.reserve(num_labels_out);
-
-            for (const auto &[j, c] : row) {
-                auto &bucket = groups[j] ? out_counts : in_counts;
-                bucket.emplace_back(static_cast<double>(c) / medians[j]);
-            }
-
-            in_counts.resize(num_labels_in);
-            out_counts.resize(num_labels_out);
-
-            double p = 0.0;
-
-            std::vector<double> c;
-            c.reserve(in_counts.size() + out_counts.size());
-            std::copy(in_counts.begin(), in_counts.end(), std::back_inserter(c));
-            std::copy(out_counts.begin(), out_counts.end(), std::back_inserter(c));
-            auto [rankc, countsc] = rankdata(c);
-            double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-            double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
-
-            if (config.test_type == "bunnermunzel") {
-                if (nx > 1 && ny > 1) {
-                    auto get_p = [&]() {
-                        double rankcx_mean = boost::math::statistics::mean(rankc.begin(), rankc.begin() + nx);
-                        double rankcy_mean = boost::math::statistics::mean(rankc.begin() + nx, rankc.end());
-                        auto [rankx, countsx] = rankdata(in_counts);
-                        auto [ranky, countsy] = rankdata(out_counts);
-                        double rankx_mean = boost::math::statistics::mean(rankx.begin(), rankx.end());
-                        double ranky_mean = boost::math::statistics::mean(ranky.begin(), ranky.end());
-
-                        double Sx = 0;
-                        for (size_t i = 0; i < nx; ++i) {
-                            Sx += std::pow(rankc[i] - rankx[i] - rankcx_mean + rankx_mean, 2.0);
-                        }
-                        Sx /= nx - 1;
-                        double Sy = 0;
-                        for (size_t i = 0; i < ny; ++i) {
-                            Sy += std::pow(rankc[nx + i] - ranky[i] - rankcy_mean + ranky_mean, 2.0);
-                        }
-                        Sy /= ny - 1;
-
-                        double wbfn = (rankcy_mean - rankcx_mean) * nx * ny;
-                        wbfn /= std::sqrt(Sx * nx + Sy * ny) * (nx + ny);
-
-                        double df_numer = std::pow(Sx * nx + Sy * ny, 2.0);
-                        double df_denom = std::pow(Sx * nx, 2.0) / (nx - 1) + std::pow(Sy * ny, 2.0) / (ny - 1);
-
-                        if (df_denom != 0) {
-                            wbfn = abs(wbfn);
-                            double df = df_numer / df_denom;
-                            boost::math::students_t dist(df);
-                            return 2 * boost::math::cdf(boost::math::complement(dist, wbfn));
-                        }
-
-                        return 0.0;
-                    };
-
-                    p = get_p();
-
-                    std::sort(rankc.begin(), rankc.end());
-                    std::copy(rankc.begin(), rankc.begin() + nx, in_counts.begin());
-                    std::copy(rankc.begin() + nx, rankc.end(), out_counts.begin());
-                    p_min = get_p();
-
-                    std::sort(rankc.begin(), rankc.end(), std::greater<double>());
-                    std::copy(rankc.begin(), rankc.begin() + nx, in_counts.begin());
-                    std::copy(rankc.begin() + nx, rankc.end(), out_counts.begin());
-                    p_min = std::min(p_min, get_p());
-                } else {
-                    p_min = 0.0;
-                }
-            } else {
-                // https://datatab.net/tutorial/mann-whitney-u-test
-                double u1_f = nx * ny + static_cast<double>(nx * (nx + 1))/2;
-                double u2_f = nx * ny + static_cast<double>(ny * (ny + 1))/2;
-                auto get_u = [&]() {
-                    double rankcx_sum = std::accumulate(rankc.begin(), rankc.begin() + nx, double(0.0));
-                    double rankcy_sum = std::accumulate(rankc.begin() + nx, rankc.end(), double(0.0));
-                    double u1 = u1_f - rankcx_sum;
-                    double u2 = u2_f - rankcy_sum;
-                    return std::min(u1, u2);
-                };
-
-                double u = get_u();
-
-                if (nx + ny < 20) {
-                    std::sort(rankc.begin(), rankc.end());
-                    size_t num_better = 0;
-                    size_t num_max = 0;
-                    double max_u = -std::numeric_limits<double>::infinity();
-                    while (std::next_permutation(rankc.begin(), rankc.end())) {
-                        double cur_u = get_u();
-                        num_better += (cur_u >= u);
-                        if (cur_u > max_u) {
-                            max_u = cur_u;
-                            num_max = 1;
-                        } else if (cur_u == max_u) {
-                            ++num_max;
-                        }
-                    }
-
-                    p = exp(log(static_cast<double>(num_better)) - lgamma(nx + ny + 1)) * 2.0;
-                    p_min = exp(log(static_cast<double>(num_max)) - lgamma(nx + ny + 1)) * 2.0;
-                } else {
-                    // normal approximation
-                    if (!nx || !ny) {
-                        p = 1.0;
-                        p_min = 1.0;
-                    } else {
-                        double n = nx + ny;
-                        double mu = static_cast<double>(nx * ny) / 2;
-                        double corr = 0;
-                        for (const auto &[val,rks] : countsc) {
-                            const auto &[rk, c] = rks;
-                            if (c > 1)
-                                corr += c * c * c - c;
-                        }
-                        double sd = sqrt(static_cast<double>(nx * ny) / n / (n - 1)) * sqrt((n * n * n - n)/12 - corr / 12);
-
-                        auto get_p = [&](double u) {
-                            double z = abs((u - mu) / sd);
-
-                            // hack just in case sd == 0
-                            return u != mu ? boost::math::cdf(boost::math::complement(norm, z)) * 2 : 1.0;
-                        };
-
-                        p = get_p(u);
-                        std::sort(rankc.begin(), rankc.end());
-                        p_min = get_p(get_u());
-                        std::sort(rankc.begin(), rankc.end(), std::greater<double>());
-                        p_min = std::min(p_min, get_p(get_u()));
-                    }
-                }
-            }
-
-            return std::make_tuple(p, rankcx_mean, rankcy_mean, p_min);
-        };
     } else if (config.test_type == "notest") {
         compute_pval = [&](const auto &row) {
             if (row.empty())
@@ -1073,12 +831,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 for (size_t j = 0; j < groups.size(); ++j) {
                     const auto &col = *columns_all[j];
                     const auto &col_vals = *column_values_all[j];
-                    if (uint64_t r = col.conditional_rank1(row_i)) {
+                    if (uint64_t r = col.conditional_rank1(row_i))
                         row.emplace_back(j, col_vals[r - 1]);
-                        // uint64_t raw_c = col_vals[r - 1];
-                        // if (uint64_t c = adjust_count(raw_c, j, row_i))
-                            // row.emplace_back(j, c);
-                    }
                 }
             }
 
@@ -1149,7 +903,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 size_t count_out = 0;
                 for (const auto &[j, raw_c] : raw_row) {
                     if (uint64_t c = raw_c) {
-                    // if (uint64_t c = adjust_count(raw_c, j, row_i)) {
                         row.emplace_back(j, c);
                         if (groups[j]) {
                             ++count_out;
