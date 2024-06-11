@@ -12,6 +12,7 @@
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
+#include <boost/math/special_functions/polygamma.hpp>
 
 #include "common/logger.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -215,7 +216,47 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 
-    double nelem = sdsl::util::cnt_one_bits(kept);
+    std::shared_ptr<MaskedDeBruijnGraph> clean_masked_graph;
+    std::vector<VectorMap<uint64_t, size_t>> unitig_hists(groups.size());
+    size_t num_unitigs = 0;
+    std::vector<uint64_t> sums_of_squares_unitigs(groups.size());
+    if (config.test_by_unitig) {
+        clean_masked_graph = std::make_shared<MaskedDeBruijnGraph>(
+            graph_ptr,
+            [&](node_index node) {
+                return node != DeBruijnGraph::npos
+                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
+            },
+            true,
+            is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+        );
+
+        clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
+            std::vector<uint64_t> unitig_sums(groups.size());
+            for (node_index node : path) {
+                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    const auto &col = *columns_all[j];
+                    const auto &col_vals = *column_values_all[j];
+                    if (uint64_t r = col.conditional_rank1(row_i)) {
+                        uint64_t c = col_vals[r - 1];
+                        unitig_sums[j] += c;
+                        std::lock_guard<std::mutex> lock(agg_mu);
+                        ++unitig_hists[j][c];
+                    }
+                }
+            }
+
+            for (size_t j = 0; j < groups.size(); ++j) {
+                sums_of_squares_unitigs[j] += unitig_sums[j] * unitig_sums[j];
+            }
+
+            std::lock_guard<std::mutex> lock(agg_mu);
+            ++num_unitigs;
+        }, num_threads);
+    }
+
+    double nelem = !config.test_by_unitig ? sdsl::util::cnt_one_bits(kept) : num_unitigs;
 
     common::logger->trace("Computing aggregate statistics");
     double in_kmers = 0;
@@ -389,24 +430,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    pmin);
         };
     } else if (config.test_type == "nbinom_exact") {
-        common::logger->trace("Fitting negative binomial distributions");
-        auto get_rp = [&](size_t j, double mu, double var, const auto &hist, double f = 1.0) {
+        common::logger->trace("Fitting per-sample negative binomial distributions");
+        auto get_rp = [&](size_t j, double mu, double var, const auto &hist) {
             double var_orig = var;
             var = std::max(var, mu + 0.1);
-            double r_guess = f * f * mu * mu / (var - mu * f);
+            double r_guess = mu * mu / (var - mu);
             common::logger->trace("{}: initial guess:\tmu: {}\tvar: {}\tr: {}\tp: {}\t",
                                   j, mu, var_orig, r_guess, mu / var);
-            double r = boost::math::tools::newton_raphson_iterate([&](double r) {
-                double dl = nelem * (log(r) - log(r + mu * f) - boost::math::digamma(r));
-                double ddl = nelem * (1.0 / r - 1.0 / (r + mu * f) - boost::math::trigamma(r));
-                for (const auto &[k, c] : hist) {
-                    dl += boost::math::digamma(k * f + r) * c;
-                    ddl += boost::math::trigamma(k * f + r) * c;
-                }
-                return std::make_pair(dl, ddl);
-            }, r_guess, std::numeric_limits<double>::min(), f * mu * nelem, 30);
+            double r = r_guess;
+            try {
+                r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                    double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
+                    double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
+                    for (const auto &[k, c] : hist) {
+                        dl += boost::math::digamma(k + r) * c;
+                        ddl += boost::math::trigamma(k + r) * c;
+                    }
+                    return std::make_pair(dl, ddl);
+                }, r_guess, std::numeric_limits<double>::min(), mu * nelem, 30);
+            } catch (std::exception &e) {
+                common::logger->warn("Caught exception for sample {}: Falling back to initial guess", j);
+                common::logger->warn("{}", e.what());
+                r = r_guess;
+            }
 
-            return std::make_pair(r, r / (r + mu * f));
+            return std::make_pair(r, r / (r + mu));
         };
 
         // geometric mean
@@ -422,49 +470,79 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
-            auto &hist = hists[j];
+            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;
             double mu2 = mu * mu;
-            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
+            double var = static_cast<double>(config.test_by_unitig ? sums_of_squares_unitigs[j] : sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(j, mu, var, hist);
             min_p = std::min(min_p, nb_params[j].second);
         }
 
+        common::logger->trace("Fitting common p");
         std::vector<double> r_maps(groups.size(), 1.0);
-        double target_p = boost::math::tools::newton_raphson_iterate([&](double p) {
-            double dl = 0;
-            double ddl = 0;
+        double target_p = min_p;
+        try {
+            target_p = boost::math::tools::newton_raphson_iterate([&](double p) {
+                double dl = 0;
+                double ddl = 0;
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    double f = target_sum / sums[j];
+                    double &r = r_maps[j];
+                    r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                        double dl = nelem * (log(p) - boost::math::digamma(r));
+                        double ddl = -nelem * boost::math::trigamma(r);
+                        for (const auto &[k, c] : hists[j]) {
+                            dl += boost::math::digamma(k * f + r) * c;
+                            ddl += boost::math::trigamma(k * f + r) * c;
+                        }
+                        return std::make_pair(dl, ddl);
+                    }, r, std::numeric_limits<double>::min(), f * sums[j], 30);
+                    double factor = nelem * r / p;
+                    dl += factor;
+                    ddl -= factor / p;
+                    const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+                    for (const auto &[k, c] : hist) {
+                        double factor = k * f * c / (1 - p);
+                        dl -= factor;
+                        ddl -= factor / (1 - p);
+                    }
+                }
+
+                return std::make_pair(dl, ddl);
+            }, min_p, std::numeric_limits<double>::min(), 1.0, 30);
+        } catch (std::exception &e) {
+            common::logger->warn("Caught exception while fitting p: Falling back to initial guess");
+            common::logger->warn("{}", e.what());
+            target_p = min_p;
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
                 double &r = r_maps[j];
-                r = boost::math::tools::newton_raphson_iterate([&](double r) {
-                    double dl = nelem * (log(p) - boost::math::digamma(r));
-                    double ddl = -nelem * boost::math::trigamma(r);
-                    for (const auto &[k, c] : hists[j]) {
-                        dl += boost::math::digamma(k * f + r) * c;
-                        ddl += boost::math::trigamma(k * f + r) * c;
-                    }
-                    return std::make_pair(dl, ddl);
-                }, r, std::numeric_limits<double>::min(), f * sums[j], 30);
-                double factor = nelem * r / p;
-                dl += factor;
-                ddl -= factor / p;
-                for (const auto &[k, c] : hists[j]) {
-                    double factor = k * f * c / (1 - p);
-                    dl -= factor;
-                    ddl -= factor / (1 - p);
+                try {
+                    r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                        double dl = nelem * (log(target_p) - boost::math::digamma(r));
+                        double ddl = -nelem * boost::math::trigamma(r);
+                        for (const auto &[k, c] : hists[j]) {
+                            dl += boost::math::digamma(k * f + r) * c;
+                            ddl += boost::math::trigamma(k * f + r) * c;
+                        }
+                        return std::make_pair(dl, ddl);
+                    }, r, std::numeric_limits<double>::min(), f * sums[j], 30);
+                } catch (std::exception &e) {
+                    common::logger->warn("Caught exception while fitting r for {}: Falling back to initial guess", j);
+                    common::logger->warn("{}", e.what());
+                    double mu = static_cast<double>(sums[j]) * f / nelem;
+                    r = target_p * mu / (1 - target_p);
                 }
             }
-
-            return std::make_pair(dl, ddl);
-        }, min_p, std::numeric_limits<double>::min(), 1.0, 30);
+        }
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
         double r_in = 0;
         double r_out = 0;
         std::mutex r_mu;
 
+        common::logger->trace("Computing quantile maps");
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
@@ -608,7 +686,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                    std::min(p_min, 1.0));
         };
 
-        compute_pval_unitig = [&,r_in_row=r_in,r_out_row=r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &rows) {
+        compute_pval_unitig = [&,r_in,r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &rows) {
             if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
                 return std::make_tuple(1.1, 0.0, 0.0, 1.1);
 
@@ -623,9 +701,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
             }
-
-            double r_in = r_in_row * (1 - target_p) / (rows.size() - target_p) * rows.size();
-            double r_out = r_out_row * (1 - target_p) / (rows.size() - target_p) * rows.size();
 
             int64_t n = in_sum + out_sum;
             double p_min = 1.0;
@@ -724,17 +799,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::atomic_thread_fence(std::memory_order_release);
 
     if (config.test_by_unitig) {
-        MaskedDeBruijnGraph clean_masked_graph(
-            graph_ptr,
-            [&](node_index node) {
-                return node != DeBruijnGraph::npos
-                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
-            },
-            true,
-            is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-        );
-
-        clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
+        clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
             if (ex)
                 return;
 
