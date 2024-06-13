@@ -345,8 +345,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     pval = boost::math::cdf(bdist, d) + boost::math::cdf(boost::math::complement(bdist, n - d - 1));
                 }
             } else {
-                p_min = std::min(boost::math::pdf(bdist, 0), boost::math::pdf(bdist, n));
                 double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
+                double d0 = static_cast<double>(n) / num_labels_out;
+                double dn = static_cast<double>(n) / num_labels_in;
+                if (d0 > dn) {
+                    p_min = boost::math::pdf(bdist, 0);
+                } else if (d0 < dn) {
+                    p_min = boost::math::pdf(bdist, n);
+                } else {
+                    p_min = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
+                }
+
                 if (d > 0) {
                     // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
                     // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
@@ -622,90 +631,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
             } else {
-                p_min = std::min(get_pmf(0), get_pmf(n));
                 double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
-                if (d > 0) {
-                    // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
-                    // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
-                    // s/num_labels_in + s/num_labels_out >= d + n/num_labels_out || n/num_labels_out - d >= s/num_labels_in + s/num_labels_out
-                    double factor = double(1.0) / num_labels_in + double(1.0) / num_labels_out;
-
-                    double lower_d = (static_cast<double>(n) / num_labels_out - d) / factor;
-                    double upper_d = (d + static_cast<double>(n) / num_labels_out) / factor;
-
-                    // fix floating point errors
-                    if (abs(lower_d - round(lower_d)) < 1e-10)
-                        lower_d = round(lower_d);
-
-                    if (abs(upper_d - round(upper_d)) < 1e-10)
-                        upper_d = round(upper_d);
-
-                    int64_t lower = floor(lower_d);
-                    int64_t upper = ceil(upper_d);
-
-                    if (lower < n && upper > 0 && lower != upper) {
-                        pval = 0;
-                        for (int64_t s = 0; s <= lower; ++s) {
-                            pval += get_pmf(s);
-                        }
-
-                        for (int64_t s = upper; s <= n; ++s) {
-                            pval += get_pmf(s);
-                        }
-                    }
+                double d0 = static_cast<double>(n) / num_labels_out;
+                double dn = static_cast<double>(n) / num_labels_in;
+                if (d0 > dn) {
+                    p_min = get_pmf(0);
+                } else if (d0 < dn) {
+                    p_min = get_pmf(n);
+                } else {
+                    p_min = get_pmf(0) + get_pmf(n);
                 }
-            }
 
-            if (pval >= 1.1)
-                throw std::runtime_error("pval fail");
-
-            return std::make_tuple(std::min(pval, 1.0),
-                                   static_cast<double>(in_sum),
-                                   static_cast<double>(out_sum) / out_kmers_adj * in_kmers_adj,
-                                   std::min(p_min, 1.0));
-        };
-
-        compute_pval_unitig = [&,r_in,r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &rows) {
-            if (std::all_of(rows.begin(), rows.end(), [](const auto &row) { return row.empty(); }))
-                return std::make_tuple(1.1, 0.0, 0.0, 1.1);
-
-            int64_t in_sum = 0;
-            int64_t out_sum = 0;
-            for (const auto &row : rows) {
-                for (const auto &[j, c] : row) {
-                    if (groups[j]) {
-                        out_sum += count_maps[j].find(c)->second.first;
-                    } else {
-                        in_sum += count_maps[j].find(c)->second.first;
-                    }
-                }
-            }
-
-            int64_t n = in_sum + out_sum;
-            double p_min = 1.0;
-            double pval = 1.0;
-
-            double lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-            auto get_pmf = [&](int64_t s) {
-                int64_t t = n - s;
-                double rs = r_in + s;
-                double rt = r_out + t;
-                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
-            };
-
-            if (num_labels_in == num_labels_out) {
-                p_min = get_pmf(0) + get_pmf(n);
-                if (in_sum != out_sum) {
-                    lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-                    int64_t d = std::min(in_sum, out_sum);
-                    pval = p_min;
-                    for (int64_t s = 1; s <= d; ++s) {
-                        pval += get_pmf(s) + get_pmf(n - s);
-                    }
-                }
-            } else {
-                p_min = std::min(get_pmf(0), get_pmf(n));
-                double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
                 if (d > 0) {
                     // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
                     // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
