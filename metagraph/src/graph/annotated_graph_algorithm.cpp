@@ -919,7 +919,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
                                      [](size_t sum, const auto &a) { return sum + a.second; });
         common::logger->trace("Performed {}/{} tests", acc, nelem);
-        size_t total_tests = acc;
         common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
 
         if (total_sig) {
@@ -937,31 +936,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (k == 0) {
-                // TODO: fix for unitig
-                common::logger->trace("Falling back to Benjamini-Yekutieli");
-                VectorMap<double, double> pval_map;
-                for (uint64_t p_u : pvals) {
-                    auto p = bit_cast<double>(p_u);
-                    if (p <= 1.0)
-                        ++pval_map[p];
-                }
-                auto p_data = const_cast<std::vector<std::pair<double, double>>&&>(pval_map.values_container());
-                std::sort(p_data.begin(), p_data.end(), utils::GreaterFirst());
-
-                double cm = boost::math::digamma(total_tests) + 0.5772156649015329; // std::numbers::e_gamma_v<double>
-                pval_map = decltype(pval_map)();
-                size_t cur_rank = 0;
-                for (const auto &[p, c] : p_data) {
-                    cur_rank += c;
-                    pval_map[p] = cm * cur_rank;
-                }
-                for (size_t i = 0; i < pvals.size(); ++i) {
-                    double p = bit_cast<double, uint64_t>(pvals[i]);
-                    if (p < config.family_wise_error_rate && p * pval_map[p] >= config.family_wise_error_rate) {
-                        indicator_in[i] = false;
-                        indicator_out[i] = false;
-                    }
-                }
+                common::logger->trace("No significant k-mers found");
+                sdsl::util::set_to_value(indicator_in, false);
+                sdsl::util::set_to_value(indicator_out, false);
             } else {
                 common::logger->trace("k: {}\talpha_corr: {}", k, config.family_wise_error_rate / k);
                 for (size_t i = 0; i < indicator_in.size(); ++i) {
