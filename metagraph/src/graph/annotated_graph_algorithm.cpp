@@ -215,6 +215,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 
+    sdsl::bit_vector unitig_start;
+    if (config.test_by_unitig)
+        unitig_start = sdsl::bit_vector(graph_ptr->max_index() + 1, true);
+
     std::shared_ptr<MaskedDeBruijnGraph> clean_masked_graph;
     std::vector<VectorMap<uint64_t, size_t>> unitig_hists(groups.size());
     size_t num_unitigs = 0;
@@ -231,6 +235,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         );
 
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
+            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
             std::vector<uint64_t> unitig_sums(groups.size());
             for (node_index node : path) {
                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
@@ -980,6 +985,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
     }
+
+    call_ones(unitig_start, [&](node_index node) { pvals[node] = nullpval; });
 
     auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
