@@ -313,7 +313,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     VectorMap<size_t, size_t> m;
     using RowStats = std::tuple<double, double, double, double>;
     std::function<RowStats(const PairContainer&)> compute_pval;
-    std::function<RowStats(const std::vector<PairContainer>&)> compute_pval_unitig;
 
     common::logger->trace("Test: {}", config.test_type);
     if (config.test_type == "poisson_exact") {
@@ -434,11 +433,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
-        auto get_rp = [&](size_t j, double mu, double var, const auto &hist, double f = 1.0) {
+        auto get_rp = [&](size_t j, double mu, double var, const auto &hist) {
             double var_orig = var;
             var = std::max(var, mu + 0.1);
-            mu *= f;
-            var *= f * f;
 
             double r_guess = mu * mu / (var - mu);
             double p_guess = mu / var;
@@ -448,8 +445,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
                     double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
                     for (const auto &[k, c] : hist) {
-                        dl += boost::math::digamma(f * k + r) * c;
-                        ddl += boost::math::trigamma(f * k + r) * c;
+                        dl += boost::math::digamma(k + r) * c;
+                        ddl += boost::math::trigamma(k + r) * c;
                     }
                     return std::make_pair(dl, ddl);
                 }, r_guess, std::numeric_limits<double>::min(), mu * nelem, 30);
@@ -460,8 +457,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double p = r / (r + mu);
-            common::logger->trace("{}: scale: {}\tmu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
-                                  j, f, mu, var_orig, r_guess, p_guess, r, p);
+            common::logger->trace("{}: mu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
+                                  j, mu, var_orig, r_guess, p_guess, r, p);
 
             return std::make_pair(r, p);
         };
@@ -475,7 +472,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         target_sum = exp(target_sum / groups.size());
 
         std::vector<std::pair<double, double>> nb_params(groups.size());
-        std::vector<std::pair<double, double>> scaled_nb_params(groups.size());
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -483,25 +479,52 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;
             double mu2 = mu * mu;
-            double var = static_cast<double>(config.test_by_unitig ? sums_of_squares_unitigs[j] : sums_of_squares[j]) / nelem - mu2;
+            double var = static_cast<double>(config.test_by_unitig
+                                                ? sums_of_squares_unitigs[j]
+                                                : sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(j, mu, var, hist);
-            scaled_nb_params[j] = get_rp(j, mu, var, hist, target_sum / s);
         }
 
-        common::logger->trace("Finding common p");
-        double p_guess = 0.0;
+        common::logger->trace("Finding common p and r.");
+        double real_sum = 0.0;
+        double real_sum_sq = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            p_guess += log(scaled_nb_params[j].second);
+            double f = target_sum / sums[j];
+            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+            for (const auto &[k, c] : hist) {
+                double val = f * k;
+                real_sum += val * c;
+                real_sum_sq += val * val * c;
+            }
         }
-        p_guess = exp(p_guess / groups.size());
 
-        double target_p = p_guess;
-        double r_map = target_p / nelem / (1 - target_p) * target_sum;
+        // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
+        // nelem * r / p = target_sum / (1 - p)
+        // r / target_mu = p / (1 - p)
+        // r / target_mu = p + p * r / target_mu
+        // p = r / target_mu / (r / target_mu + 1)
+        // p = r / (r + target_mu)
+        double target_mu = real_sum / nelem / groups.size();
+        double target_mu2 = target_mu * target_mu;
+        double target_var = real_sum_sq / nelem / groups.size() - target_mu2;
+        double r_guess = target_mu2 / (target_var - target_mu);
+
+        double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
+            double dl = nelem * groups.size() * (log(r) - log(r + target_mu) - boost::math::digamma(r));
+            double ddl = nelem * groups.size() * (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r));
+            for (size_t j = 0; j < groups.size(); ++j) {
+                double f = target_sum / sums[j];
+                const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+                for (const auto &[k, c] : hist) {
+                    dl += boost::math::digamma(f * k + r) * c;
+                    ddl += boost::math::trigamma(f * k + r) * c;
+                }
+            }
+            return std::make_pair(dl, ddl);
+        }, r_guess, std::numeric_limits<double>::min(), real_sum, 30);
+        double target_p = r_map / (r_map + target_mu);
 
         std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps(groups.size());
-        double r_in = 0;
-        double r_out = 0;
-        std::mutex r_mu;
 
         common::logger->trace("Computing quantile maps");
         #pragma omp parallel for num_threads(num_parallel_files)
@@ -513,12 +536,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             boost::math::negative_binomial nb(r, p);
             boost::math::negative_binomial nb_out(r_map, target_p);
-            double scale = exp(log(p) - log(target_p));
+            double scale = target_sum / sums[j];
 
             // ensure that 0 maps to 0
             count_maps[j][0] = std::make_pair(0, 0);
 
-            for (const auto &[k, c] : hists[j]) {
+            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+            for (const auto &[k, c] : hist) {
                 if (!count_maps[j].count(k)) {
                     double cdf = boost::math::cdf(nb, k);
 
@@ -538,14 +562,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     count_maps[j][k].second += c;
                 }
             }
-
-            std::lock_guard<std::mutex> lock(r_mu);
-            if (groups[j]) {
-                r_out += r_map;
-            } else {
-                r_in += r_map;
-            }
         }
+
+        double r_in = r_map * num_labels_in;
+        double r_out = r_map * num_labels_out;
 
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
@@ -762,16 +782,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (ex)
                 return;
 
-            std::vector<PairContainer> rows;
-            rows.reserve(path.size());
+            PairContainer merged_row;
             for (node_index node : path) {
-                auto &row = rows.emplace_back();
                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
                 for (size_t j = 0; j < groups.size(); ++j) {
                     const auto &col = *columns_all[j];
                     const auto &col_vals = *column_values_all[j];
                     if (uint64_t r = col.conditional_rank1(row_i))
-                        row.emplace_back(j, col_vals[r - 1]);
+                        merged_row.emplace_back(j, col_vals[r - 1]);
                 }
             }
 
@@ -780,7 +798,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double out_stat;
             double pval_min;
             try {
-                std::tie(pval, in_stat, out_stat, pval_min) = compute_pval_unitig(rows);
+                std::tie(pval, in_stat, out_stat, pval_min) = compute_pval(merged_row);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(pval_mu);
                 ex = std::current_exception();
