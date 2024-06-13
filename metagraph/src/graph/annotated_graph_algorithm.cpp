@@ -220,9 +220,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         unitig_start = sdsl::bit_vector(graph_ptr->max_index() + 1, true);
 
     std::shared_ptr<MaskedDeBruijnGraph> clean_masked_graph;
-    std::vector<VectorMap<uint64_t, size_t>> unitig_hists(groups.size());
-    size_t num_unitigs = 0;
-    std::vector<uint64_t> sums_of_squares_unitigs(groups.size());
+    std::atomic<size_t> num_unitigs(0);
     if (config.test_by_unitig) {
         clean_masked_graph = std::make_shared<MaskedDeBruijnGraph>(
             graph_ptr,
@@ -234,32 +232,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
         );
 
-        clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
-            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
-            std::vector<uint64_t> unitig_sums(groups.size());
-            for (node_index node : path) {
-                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    const auto &col = *columns_all[j];
-                    const auto &col_vals = *column_values_all[j];
-                    if (uint64_t r = col.conditional_rank1(row_i))
-                        unitig_sums[j] += col_vals[r - 1];
-                }
-            }
-
-            for (size_t j = 0; j < groups.size(); ++j) {
-                sums_of_squares_unitigs[j] += unitig_sums[j] * unitig_sums[j];
-            }
-
-            std::lock_guard<std::mutex> lock(agg_mu);
-            ++num_unitigs;
-            for (size_t j = 0; j < groups.size(); ++j) {
-                ++unitig_hists[j][unitig_sums[j]];
-            }
-        }, num_threads);
+        if (config.test_type != "nbinom_exact") {
+            std::atomic_thread_fence(std::memory_order_release);
+            clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
+                unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
+                num_unitigs.fetch_add(1, MO_RELAXED);
+            }, num_threads);
+            std::atomic_thread_fence(std::memory_order_acquire);
+        }
     }
 
-    double nelem = !config.test_by_unitig ? sdsl::util::cnt_one_bits(kept) : num_unitigs;
+    double nelem = sdsl::util::cnt_one_bits(kept);
 
     common::logger->trace("Computing aggregate statistics");
     double in_kmers = 0;
@@ -484,13 +467,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
-            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+            const auto &hist = hists[j];
             double s = static_cast<double>(sums[j]);
             double mu = s / nelem;
             double mu2 = mu * mu;
-            double var = static_cast<double>(config.test_by_unitig
-                                                ? sums_of_squares_unitigs[j]
-                                                : sums_of_squares[j]) / nelem - mu2;
+            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
             nb_params[j] = get_rp(j, mu, var, hist);
         }
 
@@ -499,7 +480,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double real_sum_sq = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
             double f = target_sum / sums[j];
-            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+            const auto &hist = hists[j];
             for (const auto &[k, c] : hist) {
                 double val = f * k;
                 real_sum += val * c;
@@ -523,7 +504,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ddl = nelem * groups.size() * (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r));
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
-                const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+                const auto &hist = hists[j];
                 for (const auto &[k, c] : hist) {
                     dl += boost::math::digamma(f * k + r) * c;
                     ddl += boost::math::trigamma(f * k + r) * c;
@@ -550,7 +531,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             // ensure that 0 maps to 0
             count_maps[j][0] = std::make_pair(0, 0);
 
-            const auto &hist = config.test_by_unitig ? unitig_hists[j] : hists[j];
+            const auto &hist = hists[j];
             for (const auto &[k, c] : hist) {
                 if (!count_maps[j].count(k)) {
                     double cdf = boost::math::cdf(nb, k);
@@ -573,12 +554,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        double r_in = r_map * num_labels_in;
-        double r_out = r_map * num_labels_out;
-
-        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
-
         double in_kmers_adj = 0;
         double out_kmers_adj = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
@@ -591,8 +567,67 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
         }
-
         common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers_adj, out_kmers_adj);
+
+        if (config.test_by_unitig) {
+            std::vector<VectorMap<uint64_t, size_t>> unitig_hists(groups.size());
+            std::atomic_thread_fence(std::memory_order_release);
+            clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
+                unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
+                num_unitigs.fetch_add(1, MO_RELAXED);
+                std::vector<uint64_t> unitig_sums(groups.size(), 0);
+                for (node_index node : path) {
+                    uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        const auto &col = *columns_all[j];
+                        const auto &col_vals = *column_values_all[j];
+                        if (uint64_t r = col.conditional_rank1(row_i))
+                            unitig_sums[j] += count_maps[j].find(col_vals[r - 1])->second.first;
+                    }
+                }
+
+                std::lock_guard<std::mutex> lock(agg_mu);
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    ++unitig_hists[j][unitig_sums[j]];
+                }
+            }, num_threads);
+            std::atomic_thread_fence(std::memory_order_acquire);
+
+            nelem = num_unitigs.load();
+
+            double target_mu = 0;
+            double target_var = 0;
+            for (const auto &hist : unitig_hists) {
+                for (const auto &[k, c] : hist) {
+                    target_mu += k * c;
+                    target_var += k * k * c;
+                }
+            }
+
+            target_mu /= nelem * groups.size();
+            target_mu2 = target_mu * target_mu;
+            target_var = target_var / nelem / groups.size() - target_mu2;
+            r_guess = target_mu2 / (target_var - target_mu);
+            common::logger->trace("Unitig fit: mu: {}\tvar: {}\tr_guess: {}\tp_guess: {}",
+                                  target_mu, target_var, r_guess, target_mu / target_var);
+
+            r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
+                double dl = nelem * groups.size() * (log(r) - log(r + target_mu) - boost::math::digamma(r));
+                double ddl = nelem * groups.size() * (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r));
+                for (const auto &hist : unitig_hists) {
+                    for (const auto &[k, c] : hist) {
+                        dl += boost::math::digamma(k + r) * c;
+                        ddl += boost::math::trigamma(k + r) * c;
+                    }
+                }
+                return std::make_pair(dl, ddl);
+            }, r_guess, std::numeric_limits<double>::min(), real_sum, 30);
+            target_p = r_map / (r_map + target_mu);
+        }
+
+        double r_in = r_map * num_labels_in;
+        double r_out = r_map * num_labels_out;
+        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         compute_pval = [&,r_in,r_out,count_maps,in_kmers_adj,out_kmers_adj](const auto &row) {
             if (row.empty())
