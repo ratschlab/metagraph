@@ -13,6 +13,9 @@
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
+#include "load/load_graph.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 
 namespace mtg {
@@ -326,16 +329,97 @@ int transform_annotation(Config *config) {
 
         if (input_anno_type == Config::ColumnCompressed) {
             if (config->count_kmers) {
-                ColumnCompressed<>::load_columns_and_values(files,
-                    [&](uint64_t offset, const auto &label, std::unique_ptr<bit_vector> &&column, sdsl::int_vector_buffer<>&& column_values) {
-                        std::ofstream outstream(utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension)
-                                    + fmt::format(".{}.tsv", offset));
-                        uint64_t rk = 0;
-                        column->call_ones([&](uint64_t pos) {
-                            outstream << pos << "\t" << column_values[rk++] << "\n";
-                        });
+                if (config->unitigs) {
+                    std::vector<std::unique_ptr<bit_vector>> columns_all;
+                    std::vector<sdsl::int_vector<>> column_values_all;
+                    ColumnCompressed<>::load_columns_and_values(files,
+                        [&](uint64_t offset, const auto &label, std::unique_ptr<bit_vector> &&column, sdsl::int_vector<>&& column_values) {
+                            if (offset >= columns_all.size()) {
+                                columns_all.resize(offset + 1);
+                                column_values_all.resize(offset + 1);
+                            }
+
+                            std::swap(columns_all[offset], column);
+                            std::swap(column_values_all[offset], column_values);
+                        }
+                    );
+
+                    auto graph = load_critical_dbg(config->infbase);
+
+                    std::mutex out_mu;
+                    std::ofstream outstream(utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension)
+                                        + ".unitigs.tsv");
+                    if (config->min_count <= 1) {
+                        graph->call_unitigs([&](const std::string&, const auto &path) {
+                            std::vector<uint64_t> unitig_sums(columns_all.size());
+                            for (graph::DeBruijnGraph::node_index node : path) {
+                                auto row_i = graph::AnnotatedDBG::graph_to_anno_index(node);
+                                for (size_t j = 0; j < columns_all.size(); ++j) {
+                                    if (uint64_t r = columns_all[j]->conditional_rank1(row_i))
+                                        unitig_sums[j] += column_values_all[j][r - 1];
+                                }
+                            }
+
+                            std::lock_guard<std::mutex> lock(out_mu);
+                            outstream << fmt::format("{}\t{}\t{}\n", path[0], path.size(), fmt::join(unitig_sums, "\t"));
+                        }, get_num_threads());
+                    } else {
+                        bool parallel = get_num_threads() > 1;
+                        sdsl::bit_vector mask(graph->max_index() + 1, true);
+                        mask[0] = false;
+                        std::atomic_thread_fence(std::memory_order_release);
+                        graph->call_unitigs([&](const std::string&, const auto &path) {
+                            std::vector<uint64_t> unitig_sums(columns_all.size());
+                            for (graph::DeBruijnGraph::node_index node : path) {
+                                auto row_i = graph::AnnotatedDBG::graph_to_anno_index(node);
+                                for (size_t j = 0; j < columns_all.size(); ++j) {
+                                    if (uint64_t r = columns_all[j]->conditional_rank1(row_i))
+                                        unitig_sums[j] += column_values_all[j][r - 1];
+                                }
+                            }
+
+                            if (std::all_of(unitig_sums.begin(), unitig_sums.end(), [&](uint64_t c) { return c < config->min_count; })) {
+                                for (graph::DeBruijnGraph::node_index node : path) {
+                                    unset_bit(mask.data(), node, parallel, std::memory_order_relaxed);
+                                }
+                            }
+                        }, get_num_threads());
+                        std::atomic_thread_fence(std::memory_order_acquire);
+
+                        graph::MaskedDeBruijnGraph clean_graph(
+                            graph,
+                            std::make_unique<bitmap_vector>(std::move(mask)),
+                            true,
+                            graph->get_mode() == graph::DeBruijnGraph::PRIMARY
+                                ? graph::DeBruijnGraph::PRIMARY : graph::DeBruijnGraph::BASIC
+                        );
+
+                        clean_graph.call_unitigs([&](const std::string&, const auto &path) {
+                            std::vector<uint64_t> unitig_sums(columns_all.size());
+                            for (graph::DeBruijnGraph::node_index node : path) {
+                                auto row_i = graph::AnnotatedDBG::graph_to_anno_index(node);
+                                for (size_t j = 0; j < columns_all.size(); ++j) {
+                                    if (uint64_t r = columns_all[j]->conditional_rank1(row_i))
+                                        unitig_sums[j] += column_values_all[j][r - 1];
+                                }
+                            }
+
+                            std::lock_guard<std::mutex> lock(out_mu);
+                            outstream << fmt::format("{}\t{}\t{}\n", path[0], path.size(), fmt::join(unitig_sums, "\t"));
+                        }, get_num_threads());
                     }
-                );
+                } else {
+                    ColumnCompressed<>::load_columns_and_values(files,
+                        [&](uint64_t offset, const auto &label, std::unique_ptr<bit_vector> &&column, sdsl::int_vector_buffer<>&& column_values) {
+                            std::ofstream outstream(utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension)
+                                        + fmt::format(".{}.tsv", offset));
+                            uint64_t rk = 0;
+                            column->call_ones([&](uint64_t pos) {
+                                outstream << pos << "\t" << column_values[rk++] << "\n";
+                            });
+                        }
+                    );
+                }
             } else if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);

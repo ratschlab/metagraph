@@ -613,8 +613,8 @@ Config::Config(int argc, char *argv[]) {
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
-        } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+        } else if (!to_row_diff && !count_kmers && !unitigs && !dump_text_anno && infbase.size()) {
+            std::cerr << "Graph is only required for transform to row_diff types and dumping per-unitig counts" << std::endl;
             print_usage_and_exit = true;
         }
     }

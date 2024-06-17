@@ -238,21 +238,27 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             hists[j].clear();
         }
 
+        std::atomic<uint64_t> discarded_counts(0);
         std::atomic_thread_fence(std::memory_order_release);
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
-            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
-            num_unitigs.fetch_add(1, MO_RELAXED);
-
             std::vector<uint64_t> unitig_sums(groups.size(), 0);
+            std::vector<bool> all_below_cutoff(groups.size(), true);
             for (node_index node : path) {
                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
                 for (size_t j = 0; j < groups.size(); ++j) {
                     const auto &col = *columns_all[j];
                     const auto &col_vals = *column_values_all[j];
-                    if (uint64_t r = col.conditional_rank1(row_i))
-                        unitig_sums[j] += col_vals[r - 1];
+                    if (uint64_t r = col.conditional_rank1(row_i)) {
+                        uint64_t c = col_vals[r - 1];
+                        unitig_sums[j] += c;
+                        if (c >= min_counts[j])
+                            all_below_cutoff[j] = false;
+                    }
                 }
             }
+
+            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
+            num_unitigs.fetch_add(1, MO_RELAXED);
 
             std::lock_guard<std::mutex> lock(agg_mu);
             for (size_t j = 0; j < groups.size(); ++j) {
@@ -260,6 +266,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
+
+        common::logger->trace("Discarded {} counts", discarded_counts.load());
 
         nelem = num_unitigs.load();
     }
@@ -584,7 +592,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-        compute_min_pval = [&,lscaling_base,r_in,r_out](int64_t n) {
+
+        compute_min_pval = [&,lscaling_base,r_in,r_out,target_p](int64_t n) {
             if (n == 0)
                 return 1.1;
 
@@ -596,20 +605,48 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
 
-            if (num_labels_in != num_labels_out) {
-                double d0 = static_cast<double>(n) / num_labels_out;
-                double dn = static_cast<double>(n) / num_labels_in;
-                if (d0 > dn) {
-                    return get_pmf(0);
-                } else if (d0 < dn) {
-                    return get_pmf(n);
+            auto get_deviance = [&](double y, double mu, double invphi) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2.0 * (y * log( y/mu ) + (y + invphi) * log( (mu + invphi)/(y + invphi) ) );
+            };
+
+            double mu1 = r_in * (1.0 - target_p) / target_p;
+            double mu2 = r_out * (1.0 - target_p) / target_p;
+
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1, r_in) + get_deviance(n - s, mu2, r_out));
+            }
+            double max_d = *std::max_element(devs.begin(), devs.end());
+            double pval = 0.0;
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] == max_d) {
+                    pval += get_pmf(s);
+                } else {
+                    break;
                 }
             }
 
-            return std::min(1.0, get_pmf(0) + get_pmf(n));
+            for (int64_t sp = n; sp >= s; --sp) {
+                if (devs[sp] == max_d) {
+                    pval += get_pmf(sp);
+                } else {
+                    break;
+                }
+            }
+
+            if (pval == 0.0) {
+                common::logger->error("Devs: {}", fmt::join(devs, ","));
+                throw std::runtime_error("Fail");
+            }
+
+            return std::min(1.0, pval);
         };
 
-        compute_pval = [&,lscaling_base,r_in,r_out](int64_t in_sum, int64_t out_sum, const auto &row) {
+        compute_pval = [&,lscaling_base,r_in,r_out,target_p](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
@@ -623,51 +660,39 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
 
-            double pval = 1.0;
-            if (num_labels_in == num_labels_out) {
-                if (in_sum != out_sum) {
-                    lscaling = lgamma(n + 1) + lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-                    int64_t d = std::min(in_sum, out_sum);
-                    pval = 0.0;
-                    for (int64_t s = 0; s <= d; ++s) {
-                        pval += get_pmf(s) + get_pmf(n - s);
-                    }
-                }
-            } else {
-                double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
-                if (d > 0) {
-                    // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
-                    // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
-                    // s/num_labels_in + s/num_labels_out >= d + n/num_labels_out || n/num_labels_out - d >= s/num_labels_in + s/num_labels_out
-                    double factor = double(1.0) / num_labels_in + double(1.0) / num_labels_out;
+            auto get_deviance = [&](double y, double mu, double invphi) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2.0 * (y * log( y/mu ) + (y + invphi) * log( (mu + invphi)/(y + invphi) ) );
+            };
 
-                    double lower_d = (static_cast<double>(n) / num_labels_out - d) / factor;
-                    double upper_d = (d + static_cast<double>(n) / num_labels_out) / factor;
+            double mu1 = r_in * (1.0 - target_p) / target_p;
+            double mu2 = r_out * (1.0 - target_p) / target_p;
 
-                    // fix floating point errors
-                    if (abs(lower_d - round(lower_d)) < 1e-10)
-                        lower_d = round(lower_d);
-
-                    if (abs(upper_d - round(upper_d)) < 1e-10)
-                        upper_d = round(upper_d);
-
-                    int64_t lower = floor(lower_d);
-                    int64_t upper = ceil(upper_d);
-
-                    if (lower < n && upper > 0 && lower != upper) {
-                        pval = 0;
-                        for (int64_t s = 0; s <= lower; ++s) {
-                            pval += get_pmf(s);
-                        }
-
-                        for (int64_t s = upper; s <= n; ++s) {
-                            pval += get_pmf(s);
-                        }
-                    }
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1, r_in) + get_deviance(n - s, mu2, r_out));
+            }
+            double pval = 0.0;
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] >= devs[in_sum]) {
+                    pval += get_pmf(s);
+                } else {
+                    break;
                 }
             }
 
-            return std::min(pval, 1.0);
+            for (int64_t sp = n; sp >= s; --sp) {
+                if (devs[sp] >= devs[in_sum]) {
+                    pval += get_pmf(sp);
+                } else {
+                    break;
+                }
+            }
+
+            return std::min(1.0, pval);
         };
     } else if (config.test_type == "notest") {
         compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
@@ -701,6 +726,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             PairContainer merged_row;
             int64_t in_sum = 0;
             int64_t out_sum = 0;
+            size_t count_in = 0;
+            size_t count_out = 0;
             for (size_t j = 0; j < groups.size(); ++j) {
                 if (row_counts[j] > 0) {
                     if (count_maps.size())
@@ -709,10 +736,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     merged_row.emplace_back(j, row_counts[j]);
                     if (groups[j]) {
                         out_sum += row_counts[j];
+                        ++count_out;
                     } else {
                         in_sum += row_counts[j];
+                        ++count_in;
                     }
                 }
+            }
+
+            if (count_in + count_out < config.min_recurrence
+                    || count_in < config.min_in_recurrence
+                    || count_out < config.min_out_recurrence
+                    || count_in > config.max_in_recurrence
+                    || count_out > config.max_out_recurrence) {
+                merged_row.clear();
+                in_sum = 0;
+                out_sum = 0;
             }
 
             double pval;
