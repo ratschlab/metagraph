@@ -560,7 +560,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Finding common p and r.");
         double real_sum = 0.0;
         double real_sum_sq = 0.0;
-        std::vector<std::pair<double, size_t>> joint_hists_sorted;
         for (size_t j = 0; j < groups.size(); ++j) {
             double f = target_sum / sums[j];
             common::logger->trace("{}: scale factor: {}", j, f);
@@ -570,44 +569,50 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     double val = f * k;
                     real_sum += val * c;
                     real_sum_sq += val * val * c;
-                    joint_hists_sorted.emplace_back(val, j);
                 }
             });
         }
 
-        std::sort(joint_hists_sorted.begin(), joint_hists_sorted.end(), utils::LessFirst());
+        auto get_deviance = [&](double y, double mu, double invphi) {
+            y += 1e-8;
+            mu += 1e-8;
+            return 2.0 * (y * log( y/mu ) + (y + invphi) * log( (mu + invphi)/(y + invphi) ) );
+        };
 
-        size_t min_group_size = std::min(num_labels_in, num_labels_out);
-        double r_min = double(1.0) / min_group_size;
         double r_guess = 0.0;
         double target_mu = 0.0;
         double target_var = 0.0;
 
-        do {
-            // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
-            // nelem * r / p = target_sum / (1 - p)
-            // r / target_mu = p / (1 - p)
-            // r / target_mu = p + p * r / target_mu
-            // p = r / target_mu / (r / target_mu + 1)
-            // p = r / (r + target_mu)
-            target_mu = real_sum / matrix_size;
-            double target_mu2 = target_mu * target_mu;
-            target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
+        auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
+            double cdf = boost::math::cdf(old_dist, k);
 
+            if (cdf < 1.0)
+                return boost::math::quantile(new_dist, cdf);
+
+            double ccdf = boost::math::cdf(boost::math::complement(old_dist, k));
+
+            if (ccdf > 0.0)
+                return boost::math::quantile(boost::math::complement(new_dist, ccdf));
+
+            return ceil(scale * k);
+        };
+
+        // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
+        // nelem * r / p = target_sum / (1 - p)
+        // r / target_mu = p / (1 - p)
+        // r / target_mu = p + p * r / target_mu
+        // p = r / target_mu / (r / target_mu + 1)
+        // p = r / (r + target_mu)
+        target_mu = real_sum / matrix_size;
+        double target_mu2 = target_mu * target_mu;
+        target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
+
+        if (target_var > target_mu) {
             r_guess = target_mu2 / (target_var - target_mu);
-            if (matrix_size <= 1 || target_var == target_mu || r_guess <= r_min) {
-                auto [max_count, picked_hist] = joint_hists_sorted.back();
-                joint_hists_sorted.pop_back();
-                --hist_its[picked_hist];
-                uint64_t abundance = hist_its[picked_hist]->second;
-                real_sum -= max_count * abundance;
-                real_sum_sq -= max_count * max_count * abundance;
-                matrix_size -= abundance;
-            }
-        } while (joint_hists_sorted.size() && (target_var == target_mu || r_guess <= r_min));
-
-        if (joint_hists_sorted.empty())
-            throw std::domain_error("Too few samples, could not fit. Use poisson_exact instead");
+        } else {
+            common::logger->error("Data is underdispersed: {} >= {}. Use poisson_exact instead", target_mu, target_var);
+            throw std::domain_error("Fit failed");
+        }
 
         double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
             double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
@@ -625,81 +630,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double target_p = r_map / (r_map + target_mu);
         double fit_mu = r_map * (1.0 - target_p) / target_p;
         double fit_var = fit_mu / target_p;
-        common::logger->trace("Common params: r: {}\tp: {}\tmu: {}\tvar: {}",
-                              r_map, target_p, fit_mu, fit_var);
-
-        if (fit_var / fit_mu - 1.0 < 1e-5)
-            common::logger->warn("Fit parameters are close to a Poisson distribution");
-
-        count_maps.resize(groups.size());
-
-        common::logger->trace("Computing quantile maps");
-        #pragma omp parallel for num_threads(num_parallel_files)
-        for (size_t j = 0; j < groups.size(); ++j) {
-            const auto &[r, p] = nb_params[j];
-
-            common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
-                                  j, r, p, r_map, target_p);
-
-            boost::math::negative_binomial nb_out(r_map, target_p);
-            double scale = target_sum / sums[j];
-
-            auto compute_map = [&](const auto &nb) {
-                // ensure that 0 maps to 0
-                count_maps[j][0] = std::make_pair(0, 0);
-
-                const auto &hist = hists[j];
-                for (const auto &[k, c] : hist) {
-                    if (!count_maps[j].count(k)) {
-                        double cdf = boost::math::cdf(nb, k);
-
-                        uint64_t new_k = 0;
-                        if (cdf < 1.0) {
-                            new_k = boost::math::quantile(nb_out, cdf);
-                        } else {
-                            double ccdf = boost::math::cdf(boost::math::complement(nb, k));
-                            if (ccdf > 0.0) {
-                                new_k = boost::math::quantile(boost::math::complement(nb_out, ccdf));
-                            } else {
-                                new_k = ceil(scale * k);
-                            }
-                        }
-                        count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
-                    } else {
-                        count_maps[j][k].second += c;
-                    }
-                }
-            };
-
-            if (p < 1.0) {
-                compute_map(boost::math::negative_binomial(r, p));
-            } else {
-                compute_map(boost::math::poisson(static_cast<double>(sums[j]) * scale / nelem));
-            }
-        }
-
-        common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
-        in_kmers = 0;
-        out_kmers = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            for (const auto &[k, m] : count_maps[j]) {
-                const auto &[v, c] = m;
-                if (groups[j]) {
-                    out_kmers += v * c;
-                } else {
-                    in_kmers += v * c;
-                }
-            }
-        }
-        common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
+        common::logger->trace("Common params: r_guess: {}\tr: {}\tp: {}\tmu: {}\tvar: {}",
+                              r_guess, r_map, target_p, fit_mu, fit_var);
 
         double r_in = r_map * num_labels_in;
         double r_out = r_map * num_labels_out;
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+        double mu1 = r_in * (1.0 - target_p) / target_p;
+        double mu2 = r_out * (1.0 - target_p) / target_p;
 
-        compute_min_pval = [&,lscaling_base,r_in,r_out,target_p](int64_t n) {
+        if (fit_var / fit_mu - 1.0 < 1e-5)
+            common::logger->warn("Fit parameters are close to a Poisson distribution");
+
+        compute_min_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t n) {
             if (n == 0)
                 return 1.1;
 
@@ -710,15 +655,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double rt = r_out + t;
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
-
-            auto get_deviance = [&](double y, double mu, double invphi) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2.0 * (y * log( y/mu ) + (y + invphi) * log( (mu + invphi)/(y + invphi) ) );
-            };
-
-            double mu1 = r_in * (1.0 - target_p) / target_p;
-            double mu2 = r_out * (1.0 - target_p) / target_p;
 
             std::vector<double> devs;
             devs.reserve(n + 1);
@@ -755,7 +691,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::min(1.0, pval);
         };
 
-        compute_pval = [&,lscaling_base,r_in,r_out,target_p](int64_t in_sum, int64_t out_sum, const auto &row) {
+        compute_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
@@ -768,15 +704,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double rt = r_out + t;
                 return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
             };
-
-            auto get_deviance = [&](double y, double mu, double invphi) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2.0 * (y * log( y/mu ) + (y + invphi) * log( (mu + invphi)/(y + invphi) ) );
-            };
-
-            double mu1 = r_in * (1.0 - target_p) / target_p;
-            double mu2 = r_out * (1.0 - target_p) / target_p;
 
             std::vector<double> devs;
             devs.reserve(n + 1);
@@ -803,6 +730,79 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::min(1.0, pval);
         };
+
+        count_maps.resize(groups.size());
+
+        common::logger->trace("Computing quantile maps");
+        #pragma omp parallel for num_threads(num_parallel_files)
+        for (size_t j = 0; j < groups.size(); ++j) {
+            const auto &[r, p] = nb_params[j];
+
+            common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
+                                  j, r, p, r_map, target_p);
+
+            boost::math::negative_binomial nb_out(r_map, target_p);
+            double scale = target_sum / sums[j];
+
+            auto compute_map = [&](const auto &nb) {
+                // ensure that 0 maps to 0
+                count_maps[j][0] = std::make_pair(0, 0);
+
+                const auto &hist = hists[j];
+                for (const auto &[k, c] : hist) {
+                    if (!count_maps[j].count(k)) {
+                        uint64_t new_k = map_value(k, scale, nb, nb_out);
+                        count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
+                    } else {
+                        count_maps[j][k].second += c;
+                    }
+                }
+            };
+
+            if (p < 1.0) {
+                compute_map(boost::math::negative_binomial(r, p));
+            } else {
+                compute_map(boost::math::poisson(static_cast<double>(sums[j]) * scale / nelem));
+            }
+        }
+
+        common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
+        in_kmers = 0;
+        out_kmers = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            for (const auto &[k, m] : count_maps[j]) {
+                const auto &[v, c] = m;
+                if (groups[j]) {
+                    out_kmers += v * c;
+                } else {
+                    in_kmers += v * c;
+                }
+            }
+        }
+        total_kmers = in_kmers + out_kmers;
+        common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
+
+        PairContainer best_row;
+        int64_t in_sum = 0;
+        int64_t out_sum = 0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            if (hists[j].size()) {
+                uint64_t k = count_maps[j].find(hists[j].back().first)->second.first;
+                best_row.emplace_back(j, k);
+                if (groups[j]) {
+                    out_sum += k;
+                } else {
+                    in_sum += k;
+                }
+            }
+        }
+
+        double pval = compute_pval(in_sum, out_sum, best_row);
+        common::logger->trace("Best achievable p-value: {}", pval);
+        if (pval >= config.family_wise_error_rate) {
+            common::logger->error("Best achievable p-value is too big. Use poisson_exact instead");
+            throw std::domain_error("Too few samples");
+        }
     } else if (config.test_type == "notest") {
         compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
         compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
