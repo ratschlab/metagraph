@@ -34,7 +34,7 @@ using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 double CDF_CUTOFF = 0.95;
-double HIST_CUTOFF = 0.99;
+double HIST_CUTOFF = 1.00;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
 
 
@@ -278,8 +278,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
     for (size_t j = 0; j < hists.size(); ++j) {
         hists[j] = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(hists_map[j].values_container());
+        hists_map[j].clear();
         std::sort(hists[j].begin(), hists[j].end(), utils::LessFirst());
     }
+    hists_map.clear();
 
     for (size_t j = 0; j < groups.size(); ++j) {
         size_t total_c = 0;
@@ -520,24 +522,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double p = r / (r + mu);
-            common::logger->trace("{}: mu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
-                                  j, mu, var, r_guess, p_guess, r, p);
+            common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
+                                  j, sums[j], (end - 1)->first, mu, var, r_guess, p_guess, r, p);
 
             return std::make_pair(r, p);
         };
 
         std::vector<std::pair<double, double>> nb_params(groups.size());
+        std::vector<std::vector<std::pair<uint64_t, size_t>>::const_iterator> hist_its(groups.size());
+        size_t matrix_size = 0;
+
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &hist = hists[j];
             size_t total = 0;
             size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
             auto it = hist.begin();
-            for ( ; it != hists[j].end() && total < total_cutoff; ++it) {
+            for ( ; it != hist.end() && total < total_cutoff; ++it) {
                 if (it->first != 0)
                     total += it->second;
             }
+            hist_its[j] = it;
             nb_params[j] = get_rp(j, hist.begin(), it);
+
+            #pragma omp critical
+            matrix_size += total + (hist.size() && hist[0].first == 0 ? hist[0].second : 0);
         }
 
         common::logger->trace("Scaling distributions");
@@ -551,67 +560,76 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Finding common p and r.");
         double real_sum = 0.0;
         double real_sum_sq = 0.0;
-        size_t matrix_size = 0;
+        std::vector<std::pair<double, size_t>> joint_hists_sorted;
         for (size_t j = 0; j < groups.size(); ++j) {
-            size_t total = 0;
             double f = target_sum / sums[j];
             common::logger->trace("{}: scale factor: {}", j, f);
-            size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
-            const auto &hist = hists[j];
-            for (const auto &[k, c] : hist) {
-                if (k == 0) {
-                    matrix_size += c;
-                    continue;
+            std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
+                const auto &[k, c] = a;
+                if (k != 0) {
+                    double val = f * k;
+                    real_sum += val * c;
+                    real_sum_sq += val * val * c;
+                    joint_hists_sorted.emplace_back(val, j);
                 }
+            });
+        }
 
-                if (total >= total_cutoff)
-                    break;
+        std::sort(joint_hists_sorted.begin(), joint_hists_sorted.end(), utils::LessFirst());
 
-                double val = f * k;
-                real_sum += val * c;
-                real_sum_sq += val * val * c;
-                total += c;
+        size_t min_group_size = std::min(num_labels_in, num_labels_out);
+        double r_min = double(1.0) / min_group_size;
+        double r_guess = 0.0;
+        double target_mu = 0.0;
+        double target_var = 0.0;
+
+        do {
+            // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
+            // nelem * r / p = target_sum / (1 - p)
+            // r / target_mu = p / (1 - p)
+            // r / target_mu = p + p * r / target_mu
+            // p = r / target_mu / (r / target_mu + 1)
+            // p = r / (r + target_mu)
+            target_mu = real_sum / matrix_size;
+            double target_mu2 = target_mu * target_mu;
+            target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
+
+            r_guess = target_mu2 / (target_var - target_mu);
+            if (matrix_size <= 1 || target_var == target_mu || r_guess <= r_min) {
+                auto [max_count, picked_hist] = joint_hists_sorted.back();
+                joint_hists_sorted.pop_back();
+                --hist_its[picked_hist];
+                uint64_t abundance = hist_its[picked_hist]->second;
+                real_sum -= max_count * abundance;
+                real_sum_sq -= max_count * max_count * abundance;
+                matrix_size -= abundance;
             }
-            matrix_size += total;
-        }
+        } while (joint_hists_sorted.size() && (target_var == target_mu || r_guess <= r_min));
 
-        // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
-        // nelem * r / p = target_sum / (1 - p)
-        // r / target_mu = p / (1 - p)
-        // r / target_mu = p + p * r / target_mu
-        // p = r / target_mu / (r / target_mu + 1)
-        // p = r / (r + target_mu)
-        double target_mu = real_sum / matrix_size;
-        double target_mu2 = target_mu * target_mu;
-        double target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
-        if (target_mu >= target_var) {
-            common::logger->error("Target fit failed: mu: {} >= var: {}\t{},{},{}", target_mu, target_var, real_sum, real_sum_sq, target_mu2);
-            throw std::domain_error("Fit failed");
-        }
-
-        double r_guess = target_mu2 / (target_var - target_mu);
+        if (joint_hists_sorted.empty())
+            throw std::domain_error("Too few samples, could not fit. Use poisson_exact instead");
 
         double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
             double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
             double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
-                const auto &hist = hists[j];
-                size_t total = 0;
-                size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
-                for (const auto &[k, c] : hist) {
-                    if (total >= total_cutoff)
-                        break;
-
+                std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
+                    const auto &[k, c] = a;
                     dl += boost::math::digamma(f * k + r) * c;
                     ddl += boost::math::trigamma(f * k + r) * c;
-                    if (k != 0)
-                        total += c;
-                }
+                });
             }
             return std::make_pair(dl, ddl);
         }, r_guess, std::numeric_limits<double>::min(), real_sum, 30);
         double target_p = r_map / (r_map + target_mu);
+        double fit_mu = r_map * (1.0 - target_p) / target_p;
+        double fit_var = fit_mu / target_p;
+        common::logger->trace("Common params: r: {}\tp: {}\tmu: {}\tvar: {}",
+                              r_map, target_p, fit_mu, fit_var);
+
+        if (fit_var / fit_mu - 1.0 < 1e-5)
+            common::logger->warn("Fit parameters are close to a Poisson distribution");
 
         count_maps.resize(groups.size());
 
@@ -943,6 +961,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double pval_min;
             try {
                 pval_min = compute_min_pval(in_sum + out_sum);
+
+                if (pval_min >= 1.1)
+                    return;
+
                 pval = compute_pval(in_sum, out_sum, row);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(pval_mu);
