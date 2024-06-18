@@ -710,9 +710,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double max_d = *std::max_element(devs.begin(), devs.end());
             double pval = 0.0;
             int64_t s = 0;
+            bool found = false;
             for ( ; s <= n; ++s) {
                 if (devs[s] == max_d) {
                     pval += get_pmf(s);
+                    found = true;
                 } else {
                     break;
                 }
@@ -721,12 +723,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (int64_t sp = n; sp >= s; --sp) {
                 if (devs[sp] == max_d) {
                     pval += get_pmf(sp);
+                    found = true;
                 } else {
                     break;
                 }
             }
 
-            if (pval == 0.0) {
+            if (!found) {
                 common::logger->error("Devs: {}", fmt::join(devs, ","));
                 throw std::runtime_error("Fail");
             }
