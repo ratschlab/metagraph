@@ -34,6 +34,7 @@ using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 double CDF_CUTOFF = 0.95;
+double HIST_CUTOFF = 0.99;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
 
 
@@ -192,7 +193,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Marking discarded k-mers");
     std::mutex agg_mu;
-    std::vector<VectorMap<uint64_t, size_t>> hists(groups.size());
+    std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
 
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
@@ -202,9 +203,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                [&](uint64_t row_i, const auto &row, size_t) {
             for (const auto &[j, raw_c] : row) {
                 if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j]) {
-                    std::lock_guard<std::mutex> lock(agg_mu);
-                    for (const auto &[j, raw_c] : row) {
-                        ++hists[j][raw_c];
+                    if (!config.test_by_unitig) {
+                        std::lock_guard<std::mutex> lock(agg_mu);
+                        sdsl::bit_vector marker(groups.size(), false);
+                        for (const auto &[j, raw_c] : row) {
+                            ++hists_map[j][raw_c];
+                            marker[j] = true;
+                        }
+
+                        for (size_t j = 0; j < marker.size(); ++j) {
+                            if (!marker[j])
+                                ++hists_map[j][0];
+                        }
                     }
                     return;
                 }
@@ -215,7 +225,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 
-    double nelem = sdsl::util::cnt_one_bits(kept);
+    size_t nelem = sdsl::util::cnt_one_bits(kept);
 
     sdsl::bit_vector unitig_start;
     if (config.test_by_unitig)
@@ -234,11 +244,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
         );
 
-        for (size_t j = 0; j < groups.size(); ++j) {
-            hists[j].clear();
-        }
-
-        std::atomic<uint64_t> discarded_counts(0);
         std::atomic_thread_fence(std::memory_order_release);
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
             std::vector<uint64_t> unitig_sums(groups.size(), 0);
@@ -262,14 +267,30 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             std::lock_guard<std::mutex> lock(agg_mu);
             for (size_t j = 0; j < groups.size(); ++j) {
-                ++hists[j][unitig_sums[j]];
+                ++hists_map[j][unitig_sums[j]];
             }
         }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        common::logger->trace("Discarded {} counts", discarded_counts.load());
-
         nelem = num_unitigs.load();
+    }
+
+    std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
+    for (size_t j = 0; j < hists.size(); ++j) {
+        hists[j] = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(hists_map[j].values_container());
+        std::sort(hists[j].begin(), hists[j].end(), utils::LessFirst());
+    }
+
+    for (size_t j = 0; j < groups.size(); ++j) {
+        size_t total_c = 0;
+        for (const auto &[k, c] : hists[j]) {
+            total_c += c;
+        }
+
+        if (total_c != nelem) {
+            common::logger->error("FAIL {}: {} != {}", j, total_c, nelem);
+            throw std::runtime_error("GGG");
+        }
     }
 
     common::logger->trace("Computing aggregate statistics");
@@ -285,7 +306,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         for (const auto &[k, c] : hists[j]) {
             sums[j] += k * c;
             sums_of_squares[j] += k * k * c;
-            n_kmers[j] += c;
+            if (k != 0)
+                n_kmers[j] += c;
+
             max_obs_vals[j] = std::max(max_obs_vals[j], k);
         }
 
@@ -335,17 +358,41 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double p = static_cast<double>(in_kmers) / total_kmers;
             auto bdist = boost::math::binomial(n, p);
-            if (num_labels_in != num_labels_out) {
-                double d0 = static_cast<double>(n) / num_labels_out;
-                double dn = static_cast<double>(n) / num_labels_in;
-                if (d0 > dn) {
-                    return boost::math::pdf(bdist, 0);
-                } else if (d0 < dn) {
-                    return boost::math::pdf(bdist, n);
-                }
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
+
+            double mu1 = static_cast<double>(in_kmers) / nelem;
+            double mu2 = static_cast<double>(out_kmers) / nelem;
+
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
+            double max_d = *std::max_element(devs.begin(), devs.end());
+            double pval = 0.0;
+
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] != max_d)
+                    break;
+            }
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
+
+            int64_t sp = n;
+            for ( ; sp >= s; --sp) {
+                if (devs[sp] != max_d)
+                    break;
             }
 
-            return boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
+            if (sp < n)
+                pval += boost::math::cdf(boost::math::complement(bdist, sp));
+
+            return pval;
         };
 
         compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row) {
@@ -355,50 +402,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             int64_t n = in_sum + out_sum;
             double p = static_cast<double>(in_kmers) / total_kmers;
             auto bdist = boost::math::binomial(n, p);
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
 
-            if (num_labels_in == num_labels_out) {
-                if (in_sum != out_sum) {
-                    int64_t d = std::min(in_sum, out_sum);
-                    return boost::math::cdf(bdist, d) + boost::math::cdf(boost::math::complement(bdist, n - d - 1));
-                }
+            double mu1 = static_cast<double>(in_kmers) / nelem;
+            double mu2 = static_cast<double>(out_kmers) / nelem;
 
-                return 1.0;
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
+            double pval = 0.0;
+
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] < devs[in_sum])
+                    break;
+            }
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
+
+            int64_t sp = n;
+            for ( ; sp >= s; --sp) {
+                if (devs[sp] < devs[in_sum])
+                    break;
             }
 
-            double d = abs(static_cast<double>(in_sum) / num_labels_in - static_cast<double>(out_sum) / num_labels_out);
-            if (d > 0) {
-                // we want s s.t. | s/num_labels_in - (n-s)/num_labels_out | >= d
-                // s/num_labels_in - (n-s)/num_labels_out >= d || (n-s)/num_labels_out - s/num_labels_in >= d
-                // s/num_labels_in + s/num_labels_out >= d + n/num_labels_out || n/num_labels_out - d >= s/num_labels_in + s/num_labels_out
-                double factor = double(1.0) / num_labels_in + double(1.0) / num_labels_out;
+            if (sp < n)
+                pval += boost::math::cdf(boost::math::complement(bdist, sp));
 
-                double lower_d = (static_cast<double>(n) / num_labels_out - d) / factor;
-                double upper_d = (d + static_cast<double>(n) / num_labels_out) / factor;
-
-                // fix floating point errors
-                if (abs(lower_d - round(lower_d)) < 1e-10)
-                    lower_d = round(lower_d);
-
-                if (abs(upper_d - round(upper_d)) < 1e-10)
-                    upper_d = round(upper_d);
-
-                int64_t lower = floor(lower_d);
-                int64_t upper = ceil(upper_d);
-
-                if (lower < n && upper > 0 && lower != upper) {
-                    double pval = 0.0;
-
-                    if (lower >= 0)
-                        pval += boost::math::cdf(bdist, lower);
-
-                    if (upper <= n)
-                        pval += boost::math::cdf(boost::math::complement(bdist, upper - 1));
-
-                    return pval;
-                }
-            }
-
-            return 1.0;
+            return pval;
         };
     } else if (config.test_type == "fisher") {
         double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
@@ -443,23 +480,39 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
-        auto get_rp = [&](size_t j, double mu, double var, const auto &hist) {
-            double var_orig = var;
-            var = std::max(var, mu + 0.1);
+        auto get_rp = [&](size_t j, auto begin, auto end) {
+            double mu = 0;
+            double var = 0;
+            size_t total = 0;
+            std::for_each(begin, end, [&](const auto &a) {
+                const auto &[k, c] = a;
+                mu += k * c;
+                var += k * k * c;
+                total += c;
+            });
+            mu /= total;
+            double mu2 = mu * mu;
+            var = (var - mu2 * total) / (total - 1);
+
+            if (mu >= var) {
+                common::logger->warn("Fit {} failed, falling back to Poisson: mu: {} >= var: {}", j, mu, var);
+                return std::make_pair(0.0, 1.0);
+            }
 
             double r_guess = mu * mu / (var - mu);
             double p_guess = mu / var;
             double r = r_guess;
             try {
                 r = boost::math::tools::newton_raphson_iterate([&](double r) {
-                    double dl = nelem * (log(r) - log(r + mu) - boost::math::digamma(r));
-                    double ddl = nelem * (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r));
-                    for (const auto &[k, c] : hist) {
+                    double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
+                    double ddl = (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r)) * total;
+                    std::for_each(begin, end, [&](const auto &a) {
+                        const auto &[k, c] = a;
                         dl += boost::math::digamma(k + r) * c;
                         ddl += boost::math::trigamma(k + r) * c;
-                    }
+                    });
                     return std::make_pair(dl, ddl);
-                }, r_guess, std::numeric_limits<double>::min(), mu * nelem, 30);
+                }, r_guess, std::numeric_limits<double>::min(), mu * total, 30);
             } catch (std::exception &e) {
                 common::logger->warn("Caught exception for sample {}: Falling back to initial guess", j);
                 common::logger->warn("{}", e.what());
@@ -468,42 +521,58 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double p = r / (r + mu);
             common::logger->trace("{}: mu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
-                                  j, mu, var_orig, r_guess, p_guess, r, p);
+                                  j, mu, var, r_guess, p_guess, r, p);
 
             return std::make_pair(r, p);
         };
 
+        std::vector<std::pair<double, double>> nb_params(groups.size());
+        #pragma omp parallel for num_threads(num_parallel_files)
+        for (size_t j = 0; j < groups.size(); ++j) {
+            const auto &hist = hists[j];
+            size_t total = 0;
+            size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
+            auto it = hist.begin();
+            for ( ; it != hists[j].end() && total < total_cutoff; ++it) {
+                if (it->first != 0)
+                    total += it->second;
+            }
+            nb_params[j] = get_rp(j, hist.begin(), it);
+        }
+
         common::logger->trace("Scaling distributions");
-        // geometric mean
+
         double target_sum = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
             target_sum += log(static_cast<double>(sums[j]));
         }
         target_sum = exp(target_sum / groups.size());
 
-        std::vector<std::pair<double, double>> nb_params(groups.size());
-
-        #pragma omp parallel for num_threads(num_parallel_files)
-        for (size_t j = 0; j < groups.size(); ++j) {
-            const auto &hist = hists[j];
-            double s = static_cast<double>(sums[j]);
-            double mu = s / nelem;
-            double mu2 = mu * mu;
-            double var = static_cast<double>(sums_of_squares[j]) / nelem - mu2;
-            nb_params[j] = get_rp(j, mu, var, hist);
-        }
-
         common::logger->trace("Finding common p and r.");
         double real_sum = 0.0;
         double real_sum_sq = 0.0;
+        size_t matrix_size = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
+            size_t total = 0;
             double f = target_sum / sums[j];
+            common::logger->trace("{}: scale factor: {}", j, f);
+            size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
             const auto &hist = hists[j];
             for (const auto &[k, c] : hist) {
+                if (k == 0) {
+                    matrix_size += c;
+                    continue;
+                }
+
+                if (total >= total_cutoff)
+                    break;
+
                 double val = f * k;
                 real_sum += val * c;
                 real_sum_sq += val * val * c;
+                total += c;
             }
+            matrix_size += total;
         }
 
         // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
@@ -512,20 +581,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         // r / target_mu = p + p * r / target_mu
         // p = r / target_mu / (r / target_mu + 1)
         // p = r / (r + target_mu)
-        double target_mu = real_sum / nelem / groups.size();
+        double target_mu = real_sum / matrix_size;
         double target_mu2 = target_mu * target_mu;
-        double target_var = real_sum_sq / nelem / groups.size() - target_mu2;
+        double target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
+        if (target_mu >= target_var) {
+            common::logger->error("Target fit failed: mu: {} >= var: {}\t{},{},{}", target_mu, target_var, real_sum, real_sum_sq, target_mu2);
+            throw std::domain_error("Fit failed");
+        }
+
         double r_guess = target_mu2 / (target_var - target_mu);
 
         double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
-            double dl = nelem * groups.size() * (log(r) - log(r + target_mu) - boost::math::digamma(r));
-            double ddl = nelem * groups.size() * (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r));
+            double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
+            double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
                 const auto &hist = hists[j];
+                size_t total = 0;
+                size_t total_cutoff = n_kmers[j] * HIST_CUTOFF;
                 for (const auto &[k, c] : hist) {
+                    if (total >= total_cutoff)
+                        break;
+
                     dl += boost::math::digamma(f * k + r) * c;
                     ddl += boost::math::trigamma(f * k + r) * c;
+                    if (k != 0)
+                        total += c;
                 }
             }
             return std::make_pair(dl, ddl);
@@ -542,33 +623,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
                                   j, r, p, r_map, target_p);
 
-            boost::math::negative_binomial nb(r, p);
             boost::math::negative_binomial nb_out(r_map, target_p);
             double scale = target_sum / sums[j];
 
-            // ensure that 0 maps to 0
-            count_maps[j][0] = std::make_pair(0, 0);
+            auto compute_map = [&](const auto &nb) {
+                // ensure that 0 maps to 0
+                count_maps[j][0] = std::make_pair(0, 0);
 
-            const auto &hist = hists[j];
-            for (const auto &[k, c] : hist) {
-                if (!count_maps[j].count(k)) {
-                    double cdf = boost::math::cdf(nb, k);
+                const auto &hist = hists[j];
+                for (const auto &[k, c] : hist) {
+                    if (!count_maps[j].count(k)) {
+                        double cdf = boost::math::cdf(nb, k);
 
-                    uint64_t new_k = 0;
-                    if (cdf < 1.0) {
-                        new_k = boost::math::quantile(nb_out, cdf);
-                    } else {
-                        double ccdf = boost::math::cdf(boost::math::complement(nb, k));
-                        if (ccdf > 0.0) {
-                            new_k = boost::math::quantile(boost::math::complement(nb_out, ccdf));
+                        uint64_t new_k = 0;
+                        if (cdf < 1.0) {
+                            new_k = boost::math::quantile(nb_out, cdf);
                         } else {
-                            new_k = ceil(scale * k);
+                            double ccdf = boost::math::cdf(boost::math::complement(nb, k));
+                            if (ccdf > 0.0) {
+                                new_k = boost::math::quantile(boost::math::complement(nb_out, ccdf));
+                            } else {
+                                new_k = ceil(scale * k);
+                            }
                         }
+                        count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
+                    } else {
+                        count_maps[j][k].second += c;
                     }
-                    count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
-                } else {
-                    count_maps[j][k].second += c;
                 }
+            };
+
+            if (p < 1.0) {
+                compute_map(boost::math::negative_binomial(r, p));
+            } else {
+                compute_map(boost::math::poisson(static_cast<double>(sums[j]) * scale / nelem));
             }
         }
 
