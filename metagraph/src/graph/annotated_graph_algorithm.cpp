@@ -782,23 +782,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         total_kmers = in_kmers + out_kmers;
         common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
-        PairContainer best_row;
+        PairContainer best_in_row;
+        PairContainer best_out_row;
         int64_t in_sum = 0;
         int64_t out_sum = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
             if (hists[j].size()) {
                 uint64_t k = count_maps[j].find(hists[j].back().first)->second.first;
-                best_row.emplace_back(j, k);
                 if (groups[j]) {
+                    best_out_row.emplace_back(j, k);
                     out_sum += k;
                 } else {
+                    best_in_row.emplace_back(j, k);
                     in_sum += k;
                 }
             }
         }
 
-        double pval = compute_pval(in_sum, out_sum, best_row);
-        common::logger->trace("Best achievable p-value: {}", pval);
+        double pval = std::min(compute_pval(in_sum, 0, best_in_row),
+                               compute_pval(0, out_sum, best_out_row));
+        common::logger->trace("Best achievable p-value: {}\tin_sum: {}\tout_sum: {}", pval, in_sum, out_sum);
         if (pval >= config.family_wise_error_rate) {
             common::logger->error("Best achievable p-value is too big. Use poisson_exact instead");
             throw std::domain_error("Too few samples");
