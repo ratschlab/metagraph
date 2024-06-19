@@ -293,9 +293,10 @@ int build_graph(Config *config) {
                 exit(1);
 
             case Config::GraphType::SSHASH:
-            logger->error("SSHash-graph construction"
+                logger->error("SSHash-graph construction"
                               " in dynamic regime is not supported");
                 exit(1);
+
             case Config::GraphType::INVALID:
                 assert(false);
         }

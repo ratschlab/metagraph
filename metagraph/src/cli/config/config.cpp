@@ -817,8 +817,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 
     } else if (string == "sshash") {
         return GraphType::SSHASH;
-    }
-     else {
+    } else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
     }
