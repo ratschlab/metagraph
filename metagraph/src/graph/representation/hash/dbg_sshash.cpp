@@ -101,11 +101,9 @@ DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
     sshash::build_configuration build_config;
     build_config.k = k;
     // quick fix for value of m... k/2 but odd
-    build_config.m = std::min(uint64_t((k_ + 1) / 2), sshash::constants::max_m);
+    build_config.m = std::min(uint64_t(k / 2) | 1, sshash::constants::max_m);
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
-    if (build_config.m % 2 == 0)
-        build_config.m++;
 
     // silence sshash construction messages when not verbose
     if (!common::get_verbose())
