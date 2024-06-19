@@ -1,6 +1,7 @@
 #ifndef __SERIALIZATION_HPP__
 #define __SERIALIZATION_HPP__
 
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <string_view>
