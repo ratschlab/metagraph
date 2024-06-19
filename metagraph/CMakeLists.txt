@@ -319,6 +319,8 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+target_compile_options(spdlog PRIVATE -Wno-dangling-reference)
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference>)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
