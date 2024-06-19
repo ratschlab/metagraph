@@ -221,7 +221,8 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
         auto nb = dict.kmer_forward_neighbours(kmer.c_str(), with_rc);
         for (size_t i = 0; i < nb.forward.size(); i++) {
             if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
-                callback(sshash_to_graph_index(nb.forward[i].kmer_id), kmer_t::alphabet[i],
+                callback(sshash_to_graph_index(nb.forward[i].kmer_id),
+                         kmer_t::uint64_to_char(i),
                          nb.forward[i].kmer_orientation);
             }
         }
@@ -239,7 +240,8 @@ void DBGSSHash::call_incoming_kmers_with_rc(
         auto nb = dict.kmer_backward_neighbours(kmer.c_str(), with_rc);
         for (size_t i = 0; i < nb.backward.size(); i++) {
             if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
-                callback(sshash_to_graph_index(nb.backward[i].kmer_id), kmer_t::alphabet[i],
+                callback(sshash_to_graph_index(nb.backward[i].kmer_id),
+                         kmer_t::uint64_to_char(i),
                          nb.backward[i].kmer_orientation);
             }
         }
