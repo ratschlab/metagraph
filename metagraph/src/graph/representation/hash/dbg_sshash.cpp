@@ -122,7 +122,7 @@ std::string DBGSSHash::file_extension() const {
 
 void DBGSSHash::add_sequence(std::string_view sequence,
                              const std::function<void(node_index)>& on_insertion) {
-    throw std::runtime_error("adding sequences not implemented");
+    throw std::logic_error("adding sequences not supported");
 }
 
 void DBGSSHash::map_to_nodes(std::string_view sequence,
