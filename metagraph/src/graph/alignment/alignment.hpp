@@ -396,7 +396,7 @@ template <> struct formatter<mtg::graph::align::Alignment> {
     }
 
     template <typename FormatContext>
-    auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) -> decltype(ctx.out()) {
+    auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) -> decltype(ctx.out()) const {
         format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
                   a.get_orientation() ? "-" : "+",
                   a.get_sequence(),
