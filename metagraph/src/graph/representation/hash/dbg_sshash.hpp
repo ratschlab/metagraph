@@ -110,8 +110,6 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index, char, bool)>& callback) const;
 
 
-    bool operator==(const DeBruijnGraph& other) const override;
-
     const std::string& alphabet() const override final { return alphabet_; }
 
     const dict_t& data() const { return dict_; }

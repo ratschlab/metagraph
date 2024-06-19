@@ -352,23 +352,5 @@ bool DBGSSHash::load(const std::string& filename) {
     return true;
 }
 
-bool DBGSSHash::operator==(const DeBruijnGraph& other) const {
-    try {
-        other.call_kmers([&](node_index, const std::string &kmer) {
-            if (!find(kmer))
-                throw std::bad_function_call();
-        });
-
-        call_kmers([&](node_index, const std::string &kmer) {
-            if (!other.find(kmer))
-                throw std::bad_function_call();
-        });
-    } catch (const std::bad_function_call&) {
-        return false;
-    }
-
-    return true;
-}
-
 } // namespace graph
 } // namespace mtg
