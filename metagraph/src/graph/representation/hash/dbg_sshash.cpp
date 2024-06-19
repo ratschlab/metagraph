@@ -54,12 +54,21 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     }
 }
 
-DBGSSHash::DBGSSHash(std::string const& input_filename, size_t k, Mode mode)
+DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, size_t num_chars)
       : DBGSSHash(k, mode) {
     sshash::build_configuration build_config;
     build_config.k = k;
-    // quick fix for value of m... k/2 but odd
-    build_config.m = std::min(uint64_t(k / 2) | 1, sshash::constants::max_m);
+
+    // use a value of m recommended here:
+    // https://twitter.com/giulio_pibiri/status/1803417277213114501
+    // otherwise, use the next odd value greater than or equal to floor(k / 2)
+    build_config.m = std::min(
+        num_chars > 0
+            ? uint64_t(ceil(log(static_cast<double>(num_chars)) / log(static_cast<double>(alphabet_.size()))) + 1)
+            : uint64_t(k / 2) | 1,
+        sshash::constants::max_m
+    );
+
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
 
@@ -89,7 +98,7 @@ void DBGSSHash::map_to_nodes(std::string_view sequence,
     if (mode_ != CANONICAL) {
         map_to_nodes_sequentially(sequence, callback, terminate);
     } else {
-        map_to_nodes_with_rc(
+        map_to_nodes_with_rc<true>(
                 sequence, [&](node_index node, bool) { callback(node); }, terminate);
     }
 }

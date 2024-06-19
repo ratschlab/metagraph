@@ -251,7 +251,7 @@ int build_graph(Config *config) {
         }
 
     } else if (config->graph_type == Config::GraphType::SSHASH) {
-        graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode));
+        graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode, config->num_chars));
         if (files.size() > 1) {
             logger->error("DBGSSHash does not support multiple input files.");
             exit(1);
