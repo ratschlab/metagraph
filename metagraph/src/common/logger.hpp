@@ -1,5 +1,6 @@
 #pragma once
 #include <spdlog/fmt/ostr.h> // for logging custom classes
+#include <spdlog/fmt/std.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 
