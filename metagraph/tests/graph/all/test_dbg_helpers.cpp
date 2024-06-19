@@ -41,7 +41,7 @@ template<> size_t max_test_k<DBGHashString>() {
     return 100;
 }
 template<> size_t max_test_k<DBGSSHash>() {
-    return 255 / graph::IDictionary::bits_per_char;
+    return 255 / sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 }
 
 template <class Graph>
