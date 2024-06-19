@@ -140,6 +140,7 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node == npos)
         return npos;
 
+    assert(node > 0 && node <= num_nodes());
     if (node > dict_->size())
         return node - dict_->size();
 
@@ -239,11 +240,13 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
+    assert(node > 0 && node <= num_nodes());
     // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
     return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
+    assert(node > 0 && node <= num_nodes());
     // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
     std::string string_kmer = std::string(1, prev_char) + get_node_sequence(node);
     string_kmer.pop_back();
@@ -373,12 +376,14 @@ void DBGSSHash::call_incoming_kmers_with_rc(
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
+    assert(node > 0 && node <= num_nodes());
     size_t res = 0;
     adjacent_outgoing_nodes(node, [&](node_index) { ++res; });
     return res;
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
+    assert(node > 0 && node <= num_nodes());
     size_t res = 0;
     adjacent_incoming_nodes(node, [&](node_index) { ++res; });
     return res;
@@ -416,6 +421,7 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
+    assert(node > 0 && node <= num_nodes());
     std::string str_kmer(k_, ' ');
     node_index node_canonical = node > dict_->size() ? node - dict_->size() : node;
     uint64_t ssh_idx = graph_index_to_sshash(node_canonical);
