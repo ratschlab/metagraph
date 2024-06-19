@@ -41,7 +41,7 @@ template<> size_t max_test_k<DBGHashString>() {
     return 100;
 }
 template<> size_t max_test_k<DBGSSHash>() {
-    return 255 / kmer::KmerExtractor2Bit::bits_per_char;
+    return 255 / graph::IDictionary::bits_per_char;
 }
 
 template <class Graph>
