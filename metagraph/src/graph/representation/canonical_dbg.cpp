@@ -64,7 +64,7 @@ void CanonicalDBG
     path.reserve(sequence.size() - get_k() + 1);
 
     if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->map_to_nodes_with_rc(sequence, [&](node_index node, bool orientation) {
+        sshash->map_to_nodes_with_rc<>(sequence, [&](node_index node, bool orientation) {
             callback(node && orientation ? reverse_complement(node) : node);
         }, terminate);
         return;
@@ -180,7 +180,7 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
     }
 
     if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->call_outgoing_kmers_with_rc(node, [&](node_index next, char c, bool orientation) {
+        sshash->call_outgoing_kmers_with_rc<>(node, [&](node_index next, char c, bool orientation) {
             callback(orientation ? reverse_complement(next) : next, c);
         });
         return;
@@ -273,7 +273,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
     }
 
     if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->call_incoming_kmers_with_rc(node, [&](node_index prev, char c, bool orientation) {
+        sshash->call_incoming_kmers_with_rc<>(node, [&](node_index prev, char c, bool orientation) {
             callback(orientation ? reverse_complement(prev) : prev, c);
         });
         return;
