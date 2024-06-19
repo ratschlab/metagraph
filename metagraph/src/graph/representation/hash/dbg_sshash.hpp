@@ -48,6 +48,7 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index)>& callback,
             const std::function<bool()>& terminate = []() { return false; }) const override;
 
+    template <bool with_rc = true>
     void map_to_nodes_with_rc(
             std::string_view sequence,
             const std::function<void(node_index, bool)>& callback,
@@ -88,11 +89,14 @@ class DBGSSHash : public DeBruijnGraph {
     size_t indegree(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
+
+    template <bool with_rc = true>
     std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
 
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback& callback) const override;
 
+    template <bool with_rc = true>
     void call_outgoing_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
@@ -100,6 +104,7 @@ class DBGSSHash : public DeBruijnGraph {
     void call_incoming_kmers(node_index node,
                              const IncomingEdgeCallback& callback) const override;
 
+    template <bool with_rc = true>
     void call_incoming_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;

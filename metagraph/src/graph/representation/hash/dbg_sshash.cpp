@@ -120,35 +120,18 @@ uint64_t DBGSSHash::num_nodes() const {
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)>& callback,
                                           const std::function<bool()>& terminate) const {
-    if (terminate() || sequence.size() < k_)
-        return;
-
-    if (!num_nodes()) {
-        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
-            callback(npos);
-        }
-        return;
-    }
-
     if (mode_ == CANONICAL) {
-        map_to_nodes_with_rc(sequence, [&](node_index n, bool orientation) {
+        map_to_nodes_with_rc<true>(sequence, [&](node_index n, bool orientation) {
             callback(orientation ? reverse_complement(n) : n);
         }, terminate);
-        return;
+    } else {
+        map_to_nodes_with_rc<false>(sequence, [&](node_index node, bool) {
+            callback(node);
+        }, terminate);
     }
-
-    std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
-        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
-        uint_kmer.pad_char();
-        for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
-            uint_kmer.drop_char();
-            uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-            callback(sshash_to_graph_index(dict.lookup_uint(uint_kmer, false)));
-        }
-    }, dict_);
 }
 
+template <bool with_rc>
 void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
@@ -169,7 +152,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
         for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
             uint_kmer.drop_char();
             uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-            auto res = dict.lookup_advanced_uint(uint_kmer, true);
+            auto res = dict.lookup_advanced_uint(uint_kmer, with_rc);
             callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
         }
     }, dict_);
@@ -203,37 +186,31 @@ void DBGSSHash::adjacent_incoming_nodes(node_index node,
 
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
-    assert(node > 0 && node <= num_nodes());
-    std::string kmer = get_node_sequence(node);
-
-    std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
-        auto nb = dict.kmer_forward_neighbours(kmer.c_str(), mode_ == CANONICAL);
-        for (size_t i = 0; i < nb.forward.size(); i++) {
-            if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
-                node_index next = sshash_to_graph_index(nb.forward[i].kmer_id);
-                callback(nb.forward[i].kmer_orientation ? reverse_complement(next) : next, kmer_t::alphabet[i]);
-            }
-        }
-    }, dict_);
+    if (mode_ == CANONICAL) {
+        call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool orientation) {
+            callback(orientation ? reverse_complement(next) : next, c);
+        });
+    } else {
+        call_outgoing_kmers_with_rc<false>(node, [&](node_index next, char c, bool) {
+            callback(next, c);
+        });
+    }
 }
 
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
-    assert(node > 0 && node <= num_nodes());
-    std::string kmer = get_node_sequence(node);
-    std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
-        auto nb = dict.kmer_backward_neighbours(kmer.c_str(), mode_ == CANONICAL);
-        for (size_t i = 0; i < nb.backward.size(); i++) {
-            if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
-                node_index prev = sshash_to_graph_index(nb.backward[i].kmer_id);
-                callback(nb.backward[i].kmer_orientation ? reverse_complement(prev) : prev, kmer_t::alphabet[i]);
-            }
-        }
-    }, dict_);
+    if (mode_ == CANONICAL) {
+        call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool orientation) {
+            callback(orientation ? reverse_complement(prev) : prev, c);
+        });
+    } else {
+        call_incoming_kmers_with_rc<false>(node, [&](node_index prev, char c, bool) {
+            callback(prev, c);
+        });
+    }
 }
 
+template <bool with_rc>
 void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
@@ -241,7 +218,7 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
-        auto nb = dict.kmer_forward_neighbours(kmer.c_str(), true);
+        auto nb = dict.kmer_forward_neighbours(kmer.c_str(), with_rc);
         for (size_t i = 0; i < nb.forward.size(); i++) {
             if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
                 callback(sshash_to_graph_index(nb.forward[i].kmer_id), kmer_t::alphabet[i],
@@ -251,6 +228,7 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
     }, dict_);
 }
 
+template <bool with_rc>
 void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
@@ -258,7 +236,7 @@ void DBGSSHash::call_incoming_kmers_with_rc(
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
-        auto nb = dict.kmer_backward_neighbours(kmer.c_str(), true);
+        auto nb = dict.kmer_backward_neighbours(kmer.c_str(), with_rc);
         for (size_t i = 0; i < nb.backward.size(); i++) {
             if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
                 callback(sshash_to_graph_index(nb.backward[i].kmer_id), kmer_t::alphabet[i],
@@ -296,23 +274,22 @@ void DBGSSHash::call_nodes(
 }
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
-    if (!num_nodes())
-        return npos;
-
-    return std::visit([&](const auto &d) {
-        auto res = d.lookup_advanced(kmer.data(), mode_ == CANONICAL);
-        node_index node = sshash_to_graph_index(res.kmer_id);
-        return res.kmer_orientation ? reverse_complement(node) : node;
-    }, dict_);
+    if (mode_ == CANONICAL) {
+        auto res = kmer_to_node_with_rc<true>(kmer);
+        return res.second ? reverse_complement(res.first) : res.first;
+    } else {
+        return kmer_to_node_with_rc<false>(kmer).first;
+    }
 }
 
+template <bool with_rc>
 std::pair<DBGSSHash::node_index, bool>
 DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
     if (!num_nodes())
         return std::make_pair(npos, false);
 
     return std::visit([&](const auto &d) {
-        auto res = d.lookup_advanced(kmer.data(), true);
+        auto res = d.lookup_advanced(kmer.data(), with_rc);
         return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
     }, dict_);
 }
