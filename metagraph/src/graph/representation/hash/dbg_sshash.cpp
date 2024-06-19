@@ -82,7 +82,7 @@ constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
 }
 
 DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
-    size_t odd_k = k_ % 2 == 0 ? k_ + 1 : k_;
+    size_t odd_k = (k_ | 1);
 
     if (odd_k * IDictionary::bits_per_char <= 64) {
         dict_ = std::make_unique<Dictionary<Kmer64>>();
@@ -92,7 +92,7 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
         dict_ = std::make_unique<Dictionary<Kmer256>>();
     } else {
         common::logger->error("k too big: {} > {}", odd_k, 256 / IDictionary::bits_per_char);
-        throw std::runtime_error("k fail");
+        throw std::length_error("k fail");
     }
 }
 
