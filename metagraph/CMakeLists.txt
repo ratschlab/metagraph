@@ -493,14 +493,22 @@ add_dependencies(metagraph link_target)
 # install library
 #-------------------
 
-file(GLOB header_files
-  "src/*.hpp"
-  "src/*/*.hpp"
-  "src/*/*/*.hpp"
-)
+get_property(INCLUDE_DIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+
+foreach(dir ${INCLUDE_DIRS})
+  file(GLOB_RECURSE subdirs LIST_DIRECTORIES true "${dir}/*")
+  list(APPEND subdirs ${dir})
+  foreach(subdir ${subdirs})
+        file(GLOB headers "${subdir}/*.h" "${subdir}/*.hpp")
+        if(headers)
+            file(RELATIVE_PATH rel_path ${dir} ${subdir})
+            install(FILES ${headers}
+                    DESTINATION include/${rel_path})
+        endif()
+  endforeach()
+endforeach()
 
 install(TARGETS metagraph-core DESTINATION lib)
-install(FILES ${header_files} DESTINATION include/metagraph)
 install(TARGETS metagraph DESTINATION bin)
 
 #-------------------
