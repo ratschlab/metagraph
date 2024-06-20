@@ -65,9 +65,9 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     build_config.m = std::min(
         num_chars > 0
             ? uint64_t(ceil(log(static_cast<double>(num_chars)) / log(static_cast<double>(alphabet_.size()))) + 1)
-            : uint64_t(k / 2) | 1,
+            : uint64_t(k / 2),
         sshash::constants::max_m
-    );
+    ) | 1;
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
