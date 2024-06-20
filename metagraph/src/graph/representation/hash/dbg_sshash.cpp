@@ -188,7 +188,7 @@ DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
     assert(node > 0 && node <= num_nodes());
     // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
-    std::string string_kmer = std::string(1, prev_char) + get_node_sequence(node);
+    std::string string_kmer = prev_char + get_node_sequence(node);
     string_kmer.pop_back();
     return kmer_to_node(string_kmer);
 }
