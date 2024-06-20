@@ -840,6 +840,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             int64_t out_sum = 0;
             size_t count_in = 0;
             size_t count_out = 0;
+            bool in_kmer = false;
+            bool out_kmer = false;
             for (size_t j = 0; j < groups.size(); ++j) {
                 if (row_counts[j] > 0) {
                     if (count_maps.size())
@@ -856,20 +858,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            if (count_in + count_out < config.min_recurrence
-                    || count_in < config.min_in_recurrence
-                    || count_out < config.min_out_recurrence
-                    || count_in > config.max_in_recurrence
-                    || count_out > config.max_out_recurrence) {
-                merged_row.clear();
-                in_sum = 0;
-                out_sum = 0;
+            if (count_in + count_out >= config.min_recurrence) {
+                double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
             }
+
+            if (!in_kmer && !out_kmer)
+                merged_row.clear();
 
             double pval;
             double pval_min;
             try {
                 pval_min = compute_min_pval(in_sum + out_sum);
+
+                if (pval_min >= 1.1)
+                    return;
+
                 pval = compute_pval(in_sum, out_sum, merged_row);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(pval_mu);
@@ -880,10 +885,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (pval >= 1.1)
                 return;
 
-            double in_stat = in_sum;
-            double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-            bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
-            bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
             uint64_t k = std::numeric_limits<uint64_t>::max();
 
             if (pval_min - pval > 1e-10) {
@@ -928,6 +929,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             int64_t in_sum = 0;
             int64_t out_sum = 0;
+            bool in_kmer = false;
+            bool out_kmer = false;
             PairContainer row;
             if (kept[row_i]) {
                 size_t count_in = 0;
@@ -947,16 +950,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                 }
 
-                if (count_in + count_out < config.min_recurrence
-                        || count_in < config.min_in_recurrence
-                        || count_out < config.min_out_recurrence
-                        || count_in > config.max_in_recurrence
-                        || count_out > config.max_out_recurrence) {
-                    row.clear();
-                    in_sum = 0;
-                    out_sum = 0;
+                if (count_in + count_out >= config.min_recurrence) {
+                    double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                    in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                    out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
                 }
             }
+
+            if (!in_kmer && !out_kmer)
+                row.clear();
 
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
 
@@ -978,10 +980,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (pval >= 1.1)
                 return;
 
-            double in_stat = in_sum;
-            double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-            bool in_kmer = (in_stat > out_stat) || (out_stat != out_stat && in_stat == in_stat);
-            bool out_kmer = (in_stat < out_stat) || (in_stat != in_stat && out_stat == out_stat);
             uint64_t k = std::numeric_limits<uint64_t>::max();
 
             if (pval_min - pval > 1e-10) {
