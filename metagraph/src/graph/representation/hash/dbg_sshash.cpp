@@ -69,7 +69,9 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
         (num_chars > 0
             ? uint64_t(ceil(log(static_cast<double>(num_chars)) / log(static_cast<double>(alphabet_.size()))) + 1)
             : uint64_t(k / 2)) | 1,
-        sshash::constants::max_m,
+        std::visit([](const auto &dict) -> uint64_t {
+            return get_kmer_t<decltype(dict)>::max_m;
+        }, dict_),
         uint64_t(k - 2)
     }) | 1;
 
