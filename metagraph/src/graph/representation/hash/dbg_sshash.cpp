@@ -62,12 +62,13 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     // use a value of m recommended here:
     // https://twitter.com/giulio_pibiri/status/1803417277213114501
     // otherwise, use the next odd value greater than or equal to floor(k / 2)
-    build_config.m = std::min(
+    build_config.m = std::min({
         num_chars > 0
             ? uint64_t(ceil(log(static_cast<double>(num_chars)) / log(static_cast<double>(alphabet_.size()))) + 1)
             : uint64_t(k / 2),
-        sshash::constants::max_m
-    ) | 1;
+        sshash::constants::max_m,
+        uint64_t(k - 1)
+    }) | 1;
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
