@@ -304,7 +304,10 @@ void DBGSSHash::call_nodes(
         const std::function<bool()> &terminate) const {
     for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
         callback(node_idx);
-        if (mode_ == CANONICAL && !terminate()) {
+    }
+
+    if (mode_ == CANONICAL) {
+        for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
             size_t rc_node_idx = reverse_complement(node_idx);
             if (rc_node_idx != node_idx)
                 callback(rc_node_idx);
