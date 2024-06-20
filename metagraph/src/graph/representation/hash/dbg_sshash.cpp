@@ -345,73 +345,8 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
     return str_kmer;
 }
 
-
-struct generic_loader {
-    generic_loader(std::istream &is) : m_is(is) {
-        if (!m_is.good())
-            throw std::runtime_error("Error in loading stream.");
-    }
-
-    template <typename T>
-    void visit(T& val) {
-        if constexpr (essentials::is_pod<T>::value) {
-            essentials::load_pod(m_is, val);
-        } else {
-            val.visit(*this);
-        }
-    }
-
-    template <typename T, typename Allocator>
-    void visit(std::vector<T, Allocator>& vec) {
-        size_t n;
-        visit(n);
-        vec.resize(n);
-        if constexpr (essentials::is_pod<T>::value) {
-            m_is.read(reinterpret_cast<char*>(vec.data()),
-                      static_cast<std::streamsize>(sizeof(T) * n));
-        } else {
-            for (auto& v : vec) visit(v);
-        }
-    }
-
-private:
-    std::istream &m_is;
-};
-
-struct generic_saver {
-    generic_saver(std::ostream &os) : m_os(os) {
-        if (!m_os.good())
-            throw std::runtime_error("Error in saving stream.");
-    }
-
-    template <typename T>
-    void visit(const T &val) {
-        if constexpr (essentials::is_pod<T>::value) {
-            essentials::save_pod(m_os, val);
-        } else {
-            // TODO: the visit methods in sshash are non-const
-            const_cast<T&>(val).visit(*this);
-        }
-    }
-
-    template <typename T, typename Allocator>
-    void visit(const std::vector<T, Allocator> &vec) {
-        if constexpr (essentials::is_pod<T>::value) {
-            essentials::save_vec(m_os, vec);
-        } else {
-            size_t n = vec.size();
-            visit(n);
-            for (const auto &v : vec) visit(v);
-        }
-    }
-
-private:
-    std::ostream &m_os;
-};
-
-
 void DBGSSHash::serialize(std::ostream& out) const {
-    generic_saver saver(out);
+    essentials::generic_saver saver(out);
 
     saver.visit(num_nodes_);
     saver.visit(k_);
@@ -428,7 +363,7 @@ void DBGSSHash::serialize(const std::string& filename) const {
 }
 
 bool DBGSSHash::load(std::istream &in) {
-    generic_loader loader(in);
+    essentials::generic_loader loader(in);
     size_t num_nodes;
     size_t k;
     Mode mode;
