@@ -54,12 +54,6 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index, bool)>& callback,
             const std::function<bool()>& terminate = []() { return false; }) const;
 
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
-
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
-
     uint64_t num_nodes() const override;
 
     bool load(std::istream& in);
