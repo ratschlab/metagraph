@@ -118,14 +118,6 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
         }
     }, dict_);
 }
-template <>
-void DBGSSHash::map_to_nodes_with_rc<true>(std::string_view,
-                                           const std::function<void(node_index, bool)>&,
-                                           const std::function<bool()>&) const;
-template <>
-void DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
-                                            const std::function<void(node_index, bool)>&,
-                                            const std::function<bool()>&) const;
 
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)>& callback,
@@ -219,14 +211,6 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
         }
     }, dict_);
 }
-template <>
-void DBGSSHash::call_outgoing_kmers_with_rc<true>(
-        node_index,
-        const std::function<void(node_index, char, bool)>&) const;
-template <>
-void DBGSSHash::call_outgoing_kmers_with_rc<false>(
-        node_index,
-        const std::function<void(node_index, char, bool)>&) const;
 
 template <bool with_rc>
 void DBGSSHash::call_incoming_kmers_with_rc(
@@ -246,14 +230,6 @@ void DBGSSHash::call_incoming_kmers_with_rc(
         }
     }, dict_);
 }
-template <>
-void DBGSSHash::call_incoming_kmers_with_rc<true>(
-        node_index,
-        const std::function<void(node_index, char, bool)>&) const;
-template <>
-void DBGSSHash::call_incoming_kmers_with_rc<false>(
-        node_index,
-        const std::function<void(node_index, char, bool)>&) const;
 
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
@@ -319,12 +295,6 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
         return std::make_pair(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
     }, dict_);
 }
-template <>
-std::pair<DBGSSHash::node_index, bool>
-DBGSSHash::kmer_to_node_with_rc<true>(std::string_view) const;
-template <>
-std::pair<DBGSSHash::node_index, bool>
-DBGSSHash::kmer_to_node_with_rc<false>(std::string_view) const;
 
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     if (mode_ == CANONICAL) {
