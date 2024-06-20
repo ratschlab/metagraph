@@ -193,18 +193,6 @@ DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) 
     return kmer_to_node(string_kmer);
 }
 
-void DBGSSHash::adjacent_outgoing_nodes(node_index node,
-                                        const std::function<void(node_index)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
-    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
-}
-
-void DBGSSHash::adjacent_incoming_nodes(node_index node,
-                                        const std::function<void(node_index)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
-    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
-}
-
 template <bool with_rc>
 void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,

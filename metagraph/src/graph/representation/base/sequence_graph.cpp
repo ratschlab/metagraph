@@ -80,6 +80,20 @@ bool DeBruijnGraph::find(std::string_view sequence,
     return num_kmers_missing <= max_kmers_missing;
 }
 
+void DeBruijnGraph
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    assert(node > 0 && node <= num_nodes());
+    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
+}
+
+void DeBruijnGraph
+::adjacent_incoming_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    assert(node > 0 && node <= num_nodes());
+    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
+}
+
 bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     bool not_equal = false;
     other.call_kmers([&](node_index, const std::string &kmer) {

@@ -42,13 +42,6 @@ class DBGHashString : public DeBruijnGraph {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const;
-
     size_t outdegree(node_index) const;
     bool has_single_outgoing(node_index) const;
     bool has_multiple_outgoing(node_index) const;
