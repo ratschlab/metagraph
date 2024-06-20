@@ -236,8 +236,9 @@ bool DBGHashString::has_single_incoming(node_index node) const {
 }
 
 void DBGHashString
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
-    for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
+    for (auto it = kmers_.begin(); it != kmers_.end() && !stop_early(); ++it) {
         callback(it - kmers_.begin() + 1, *it);
     }
 }

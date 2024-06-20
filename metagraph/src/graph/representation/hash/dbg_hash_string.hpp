@@ -57,7 +57,9 @@ class DBGHashString : public DeBruijnGraph {
     bool has_no_incoming(node_index) const;
     bool has_single_incoming(node_index) const;
 
-    void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
+    void call_kmers(const std::function<void(node_index,
+                    const std::string&)> &callback,
+                    const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     node_index kmer_to_node(std::string_view kmer) const;
 

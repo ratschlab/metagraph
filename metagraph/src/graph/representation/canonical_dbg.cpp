@@ -12,6 +12,11 @@ namespace graph {
 using mtg::common::logger;
 using edge_index = boss::BOSS::edge_index;
 
+class early_term : public std::exception {
+  public:
+    const char* what() { return "Finished iteration"; }
+};
+
 inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const DeBruijnGraph *base_graph = &graph;
     while (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(base_graph)) {
@@ -386,11 +391,11 @@ bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
     try {
         adjacent_outgoing_nodes(node, [&](node_index) {
             if (found)
-                throw std::bad_function_call();
+                throw early_term();
 
             found = true;
         });
-    } catch (const std::bad_function_call&) {
+    } catch (const early_term&) {
         return true;
     }
 
@@ -402,9 +407,9 @@ bool CanonicalDBG::has_single_incoming(node_index node) const {
     try {
         adjacent_incoming_nodes(node, [&](node_index) {
             if (++count > 1)
-                throw std::bad_function_call();
+                throw early_term();
         });
-    } catch (const std::bad_function_call&) {}
+    } catch (const early_term&) {}
 
     return count == 1;
 }
@@ -506,16 +511,20 @@ void CanonicalDBG::call_nodes(const std::function<void(node_index)> &callback,
 }
 
 void CanonicalDBG
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
     graph_->call_kmers([&](node_index i, const std::string &seq) {
         callback(i, seq);
+        if (stop_early())
+            return;
+
         node_index j = reverse_complement(i);
         if (j != i) {
             std::string rseq(seq);
             ::reverse_complement(rseq.begin(), rseq.end());
             callback(j, rseq);
         }
-    });
+    }, stop_early);
 }
 
 bool CanonicalDBG::operator==(const DeBruijnGraph &other) const {

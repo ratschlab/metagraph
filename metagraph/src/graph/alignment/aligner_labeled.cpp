@@ -11,6 +11,11 @@ namespace align {
 
 using mtg::common::logger;
 
+class early_term : public std::exception {
+  public:
+    const char* what() { return "Finished iteration"; }
+};
+
 typedef annot::matrix::BinaryMatrix::Row Row;
 typedef annot::matrix::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
@@ -415,7 +420,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                     }
 
                     if (label_it == label_end_it)
-                        throw std::bad_function_call();
+                        throw early_term();
 
                     if (c < *label_it)
                         return;
@@ -431,7 +436,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                     }
                 }
             );
-        } catch (const std::bad_function_call&) {}
+        } catch (const early_term&) {}
     }
 
     if (alignment.label_coordinates.empty())

@@ -195,7 +195,8 @@ class DeBruijnGraph : public SequenceGraph {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }

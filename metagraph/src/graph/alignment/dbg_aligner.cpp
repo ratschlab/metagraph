@@ -14,6 +14,11 @@ namespace align {
 
 using mtg::common::logger;
 
+class early_term : public std::exception {
+  public:
+    const char* what() { return "Finished iteration"; }
+};
+
 const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     return dynamic_cast<const DBGSuccinct*>(&(canonical ? canonical->get_graph() : graph));
@@ -578,7 +583,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 [&](Chain&& chain, score_t score) {
                     if (config_.num_alternative_paths <= 1
                             && finished_columns.size() == all_columns.size()) {
-                        throw std::bad_function_call();
+                        throw early_term();
                     }
 
                     double exact_match_fraction
@@ -595,7 +600,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
                     if (exact_match_fraction < config_.min_exact_match)
-                        throw std::bad_function_call();
+                        throw early_term();
 
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
@@ -613,7 +618,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 [&](Alignment::Column column) { return finished_columns.count(column); }
             );
             num_explored_nodes += this_num_explored;
-        } catch (const std::bad_function_call&) {}
+        } catch (const early_term&) {}
 
         for (Alignment &alignment : aggregator.get_alignments()) {
             if (alignment.get_score() < get_min_path_score(alignment))

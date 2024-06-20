@@ -81,21 +81,18 @@ bool DeBruijnGraph::find(std::string_view sequence,
 }
 
 bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
-    try {
-        other.call_kmers([&](node_index, const std::string &kmer) {
-            if (!find(kmer))
-                throw std::bad_function_call();
-        });
+    bool not_equal = false;
+    other.call_kmers([&](node_index, const std::string &kmer) {
+        if (!find(kmer))
+            not_equal = true;
+    }, [&]() { return not_equal; });
 
-        call_kmers([&](node_index, const std::string &kmer) {
-            if (!other.find(kmer))
-                throw std::bad_function_call();
-        });
-    } catch (const std::bad_function_call&) {
-        return false;
-    }
+    call_kmers([&](node_index, const std::string &kmer) {
+        if (!other.find(kmer))
+            not_equal = true;
+    }, [&]() { return not_equal; });
 
-    return true;
+    return !not_equal;
 }
 
 void DeBruijnGraph::traverse(node_index start,
@@ -413,7 +410,12 @@ void DeBruijnGraph::call_unitigs(const CallPath &callback,
  * Traverse graph and iterate over all nodes
  */
 void DeBruijnGraph
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+::call_kmers(const std::function<void(node_index,
+             const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
+    if (stop_early())
+        return;
+
     sdsl::bit_vector visited(max_index() + 1, false);
     std::stack<std::pair<node_index, std::string>> nodes;
 
@@ -457,7 +459,7 @@ void DeBruijnGraph
                 sequence.push_back(next_c);
             }
         }
-    });
+    }, stop_early);
 }
 
 void DeBruijnGraph::print(std::ostream &out) const {
