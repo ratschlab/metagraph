@@ -14,7 +14,7 @@ using edge_index = boss::BOSS::edge_index;
 
 class early_term : public std::exception {
   public:
-    const char* what() { return "Finished iteration"; }
+    const char* what() const noexcept override { return "Finished iteration"; }
 };
 
 inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {

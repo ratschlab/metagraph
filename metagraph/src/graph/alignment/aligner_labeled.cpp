@@ -13,7 +13,7 @@ using mtg::common::logger;
 
 class early_term : public std::exception {
   public:
-    const char* what() { return "Finished iteration"; }
+    const char* what() const noexcept override { return "Finished iteration"; }
 };
 
 typedef annot::matrix::BinaryMatrix::Row Row;
