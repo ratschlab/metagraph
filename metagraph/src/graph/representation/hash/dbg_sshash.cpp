@@ -355,33 +355,90 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
     return str_kmer;
 }
 
+
+struct generic_loader {
+    generic_loader(std::istream &is) : m_is(is) {
+        if (!m_is.good())
+            throw std::runtime_error("Error in loading stream.");
+    }
+
+    template <typename T>
+    void visit(T& val) {
+        if constexpr (essentials::is_pod<T>::value) {
+            essentials::load_pod(m_is, val);
+        } else {
+            val.visit(*this);
+        }
+    }
+
+    template <typename T, typename Allocator>
+    void visit(std::vector<T, Allocator>& vec) {
+        size_t n;
+        visit(n);
+        vec.resize(n);
+        if constexpr (essentials::is_pod<T>::value) {
+            m_is.read(reinterpret_cast<char*>(vec.data()),
+                      static_cast<std::streamsize>(sizeof(T) * n));
+        } else {
+            for (auto& v : vec) visit(v);
+        }
+    }
+
+private:
+    std::istream &m_is;
+};
+
+struct generic_saver {
+    generic_saver(std::ostream &os) : m_os(os) {
+        if (!m_os.good())
+            throw std::runtime_error("Error in saving stream.");
+    }
+
+    template <typename T>
+    void visit(const T &val) {
+        if constexpr (essentials::is_pod<T>::value) {
+            essentials::save_pod(m_os, val);
+        } else {
+            // TODO: the visit methods in sshash are non-const
+            const_cast<T&>(val).visit(*this);
+        }
+    }
+
+    template <typename T, typename Allocator>
+    void visit(const std::vector<T, Allocator> &vec) {
+        if constexpr (essentials::is_pod<T>::value) {
+            essentials::save_vec(m_os, vec);
+        } else {
+            size_t n = vec.size();
+            visit(n);
+            for (const auto &v : vec) visit(v);
+        }
+    }
+
+private:
+    std::ostream &m_os;
+};
+
+
 void DBGSSHash::serialize(std::ostream& out) const {
-    // TODO
-    throw std::runtime_error("serialize to stream not implemented");
+    generic_saver saver(out);
+
+    saver.visit(num_nodes_);
+    saver.visit(k_);
+    saver.visit(mode_);
+
+    if (num_nodes())
+        std::visit([&](const auto &d) { saver.visit(d); }, dict_);
 }
 
 void DBGSSHash::serialize(const std::string& filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    essentials::saver saver(suffixed_filename.c_str());
-
-    // TODO: fix this in the essentials library. for some reason, its saver takes a non-const ref
-    saver.visit(const_cast<size_t&>(num_nodes_));
-    saver.visit(const_cast<size_t&>(k_));
-    saver.visit(const_cast<Mode&>(mode_));
-
-    if (num_nodes())
-        std::visit([&](auto &d) { d.visit(saver); }, const_cast<dict_t&>(dict_));
+    std::ofstream fout(suffixed_filename, std::ios::binary);
+    serialize(fout);
 }
 
-bool DBGSSHash::load(std::istream& in) {
-    throw std::runtime_error("load from stream not implemented");
-    return false;
-}
-
-bool DBGSSHash::load(const std::string& filename) {
-    std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    essentials::loader loader(suffixed_filename.c_str());
-
+bool DBGSSHash::load(std::istream &in) {
+    generic_loader loader(in);
     size_t num_nodes;
     size_t k;
     Mode mode;
@@ -396,6 +453,12 @@ bool DBGSSHash::load(const std::string& filename) {
         std::visit([&](auto &d) { d.visit(loader); }, dict_);
 
     return true;
+}
+
+bool DBGSSHash::load(const std::string& filename) {
+    std::string suffixed_filename = utils::make_suffix(filename, kExtension);
+    std::ifstream fin(suffixed_filename, std::ios::binary);
+    return load(fin);
 }
 
 } // namespace graph
