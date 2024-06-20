@@ -495,6 +495,12 @@ add_dependencies(metagraph link_target)
 
 get_property(INCLUDE_DIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
 
+get_property(SUBDIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY SUBDIRECTORIES)
+foreach(subdir ${SUBDIRS})
+    get_property(SUBDIR_INCLUDE_DIRS DIRECTORY ${subdir} PROPERTY INCLUDE_DIRECTORIES)
+    list(APPEND INCLUDE_DIRS ${SUBDIR_INCLUDE_DIRS})
+endforeach()
+
 foreach(dir ${INCLUDE_DIRS})
   file(GLOB_RECURSE subdirs LIST_DIRECTORIES true "${dir}/*")
   list(APPEND subdirs ${dir})
