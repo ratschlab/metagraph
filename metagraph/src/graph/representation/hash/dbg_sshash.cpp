@@ -24,7 +24,7 @@ template <template <typename ...> class C, typename T>
 struct template_parameter<C<T>> { using type = T; };
 
 template <typename T>
-using get_kmer_t = typename template_parameter<typename std::remove_const<typename std::remove_reference<T>::type>::type>::type;
+using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
 
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 

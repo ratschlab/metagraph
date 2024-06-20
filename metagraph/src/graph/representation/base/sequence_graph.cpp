@@ -83,14 +83,14 @@ bool DeBruijnGraph::find(std::string_view sequence,
 void DeBruijnGraph
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(node > 0 && node <= max_index());
     call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
 
 void DeBruijnGraph
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(node > 0 && node <= max_index());
     call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
