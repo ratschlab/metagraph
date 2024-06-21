@@ -44,10 +44,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::filesystem::path = "",
                          size_t num_parallel_files = std::numeric_limits<size_t>::max());
 
+template <class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads = 1,
+                         std::filesystem::path = "");
+
 template <typename value_type, class PValStorage>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
+                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
                          const std::function<value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,

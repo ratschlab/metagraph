@@ -21,6 +21,7 @@
 #include "graph/representation/masked_graph.hpp"
 #include "graph/graph_cleaning.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 
 namespace mtg {
 namespace graph {
@@ -72,11 +73,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     size_t total_labels = labels_in.size() + labels_out.size();
 
-    using ValuesContainerMem = sdsl::int_vector<>;
-    using ColumnValuesMem = std::vector<std::unique_ptr<const ValuesContainerMem>>;
-
-    using ValuesContainerDisk = sdsl::int_vector_buffer<>;
-    using ColumnValuesDisk = std::vector<std::unique_ptr<const ValuesContainerDisk>>;
+    using ColumnValuesMem = std::vector<std::unique_ptr<const sdsl::int_vector<>>>;
+    using ColumnValuesDisk = std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>>;
 
     std::variant<ColumnValuesMem, ColumnValuesDisk> column_values_all;
 
@@ -91,7 +89,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         using ValuesContainerPtr = typename ColumnValues::value_type;
         using ValuesContainer = typename std::decay<typename ValuesContainerPtr::element_type>::type;
         using value_type = typename ValuesContainer::value_type;
-        using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
+        using PairContainer = Vector<std::pair<uint64_t, value_type>>;
 
         std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
         std::vector<bool> groups(total_labels);
@@ -160,10 +158,105 @@ mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBr
                          std::filesystem::path,
                          size_t);
 
+template <class PValStorage>
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                         const DifferentialAssemblyConfig &config,
+                         size_t num_threads,
+                         std::filesystem::path tmp_dir) {
+    common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
+    common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
+
+    size_t total_labels = labels_in.size() + labels_out.size();
+    const auto &annotation = anno_graph.get_annotator();
+
+    std::vector<bool> groups;
+    groups.reserve(total_labels);
+    for (const auto &label : annotation.get_label_encoder().get_labels()) {
+        groups.emplace_back(labels_out.count(label));
+    }
+
+    const auto &matrix = annotation.get_matrix();
+    using Row = annot::matrix::BinaryMatrix::Row;
+
+    if (const auto *int_matrix = dynamic_cast<const annot::matrix::IntMatrix*>(&matrix)) {
+        using value_type = annot::matrix::IntMatrix::Value;
+        return mask_nodes_by_label_dual<value_type, PValStorage>(
+            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            [&](const auto &callback) {
+                std::vector<Row> row_ids { 0 };
+                for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
+                    row_ids[0] = row_i;
+                    callback(row_i, int_matrix->get_row_values(row_ids)[0]);
+                }
+            },
+            [&](uint64_t row_i, uint64_t col_j) -> value_type {
+                std::vector<Row> row_ids { Row(row_i) };
+                for (const auto &[j, c] : int_matrix->get_row_values(row_ids)[0]) {
+                    if (j == col_j)
+                        return c;
+                }
+
+                return 0;
+            },
+            groups,
+            config, num_threads, tmp_dir, num_threads
+        );
+    } else {
+        return mask_nodes_by_label_dual<uint64_t, PValStorage>(
+            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            [&](const auto &callback) {
+                std::vector<Row> row_ids { 0 };
+                for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
+                    row_ids[0] = row_i;
+                    auto set_bits = matrix.get_rows(row_ids);
+                    Vector<std::pair<uint64_t, uint64_t>> container;
+                    container.reserve(set_bits[0].size());
+                    for (auto j : set_bits[0]) {
+                        container.emplace_back(j, 1);
+                    }
+
+                    callback(row_i, container);
+                }
+            },
+            [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
+                std::vector<Row> row_ids { Row(row_i) };
+                for (auto j : matrix.get_rows(row_ids)[0]) {
+                    if (j == col_j)
+                        return 1;
+                }
+
+                return 0;
+            },
+            groups,
+            config, num_threads, tmp_dir, num_threads
+        );
+    }
+}
+
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<std::vector<uint64_t>>(const AnnotatedDBG &,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path);
+template
+std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
+mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(const AnnotatedDBG &,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &,
+                         const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &,
+                         const DifferentialAssemblyConfig &,
+                         size_t,
+                         std::filesystem::path);
+
 template <typename value_type, class PValStorage>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
+                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
                          const std::function<value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
@@ -1112,7 +1205,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
-                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
+                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
                          const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
@@ -1125,7 +1218,7 @@ mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<ui
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
-                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
+                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
                          const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
