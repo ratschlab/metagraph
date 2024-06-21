@@ -11,6 +11,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/transpose.hpp"
 
 
 namespace {
@@ -80,16 +81,27 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             std::vector<bool> groups = { true, false, false };
             columns.resize(groups.size());
 
+            using PairContainer = std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
             std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
-            auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(
+            auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
                 graph_ptr,
-                columns,
-                column_values,
+                [&](const auto &callback) {
+                    utils::call_rows<std::unique_ptr<const bit_vector>,
+                                     std::unique_ptr<const sdsl::int_vector<>>,
+                                     PairContainer, true>(columns, column_values,
+                                                          [&](uint64_t row_i, const auto &row, size_t) {
+                        callback(row_i, row);
+                    });
+                },
                 [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
                     return (*columns[col_j])[row_i];
                 },
                 groups,
-                config, num_threads
+                config, num_threads, test_dump_basename, num_threads,
+                [&]() {
+                    columns.clear();
+                    column_values.clear();
+                }
             );
 
             EXPECT_EQ(0u, masked_dbg_out->num_nodes());
@@ -144,12 +156,12 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
 
             ASSERT_LT(0u, columns.size());
 
-            std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values_all;
+            std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
             std::vector<sdsl::int_vector<>::iterator> pos;
-            column_values_all.reserve(columns.size());
+            column_values.reserve(columns.size());
             for (const auto &bin_col : columns) {
-                column_values_all.emplace_back(std::make_unique<const sdsl::int_vector<>>(bin_col->num_set_bits()));
-                pos.emplace_back(const_cast<sdsl::int_vector<>&>(*column_values_all.back()).begin());
+                column_values.emplace_back(std::make_unique<const sdsl::int_vector<>>(bin_col->num_set_bits()));
+                pos.emplace_back(const_cast<sdsl::int_vector<>&>(*column_values.back()).begin());
             }
 
             std::vector<uint64_t> row_indices(columns[0]->size());
@@ -175,8 +187,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
             std::vector<bool> groups { true, false, false };
             columns.resize(groups.size());
 
-            ASSERT_GE(column_values_all.size(), groups.size());
-            column_values_all.resize(groups.size());
+            ASSERT_GE(column_values.size(), groups.size());
+            column_values.resize(groups.size());
 
             std::vector<std::string> test_types = {
                 "poisson_exact",
@@ -190,21 +202,27 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                     .outfbase = "",
                 };
 
-                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(
+                using PairContainer = std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
                     graph_ptr,
-                    columns,
-                    column_values_all,
+                    [&](const auto &callback) {
+                        utils::call_rows<std::unique_ptr<const bit_vector>,
+                                         std::unique_ptr<const sdsl::int_vector<>>,
+                                         PairContainer, true>(columns, column_values,
+                                                              [&](uint64_t row_i, const auto &row, size_t) {
+                            callback(row_i, row);
+                        });
+                    },
                     [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
                         const auto &col = *columns[col_j];
-                        const auto &col_vals = *column_values_all[col_j];
+                        const auto &col_vals = *column_values[col_j];
                         if (uint64_t r = col.conditional_rank1(row_i))
                             return col_vals[r - 1];
 
                         return 0;
                     },
                     groups,
-                    config, num_threads, test_dump_basename, num_threads,
-                    false
+                    config, num_threads, test_dump_basename, num_threads
                 );
 
                 masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {

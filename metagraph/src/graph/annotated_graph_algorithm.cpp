@@ -91,6 +91,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         using ValuesContainerPtr = typename ColumnValues::value_type;
         using ValuesContainer = typename std::decay<typename ValuesContainerPtr::element_type>::type;
         using value_type = typename ValuesContainer::value_type;
+        using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
+
         std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
         std::vector<bool> groups(total_labels);
         annot::ColumnCompressed<>::load_columns_and_values(
@@ -108,8 +110,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_width = std::max(max_width, col_vals->width());
         }
 
-        return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
-            graph_ptr, columns_all, column_values_all,
+        return mask_nodes_by_label_dual<value_type, PValStorage>(
+            graph_ptr,
+            [&](const auto &callback) {
+                utils::call_rows<std::unique_ptr<const bit_vector>,
+                                 std::unique_ptr<const ValuesContainer>,
+                                 PairContainer, true>(columns_all, column_values_all,
+                                                      [&](uint64_t row_i, const auto &row, size_t) {
+                    callback(row_i, row);
+                });
+            },
             [&](uint64_t row_i, uint64_t col_j) -> value_type {
                 const auto &col = *columns_all[col_j];
                 const auto &col_vals = *column_values_all[col_j];
@@ -119,7 +129,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 0;
             },
             groups,
-            config, num_threads, tmp_dir, num_parallel_files, true, max_width
+            config, num_threads, tmp_dir, num_parallel_files,
+            [&]() {
+                columns_all.clear();
+                column_values_all.clear();
+            },
+            max_width
         );
     }, column_values_all);
 }
@@ -145,18 +160,17 @@ mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBr
                          std::filesystem::path,
                          size_t);
 
-template <class ValuesContainer, class PValStorage>
+template <typename value_type, class PValStorage>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         std::vector<std::unique_ptr<const bit_vector>> &columns_all,
-                         std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
-                         const std::function<typename ValuesContainer::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
+                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
+                         const std::function<value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
                          std::filesystem::path tmp_dir,
                          size_t num_parallel_files,
-                         bool deallocate,
+                         const std::function<void()> &deallocate,
                          uint8_t max_width) {
     num_parallel_files = std::min(num_parallel_files, num_threads);
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
@@ -175,14 +189,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::mutex agg_mu;
     std::vector<std::mutex> column_mus(groups.size());
     std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-    using value_type = typename ValuesContainer::value_type;
     using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
 
     common::logger->trace("Calculating count histograms");
-    utils::call_rows<std::unique_ptr<const bit_vector>,
-                     std::unique_ptr<const ValuesContainer>,
-                     PairContainer, false>(columns_all, column_values_all,
-                                           [&](uint64_t row_i, const auto &row, size_t) {
+    generate_rows([&](uint64_t row_i, const auto &row) {
         if (row.empty())
             return;
 
@@ -201,7 +211,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     });
 
-    if (config.clean && column_values_all.size()) {
+    if (config.clean) {
         common::logger->trace("Cleaning count columns");
 
         #pragma omp parallel for num_threads(num_parallel_files)
@@ -232,10 +242,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
-        utils::call_rows<std::unique_ptr<const bit_vector>,
-                         std::unique_ptr<const ValuesContainer>,
-                         PairContainer, false>(columns_all, column_values_all,
-                                               [&](uint64_t row_i, const auto &row, size_t) {
+        generate_rows([&](uint64_t row_i, const auto &row) {
             std::vector<uint64_t> counts(groups.size(), 0);
             for (const auto &[j, raw_c] : row) {
                 if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
@@ -951,10 +958,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }, num_threads);
     } else {
-        utils::call_rows<std::unique_ptr<const bit_vector>,
-                         std::unique_ptr<const ValuesContainer>,
-                         PairContainer, true>(columns_all, column_values_all,
-                                              [&](uint64_t row_i, const auto &raw_row, size_t batch_id) {
+        generate_rows([&](uint64_t row_i, const auto &raw_row) {
             if (ex)
                 return;
 
@@ -1044,18 +1048,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    if (deallocate) {
-        for (auto &col : columns_all) {
-            col.reset();
-        }
-
-        for (auto &col_vals : column_values_all) {
-            col_vals.reset();
-        }
-    }
-
     if (ex)
         std::rethrow_exception(ex);
+
+    deallocate();
 
     if (config.test_type != "notest") {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
@@ -1115,56 +1111,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
-mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
-                         std::vector<std::unique_ptr<const bit_vector>> &,
-                         std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
-                         const std::function<typename sdsl::int_vector_buffer<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
-                         const std::vector<bool> &,
-                         const DifferentialAssemblyConfig &,
-                         size_t,
-                         std::filesystem::path,
-                         size_t,
-                         bool,
-                         uint8_t);
-template
-std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
-mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
-                         std::vector<std::unique_ptr<const bit_vector>> &,
-                         std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
+                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
                          const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool,
+                         const std::function<void()> &,
                          uint8_t);
 
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
-mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
-                         std::vector<std::unique_ptr<const bit_vector>> &,
-                         std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
-                         const std::function<typename sdsl::int_vector_buffer<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
-                         const std::vector<bool> &,
-                         const DifferentialAssemblyConfig &,
-                         size_t,
-                         std::filesystem::path,
-                         size_t,
-                         bool,
-                         uint8_t);
-template
-std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
-mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
-                         std::vector<std::unique_ptr<const bit_vector>> &,
-                         std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
+                         const std::function<void(const std::function<void(uint64_t, const std::vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>)>&)> &generate_rows,
                          const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool,
+                         const std::function<void()> &,
                          uint8_t);
 
 } // namespace graph
