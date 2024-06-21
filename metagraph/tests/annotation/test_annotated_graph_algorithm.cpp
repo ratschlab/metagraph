@@ -60,8 +60,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                                return std::make_unique<const bit_vector_stat>(a->to_vector());
                            });
 
-            std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values_all;
-
             std::unordered_set<std::string> obs_labels, obs_kmers;
             const std::unordered_set<std::string> ref_kmers {
                 std::string(k - 1, 'A') + "C"
@@ -82,10 +80,14 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             std::vector<bool> groups = { true, false, false };
             columns.resize(groups.size());
 
+            std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
             auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(
                 graph_ptr,
                 columns,
-                column_values_all,
+                column_values,
+                [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
+                    return (*columns[col_j])[row_i];
+                },
                 groups,
                 config, num_threads
             );
@@ -192,6 +194,14 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                     graph_ptr,
                     columns,
                     column_values_all,
+                    [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
+                        const auto &col = *columns[col_j];
+                        const auto &col_vals = *column_values_all[col_j];
+                        if (uint64_t r = col.conditional_rank1(row_i))
+                            return col_vals[r - 1];
+
+                        return 0;
+                    },
                     groups,
                     config, num_threads, test_dump_basename, num_threads,
                     false

@@ -49,6 +49,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValS
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::unique_ptr<const bit_vector>> &columns_all,
                          std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
+                         const std::function<typename ValuesContainer::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,

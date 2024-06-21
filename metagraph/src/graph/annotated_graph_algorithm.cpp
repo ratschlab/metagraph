@@ -2,6 +2,7 @@
 
 #include <typeinfo>
 #include <mutex>
+#include <variant>
 
 #include <sdust.h>
 
@@ -30,7 +31,6 @@ typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
 using Column = annot::matrix::BinaryMatrix::Column;
-using PairContainer = std::vector<std::pair<uint64_t, uint64_t>>;
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 double CDF_CUTOFF = 0.95;
@@ -71,32 +71,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
     size_t total_labels = labels_in.size() + labels_out.size();
-    std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
-    std::vector<bool> groups(total_labels);
+
+    using ValuesContainerMem = sdsl::int_vector<>;
+    using ColumnValuesMem = std::vector<std::unique_ptr<const ValuesContainerMem>>;
+
+    using ValuesContainerDisk = sdsl::int_vector_buffer<>;
+    using ColumnValuesDisk = std::vector<std::unique_ptr<const ValuesContainerDisk>>;
+
+    std::variant<ColumnValuesMem, ColumnValuesDisk> column_values_all;
 
     if (config.test_by_unitig) {
-        using ValuesContainer = sdsl::int_vector<>;
-        std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
-        annot::ColumnCompressed<>::load_columns_and_values(
-            files,
-            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
-                groups[offset] = labels_out.count(label);
-                columns_all[offset].reset(column.release());
-                column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
-            },
-            num_parallel_files
-        );
-
-        return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
-            graph_ptr, columns_all, column_values_all, groups,
-            config, num_threads, tmp_dir, num_parallel_files, true
-        );
+        column_values_all = ColumnValuesMem(total_labels);
     } else {
-        using ValuesContainer = sdsl::int_vector_buffer<>;
-        std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
+        column_values_all = ColumnValuesDisk(total_labels);
+    }
+
+    return std::visit([&](auto&& column_values_all) {
+        using ColumnValues = typename std::decay<decltype(column_values_all)>::type;
+        using ValuesContainerPtr = typename ColumnValues::value_type;
+        using ValuesContainer = typename std::decay<typename ValuesContainerPtr::element_type>::type;
+        using value_type = typename ValuesContainer::value_type;
+        std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
+        std::vector<bool> groups(total_labels);
         annot::ColumnCompressed<>::load_columns_and_values(
             files,
-            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> &&column, ValuesContainer&& column_values) {
+            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
                 groups[offset] = labels_out.count(label);
                 columns_all[offset].reset(column.release());
                 column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
@@ -105,10 +104,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         );
 
         return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
-            graph_ptr, columns_all, column_values_all, groups,
+            graph_ptr, columns_all, column_values_all,
+            [&](uint64_t row_i, uint64_t col_j) -> value_type {
+                const auto &col = *columns_all[col_j];
+                const auto &col_vals = *column_values_all[col_j];
+                if (uint64_t r = col.conditional_rank1(row_i))
+                    return col_vals[r - 1];
+
+                return 0;
+            },
+            groups,
             config, num_threads, tmp_dir, num_parallel_files, true
         );
-    }
+    }, column_values_all);
 }
 
 template
@@ -137,6 +145,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValS
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::vector<std::unique_ptr<const bit_vector>> &columns_all,
                          std::vector<std::unique_ptr<const ValuesContainer>> &column_values_all,
+                         const std::function<typename ValuesContainer::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &get_value,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
@@ -195,6 +204,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::mutex agg_mu;
     std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
 
+    using value_type = typename ValuesContainer::value_type;
+    using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
+
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
         utils::call_rows<std::unique_ptr<const bit_vector>,
@@ -251,10 +263,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (node_index node : path) {
                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
                 for (size_t j = 0; j < groups.size(); ++j) {
-                    const auto &col = *columns_all[j];
-                    const auto &col_vals = *column_values_all[j];
-                    if (uint64_t r = col.conditional_rank1(row_i)) {
-                        uint64_t c = col_vals[r - 1];
+                    if (uint64_t c = get_value(row_i, j)) {
                         unitig_sums[j] += c;
                         if (c >= min_counts[j])
                             all_below_cutoff[j] = false;
@@ -828,10 +837,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             for (node_index node : path) {
                 uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
                 for (size_t j = 0; j < groups.size(); ++j) {
-                    const auto &col = *columns_all[j];
-                    const auto &col_vals = *column_values_all[j];
-                    if (uint64_t r = col.conditional_rank1(row_i))
-                        row_counts[j] += col_vals[r - 1];
+                    if (uint64_t c = get_value(row_i, j))
+                        row_counts[j] += c;
                 }
             }
 
@@ -1087,6 +1094,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::
 mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
+                         const std::function<typename sdsl::int_vector_buffer<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
@@ -1098,6 +1106,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::
 mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+                         const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
@@ -1110,6 +1119,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl:
 mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>> &,
+                         const std::function<typename sdsl::int_vector_buffer<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
@@ -1121,6 +1131,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl:
 mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
                          std::vector<std::unique_ptr<const bit_vector>> &,
                          std::vector<std::unique_ptr<const sdsl::int_vector<>>> &,
+                         const std::function<typename sdsl::int_vector<>::value_type(uint64_t /* row_i */, uint64_t /* col_j */)> &,
                          const std::vector<bool> &,
                          const DifferentialAssemblyConfig &,
                          size_t,
