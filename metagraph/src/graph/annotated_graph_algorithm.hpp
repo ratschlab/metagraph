@@ -55,7 +55,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_threads = 1,
                          std::filesystem::path = "",
                          size_t num_parallel_files = std::numeric_limits<size_t>::max(),
-                         bool deallocate = false);
+                         bool deallocate = false,
+                         uint8_t max_width = 64);
 
 } // namespace graph
 } // namespace mtg

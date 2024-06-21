@@ -103,6 +103,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             num_parallel_files
         );
 
+        uint8_t max_width = 0;
+        for (const auto &col_vals : column_values_all) {
+            max_width = std::max(max_width, col_vals->width());
+        }
+
         return mask_nodes_by_label_dual<ValuesContainer, PValStorage>(
             graph_ptr, columns_all, column_values_all,
             [&](uint64_t row_i, uint64_t col_j) -> value_type {
@@ -114,7 +119,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 0;
             },
             groups,
-            config, num_threads, tmp_dir, num_parallel_files, true
+            config, num_threads, tmp_dir, num_parallel_files, true, max_width
         );
     }, column_values_all);
 }
@@ -151,7 +156,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_threads,
                          std::filesystem::path tmp_dir,
                          size_t num_parallel_files,
-                         bool deallocate) {
+                         bool deallocate,
+                         uint8_t max_width) {
     num_parallel_files = std::min(num_parallel_files, num_threads);
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
@@ -161,32 +167,54 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
 
-    uint8_t max_width = 0;
-    for (const auto &col_vals : column_values_all) {
-        max_width = std::max(max_width, col_vals->width());
-    }
-
     sdsl::bit_vector kept(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
 
     std::vector<uint64_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
-    if (config.clean && column_values_all.empty())
-        common::logger->warn("Can't clean when no counts provided, skipping cleaning");
+    std::mutex agg_mu;
+    std::vector<std::mutex> column_mus(groups.size());
+    std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
+    using value_type = typename ValuesContainer::value_type;
+    using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
+
+    common::logger->trace("Calculating count histograms");
+    utils::call_rows<std::unique_ptr<const bit_vector>,
+                     std::unique_ptr<const ValuesContainer>,
+                     PairContainer, false>(columns_all, column_values_all,
+                                           [&](uint64_t row_i, const auto &row, size_t) {
+        if (row.empty())
+            return;
+
+        sdsl::bit_vector marker(groups.size(), false);
+        for (const auto &[j, raw_c] : row) {
+            marker[j] = true;
+            std::lock_guard<std::mutex> lock(column_mus[j]);
+            ++hists_map[j][raw_c];
+        }
+
+        for (size_t j = 0; j < marker.size(); ++j) {
+            if (!marker[j]) {
+                std::lock_guard<std::mutex> lock(column_mus[j]);
+                ++hists_map[j][0];
+            }
+        }
+    });
 
     if (config.clean && column_values_all.size()) {
         common::logger->trace("Cleaning count columns");
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
-            const auto &column_values = *column_values_all[j];
-
             // set cutoff for lower end of distribution
             auto [mean_est, nzeros_est] = estimate_ztp_mean(
                 [&](const auto &callback) {
-                    for (size_t i = 0; i < column_values.size(); ++i) {
-                        if (column_values[i] <= N_BUCKETS_FOR_ESTIMATION)
-                            callback(column_values[i]);
+                    for (const auto &[k, c] : hists_map[j]) {
+                        if (k > 0 && k <= N_BUCKETS_FOR_ESTIMATION) {
+                            for (size_t i = 0; i < c; ++i) {
+                                callback(k);
+                            }
+                        }
                     }
                 },
                 max_width,
@@ -201,11 +229,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     }
 
     common::logger->trace("Marking discarded k-mers");
-    std::mutex agg_mu;
-    std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-
-    using value_type = typename ValuesContainer::value_type;
-    using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
 
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
@@ -213,26 +236,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          std::unique_ptr<const ValuesContainer>,
                          PairContainer, false>(columns_all, column_values_all,
                                                [&](uint64_t row_i, const auto &row, size_t) {
+            std::vector<uint64_t> counts(groups.size(), 0);
             for (const auto &[j, raw_c] : row) {
-                if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j]) {
-                    if (!config.test_by_unitig) {
-                        std::lock_guard<std::mutex> lock(agg_mu);
-                        sdsl::bit_vector marker(groups.size(), false);
-                        for (const auto &[j, raw_c] : row) {
-                            ++hists_map[j][raw_c];
-                            marker[j] = true;
-                        }
-
-                        for (size_t j = 0; j < marker.size(); ++j) {
-                            if (!marker[j])
-                                ++hists_map[j][0];
-                        }
-                    }
+                if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
                     return;
-                }
+
+                counts[j] = raw_c;
             }
 
             unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
+            if (row.size()) {
+                for (size_t j = 0; j < counts.size(); ++j) {
+                    size_t &count = hists_map[j].find(counts[j]).value();
+                    size_t old_val = __atomic_fetch_sub(&count, 1, MO_RELAXED);
+                    std::ignore = old_val;
+                    assert(old_val);
+                }
+            }
         });
         std::atomic_thread_fence(std::memory_order_acquire);
     }
@@ -255,6 +275,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             true,
             is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
         );
+
+        for (size_t j = 0; j < groups.size(); ++j) {
+            hists_map[j].clear();
+        }
 
         std::atomic_thread_fence(std::memory_order_release);
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
@@ -1100,7 +1124,8 @@ mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, std::vector<uint64_t>>(std::
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool);
+                         bool,
+                         uint8_t);
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, std::vector<uint64_t>, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(std::shared_ptr<const DeBruijnGraph>,
@@ -1112,7 +1137,8 @@ mask_nodes_by_label_dual<sdsl::int_vector<>, std::vector<uint64_t>>(std::shared_
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool);
+                         bool,
+                         uint8_t);
 
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
@@ -1125,7 +1151,8 @@ mask_nodes_by_label_dual<sdsl::int_vector_buffer<>, sdsl::int_vector_buffer<64>>
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool);
+                         bool,
+                         uint8_t);
 template
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, sdsl::int_vector_buffer<64>, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::shared_ptr<const DeBruijnGraph>,
@@ -1137,7 +1164,8 @@ mask_nodes_by_label_dual<sdsl::int_vector<>, sdsl::int_vector_buffer<64>>(std::s
                          size_t,
                          std::filesystem::path,
                          size_t,
-                         bool);
+                         bool,
+                         uint8_t);
 
 } // namespace graph
 } // namespace mtg
