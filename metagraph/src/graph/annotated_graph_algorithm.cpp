@@ -264,15 +264,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return;
 
         sdsl::bit_vector marker(groups.size(), false);
+        std::lock_guard<std::mutex> lock(agg_mu);
         for (const auto &[j, raw_c] : row) {
             marker[j] = true;
-            std::lock_guard<std::mutex> lock(column_mus[j]);
+            // std::lock_guard<std::mutex> lock(column_mus[j]);
             ++hists_map[j][raw_c];
         }
 
         for (size_t j = 0; j < marker.size(); ++j) {
             if (!marker[j]) {
-                std::lock_guard<std::mutex> lock(column_mus[j]);
+                // std::lock_guard<std::mutex> lock(column_mus[j]);
                 ++hists_map[j][0];
             }
         }
@@ -1116,17 +1117,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 sdsl::util::set_to_value(indicator_out, false);
             } else {
                 common::logger->trace("k: {}\talpha_corr: {}", k, config.family_wise_error_rate / k);
+
+                std::atomic_thread_fence(std::memory_order_release);
+                #pragma omp parallel for ordered num_threads(num_threads)
                 for (size_t i = 0; i < indicator_in.size(); ++i) {
-                    double p = bit_cast<double, uint64_t>(pvals[i]);
+                    double p = 1.0;
+
+                    #pragma omp ordered
+                    p = bit_cast<double, uint64_t>(pvals[i]);
+
                     if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
-                        indicator_in[i] = false;
-                        indicator_out[i] = false;
+                        unset_bit(indicator_in.data(), i, parallel, MO_RELAXED);
+                        unset_bit(indicator_out.data(), i, parallel, MO_RELAXED);
                     }
                 }
+                std::atomic_thread_fence(std::memory_order_acquire);
             }
         }
     }
 
+    common::logger->trace("Done! Assembling contigs.");
     auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
         is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
