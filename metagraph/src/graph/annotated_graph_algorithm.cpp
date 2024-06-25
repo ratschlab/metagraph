@@ -406,6 +406,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::unique_ptr<PValStorage> eff_size;
     std::unique_ptr<utils::TempFile> tmp_file_eff;
     if (config.test_by_unitig) {
+        common::logger->trace("Allocating p-value storage");
         pvals_min = std::make_unique<PValStorage>();
         eff_size = std::make_unique<PValStorage>();
         if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
@@ -422,9 +423,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
 
-    common::logger->trace("Allocating k-mer bitmasks");
-    sdsl::bit_vector indicator_in(graph_ptr->max_index() + 1, false);
-    sdsl::bit_vector indicator_out(graph_ptr->max_index() + 1, false);
+    sdsl::bit_vector indicator_in;
+    sdsl::bit_vector indicator_out;
+
+    if (!config.test_by_unitig) {
+        common::logger->trace("Allocating k-mer bitmasks");
+        indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+        indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+    }
 
     VectorMap<size_t, size_t> m;
     std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
@@ -960,8 +966,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (pval >= 1.1)
             return;
 
-        uint64_t k = std::numeric_limits<uint64_t>::max();
-
         if (pval_min - pval > 1e-10) {
             common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
             throw std::runtime_error("Test failed");
@@ -969,34 +973,34 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (config.test_by_unitig) {
             assert(pvals_min);
-            (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
-        }
-
-        if (pval_min >= config.family_wise_error_rate) {
-            k = 0;
-        } else if (pval_min > 0) {
-            double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
-            if (lkd <= 64)
-                k = pow(2.0, lkd);
-
-            if (k == 0) {
-                common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
-                throw std::runtime_error("Min failed");
-            }
-        }
-
-        if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
-            set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
-            if (config.test_by_unitig) {
-                std::lock_guard<std::mutex> lock(pval_mu);
-                (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
-            }
-        }
-
-        if (config.test_type != "notest") {
             std::lock_guard<std::mutex> lock(pval_mu);
-            ++m[k];
+            (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
             pvals[node] = bit_cast<uint64_t>(pval);
+            (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
+        } else {
+            uint64_t k = std::numeric_limits<uint64_t>::max();
+            if (pval_min >= config.family_wise_error_rate) {
+                k = 0;
+            } else if (pval_min > 0) {
+                double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
+                if (lkd <= 64)
+                    k = pow(2.0, lkd);
+
+                if (k == 0) {
+                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                    throw std::runtime_error("Min failed");
+                }
+            }
+
+            if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
+                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
+            }
+
+            if (config.test_type != "notest") {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                ++m[k];
+                pvals[node] = bit_cast<uint64_t>(pval);
+            }
         }
     });
 
@@ -1008,8 +1012,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     deallocate();
 
     if (config.test_by_unitig) {
+        common::logger->trace("Allocating k-mer bitmasks");
+        indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+        indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+
         common::logger->trace("Combining p-values within unitigs");
-        m.clear();
         MaskedDeBruijnGraph clean_masked_graph(
             graph_ptr,
             [&](node_index node) {
@@ -1040,16 +1047,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             stat /= path.size();
             stat_min /= path.size();
             double comb_pval = boost::math::cdf(boost::math::complement(dist, stat));
-            for (node_index node : path) {
-                if (comb_pval >= config.family_wise_error_rate || comb_eff_size == 0) {
-                    unset_bit(indicator_in.data(), node, parallel, MO_RELAXED);
-                    unset_bit(indicator_out.data(), node, parallel, MO_RELAXED);
-                } else if (comb_eff_size > 0) {
-                    set_bit(indicator_in.data(), node, parallel, MO_RELAXED);
-                    unset_bit(indicator_out.data(), node, parallel, MO_RELAXED);
-                } else {
-                    unset_bit(indicator_in.data(), node, parallel, MO_RELAXED);
-                    set_bit(indicator_out.data(), node, parallel, MO_RELAXED);
+            if (comb_pval < config.family_wise_error_rate && comb_eff_size != 0) {
+                auto *data = comb_eff_size > 0 ? indicator_in.data() : indicator_out.data();
+                for (node_index node : path) {
+                    set_bit(data, node, parallel, MO_RELAXED);
                 }
             }
 
