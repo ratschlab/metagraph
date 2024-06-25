@@ -100,9 +100,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                             callback(row_i, row);
                         });
                     },
-                    [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
-                        return (*columns[col_j])[row_i];
-                    },
                     groups,
                     config, num_threads, test_dump_basename, num_threads,
                     [&]() {
@@ -234,14 +231,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
                                                                 [&](uint64_t row_i, const auto &row, size_t) {
                                 callback(row_i, row);
                             });
-                        },
-                        [&](uint64_t row_i, uint64_t col_j) -> uint64_t {
-                            const auto &col = *columns[col_j];
-                            const auto &col_vals = *column_values[col_j];
-                            if (uint64_t r = col.conditional_rank1(row_i))
-                                return col_vals[r - 1];
-
-                            return 0;
                         },
                         groups,
                         config, num_threads, test_dump_basename, num_threads
