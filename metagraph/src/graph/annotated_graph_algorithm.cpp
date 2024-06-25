@@ -364,6 +364,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         unitig_start = sdsl::bit_vector(graph_ptr->max_index() + 1, true);
 
     std::shared_ptr<MaskedDeBruijnGraph> clean_masked_graph;
+    std::atomic<size_t> num_unitigs(0);
     if (config.test_by_unitig) {
         clean_masked_graph = std::make_shared<MaskedDeBruijnGraph>(
             graph_ptr,
@@ -375,36 +376,36 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
         );
 
-        // for (size_t j = 0; j < groups.size(); ++j) {
-        //     hists_map[j].clear();
-        // }
+        for (size_t j = 0; j < groups.size(); ++j) {
+            hists_map[j].clear();
+        }
 
-        // std::atomic_thread_fence(std::memory_order_release);
-        // clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
-        //     std::vector<uint64_t> unitig_sums(groups.size(), 0);
-        //     std::vector<bool> all_below_cutoff(groups.size(), true);
-        //     for (node_index node : path) {
-        //         uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-        //         for (size_t j = 0; j < groups.size(); ++j) {
-        //             if (uint64_t c = get_value(row_i, j)) {
-        //                 unitig_sums[j] += c;
-        //                 if (c >= min_counts[j])
-        //                     all_below_cutoff[j] = false;
-        //             }
-        //         }
-        //     }
+        std::atomic_thread_fence(std::memory_order_release);
+        clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
+            std::vector<uint64_t> unitig_sums(groups.size(), 0);
+            std::vector<bool> all_below_cutoff(groups.size(), true);
+            for (node_index node : path) {
+                uint64_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    if (uint64_t c = get_value(row_i, j)) {
+                        unitig_sums[j] += c;
+                        if (c >= min_counts[j])
+                            all_below_cutoff[j] = false;
+                    }
+                }
+            }
 
-        //     unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
-        //     num_unitigs.fetch_add(1, MO_RELAXED);
+            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
+            num_unitigs.fetch_add(1, MO_RELAXED);
 
-        //     std::lock_guard<std::mutex> lock(agg_mu);
-        //     for (size_t j = 0; j < groups.size(); ++j) {
-        //         ++hists_map[j][unitig_sums[j]];
-        //     }
-        // }, num_threads);
-        // std::atomic_thread_fence(std::memory_order_acquire);
+            std::lock_guard<std::mutex> lock(agg_mu);
+            for (size_t j = 0; j < groups.size(); ++j) {
+                ++hists_map[j][unitig_sums[j]];
+            }
+        }, num_threads);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
-        // nelem = num_unitigs.load();
+        nelem = num_unitigs.load();
     }
 
     std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
@@ -479,15 +480,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     sdsl::bit_vector indicator_out(graph_ptr->max_index() + 1, false);
 
     VectorMap<size_t, size_t> m;
-    std::function<double(int64_t, int64_t, const PairContainer&, size_t)> compute_pval;
-    std::function<double(int64_t, size_t)> compute_min_pval;
+    std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
+    std::function<double(int64_t)> compute_min_pval;
 
     std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps;
-    VectorMap<size_t, std::pair<double, double>> path_params;
 
     common::logger->trace("Test: {}", config.test_type);
     if (config.test_type == "poisson_exact") {
-        compute_min_pval = [&](int64_t n, size_t) {
+        compute_min_pval = [&](int64_t n) {
             if (n == 0)
                 return 1.1;
 
@@ -530,7 +530,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return pval;
         };
 
-        compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row, size_t) {
+        compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
@@ -575,7 +575,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     } else if (config.test_type == "fisher") {
         double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
 
-        compute_min_pval = [&,lbase_shared](int64_t m1, size_t) {
+        compute_min_pval = [&,lbase_shared](int64_t m1) {
             if (m1 == 0)
                 return 1.1;
 
@@ -597,7 +597,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::min(get_pval(0), get_pval(std::min(in_kmers, m1)));
         };
 
-        compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row, size_t) {
+        compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
@@ -747,63 +747,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::domain_error("Fit failed");
         }
 
-        auto get_r_map_target_p = [&,target_mu,matrix_size,hist_its,target_sum](int64_t c = 1) {
-            double r_map = 0;
-            double local_target_mu = 0;
-            if (c == 1) {
-                local_target_mu = target_mu * c;
-                double local_r_guess = target_mu2 * c / (target_var * c - target_mu);
-                r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
-                    double dl = (log(r) - log(r + local_target_mu) - boost::math::digamma(r)) * matrix_size;
-                    double ddl = (1.0 / r - 1.0 / (r + local_target_mu) - boost::math::trigamma(r)) * matrix_size;
-                    for (size_t j = 0; j < groups.size(); ++j) {
-                        double f = target_sum / sums[j] * c;
-                        std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                            const auto &[k, c] = a;
-                            dl += boost::math::digamma(f * k + r) * c;
-                            ddl += boost::math::trigamma(f * k + r) * c;
-                        });
-                    }
-                    return std::make_pair(dl, ddl);
-                }, local_r_guess, std::numeric_limits<double>::min(), real_sum * c, 30);
-            } else {
-                double local_target_var = 0.0;
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                        auto [k, cnt] = a;
-                        k *= c;
-                        if (count_maps.size())
-                            cnt = count_maps[j].find(cnt)->second.first;
-
-                        local_target_mu += k * cnt;
-                        local_target_var += k * k * cnt;
-                    });
-                }
-                local_target_mu /= matrix_size;
-                double local_target_mu2 = local_target_mu * local_target_mu;
-                local_target_var = (local_target_var - local_target_mu2 * matrix_size) / (matrix_size - 1);
-                double local_r_guess = local_target_mu2 / (local_target_var - local_target_mu);
-                r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
-                    double dl = (log(r) - log(r + local_target_mu) - boost::math::digamma(r)) * matrix_size;
-                    double ddl = (1.0 / r - 1.0 / (r + local_target_mu) - boost::math::trigamma(r)) * matrix_size;
-                    for (size_t j = 0; j < groups.size(); ++j) {
-                        std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                            auto [k, cnt] = a;
-                            k *= c;
-                            if (count_maps.size())
-                                cnt = count_maps[j].find(cnt)->second.first;
-                            dl += boost::math::digamma(k + r) * cnt;
-                            ddl += boost::math::trigamma(k + r) * cnt;
-                        });
-                    }
-                    return std::make_pair(dl, ddl);
-                }, local_r_guess, std::numeric_limits<double>::min(), real_sum * c, 30);
+        double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
+            double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
+            double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
+            for (size_t j = 0; j < groups.size(); ++j) {
+                double f = target_sum / sums[j];
+                std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
+                    const auto &[k, c] = a;
+                    dl += boost::math::digamma(f * k + r) * c;
+                    ddl += boost::math::trigamma(f * k + r) * c;
+                });
             }
-            double target_p = r_map / (r_map + local_target_mu);
-            return std::make_pair(r_map, target_p);
-        };
-
-        auto [r_map, target_p] = get_r_map_target_p();
+            return std::make_pair(dl, ddl);
+        }, r_guess, std::numeric_limits<double>::min(), real_sum, 30);
+        double target_p = r_map / (r_map + target_mu);
         double fit_mu = r_map * (1.0 - target_p) / target_p;
         double fit_var = fit_mu / target_p;
         common::logger->trace("Common params: r_guess: {}\tr: {}\tp: {}\tmu: {}\tvar: {}",
@@ -820,29 +777,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (fit_var / fit_mu - 1.0 < 1e-5)
             common::logger->warn("Fit parameters are close to a Poisson distribution");
 
-        compute_min_pval = [&,lscaling_base_row=lscaling_base,r_in_row=r_in,r_out_row=r_out,target_p_row=target_p,get_deviance,mu1_row=mu1,mu2_row=mu2,get_r_map_target_p](int64_t n, size_t path_size) {
+        compute_min_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t n) {
             if (n == 0)
                 return 1.1;
-
-            double r_in = r_in_row;
-            double r_out = r_out_row;
-            double target_p = target_p_row;
-            double lscaling_base = lscaling_base_row;
-            double mu1 = mu1_row;
-            double mu2 = mu2_row;
-            if (path_size > 1) {
-                std::lock_guard<std::mutex> lock(agg_mu);
-                auto find = path_params.find(path_size);
-                if (find == path_params.end())
-                    find = path_params.emplace(path_size, get_r_map_target_p(path_size)).first;
-
-                r_in = find->second.first * num_labels_in;
-                r_out = find->second.first * num_labels_out;
-                target_p = find->second.second;
-                lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-                mu1 = r_in * (1.0 - target_p) / target_p;
-                mu2 = r_out * (1.0 - target_p) / target_p;
-            }
 
             double lscaling = lgamma(n + 1) + lscaling_base;
             auto get_pmf = [&](int64_t s) {
@@ -887,29 +824,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::min(1.0, pval);
         };
 
-        compute_pval = [&,lscaling_base_row=lscaling_base,r_in_row=r_in,r_out_row=r_out,target_p_row=target_p,get_deviance,mu1_row=mu1,mu2_row=mu2,get_r_map_target_p](int64_t in_sum, int64_t out_sum, const auto &row, size_t path_size) {
+        compute_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
-
-            double r_in = r_in_row;
-            double r_out = r_out_row;
-            double target_p = target_p_row;
-            double lscaling_base = lscaling_base_row;
-            double mu1 = mu1_row;
-            double mu2 = mu2_row;
-            if (path_size > 1) {
-                std::lock_guard<std::mutex> lock(agg_mu);
-                auto find = path_params.find(path_size);
-                if (find == path_params.end())
-                    find = path_params.emplace(path_size, get_r_map_target_p(path_size)).first;
-
-                r_in = find->second.first * num_labels_in;
-                r_out = find->second.first * num_labels_out;
-                target_p = find->second.second;
-                lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-                mu1 = r_in * (1.0 - target_p) / target_p;
-                mu2 = r_out * (1.0 - target_p) / target_p;
-            }
 
             int64_t n = in_sum + out_sum;
 
@@ -1015,16 +932,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        double pval = std::min(compute_pval(in_sum, 0, best_in_row, 1),
-                               compute_pval(0, out_sum, best_out_row, 1));
+        double pval = std::min(compute_pval(in_sum, 0, best_in_row),
+                               compute_pval(0, out_sum, best_out_row));
         common::logger->trace("Best achievable p-value: {}\tin_sum: {}\tout_sum: {}", pval, in_sum, out_sum);
         if (pval >= config.family_wise_error_rate) {
             common::logger->error("Best achievable p-value is too big. Use poisson_exact instead");
             throw std::domain_error("Too few samples");
         }
     } else if (config.test_type == "notest") {
-        compute_min_pval = [&](int64_t n, size_t) { return n > 0 ? 0.0 : 1.1; };
-        compute_pval = [&](int64_t, int64_t, const auto &row, size_t) { return row.size() ? 0.0 : 1.1; };
+        compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
+        compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
     } else {
         throw std::runtime_error("Test not implemented");
     }
@@ -1035,14 +952,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::mutex pval_mu;
     std::atomic_thread_fence(std::memory_order_release);
 
-    std::atomic<size_t> num_unitigs(0);
     if (config.test_by_unitig) {
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
             if (ex)
                 return;
-
-            ++num_unitigs;
-            unset_bit(unitig_start.data(), path[0], parallel, MO_RELAXED);
 
             std::vector<int64_t> row_counts(groups.size());
             for (node_index node : path) {
@@ -1088,12 +1001,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double pval;
             double pval_min;
             try {
-                pval_min = compute_min_pval(in_sum + out_sum, path.size());
+                pval_min = compute_min_pval(in_sum + out_sum);
 
                 if (pval_min >= 1.1)
                     return;
 
-                pval = compute_pval(in_sum, out_sum, merged_row, path.size());
+                pval = compute_pval(in_sum, out_sum, merged_row);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(pval_mu);
                 ex = std::current_exception();
@@ -1180,12 +1093,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double pval;
             double pval_min;
             try {
-                pval_min = compute_min_pval(in_sum + out_sum, 1);
+                pval_min = compute_min_pval(in_sum + out_sum);
 
                 if (pval_min >= 1.1)
                     return;
 
-                pval = compute_pval(in_sum, out_sum, row, 1);
+                pval = compute_pval(in_sum, out_sum, row);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(pval_mu);
                 ex = std::current_exception();
