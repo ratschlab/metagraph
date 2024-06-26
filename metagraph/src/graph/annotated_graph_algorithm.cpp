@@ -1121,14 +1121,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 std::atomic_thread_fence(std::memory_order_release);
                 #pragma omp parallel for ordered num_threads(num_threads)
                 for (size_t i = 0; i < indicator_in.size(); ++i) {
-                    double p = 1.0;
+                    if (fetch_bit(indicator_in.data(), i, parallel, MO_RELAXED)
+                            || fetch_bit(indicator_out.data(), i, parallel, MO_RELAXED)) {
+                        double p = 1.0;
 
-                    #pragma omp ordered
-                    p = bit_cast<double, uint64_t>(pvals[i]);
+                        #pragma omp ordered
+                        p = bit_cast<double, uint64_t>(pvals[i]);
 
-                    if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
-                        unset_bit(indicator_in.data(), i, parallel, MO_RELAXED);
-                        unset_bit(indicator_out.data(), i, parallel, MO_RELAXED);
+                        if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
+                            unset_bit(indicator_in.data(), i, parallel, MO_RELAXED);
+                            unset_bit(indicator_out.data(), i, parallel, MO_RELAXED);
+                        }
                     }
                 }
                 std::atomic_thread_fence(std::memory_order_acquire);
