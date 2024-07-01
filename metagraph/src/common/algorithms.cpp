@@ -1,7 +1,5 @@
 #include "algorithms.hpp"
 
-#include <algorithm>
-
 
 namespace utils {
 

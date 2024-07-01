@@ -1,6 +1,7 @@
 #ifndef __SORTED_MULTISET_HPP__
 #define __SORTED_MULTISET_HPP__
 
+#include <algorithm>
 #include <cassert>
 #include <mutex>
 #include <shared_mutex>

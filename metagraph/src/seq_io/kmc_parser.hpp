@@ -2,6 +2,7 @@
 #define __KMC_KMERS__
 
 #include <functional>
+#include <cstdint>
 #include <string>
 
 
