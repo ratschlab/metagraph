@@ -407,7 +407,7 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts zlib
+  -lhts zlib deflate
   -lsdsl
   jsoncpp_lib
   progress_bar
