@@ -2,38 +2,36 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
+#include <variant>
 
 #include <dictionary.hpp>
+#include <sdsl/uint256_t.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg::graph {
 
-class IDictionary {
-  public:
-    virtual ~IDictionary() {}
-#if _PROTEIN_GRAPH
-    static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
-#else
-    static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
-#endif
-
-    virtual size_t size() const = 0;
-
-    virtual void visit(essentials::loader &loader) = 0;
-    virtual void visit(essentials::saver &saver) const = 0;
-    virtual void access(uint64_t kmer_id, char* string_kmer) const = 0;
-    virtual void build(std::string const& input_filename, sshash::build_configuration const& build_config) = 0;
-    virtual uint64_t lookup(char const* string_kmer, bool check_reverse_complement = true) const = 0;
-    virtual sshash::lookup_result lookup_advanced(
-            char const* string_kmer,
-            bool check_reverse_complement = true) const = 0;
-};
-
 class DBGSSHash : public DeBruijnGraph {
   public:
+    using KmerInt64 = uint64_t;
+    using KmerInt128 = __uint128_t;
+    using KmerInt256 = sdsl::uint256_t;
+
+#if _PROTEIN_GRAPH
+    template <typename KmerInt>
+    using kmer_t = sshash::aa_uint_kmer_t<KmerInt>;
+#else
+    template <typename KmerInt>
+    using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;
+#endif
+
+    using dict_t = std::variant<
+                        sshash::dictionary<kmer_t<KmerInt64>>,
+                        sshash::dictionary<kmer_t<KmerInt128>>,
+                        sshash::dictionary<kmer_t<KmerInt256>>>;
+
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
-    DBGSSHash(std::string const& input_filename, size_t k, Mode mode = BASIC);
+    DBGSSHash(const std::string &input_filename, size_t k, Mode mode = BASIC, size_t num_chars = 0);
 
     // SequenceGraph overrides
     void add_sequence(
@@ -50,16 +48,11 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index)>& callback,
             const std::function<bool()>& terminate = []() { return false; }) const override;
 
+    template <bool with_rc = true>
     void map_to_nodes_with_rc(
             std::string_view sequence,
             const std::function<void(node_index, bool)>& callback,
             const std::function<bool()>& terminate = []() { return false; }) const;
-
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
-
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)>& callback) const override;
 
     uint64_t num_nodes() const override;
 
@@ -90,11 +83,14 @@ class DBGSSHash : public DeBruijnGraph {
     size_t indegree(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
+
+    template <bool with_rc = true>
     std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
 
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback& callback) const override;
 
+    template <bool with_rc = true>
     void call_outgoing_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
@@ -102,25 +98,26 @@ class DBGSSHash : public DeBruijnGraph {
     void call_incoming_kmers(node_index node,
                              const IncomingEdgeCallback& callback) const override;
 
+    template <bool with_rc = true>
     void call_incoming_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
 
 
-    bool operator==(const DeBruijnGraph& other) const override;
-
     const std::string& alphabet() const override final { return alphabet_; }
 
-    const IDictionary& data() const { return *dict_; }
+    const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
 
   private:
     static const std::string alphabet_;
-    std::unique_ptr<IDictionary> dict_;
+    dict_t dict_;
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+
+    size_t dict_size() const;
 };
 
 } // namespace mtg::graph

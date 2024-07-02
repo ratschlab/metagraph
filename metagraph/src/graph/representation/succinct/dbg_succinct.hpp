@@ -70,7 +70,9 @@ class DBGSuccinct : public DeBruijnGraph {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override final;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override final;
 
     // Find nodes with a common suffix matching the maximal prefix of the string |str|,
     // and call these nodes. If more than |max_num_allowed_matches| are found,

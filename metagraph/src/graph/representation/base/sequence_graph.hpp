@@ -197,7 +197,8 @@ class DeBruijnGraph : public SequenceGraph {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual bool has_no_outgoing(node_index node) const { return outdegree(node) == 0; }
@@ -219,6 +220,13 @@ class DeBruijnGraph : public SequenceGraph {
                                                     char /* first_source_char */)>;
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const = 0;
+
+    // Given a node index, call the target nodes of all edges outgoing from it.
+    virtual void adjacent_outgoing_nodes(node_index node,
+                                         const std::function<void(node_index)> &callback) const override;
+    // Given a node index, call the source nodes of all edges incoming to it.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         const std::function<void(node_index)> &callback) const override;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(std::string_view sequence, double discovery_fraction = 1) const;

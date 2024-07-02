@@ -117,7 +117,8 @@ class BOSS {
      * Traverse the boss graph and call all its edges
      * except for the dummy source nodes and the dummy sink nodes
      */
-    void call_kmers(Call<edge_index, const std::string&> callback) const;
+    void call_kmers(Call<edge_index, const std::string&> callback,
+                    const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;

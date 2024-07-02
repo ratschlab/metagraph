@@ -70,22 +70,6 @@ DBGHashString::traverse_back(node_index node, char prev_char) const {
 }
 
 void DBGHashString
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
-
-    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
-}
-
-void DBGHashString
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
-
-    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
-}
-
-void DBGHashString
 ::call_outgoing_kmers(node_index node,
                       const OutgoingEdgeCallback &callback) const {
     assert(node > 0 && node <= num_nodes());
@@ -236,8 +220,9 @@ bool DBGHashString::has_single_incoming(node_index node) const {
 }
 
 void DBGHashString
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
-    for (auto it = kmers_.begin(); it != kmers_.end(); ++it) {
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
+    for (auto it = kmers_.begin(); it != kmers_.end() && !stop_early(); ++it) {
         callback(it - kmers_.begin() + 1, *it);
     }
 }

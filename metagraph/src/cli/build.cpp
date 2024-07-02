@@ -250,11 +250,10 @@ int build_graph(Config *config) {
                                                              get_verbose()));
         }
 
-    } else if (config->graph_type == Config::GraphType::SSHASH) {
-
-        graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode));
-        if(files.size() > 1){
-            logger->error("Only one file for SSHash");
+    } else if (config->graph_type == Config::GraphType::SSHASH && !config->dynamic) {
+        graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode, config->num_chars));
+        if (files.size() > 1) {
+            logger->error("DBGSSHash does not support multiple input files.");
             exit(1);
         }
 
@@ -294,9 +293,10 @@ int build_graph(Config *config) {
                 exit(1);
 
             case Config::GraphType::SSHASH:
-            logger->error("SSHash-graph construction"
+                logger->error("SSHash-graph construction"
                               " in dynamic regime is not supported");
                 exit(1);
+
             case Config::GraphType::INVALID:
                 assert(false);
         }

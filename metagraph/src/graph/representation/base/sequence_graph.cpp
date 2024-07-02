@@ -80,9 +80,33 @@ bool DeBruijnGraph::find(std::string_view sequence,
     return num_kmers_missing <= max_kmers_missing;
 }
 
-bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
-    throw std::runtime_error("Not implemented");
-    return false;
+void DeBruijnGraph
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    assert(node > 0 && node <= max_index());
+    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
+}
+
+void DeBruijnGraph
+::adjacent_incoming_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    assert(node > 0 && node <= max_index());
+    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
+}
+
+bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
+    bool not_equal = false;
+    other.call_kmers([&](node_index, const std::string &kmer) {
+        if (!find(kmer))
+            not_equal = true;
+    }, [&]() { return not_equal; });
+
+    call_kmers([&](node_index, const std::string &kmer) {
+        if (!other.find(kmer))
+            not_equal = true;
+    }, [&]() { return not_equal; });
+
+    return !not_equal;
 }
 
 void DeBruijnGraph::traverse(node_index start,
@@ -444,7 +468,12 @@ void DeBruijnGraph::row_diff_traverse(size_t num_threads,
  * Traverse graph and iterate over all nodes
  */
 void DeBruijnGraph
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+::call_kmers(const std::function<void(node_index,
+             const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
+    if (stop_early())
+        return;
+
     sdsl::bit_vector visited(max_index() + 1, false);
     std::stack<std::pair<node_index, std::string>> nodes;
 
@@ -488,7 +517,7 @@ void DeBruijnGraph
                 sequence.push_back(next_c);
             }
         }
-    });
+    }, stop_early);
 }
 
 void DeBruijnGraph::print(std::ostream &out) const {

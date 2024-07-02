@@ -107,7 +107,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual bool has_multiple_outgoing(node_index node) const override final;
     virtual bool has_single_incoming(node_index node) const override final;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override final;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
