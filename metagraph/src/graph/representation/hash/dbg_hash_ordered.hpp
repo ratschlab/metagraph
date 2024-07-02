@@ -70,18 +70,6 @@ class DBGHashOrdered : public DeBruijnGraph {
         return hash_dbg_->traverse_back(node, prev_char);
     }
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const {
-        hash_dbg_->adjacent_outgoing_nodes(node, callback);
-    }
-
-    // Given a node index, call the source nodes of all edges incoming to it.
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const {
-        hash_dbg_->adjacent_incoming_nodes(node, callback);
-    }
-
     size_t outdegree(node_index node) const { return hash_dbg_->outdegree(node); }
     bool has_single_outgoing(node_index node) const { return hash_dbg_->has_single_outgoing(node); }
     bool has_multiple_outgoing(node_index node) const { return hash_dbg_->has_multiple_outgoing(node); }

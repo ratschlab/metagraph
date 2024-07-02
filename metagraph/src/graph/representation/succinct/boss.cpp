@@ -3050,14 +3050,18 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
  * Traverse the boss graph and call all its edges
  * except for the dummy source nodes and the dummy sink nodes
  */
-void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
+void BOSS::call_kmers(Call<edge_index, const std::string&> callback,
+                      const std::function<bool()> &stop_early) const {
+    if (stop_early())
+        return;
+
     sdsl::bit_vector visited(W_->size(), false);
 
     // store all branch nodes on the way
     std::queue<std::pair<edge_index, std::string>> branchnodes;
 
     // start from the second edge (skip dummy main source)
-    for (edge_index i = 2; i < W_->size(); ++i) {
+    for (edge_index i = 2; i < W_->size() && !stop_early(); ++i) {
         if (visited[i] || !get_last(i))
             continue;
 
@@ -3067,13 +3071,13 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
         branchnodes.push({ i, get_node_str(i) + '\0' });
 
         // keep traversing until we have worked off all branches from the queue
-        while (!branchnodes.empty()) {
+        while (!branchnodes.empty() && !stop_early()) {
             auto [edge, kmer] = std::move(branchnodes.front());
             branchnodes.pop();
 
             // traverse forwards until we reach a sink or
             // the first edge that has been already visited
-            while (!visited[edge]) {
+            while (!visited[edge] && !stop_early()) {
                 assert(edge > 0);
                 assert(get_last(edge));
 
@@ -3110,7 +3114,7 @@ void BOSS::call_kmers(Call<edge_index, const std::string&> callback) const {
                         if (!visited[next_edge])
                             branchnodes.push({ next_edge, kmer.substr(1) + '\0' });
 
-                    } while (--edge > 1 && !get_last(edge) && (d = get_W(edge) % alph_size));
+                    } while (--edge > 1 && !get_last(edge) && (d = get_W(edge) % alph_size) && !stop_early());
 
                     break;
                 }

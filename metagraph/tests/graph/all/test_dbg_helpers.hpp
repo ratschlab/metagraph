@@ -10,6 +10,7 @@
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 
 
@@ -91,6 +92,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,
                          DBGHashFast,
+                         DBGSSHash,
                          DBGSuccinct,
                          DBGSuccinctIndexed<1>,
                          DBGSuccinctIndexed<2>,

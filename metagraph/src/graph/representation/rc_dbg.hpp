@@ -135,13 +135,15 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         graph_->call_nodes(callback, stop_early);
     }
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override {
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override {
         // all node IDs are the same, but represent the reverse complement sequences
         graph_->call_kmers([&](node_index node, const std::string &seq) {
             std::string rseq(seq);
             ::reverse_complement(rseq.begin(), rseq.end());
             callback(node, rseq);
-        });
+        }, stop_early);
     }
 };
 
