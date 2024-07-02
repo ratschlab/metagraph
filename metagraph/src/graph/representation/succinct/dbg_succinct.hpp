@@ -174,6 +174,15 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
+    virtual std::shared_ptr<const bit_vector> get_last() const override final;
+
+    virtual void row_diff_traverse(size_t num_threads,
+                                   size_t max_length,
+                                   const bit_vector &rd_succ,
+                                   sdsl::bit_vector *terminal) const override final;
+
+    virtual node_index row_diff_successor(node_index node, const bit_vector &rd_succ) const override final;
+
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 

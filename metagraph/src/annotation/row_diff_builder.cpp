@@ -264,7 +264,16 @@ void sum_and_call_counts(const fs::path &dir,
     }
 }
 
-rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
+uint64_t from_graph_index(const graph::DeBruijnGraph &graph,
+                          graph::DeBruijnGraph::node_index idx) {
+    if (auto* g = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return g->kmer_to_boss_index(idx);
+    } else {
+        return idx;
+    }
+}
+
+rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
                                const std::string &row_count_extension) {
@@ -282,7 +291,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         logger->trace("RowDiff successors will be set to the adjacent nodes with"
                       " the largest number of labels");
 
-        const bit_vector &last = graph.get_boss().get_last();
+        const bit_vector &last = *graph.get_last();
         graph::DeBruijnGraph::node_index graph_idx = to_node(0);
 
         std::vector<uint32_t> outgoing_counts;
@@ -293,12 +302,12 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
             [&](int32_t count) {
                 // TODO: skip single outgoing
                 outgoing_counts.push_back(count);
-                if (last[graph.kmer_to_boss_index(graph_idx)]) {
+                if (last[from_graph_index(graph, graph_idx)]) {
                     // pick the node with the largest count
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                       outgoing_counts.rend())
                                      - outgoing_counts.rbegin();
-                    rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
+                    rd_succ_bv[from_graph_index(graph, graph_idx - max_pos)] = true;
                     outgoing_counts.resize(0);
                 }
                 graph_idx++;
