@@ -8,11 +8,6 @@
 namespace mtg {
 namespace graph {
 
-class early_term : public std::exception {
-  public:
-    const char* what() const noexcept override { return "Finished iteration"; }
-};
-
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse(node_index node, char next_char) const {

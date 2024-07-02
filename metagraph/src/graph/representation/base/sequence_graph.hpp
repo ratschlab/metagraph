@@ -7,7 +7,6 @@
 #include <iostream>
 #include <memory>
 
-
 namespace utils {
     std::string make_suffix(const std::string &str, const std::string &suffix);
 } // namespace utils
@@ -15,6 +14,11 @@ namespace utils {
 
 namespace mtg {
 namespace graph {
+
+class early_term : public std::exception {
+  public:
+    const char* what() const noexcept override { return "Finished iteration"; }
+};
 
 class SequenceGraph {
   public:

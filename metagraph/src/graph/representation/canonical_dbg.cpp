@@ -12,11 +12,6 @@ namespace graph {
 using mtg::common::logger;
 using edge_index = boss::BOSS::edge_index;
 
-class early_term : public std::exception {
-  public:
-    const char* what() const noexcept override { return "Finished iteration"; }
-};
-
 inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const DeBruijnGraph *base_graph = &graph;
     while (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(base_graph)) {

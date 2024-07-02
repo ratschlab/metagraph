@@ -14,11 +14,6 @@ namespace align {
 
 using mtg::common::logger;
 
-class early_term : public std::exception {
-  public:
-    const char* what() const noexcept override { return "Finished iteration"; }
-};
-
 const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     return dynamic_cast<const DBGSuccinct*>(&(canonical ? canonical->get_graph() : graph));
