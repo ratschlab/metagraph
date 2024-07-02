@@ -16,6 +16,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libboost-all-dev \
     libbrotli-dev \
     libbz2-dev \
+    libdeflate-dev \
     libdouble-conversion-dev \
     libevent-dev \
     libgflags-dev \
@@ -90,6 +91,7 @@ ARG CODE_BASE
 RUN apt-get update && apt-get install -y \
     libatomic1 \
     libcurl4-nss-dev \
+    libdeflate-dev \
     libgomp1 \
     libhts-dev \
     libjemalloc2 \
