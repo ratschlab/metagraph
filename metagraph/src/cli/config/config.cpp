@@ -337,6 +337,8 @@ Config::Config(int argc, char *argv[]) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--compacted")) {
             output_compacted = true;
+        } else if (!strcmp(argv[i], "--clean-ztp")) {
+            clean_ztp = true;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -578,7 +580,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fnames.size() != 1) {
+                    && (fnames.size() != 1 && assembly_config_file.empty())) {
         std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
         print_usage_and_exit = true;
     }
@@ -611,8 +613,8 @@ Config::Config(int argc, char *argv[]) {
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
-        } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+        } else if (!to_row_diff && !count_kmers && !unitigs && !dump_text_anno && infbase.size()) {
+            std::cerr << "Graph is only required for transform to row_diff types and dumping per-unitig counts" << std::endl;
             print_usage_and_exit = true;
         }
     }
