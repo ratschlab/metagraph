@@ -79,13 +79,13 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     build_config.num_threads = get_num_threads();
 
     // silence sshash construction messages when not verbose
-    std::ostringstream devnull;
-    auto cout_buff = std::cout.rdbuf();
+    std::ios orig_state(nullptr);
+    orig_state.copyfmt(std::cout);
     if (!common::get_verbose())
-        std::cout.rdbuf(devnull.rdbuf());
+        std::cout.setstate(std::ios_base::failbit);
     std::visit([&](auto &d) { d.build(input_filename, build_config); }, dict_);
     if (!common::get_verbose())
-        std::cout.rdbuf(cout_buff);
+        std::cout.copyfmt(orig_state);
 
     num_nodes_ = dict_size();
 }
