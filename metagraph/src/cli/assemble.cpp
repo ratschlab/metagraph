@@ -1,5 +1,7 @@
 #include "assemble.hpp"
 
+#include <variant>
+
 #include <json/json.h>
 #include <spdlog/fmt/fmt.h>
 #include <tsl/hopscotch_set.h>
@@ -62,7 +64,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
 typedef std::function<void(const graph::DeBruijnGraph&,
                            const std::string& /* header */)> CallMaskedGraphHeader;
 
-void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+void call_masked_graphs(std::shared_ptr<DeBruijnGraph> graph_ptr,
                         Config *config,
                         const CallMaskedGraphHeader &callback) {
     assert(!config->assembly_config_file.empty());
@@ -71,9 +73,11 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (!fin.good())
         throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
-    for (const auto &name : config->fnames) {
-        if (parse_annotation_type(name) != Config::ColumnCompressed) {
-            throw std::runtime_error("Multiple annotation files must be ColumnCompressed");
+    if (config->infbase_annotators.size() > 1) {
+        for (const auto &name : config->infbase_annotators) {
+            if (parse_annotation_type(name) != Config::ColumnCompressed) {
+                throw std::runtime_error("Multiple annotation files must be ColumnCompressed");
+            }
         }
     }
 
@@ -106,41 +110,36 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             logger->trace("Running assembly: {}", exp_name);
 
-            auto filenames = (config->infbase_annotators.size() > 1) ? config->infbase_annotators : config->fnames;
-
             std::shared_ptr<DeBruijnGraph> ingraph;
             std::shared_ptr<DeBruijnGraph> outgraph;
 
+            std::variant<std::vector<uint64_t>, sdsl::int_vector_buffer<64>> pvals;
             if (diff_config.test_by_unitig) {
-                auto [cur_ingraph, cur_outgraph, pvals, tmp_file] =
-                    graph::mask_nodes_by_label_dual<std::vector<uint64_t>>(graph_ptr,
-                                        filenames,
-                                        foreground_labels,
-                                        background_labels,
-                                        diff_config, num_threads,
-                                        config->tmp_dir,
-                                        config->parallel_nodes);
-                std::swap(ingraph, cur_ingraph);
-                std::swap(outgraph, cur_outgraph);
-
-                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
-                for (uint64_t pval : pvals) {
-                    static_assert(sizeof(double) == sizeof(pval));
-                    double pval_d;
-                    memcpy(&pval_d, &pval, sizeof(pval));
-                    fout_all << pval_d << "\n";
-                }
+                pvals = sdsl::int_vector_buffer<64>();
             } else {
-                auto [cur_ingraph, cur_outgraph, pvals, tmp_file] =
-                    graph::mask_nodes_by_label_dual<sdsl::int_vector_buffer<64>>(graph_ptr,
-                                        filenames,
-                                        foreground_labels,
-                                        background_labels,
-                                        diff_config, num_threads,
-                                        config->tmp_dir,
-                                        config->parallel_nodes);
-                std::swap(ingraph, cur_ingraph);
-                std::swap(outgraph, cur_outgraph);
+                pvals = std::vector<uint64_t>();
+            }
+
+            std::tie(ingraph, outgraph) = std::visit([&](auto &pvals) {
+                using T = std::decay_t<decltype(pvals)>;
+                std::unique_ptr<utils::TempFile> tmp_file;
+                if (config->infbase_annotators.size() > 1
+                        || parse_annotation_type(config->infbase_annotators[0]) == Config::ColumnCompressed) {
+                    std::tie(ingraph, outgraph, pvals, tmp_file) = graph::mask_nodes_by_label_dual<T>(graph_ptr,
+                                            config->infbase_annotators,
+                                            foreground_labels,
+                                            background_labels,
+                                            diff_config, num_threads,
+                                            config->tmp_dir,
+                                            config->parallel_nodes);
+                } else {
+                    auto anno_graph = initialize_annotated_dbg(graph_ptr, *config);
+                    std::tie(ingraph, outgraph, pvals, tmp_file) = graph::mask_nodes_by_label_dual<T>(*anno_graph,
+                                            foreground_labels,
+                                            background_labels,
+                                            diff_config, num_threads,
+                                            config->tmp_dir);
+                }
 
                 std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
                 for (uint64_t pval : pvals) {
@@ -149,8 +148,15 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     memcpy(&pval_d, &pval, sizeof(pval));
                     fout_all << pval_d << "\n";
                 }
-                pvals.close();
-            }
+
+                if constexpr(std::is_same_v<T, sdsl::int_vector_buffer<64>>) {
+                    pvals.close();
+                } else {
+                    pvals = T();
+                }
+
+                return std::make_pair(std::move(ingraph), std::move(outgraph));
+            }, pvals);
 
             sdsl::bit_vector mask;
             callback(*ingraph, exp_name + "in.");
@@ -205,7 +211,7 @@ int assemble(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    if (config->infbase_annotators.size() > 1 || files.size() > 1) {
+    if (config->infbase_annotators.size()) {
         logger->trace("Generating masked graphs...");
         std::mutex write_mutex;
         size_t num_threads = std::max(1u, get_num_threads());
@@ -244,7 +250,6 @@ int assemble(Config *config) {
             }
         };
 
-        config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
         call_masked_graphs(graph, config, graph_callback);
 
         return 0;

@@ -16,6 +16,7 @@
 #include "load/load_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "common/vectors/transpose.hpp"
 
 
 namespace mtg {
@@ -279,6 +280,51 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 std::make_unique<matrix::CSCMatrix<matrix::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
+}
+
+IntRowFlatAnnotator
+convert_to_IntRowFlat(const std::vector<std::string> &files,
+                      const Config &config,
+                      const Timer &timer) {
+    size_t total_labels = get_num_columns(files, Config::ColumnCompressed);
+    std::vector<std::string> labels(total_labels);
+    std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
+    using ValuesContainer = sdsl::int_vector_buffer<>;
+    std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
+    using PairContainer = Vector<std::pair<uint64_t, uint64_t>>;
+    uint64_t num_rows = 0;
+    uint64_t num_nonzeros = 0;
+    uint8_t max_width = 0;
+    ColumnCompressed<>::load_columns_and_values(
+        files,
+        [&](uint64_t offset, const std::string &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
+            max_width = std::max(max_width, column_values.width());
+            labels[offset] = label;
+            num_rows = column->size();
+            num_nonzeros += column_values.size();
+            columns_all[offset].reset(column.release());
+            column_values_all[offset] = std::make_unique<const ValuesContainer>(std::move(column_values));
+        },
+        get_num_threads()
+    );
+
+    common::logger->trace("Num rows: {}\tNum columns: {}\tNum nonzeros: {}",
+                          num_rows, total_labels, num_nonzeros);
+
+    LabelEncoder label_encoder;
+    for (std::string &label : labels) {
+        label_encoder.insert_and_encode(std::move(label));
+    }
+    auto mat = std::make_unique<matrix::CSRMatrixFlat>([&](const auto &row_callback) {
+        utils::call_rows<std::unique_ptr<const bit_vector>,
+                         std::unique_ptr<const ValuesContainer>,
+                         PairContainer, true>(columns_all, column_values_all,
+                                              [&](uint64_t, const auto &row, size_t) {
+            row_callback(row);
+        }, num_rows);
+    }, total_labels, num_rows, num_nonzeros, max_width);
+
+    return IntRowFlatAnnotator(std::move(mat), std::move(label_encoder));
 }
 
 int transform_annotation(Config *config) {
@@ -870,6 +916,13 @@ int transform_annotation(Config *config) {
             }
             case Config::IntBRWT: {
                 auto annotator = convert_to_IntMultiBRWT(files, *config, timer);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                annotator.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::IntRowFlat: {
+                auto annotator = convert_to_IntRowFlat(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 annotator.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);

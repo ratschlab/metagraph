@@ -190,6 +190,7 @@ template class StaticBinRelAnnotator<CSCMatrix<BRWT, CountsVector>, std::string>
 template class StaticBinRelAnnotator<IntRowDiff<CSCMatrix<BRWT, CountsVector>>, std::string>;
 
 template class StaticBinRelAnnotator<CSRMatrix, std::string>;
+template class StaticBinRelAnnotator<CSRMatrixFlat, std::string>;
 
 template class StaticBinRelAnnotator<TupleCSCMatrix<ColumnMajor>, std::string>;
 template class StaticBinRelAnnotator<TupleCSCMatrix<BRWT>, std::string>;

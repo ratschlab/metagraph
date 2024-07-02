@@ -78,6 +78,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::IntMultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::IntBRWT;
 
+    } else if (utils::ends_with(filename, annot::IntRowFlatAnnotator::kExtension)) {
+        return Config::AnnotationType::IntRowFlat;
+
     } else if (utils::ends_with(filename, annot::IntRowDiffBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::IntRowDiffBRWT;
 
@@ -166,6 +169,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::IntBRWT: {
             annotation.reset(new annot::IntMultiBRWTAnnotator());
+            break;
+        }
+        case Config::IntRowFlat: {
+            annotation.reset(new annot::IntRowFlatAnnotator());
             break;
         }
         case Config::IntRowDiffBRWT: {

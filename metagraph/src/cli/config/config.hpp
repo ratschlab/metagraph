@@ -208,6 +208,7 @@ class Config {
         RBFish,
         RbBRWT,
         IntBRWT,
+        IntRowFlat,
         IntRowDiffBRWT,
         IntRowDiffDisk,
         ColumnCoord,

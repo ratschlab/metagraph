@@ -735,6 +735,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_disk_coord";
         case IntBRWT:
             return "int_brwt";
+        case IntRowFlat:
+            return "int_row_flat";
         case IntRowDiffBRWT:
             return "row_diff_int_brwt";
         case ColumnCoord:
@@ -782,6 +784,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffDiskCoord;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
+    } else if (string == "int_row_flat") {
+        return AnnotationType::IntRowFlat;
     } else if (string == "row_diff_int_brwt") {
         return AnnotationType::IntRowDiffBRWT;
     } else if (string == "column_coord") {
@@ -890,7 +894,7 @@ QueryMode Config::string_to_querymode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt, int_row_flat,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
