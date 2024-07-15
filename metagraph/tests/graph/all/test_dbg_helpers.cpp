@@ -173,15 +173,7 @@ build_graph<DBGSSHash>(uint64_t k,
     writeFastaFile(contigs, dump_path);
 
     std::shared_ptr<DBGSSHash> graph;
-    try {
-        graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
-    } catch (const std::runtime_error &e) {
-        if (strcmp(e.what(), "each partition must contain more than one key: use less partitions") == 0) {
-            return build_graph<DBGHashOrdered>(k, sequences, mode);
-        } else {
-            throw e;
-        }
-    }
+    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
 
     if (mode == DeBruijnGraph::PRIMARY)
         return std::make_shared<CanonicalDBG>(
