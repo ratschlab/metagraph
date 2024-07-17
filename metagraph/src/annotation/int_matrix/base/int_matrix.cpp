@@ -13,7 +13,8 @@ namespace matrix {
 using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 
-void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback) const {
+void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback,
+                                bool ordered) const {
     size_t n = get_binary_matrix().num_rows();
     ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
     #pragma omp parallel for num_threads(get_num_threads()) ordered
@@ -22,8 +23,12 @@ void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValu
         std::vector<Row> row_ids { row_i };
         auto row_vals = get_row_values(row_ids)[0];
 
-        #pragma omp ordered
-        callback(row_i, row_vals);
+        if (ordered) {
+            #pragma omp ordered
+            callback(row_i, row_vals);
+        } else {
+            callback(row_i, row_vals);
+        }
     }
 }
 

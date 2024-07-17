@@ -53,18 +53,6 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                          size_t num_threads = 1,
                          std::filesystem::path = "");
 
-template <typename value_type, class PValStorage>
-std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
-mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, value_type>>)>&)> &generate_rows,
-                         const std::vector<bool> &groups,
-                         const DifferentialAssemblyConfig &config,
-                         size_t num_threads = 1,
-                         std::filesystem::path = "",
-                         size_t num_parallel_files = std::numeric_limits<size_t>::max(),
-                         const std::function<void()> &deallocate = []() {},
-                         uint8_t max_width = 64);
-
 } // namespace graph
 } // namespace mtg
 
