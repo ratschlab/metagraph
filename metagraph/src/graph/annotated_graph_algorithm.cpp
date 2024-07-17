@@ -178,18 +178,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         using value_type = annot::matrix::IntMatrix::Value;
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-            [&](const auto &callback) {
-                ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads) ordered
-                for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-                    ++progress_bar;
-                    std::vector<Row> row_ids { row_i };
-                    auto row_vals = int_matrix->get_row_values(row_ids)[0];
-
-                    #pragma omp ordered
-                    callback(row_i, row_vals);
-                }
-            },
+            [&](const auto &callback) { int_matrix->call_row_values(callback); },
             groups,
             config, num_threads, tmp_dir, num_threads
         );
@@ -272,6 +261,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return;
 
         sdsl::bit_vector marker(groups.size(), false);
+        std::lock_guard<std::mutex> lock(agg_mu);
         for (const auto &[j, raw_c] : row) {
             marker[j] = true;
             ++hists_map[j][raw_c];

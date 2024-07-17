@@ -1,5 +1,10 @@
 #include "int_matrix.hpp"
 
+#include <progress_bar.hpp>
+
+#include "common/logger.hpp"
+#include "common/threads/threading.hpp"
+
 
 namespace mtg {
 namespace annot {
@@ -8,6 +13,19 @@ namespace matrix {
 using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 
+void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback) const {
+    size_t n = get_binary_matrix().num_rows();
+    ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
+    #pragma omp parallel for num_threads(get_num_threads()) ordered
+    for (size_t row_i = 0; row_i < n; ++row_i) {
+        ++progress_bar;
+        std::vector<Row> row_ids { row_i };
+        auto row_vals = get_row_values(row_ids)[0];
+
+        #pragma omp ordered
+        callback(row_i, row_vals);
+    }
+}
 
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,

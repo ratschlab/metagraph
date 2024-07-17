@@ -20,6 +20,8 @@ class IntMatrix {
     // |row| is in [0, num_rows), |column| is in [0, num_columns)
     virtual std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const = 0;
 
+    virtual void call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback) const;
+
     // sum up values for each column with at least |min_count| non-zero values
     virtual RowValues
     sum_row_values(const std::vector<std::pair<BinaryMatrix::Row, size_t>> &index_counts,
