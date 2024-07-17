@@ -59,11 +59,11 @@ bit_cast(const From& src) noexcept
     return dst;
 }
 
-template <typename value_type, class PValStorage>
+template <typename value_type, class PValStorage, typename Generator>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         const std::function<void(const std::function<void(uint64_t, const Vector<std::pair<uint64_t, value_type>>)>&,
-                                                  bool)> &generate_rows,
+                         std::vector<VectorMap<uint64_t, size_t>>&& hists_map,
+                         const Generator &generate_rows,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
@@ -86,27 +86,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
     std::mutex agg_mu;
-    std::vector<std::mutex> column_mus(groups.size());
-    std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
     using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
-
-    common::logger->trace("Calculating count histograms");
-    generate_rows([&](uint64_t, const auto &row) {
-        if (row.empty())
-            return;
-
-        Vector<uint64_t> counts(groups.size(), 0);
-        for (const auto &[j, raw_c] : row) {
-            counts[j] = raw_c;
-        }
-
-        #pragma omp critical
-        {
-        for (size_t j = 0; j < counts.size(); ++j) {
-            ++hists_map[j][counts[j]];
-        }
-        }
-    }, false);
 
     if (config.clean) {
         common::logger->trace("Cleaning count columns");
@@ -1032,8 +1012,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_width = std::max(max_width, col_vals->width());
         }
 
+        common::logger->trace("Calculating count histograms");
+        std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
+        utils::call_rows<std::unique_ptr<const bit_vector>,
+                         std::unique_ptr<const ValuesContainer>,
+                         PairContainer, false>(columns_all, column_values_all,
+                                               [&](uint64_t row_i, const auto &row, size_t) {
+            if (row.empty())
+                return;
+
+            Vector<uint64_t> counts(groups.size());
+            for (const auto &[j, raw_c] : row) {
+                counts[j] = raw_c;
+            }
+
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < counts.size(); ++j) {
+                    ++hists_map[j][counts[j]];
+                }
+            }
+        });
+
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             graph_ptr,
+            std::move(hists_map),
             [&](const auto &callback, bool ordered) {
                 if (ordered) {
                     utils::call_rows<std::unique_ptr<const bit_vector>,
@@ -1110,6 +1113,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         using value_type = annot::matrix::IntMatrix::Value;
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            int_matrix->get_histograms(),
             [&](const auto &callback, bool ordered) {
                 int_matrix->call_row_values(callback, ordered);
             },
@@ -1117,8 +1121,33 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             config, num_threads, tmp_dir, num_threads
         );
     } else {
+        common::logger->trace("Calculating count histograms");
+        std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
+        for (size_t j = 0; j < groups.size(); ++j) {
+            hists_map[j][0] = 0;
+            hists_map[j][1] = 0;
+        }
+        ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
+        #pragma omp parallel for num_threads(num_threads)
+        for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
+            ++progress_bar;
+            std::vector<Row> row_ids(1, row_i);
+            auto set_bits = matrix.get_rows(row_ids);
+            std::vector<bool> container(groups.size());
+            for (auto j : set_bits[0]) {
+                container[j] = true;
+            }
+
+            #pragma omp critical
+            {
+            for (size_t j = 0; j < container.size(); ++j) {
+                ++hists_map[j][container[j]];
+            }
+            }
+        }
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            std::move(hists_map),
             [&](const auto &callback, bool ordered) {
                 ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
                 #pragma omp parallel for num_threads(num_threads) ordered

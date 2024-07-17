@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -22,6 +23,8 @@ class IntMatrix {
 
     virtual void call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback,
                                  bool ordered = true) const;
+
+    virtual std::vector<VectorMap<uint64_t, size_t>> get_histograms() const;
 
     // sum up values for each column with at least |min_count| non-zero values
     virtual RowValues

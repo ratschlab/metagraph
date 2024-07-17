@@ -32,6 +32,29 @@ void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValu
     }
 }
 
+std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms() const {
+    common::logger->trace("Calculating count histograms");
+    std::vector<VectorMap<uint64_t, size_t>> hists_map(get_binary_matrix().num_columns());
+    call_row_values([&](auto, const auto &row) {
+        if (row.empty())
+            return;
+
+        Vector<uint64_t> counts(hists_map.size());
+        for (const auto &[j, raw_c] : row) {
+            counts[j] = raw_c;
+        }
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < counts.size(); ++j) {
+                ++hists_map[j][counts[j]];
+            }
+        }
+    }, false);
+
+    return hists_map;
+}
+
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {
