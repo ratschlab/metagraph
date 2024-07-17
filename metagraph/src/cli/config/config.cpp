@@ -337,6 +337,8 @@ Config::Config(int argc, char *argv[]) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--compacted")) {
             output_compacted = true;
+        } else if (!strcmp(argv[i], "--dump-pvals")) {
+            output_pvals = true;
         } else if (!strcmp(argv[i], "--clean-ztp")) {
             clean_ztp = true;
         } else if (!strcmp(argv[i], "--json")) {

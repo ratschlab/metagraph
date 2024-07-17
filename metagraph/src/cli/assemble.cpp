@@ -141,12 +141,15 @@ void call_masked_graphs(std::shared_ptr<DeBruijnGraph> graph_ptr,
                                             config->tmp_dir);
                 }
 
-                std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
-                for (uint64_t pval : pvals) {
-                    static_assert(sizeof(double) == sizeof(pval));
-                    double pval_d;
-                    memcpy(&pval_d, &pval, sizeof(pval));
-                    fout_all << pval_d << "\n";
+                if (config->output_pvals) {
+                    common::logger->trace("Writing p-values");
+                    std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                    for (uint64_t pval : pvals) {
+                        static_assert(sizeof(double) == sizeof(pval));
+                        double pval_d;
+                        memcpy(&pval_d, &pval, sizeof(pval));
+                        fout_all << pval_d << "\n";
+                    }
                 }
 
                 if constexpr(std::is_same_v<T, sdsl::int_vector_buffer<64>>) {

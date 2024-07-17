@@ -35,6 +35,7 @@ class Config {
     bool enumerate_out_sequences = false;
     bool to_gfa = false;
     bool output_compacted = false;
+    bool output_pvals = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
