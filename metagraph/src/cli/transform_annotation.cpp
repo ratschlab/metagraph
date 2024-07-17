@@ -287,34 +287,43 @@ convert_to_IntRowFlat(const std::vector<std::string> &files,
                       const Config &config,
                       const Timer &timer) {
     size_t total_labels = get_num_columns(files, Config::ColumnCompressed);
+    if (!total_labels)
+        return {};
+
     std::vector<std::string> labels(total_labels);
     std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
     using ValuesContainer = sdsl::int_vector_buffer<>;
     std::vector<std::unique_ptr<const ValuesContainer>> column_values_all(total_labels);
     using PairContainer = Vector<std::pair<uint64_t, uint64_t>>;
-    uint64_t num_rows = 0;
-    uint64_t num_nonzeros = 0;
-    uint8_t max_width = 0;
     ColumnCompressed<>::load_columns_and_values(
         files,
         [&](uint64_t offset, const std::string &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
-            max_width = std::max(max_width, column_values.width());
             labels[offset] = label;
-            num_rows = column->size();
-            num_nonzeros += column_values.size();
             columns_all[offset].reset(column.release());
             column_values_all[offset] = std::make_unique<const ValuesContainer>(std::move(column_values));
         },
         get_num_threads()
     );
 
-    common::logger->trace("Num rows: {}\tNum columns: {}\tNum nonzeros: {}",
-                          num_rows, total_labels, num_nonzeros);
+    uint64_t num_rows = columns_all[0]->size();
+    uint64_t num_nonzeros = 0;
+    uint8_t max_width = 0;
+
+    for (size_t j = 0; j < columns_all.size(); ++j) {
+        assert(num_rows == columns_all[j]->size());
+        num_nonzeros += column_values_all[j]->size();
+        max_width = std::max(max_width, column_values_all[j]->width());
+    }
 
     LabelEncoder label_encoder;
     for (std::string &label : labels) {
         label_encoder.insert_and_encode(std::move(label));
     }
+
+    assert(label_encoder.size() == total_labels);
+
+    common::logger->trace("Num rows: {}\tNum columns: {}\tNum nonzeros: {}",
+                          num_rows, total_labels, num_nonzeros);
     auto mat = std::make_unique<matrix::CSRMatrixFlat>([&](const auto &row_callback) {
         utils::call_rows<std::unique_ptr<const bit_vector>,
                          std::unique_ptr<const ValuesContainer>,
@@ -323,6 +332,9 @@ convert_to_IntRowFlat(const std::vector<std::string> &files,
             row_callback(row);
         }, num_rows);
     }, total_labels, num_rows, num_nonzeros, max_width);
+    assert(mat->num_columns() == total_labels);
+    assert(mat->num_rows() == num_rows);
+    assert(mat->num_relations() == num_nonzeros);
 
     return IntRowFlatAnnotator(std::move(mat), std::move(label_encoder));
 }

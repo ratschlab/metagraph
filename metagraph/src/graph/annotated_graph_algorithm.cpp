@@ -179,10 +179,15 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
             [&](const auto &callback) {
-                std::vector<Row> row_ids { 0 };
+                ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
+                #pragma omp parallel for num_threads(num_threads) ordered
                 for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-                    row_ids[0] = row_i;
-                    callback(row_i, int_matrix->get_row_values(row_ids)[0]);
+                    ++progress_bar;
+                    std::vector<Row> row_ids { row_i };
+                    auto row_vals = int_matrix->get_row_values(row_ids)[0];
+
+                    #pragma omp ordered
+                    callback(row_i, row_vals);
                 }
             },
             groups,
@@ -192,9 +197,11 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
             [&](const auto &callback) {
-                std::vector<Row> row_ids { 0 };
+                ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
+                #pragma omp parallel for num_threads(num_threads) ordered
                 for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-                    row_ids[0] = row_i;
+                    ++progress_bar;
+                    std::vector<Row> row_ids(1, row_i);
                     auto set_bits = matrix.get_rows(row_ids);
                     Vector<std::pair<uint64_t, uint64_t>> container;
                     container.reserve(set_bits[0].size());
@@ -202,6 +209,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                         container.emplace_back(j, 1);
                     }
 
+                    #pragma omp ordered
                     callback(row_i, container);
                 }
             },
@@ -259,23 +267,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
 
     common::logger->trace("Calculating count histograms");
-    generate_rows([&](uint64_t row_i, const auto &row) {
+    generate_rows([&](uint64_t, const auto &row) {
         if (row.empty())
             return;
 
         sdsl::bit_vector marker(groups.size(), false);
-        std::lock_guard<std::mutex> lock(agg_mu);
         for (const auto &[j, raw_c] : row) {
             marker[j] = true;
-            // std::lock_guard<std::mutex> lock(column_mus[j]);
             ++hists_map[j][raw_c];
         }
 
         for (size_t j = 0; j < marker.size(); ++j) {
-            if (!marker[j]) {
-                // std::lock_guard<std::mutex> lock(column_mus[j]);
+            if (!marker[j])
                 ++hists_map[j][0];
-            }
         }
     });
 

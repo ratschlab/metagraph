@@ -119,6 +119,9 @@ std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::
         hist[1] = num_singleton_kmers;
     }
 
+    if (hist.empty())
+        return {};
+
     uint64_t max_size = 1llu << width;
     if (hist.size() == max_size)
         hist.pop_back();
