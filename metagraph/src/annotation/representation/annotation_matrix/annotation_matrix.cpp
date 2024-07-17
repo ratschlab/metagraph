@@ -42,7 +42,14 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
 
     try {
         assert(matrix_.get());
-        return label_encoder_.load(*in) && matrix_->load(*in);
+        if (!label_encoder_.load(*in))
+            return false;
+
+        if constexpr(std::is_same_v<T, IntRowFlatAnnotator>) {
+            return matrix_->load(fname, in->tellg());
+        }
+
+        return matrix_->load(*in);
     } catch (...) {
         return false;
     }
