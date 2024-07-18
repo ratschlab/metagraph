@@ -120,16 +120,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (groups.size()) {
         std::atomic_thread_fence(std::memory_order_release);
         generate_rows([&](uint64_t row_i, const auto &row) {
-            std::vector<uint64_t> counts(groups.size(), 0);
-            for (const auto &[j, raw_c] : row) {
-                if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
-                    return;
-
-                counts[j] = raw_c;
-            }
-
-            unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
             if (row.size()) {
+                std::vector<uint64_t> counts(groups.size(), 0);
+                for (const auto &[j, raw_c] : row) {
+                    if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
+                        return;
+
+                    counts[j] = raw_c;
+                }
+
                 for (size_t j = 0; j < counts.size(); ++j) {
                     size_t &count = hists_map[j].find(counts[j]).value();
                     size_t old_val = __atomic_fetch_sub(&count, 1, MO_RELAXED);
@@ -137,6 +136,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     assert(old_val);
                 }
             }
+
+            unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
         }, false);
         std::atomic_thread_fence(std::memory_order_acquire);
     }
@@ -1113,7 +1114,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         using value_type = annot::matrix::IntMatrix::Value;
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-            int_matrix->get_histograms(),
+            int_matrix->get_histograms(true),
             [&](const auto &callback, bool ordered) {
                 int_matrix->call_row_values(callback, ordered);
             },

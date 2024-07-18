@@ -13,7 +13,7 @@ namespace matrix {
 using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 
-void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&)> &callback,
+void IntMatrix::call_row_values(const std::function<void(uint64_t, RowValues&&)> &callback,
                                 bool ordered) const {
     size_t n = get_binary_matrix().num_rows();
     ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
@@ -21,22 +21,22 @@ void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValu
     for (size_t row_i = 0; row_i < n; ++row_i) {
         ++progress_bar;
         std::vector<Row> row_ids { row_i };
-        auto row_vals = get_row_values(row_ids)[0];
+        auto row_vals = get_row_values(row_ids);
 
         if (ordered) {
             #pragma omp ordered
-            callback(row_i, row_vals);
+            callback(row_i, std::move(row_vals[0]));
         } else {
-            callback(row_i, row_vals);
+            callback(row_i, std::move(row_vals[0]));
         }
     }
 }
 
-std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms() const {
+std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(bool ignore_empty) const {
     common::logger->trace("Calculating count histograms");
     std::vector<VectorMap<uint64_t, size_t>> hists_map(get_binary_matrix().num_columns());
     call_row_values([&](auto, const auto &row) {
-        if (row.empty())
+        if (ignore_empty && row.empty())
             return;
 
         Vector<uint64_t> counts(hists_map.size());
