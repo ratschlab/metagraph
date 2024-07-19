@@ -4,6 +4,7 @@
 
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 namespace mtg {
@@ -32,12 +33,29 @@ void IntMatrix::call_row_values(const std::function<void(uint64_t, RowValues&&)>
     }
 }
 
-std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(bool ignore_empty) const {
+std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(const std::vector<size_t> &min_counts,
+                                                                   sdsl::bit_vector *unmark_discarded) const {
     common::logger->trace("Calculating count histograms");
+    bool parallel = get_num_threads() > 0;
     std::vector<VectorMap<uint64_t, size_t>> hists_map(get_binary_matrix().num_columns());
-    call_row_values([&](auto, const auto &row) {
-        if (ignore_empty && row.empty())
-            return;
+    std::atomic_thread_fence(std::memory_order_release);
+    call_row_values([&](uint64_t row_i, const auto &row) {
+        if (min_counts.size()) {
+            bool keep_row = false;
+            for (const auto &[j, c] : row) {
+                if (c >= min_counts[j]) {
+                    keep_row = true;
+                    break;
+                }
+            }
+
+            if (!keep_row) {
+                if (unmark_discarded)
+                    unset_bit(unmark_discarded->data(), row_i, parallel, std::memory_order_relaxed);
+
+                return;
+            }
+        }
 
         Vector<uint64_t> counts(hists_map.size());
         for (const auto &[j, raw_c] : row) {
@@ -51,6 +69,7 @@ std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(bool ignore_e
             }
         }
     }, false);
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     return hists_map;
 }

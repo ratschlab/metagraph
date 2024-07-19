@@ -59,10 +59,10 @@ bit_cast(const From& src) noexcept
     return dst;
 }
 
-template <typename value_type, class PValStorage, typename Generator>
+template <typename value_type, class PValStorage, typename HistGetter, typename Generator>
 std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValStorage, std::unique_ptr<utils::TempFile>>
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                         std::vector<VectorMap<uint64_t, size_t>>&& hists_map,
+                         const HistGetter &get_hist_map,
                          const Generator &generate_rows,
                          const std::vector<bool> &groups,
                          const DifferentialAssemblyConfig &config,
@@ -80,9 +80,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
 
+    auto hists_map = get_hist_map(std::vector<size_t>(groups.size(), 1), nullptr);
+
     sdsl::bit_vector kept(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
 
-    std::vector<uint64_t> min_counts(groups.size(), config.min_count);
+    std::vector<size_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
     std::mutex agg_mu;
@@ -118,28 +120,29 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Marking discarded k-mers");
 
     if (groups.size()) {
-        std::atomic_thread_fence(std::memory_order_release);
-        generate_rows([&](uint64_t row_i, const auto &row) {
-            if (row.size()) {
-                std::vector<uint64_t> counts(groups.size(), 0);
-                for (const auto &[j, raw_c] : row) {
-                    if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
-                        return;
+        hists_map = get_hist_map(min_counts, &kept);
+        // std::atomic_thread_fence(std::memory_order_release);
+        // generate_rows([&](uint64_t row_i, const auto &row) {
+        //     if (row.size()) {
+        //         std::vector<uint64_t> counts(groups.size(), 0);
+        //         for (const auto &[j, raw_c] : row) {
+        //             if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
+        //                 return;
 
-                    counts[j] = raw_c;
-                }
+        //             counts[j] = raw_c;
+        //         }
 
-                for (size_t j = 0; j < counts.size(); ++j) {
-                    size_t &count = hists_map[j].find(counts[j]).value();
-                    size_t old_val = __atomic_fetch_sub(&count, 1, MO_RELAXED);
-                    std::ignore = old_val;
-                    assert(old_val);
-                }
-            }
+        //         for (size_t j = 0; j < counts.size(); ++j) {
+        //             size_t &count = hists_map[j].find(counts[j]).value();
+        //             size_t old_val = __atomic_fetch_sub(&count, 1, MO_RELAXED);
+        //             std::ignore = old_val;
+        //             assert(old_val);
+        //         }
+        //     }
 
-            unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
-        }, false);
-        std::atomic_thread_fence(std::memory_order_acquire);
+        //     unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
+        // }, false);
+        // std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     size_t nelem = sdsl::util::cnt_one_bits(kept);
@@ -1037,7 +1040,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             graph_ptr,
-            std::move(hists_map),
+            [&](const std::vector<size_t> &, sdsl::bit_vector *) -> std::vector<VectorMap<uint64_t, size_t>> { throw std::runtime_error("not imf"); return {}; },
             [&](const auto &callback, bool ordered) {
                 if (ordered) {
                     utils::call_rows<std::unique_ptr<const bit_vector>,
@@ -1114,7 +1117,9 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         using value_type = annot::matrix::IntMatrix::Value;
         return mask_nodes_by_label_dual<value_type, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-            int_matrix->get_histograms(true),
+            [&](const std::vector<size_t> &min_counts, sdsl::bit_vector *unmark_discarded) {
+                return int_matrix->get_histograms(min_counts, unmark_discarded);
+            },
             [&](const auto &callback, bool ordered) {
                 int_matrix->call_row_values(callback, ordered);
             },
@@ -1148,7 +1153,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         }
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-            std::move(hists_map),
+            [&](const std::vector<size_t> &, sdsl::bit_vector *) -> std::vector<VectorMap<uint64_t, size_t>> { throw std::runtime_error("not imf"); return {}; },
             [&](const auto &callback, bool ordered) {
                 ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
                 #pragma omp parallel for num_threads(num_threads) ordered
