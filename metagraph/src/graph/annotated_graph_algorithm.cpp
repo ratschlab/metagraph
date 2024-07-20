@@ -119,31 +119,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Marking discarded k-mers");
 
-    if (groups.size()) {
+    if (groups.size())
         hists_map = get_hist_map(min_counts, &kept);
-        // std::atomic_thread_fence(std::memory_order_release);
-        // generate_rows([&](uint64_t row_i, const auto &row) {
-        //     if (row.size()) {
-        //         std::vector<uint64_t> counts(groups.size(), 0);
-        //         for (const auto &[j, raw_c] : row) {
-        //             if (raw_c >= min_counts[j] && raw_c <= check_cutoff[j])
-        //                 return;
-
-        //             counts[j] = raw_c;
-        //         }
-
-        //         for (size_t j = 0; j < counts.size(); ++j) {
-        //             size_t &count = hists_map[j].find(counts[j]).value();
-        //             size_t old_val = __atomic_fetch_sub(&count, 1, MO_RELAXED);
-        //             std::ignore = old_val;
-        //             assert(old_val);
-        //         }
-        //     }
-
-        //     unset_bit(kept.data(), row_i, parallel, MO_RELAXED);
-        // }, false);
-        // std::atomic_thread_fence(std::memory_order_acquire);
-    }
 
     size_t nelem = sdsl::util::cnt_one_bits(kept);
 
@@ -816,7 +793,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 pvals[node] = bit_cast<uint64_t>(pval);
             }
         }
-    }, true);
+    }, false);
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
