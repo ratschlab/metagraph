@@ -993,48 +993,69 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_width = std::max(max_width, col_vals->width());
         }
 
-        common::logger->trace("Calculating count histograms");
-        std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-        utils::call_rows<std::unique_ptr<const bit_vector>,
-                         std::unique_ptr<const ValuesContainer>,
-                         PairContainer, false>(columns_all, column_values_all,
-                                               [&](uint64_t row_i, const auto &row, size_t) {
-            if (row.empty())
-                return;
-
-            Vector<uint64_t> counts(groups.size());
-            for (const auto &[j, raw_c] : row) {
-                counts[j] = raw_c;
-            }
-
-            #pragma omp critical
-            {
-                for (size_t j = 0; j < counts.size(); ++j) {
-                    ++hists_map[j][counts[j]];
-                }
-            }
-        });
-
-        return mask_nodes_by_label_dual<value_type, PValStorage>(
-            graph_ptr,
-            [&](const std::vector<size_t> &, sdsl::bit_vector *) -> std::vector<VectorMap<uint64_t, size_t>> { throw std::runtime_error("not imf"); return {}; },
-            [&](const auto &callback, bool ordered) {
-                if (ordered) {
-                    utils::call_rows<std::unique_ptr<const bit_vector>,
+        auto generate_rows = [&](const auto &callback, bool ordered) {
+            if (ordered) {
+                utils::call_rows<std::unique_ptr<const bit_vector>,
                                  std::unique_ptr<const ValuesContainer>,
                                  PairContainer, true>(columns_all, column_values_all,
                                                       [&](uint64_t row_i, const auto &row, size_t) {
-                        callback(row_i, row);
-                    });
-                } else {
-                    utils::call_rows<std::unique_ptr<const bit_vector>,
-                                     std::unique_ptr<const ValuesContainer>,
-                                     PairContainer, false>(columns_all, column_values_all,
-                                                           [&](uint64_t row_i, const auto &row, size_t) {
-                        callback(row_i, row);
-                    });
-                }
+                    callback(row_i, row);
+                });
+            } else {
+                utils::call_rows<std::unique_ptr<const bit_vector>,
+                                 std::unique_ptr<const ValuesContainer>,
+                                 PairContainer, false>(columns_all, column_values_all,
+                                                       [&](uint64_t row_i, const auto &row, size_t) {
+                    callback(row_i, row);
+                });
+            }
+        };
+
+        bool parallel = get_num_threads() > 1;
+
+        return mask_nodes_by_label_dual<value_type, PValStorage>(
+            graph_ptr,
+            [&](const std::vector<size_t> &min_counts, sdsl::bit_vector *kept) -> std::vector<VectorMap<uint64_t, size_t>> {
+                common::logger->trace("Calculating count histograms");
+                std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
+                utils::call_rows<std::unique_ptr<const bit_vector>,
+                                 std::unique_ptr<const ValuesContainer>,
+                                 PairContainer, false>(columns_all, column_values_all,
+                                                       [&](uint64_t row_i, const auto &row, size_t) {
+                    if (row.empty()) {
+                        if (kept)
+                            unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
+
+                        return;
+                    }
+
+                    bool found = false;
+                    Vector<uint64_t> counts(groups.size());
+                    for (const auto &[j, raw_c] : row) {
+                        if (min_counts.empty() || raw_c >= min_counts[j]) {
+                            counts[j] = raw_c;
+                            found = true;
+                        }
+                    }
+
+                    if (!found) {
+                        if (kept)
+                            unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
+
+                        return;
+                    }
+
+                    #pragma omp critical
+                    {
+                        for (size_t j = 0; j < counts.size(); ++j) {
+                            ++hists_map[j][counts[j]];
+                        }
+                    }
+                });
+
+                return hists_map;
             },
+            generate_rows,
             groups,
             config, num_threads, tmp_dir, num_parallel_files,
             [&]() {
@@ -1104,54 +1125,64 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             config, num_threads, tmp_dir, num_threads
         );
     } else {
-        common::logger->trace("Calculating count histograms");
-        std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-        for (size_t j = 0; j < groups.size(); ++j) {
-            hists_map[j][0] = 0;
-            hists_map[j][1] = 0;
-        }
-        ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
-        #pragma omp parallel for num_threads(num_threads)
-        for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-            ++progress_bar;
-            std::vector<Row> row_ids(1, row_i);
-            auto set_bits = matrix.get_rows(row_ids);
-            std::vector<bool> container(groups.size());
-            for (auto j : set_bits[0]) {
-                container[j] = true;
-            }
+        auto generate_rows = [&](const auto &callback, bool ordered) {
+            ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
+            #pragma omp parallel for num_threads(num_threads) ordered
+            for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
+                ++progress_bar;
+                std::vector<Row> row_ids(1, row_i);
+                auto set_bits = matrix.get_rows(row_ids);
+                Vector<std::pair<uint64_t, uint64_t>> container;
+                container.reserve(set_bits[0].size());
+                for (auto j : set_bits[0]) {
+                    container.emplace_back(j, 1);
+                }
 
-            #pragma omp critical
-            {
-            for (size_t j = 0; j < container.size(); ++j) {
-                ++hists_map[j][container[j]];
+                if (ordered) {
+                    #pragma omp ordered
+                    callback(row_i, container);
+                } else {
+                    callback(row_i, container);
+                }
             }
-            }
-        }
+        };
+
+        bool parallel = get_num_threads() > 1;
+
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-            [&](const std::vector<size_t> &, sdsl::bit_vector *) -> std::vector<VectorMap<uint64_t, size_t>> { throw std::runtime_error("not imf"); return {}; },
-            [&](const auto &callback, bool ordered) {
+            [&](const std::vector<size_t> &, sdsl::bit_vector *kept) -> std::vector<VectorMap<uint64_t, size_t>> {
+                common::logger->trace("Calculating count histograms");
+                std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
+                for (size_t j = 0; j < groups.size(); ++j) {
+                    hists_map[j][0] = 0;
+                    hists_map[j][1] = 0;
+                }
                 ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads) ordered
+                #pragma omp parallel for num_threads(num_threads)
                 for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
                     ++progress_bar;
                     std::vector<Row> row_ids(1, row_i);
                     auto set_bits = matrix.get_rows(row_ids);
-                    Vector<std::pair<uint64_t, uint64_t>> container;
-                    container.reserve(set_bits[0].size());
+                    std::vector<bool> container(groups.size());
                     for (auto j : set_bits[0]) {
-                        container.emplace_back(j, 1);
+                        container[j] = true;
                     }
 
-                    if (ordered) {
-                        #pragma omp ordered
-                        callback(row_i, container);
-                    } else {
-                        callback(row_i, container);
+                    if (kept && set_bits.empty())
+                        unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
+
+                    #pragma omp critical
+                    {
+                    for (size_t j = 0; j < container.size(); ++j) {
+                        ++hists_map[j][container[j]];
+                    }
                     }
                 }
+
+                return hists_map;
             },
+            generate_rows,
             groups,
             config, num_threads, tmp_dir, num_threads
         );
