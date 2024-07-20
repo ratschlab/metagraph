@@ -114,7 +114,7 @@ void call_masked_graphs(std::shared_ptr<DeBruijnGraph> graph_ptr,
             std::shared_ptr<DeBruijnGraph> outgraph;
 
             std::variant<std::vector<uint64_t>, sdsl::int_vector_buffer<64>> pvals;
-            if (diff_config.test_by_unitig) {
+            if (!diff_config.test_by_unitig) {
                 pvals = sdsl::int_vector_buffer<64>();
             } else {
                 pvals = std::vector<uint64_t>();
