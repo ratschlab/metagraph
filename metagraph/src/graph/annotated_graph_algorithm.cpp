@@ -180,22 +180,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Allocating p-value storage");
     auto nullpval = bit_cast<uint64_t>(double(1.1));
-    std::unique_ptr<utils::TempFile> tmp_file;
-    std::unique_ptr<utils::TempFile> tmp_file_min;
-    PValStorage pvals;
-    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
-        tmp_file = std::make_unique<utils::TempFile>(tmp_dir);
-        pvals = sdsl::int_vector_buffer<64>(tmp_file->name(), std::ios::out);
+
+    std::vector<PValStorage> pvals_buckets;
+    std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
+    if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
+        pvals_buckets.emplace_back(graph_ptr->max_index() + 1, nullpval);
     }
 
-    std::unique_ptr<PValStorage> pvals_min;
+    uint64_t bucket_size = (graph_ptr->max_index() + 1) / num_threads;
+    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+        for (size_t j = 0; j < num_threads; ++j) {
+            auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
+            auto &pvals = pvals_buckets.emplace_back(tmp_file->name(), std::ios::out);
+            uint64_t cur_bucket_size = bucket_size;
+            if (j + 1 == num_threads)
+                cur_bucket_size -= (graph_ptr->max_index() + 1) % num_threads;
 
-    for (size_t i = 0; i <= graph_ptr->max_index(); ++i) {
-        pvals.push_back(nullpval);
+            for (size_t i = 0; i < cur_bucket_size; ++i) {
+                pvals.push_back(nullpval);
+            }
+        }
     }
 
     std::unique_ptr<PValStorage> eff_size;
+    std::unique_ptr<PValStorage> pvals_min;
     std::unique_ptr<utils::TempFile> tmp_file_eff;
+    std::unique_ptr<utils::TempFile> tmp_file_min;
     if (config.test_by_unitig) {
         common::logger->trace("Allocating p-value storage");
         pvals_min = std::make_unique<PValStorage>();
@@ -764,9 +774,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (config.test_by_unitig) {
             assert(pvals_min);
+            size_t bucket_idx = std::min(node / bucket_size, pvals_buckets.size() - 1);
+            auto &pvals = pvals_buckets[bucket_idx];
+
             std::lock_guard<std::mutex> lock(pval_mu);
+            pvals[node - bucket_size * bucket_idx] = bit_cast<uint64_t>(pval);
             (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
-            pvals[node] = bit_cast<uint64_t>(pval);
             (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
         } else {
             uint64_t k = std::numeric_limits<uint64_t>::max();
@@ -788,14 +801,37 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (config.test_type != "notest") {
+                size_t bucket_idx = std::min(node / bucket_size, pvals_buckets.size() - 1);
+                auto &pvals = pvals_buckets[bucket_idx];
                 std::lock_guard<std::mutex> lock(pval_mu);
                 ++m[k];
-                pvals[node] = bit_cast<uint64_t>(pval);
+                pvals[node - bucket_size * bucket_idx] = bit_cast<uint64_t>(pval);
             }
         }
     }, false);
 
     std::atomic_thread_fence(std::memory_order_acquire);
+
+    std::unique_ptr<utils::TempFile> tmp_file;
+    PValStorage pvals;
+
+    if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
+        pvals = std::move(pvals_buckets[0]);
+    }
+
+    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+        common::logger->trace("Merging buckets");
+        for (size_t i = 1; i < pvals_buckets.size(); ++i) {
+            for (size_t j = 0; j < pvals_buckets[i].size(); ++j) {
+                pvals_buckets[0].push_back(pvals_buckets[i][j]);
+            }
+            pvals_buckets[i].close();
+        }
+        pvals = std::move(pvals_buckets[0]);
+        pvals_buckets.resize(0);
+        tmp_file = std::move(tmp_buckets[0]);
+        tmp_buckets.resize(0);
+    }
 
     if (ex)
         std::rethrow_exception(ex);
