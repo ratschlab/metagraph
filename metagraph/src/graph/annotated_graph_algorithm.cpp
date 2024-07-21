@@ -187,7 +187,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         pvals_buckets.emplace_back(graph_ptr->max_index() + 1, nullpval);
     }
 
-    uint64_t bucket_size = graph_ptr->max_index() / num_threads;
+    uint64_t bucket_size = graph_ptr->max_index() / std::max(size_t(1), num_threads - 1);
+    bucket_size -= bucket_size % 64;
     if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
         for (size_t total_size = 0; total_size < graph_ptr->max_index(); total_size += bucket_size) {
             auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
@@ -797,13 +798,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
+            size_t pval_i = row_i - bucket_size * bucket_idx + (bucket_idx == 0);
             if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
-                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
+                bool use_atomic = parallel && pval_i + 1 == pvals_buckets[bucket_idx].size();
+                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
             }
 
             if (config.test_type != "notest") {
                 auto &pvals = pvals_buckets[bucket_idx];
-                pvals[row_i - bucket_size * bucket_idx + (bucket_idx == 0)] = bit_cast<uint64_t>(pval);
+                pvals[pval_i] = bit_cast<uint64_t>(pval);
                 ++ms[bucket_idx][k];
             }
         }
