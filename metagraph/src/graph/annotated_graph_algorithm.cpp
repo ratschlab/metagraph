@@ -187,19 +187,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         pvals_buckets.emplace_back(graph_ptr->max_index() + 1, nullpval);
     }
 
-    uint64_t bucket_size = (graph_ptr->max_index() + 1) / num_threads;
+    uint64_t bucket_size = graph_ptr->max_index() / num_threads;
     if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
-        for (size_t j = 0; j < num_threads; ++j) {
+        for (size_t total_size = 0; total_size < graph_ptr->max_index(); total_size += bucket_size) {
             auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
             auto &pvals = pvals_buckets.emplace_back(tmp_file->name(), std::ios::out);
             uint64_t cur_bucket_size = bucket_size;
-            if (j + 1 == num_threads)
-                cur_bucket_size -= (graph_ptr->max_index() + 1) % num_threads;
+            if (total_size + bucket_size > graph_ptr->max_index())
+                cur_bucket_size -= total_size + bucket_size - graph_ptr->max_index();
 
             for (size_t i = 0; i < cur_bucket_size; ++i) {
                 pvals.push_back(nullpval);
             }
         }
+        pvals_buckets[0].push_back(nullpval);
     }
 
     std::unique_ptr<PValStorage> eff_size;
@@ -233,7 +234,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
     }
 
-    VectorMap<size_t, size_t> m;
     std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
     std::function<double(int64_t)> compute_min_pval;
 
@@ -704,9 +704,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::exception_ptr ex = nullptr;
 
     std::mutex pval_mu;
+
+    std::vector<VectorMap<size_t, size_t>> ms(pvals_buckets.size());
     std::atomic_thread_fence(std::memory_order_release);
 
-    generate_rows([&](uint64_t row_i, const auto &raw_row) {
+    generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
         if (ex)
             return;
 
@@ -774,11 +776,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (config.test_by_unitig) {
             assert(pvals_min);
-            size_t bucket_idx = std::min(node / bucket_size, pvals_buckets.size() - 1);
             auto &pvals = pvals_buckets[bucket_idx];
+            pvals[row_i - bucket_size * bucket_idx + (bucket_idx == 0)] = bit_cast<uint64_t>(pval);
 
             std::lock_guard<std::mutex> lock(pval_mu);
-            pvals[node - bucket_size * bucket_idx] = bit_cast<uint64_t>(pval);
             (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
             (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
         } else {
@@ -801,16 +802,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             if (config.test_type != "notest") {
-                size_t bucket_idx = std::min(node / bucket_size, pvals_buckets.size() - 1);
                 auto &pvals = pvals_buckets[bucket_idx];
-                std::lock_guard<std::mutex> lock(pval_mu);
-                ++m[k];
-                pvals[node - bucket_size * bucket_idx] = bit_cast<uint64_t>(pval);
+                pvals[row_i - bucket_size * bucket_idx + (bucket_idx == 0)] = bit_cast<uint64_t>(pval);
+                ++ms[bucket_idx][k];
             }
         }
     }, false);
 
     std::atomic_thread_fence(std::memory_order_acquire);
+
+    for (size_t i = 1; i < ms.size(); ++i) {
+        for (const auto &[k, c] : ms[i]) {
+            ms[0][k] += c;
+        }
+    }
+    VectorMap<size_t, size_t> m = std::move(ms[0]);
+    ms.resize(0);
 
     std::unique_ptr<utils::TempFile> tmp_file;
     PValStorage pvals;
@@ -1034,15 +1041,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 utils::call_rows<std::unique_ptr<const bit_vector>,
                                  std::unique_ptr<const ValuesContainer>,
                                  PairContainer, true>(columns_all, column_values_all,
-                                                      [&](uint64_t row_i, const auto &row, size_t) {
-                    callback(row_i, row);
+                                                      [&](uint64_t row_i, const auto &row, size_t thread_id) {
+                    callback(row_i, row, thread_id);
                 });
             } else {
                 utils::call_rows<std::unique_ptr<const bit_vector>,
                                  std::unique_ptr<const ValuesContainer>,
                                  PairContainer, false>(columns_all, column_values_all,
-                                                       [&](uint64_t row_i, const auto &row, size_t) {
-                    callback(row_i, row);
+                                                       [&](uint64_t row_i, const auto &row, size_t thread_id) {
+                    callback(row_i, row, thread_id);
                 });
             }
         };
@@ -1162,6 +1169,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         );
     } else {
         auto generate_rows = [&](const auto &callback, bool ordered) {
+            size_t bucket_size = matrix.num_rows() / num_threads;
             ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
             #pragma omp parallel for num_threads(num_threads) ordered
             for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
@@ -1176,9 +1184,9 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
 
                 if (ordered) {
                     #pragma omp ordered
-                    callback(row_i, container);
+                    callback(row_i, container, row_i / bucket_size);
                 } else {
-                    callback(row_i, container);
+                    callback(row_i, container, row_i / bucket_size);
                 }
             }
         };

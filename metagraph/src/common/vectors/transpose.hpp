@@ -119,14 +119,14 @@ void call_rows(const std::vector<BitmapPtr> &columns,
             #pragma omp ordered
             {
                 for (uint64_t j = 0; j < rows.size(); ++j) {
-                    callback(j + begin, rows[j], begin);
+                    callback(j + begin, rows[j], begin / kNumRowsInBlock);
                     ++progress_bar;
                     rows[j].resize(0);
                 }
             }
         } else {
             for (uint64_t j = 0; j < rows.size(); ++j) {
-                callback(j + begin, rows[j], begin);
+                callback(j + begin, rows[j], begin / kNumRowsInBlock);
                 ++progress_bar;
                 rows[j].resize(0);
             }
