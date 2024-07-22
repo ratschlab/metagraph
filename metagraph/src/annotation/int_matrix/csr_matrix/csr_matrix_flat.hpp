@@ -157,24 +157,23 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
     std::vector<VectorMap<uint64_t, size_t>> get_histograms(const std::vector<size_t> &min_counts = {},
                                                             sdsl::bit_vector *unmark_discarded = nullptr) const override {
         constexpr uint8_t HIST_CUTOFF = 64;
-        // bool parallel = get_num_threads() > 1;
+        bool parallel = get_num_threads() > 1;
         uint64_t n = num_rows();
-        uint64_t block_size = n / std::max(1u, get_num_threads() - 1);
-        block_size -= block_size % 64;
-        uint64_t num_tasks = (n + block_size - 1) / block_size;
+        size_t num_tasks = get_num_threads() + 1;
+        std::vector<std::vector<size_t>> num_nonzeros;
         std::vector<std::vector<std::vector<size_t>>> hists_maps_base;
         std::vector<std::vector<tsl::hopscotch_map<uint64_t, size_t>>> hists_maps;
         for (size_t j = 0; j < num_tasks; ++j) {
-            uint64_t cur_block_size = block_size;
-            if ((j + 1) * block_size > n)
-                cur_block_size -= (j + 1) * block_size - n;
-
             hists_maps.emplace_back(get_binary_matrix().num_columns());
             hists_maps_base.emplace_back(get_binary_matrix().num_columns());
+            num_nonzeros.emplace_back(get_binary_matrix().num_columns());
             for (size_t i = 0; i < num_columns_; ++i) {
                 hists_maps_base.back()[i].resize(HIST_CUTOFF);
-                hists_maps_base.back()[i][0] = cur_block_size;
             }
+        }
+
+        for (size_t i = 0; i < num_columns_; ++i) {
+            hists_maps_base[0][i][0] = n;
         }
 
         std::atomic<uint64_t> num_empty_rows{0};
@@ -195,8 +194,8 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
 
             if (!keep) {
                 if (unmark_discarded)
-                    unset_bit(unmark_discarded->data(), row_i, false);
-                    // unset_bit(unmark_discarded->data(), row_i, parallel, std::memory_order_relaxed);
+                    // unset_bit(unmark_discarded->data(), row_i, false);
+                    unset_bit(unmark_discarded->data(), row_i, parallel, std::memory_order_relaxed);
 
                 num_empty_rows.fetch_add(1, std::memory_order_relaxed);
             } else {
@@ -208,7 +207,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     } else {
                         ++hists_map[j][c];
                     }
-                    --hists_map_base[j][0];
+                    ++num_nonzeros[bucket_id][j];
                 }
             }
         };
@@ -237,6 +236,9 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
 
         for (size_t j = 0; j < num_columns_; ++j) {
             hists_maps_base[0][j][0] -= num_empty_rows;
+            for (size_t i = 0; i < num_nonzeros.size(); ++i) {
+                hists_maps_base[0][j][0] -= num_nonzeros[i][j];
+            }
             for (size_t k = 0; k < HIST_CUTOFF; ++k) {
                 if (hists_maps_base[0][j][k] > 0)
                     hist_maps[j][k] += hists_maps_base[0][j][k];
