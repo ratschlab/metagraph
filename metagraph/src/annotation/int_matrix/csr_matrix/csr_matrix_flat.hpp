@@ -194,7 +194,6 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
             }
 
             if (!keep) {
-                // TODO: are these bottlenecks?
                 if (unmark_discarded)
                     unset_bit(unmark_discarded->data(), row_i, false);
                     // unset_bit(unmark_discarded->data(), row_i, parallel, std::memory_order_relaxed);
