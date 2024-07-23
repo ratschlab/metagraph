@@ -80,6 +80,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
 
+    common::logger->trace("Computing histogram from uncleaned counts");
     auto hists_map = get_hist_map(std::vector<size_t>(groups.size(), 1), nullptr);
 
     sdsl::bit_vector kept(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
@@ -117,7 +118,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
 
-    common::logger->trace("Marking discarded k-mers");
+    common::logger->trace("Updating histogram and marking discarded k-mers");
 
     if (groups.size())
         hists_map = get_hist_map(min_counts, &kept);
@@ -791,9 +792,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
-                    // bool use_atomic = parallel && pval_i + 1 == pvals_buckets[bucket_idx].size();
-                    bool use_atomic = parallel;
-                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
+                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
                 }
 
                 ++ms[bucket_idx][k];
