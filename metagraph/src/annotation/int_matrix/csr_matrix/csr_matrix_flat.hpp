@@ -281,7 +281,9 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     auto it = const_cast<S*>(v_use)->begin() + r;
 
                     uint64_t last_i = begin;
-                    flat.call_ones_in_range(flat_begin, flat_end, [&](uint64_t b) __attribute__((always_inline)) {
+                    uint64_t num_ones = flat_end ? flat.rank1(flat_end - 1) : 0;
+                    for (uint64_t r = flat_begin ? flat.rank1(flat_begin - 1) + 1 : 1; r <= num_ones; ++r) {
+                        uint64_t b = flat.select1(r);
                         uint64_t i = b / num_columns_;
                         if (i > last_i) {
                             row_callback(last_i);
@@ -304,7 +306,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                         ++it;
 
                         row.emplace_back(j, val);
-                    });
+                    }
 
                     row_callback(last_i);
                     ++last_i;
