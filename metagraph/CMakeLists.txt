@@ -208,7 +208,7 @@ endif()
 
 
 # Profile with gprof
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O3 -g")
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
