@@ -100,11 +100,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto [mean_est, nzeros_est] = estimate_ztp_mean(
                 [&](const auto &callback) {
                     for (const auto &[k, c] : hists_map[j]) {
-                        if (k > 0 && k <= N_BUCKETS_FOR_ESTIMATION) {
-                            for (size_t i = 0; i < c; ++i) {
-                                callback(k);
-                            }
-                        }
+                        if (k > 0 && k <= N_BUCKETS_FOR_ESTIMATION)
+                            callback(k, c);
                     }
                 },
                 max_width,

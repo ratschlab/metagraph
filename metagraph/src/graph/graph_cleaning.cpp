@@ -75,7 +75,7 @@ uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
     auto [mean_est, nzeros_est] = estimate_ztp_mean(
         [&](const auto &callback) {
             graph.call_nodes([&](DeBruijnGraph::node_index i) {
-                callback(node_weights[i]);
+                callback(node_weights[i], 1);
             });
         },
         node_weights.get_data().width(),
@@ -100,17 +100,17 @@ uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
     return min_count + 1;
 }
 
-std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t)>&)> &generator,
+std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t, size_t)>&)> &generator,
                                             uint8_t width,
                                             uint64_t num_singleton_kmers,
                                             size_t touse) {
     std::vector<uint64_t> hist;
-    generator([&](uint64_t kmer_count) {
+    generator([&](uint64_t kmer_count, size_t occ) {
         assert(kmer_count && "All k-mers in graph must have non-zero counts");
         while (kmer_count >= hist.size()) {
             hist.push_back(0);
         }
-        hist[kmer_count]++;
+        hist[kmer_count] += occ;
     });
 
     if (num_singleton_kmers) {
