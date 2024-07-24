@@ -38,22 +38,19 @@ CSRMatrixFlat::CSRMatrixFlat(const std::function<void(const std::function<void(c
 
 auto CSRMatrixFlat::get_row_values(const std::vector<BinaryMatrix::Row> &rows) const -> std::vector<RowValues> {
     std::vector<RowValues> row_values(rows.size());
-    std::visit([&](const auto &binmat) {
-        using T = std::decay_t<decltype(binmat)>;
-        static_assert(std::is_same_v<T, RowFlat<>>);
-        const auto &flat = binmat.data();
+    const auto &flat = matrix_.data();
 
-        std::visit([&](const auto &v) {
-            for (size_t i = 0; i < rows.size(); ++i) {
-                uint64_t idx_begin = rows[i] * num_columns_;
-                uint64_t idx_end = idx_begin + num_columns_;
-                uint64_t r = flat.rank1(idx_begin) - flat[idx_begin];
-                flat.call_ones_in_range(idx_begin, idx_end, [&](uint64_t j) {
-                    row_values[i].emplace_back(j % num_columns_, v[r++]);
-                });
-            }
-        }, values_);
-    }, matrix_);
+    std::visit([&](const auto &v) {
+        for (size_t i = 0; i < rows.size(); ++i) {
+            uint64_t idx_begin = rows[i] * num_columns_;
+            uint64_t idx_end = idx_begin + num_columns_;
+            uint64_t r = flat.rank1(idx_begin) - flat[idx_begin];
+            flat.call_ones_in_range(idx_begin, idx_end, [&](uint64_t j) {
+                row_values[i].emplace_back(j % num_columns_, v[r++]);
+            });
+        }
+    }, values_);
+
     return row_values;
 }
 
@@ -63,21 +60,14 @@ bool CSRMatrixFlat::load(const std::string &fname, std::streampos offset) {
     num_columns_ = load_number(fin);
     uint64_t m_index = load_number(fin);
     uint64_t v_index = load_number(fin);
+    std::ignore = m_index;
     std::ignore = v_index;
 
-    switch (m_index) {
-        case 0: {
-            RowFlat<> binmat;
-            if (!binmat.load(fin))
-                return false;
+    RowFlat<> binmat;
+    if (!binmat.load(fin))
+        return false;
 
-            matrix_ = std::move(binmat);
-        } break;
-        default: {
-            throw std::runtime_error("No other representations supported");
-        } break;
-    }
-
+    matrix_ = std::move(binmat);
     offset_ = fin.tellg();
     values_ = sdsl::int_vector_buffer<>(fname, std::ios::in, buffer_size, 0, false, offset_);
     return true;
@@ -87,21 +77,14 @@ bool CSRMatrixFlat::load(std::istream &in) {
     num_columns_ = load_number(in);
     uint64_t m_index = load_number(in);
     uint64_t v_index = load_number(in);
+    std::ignore = m_index;
     std::ignore = v_index;
 
-    switch (m_index) {
-        case 0: {
-            RowFlat<> binmat;
-            if (!binmat.load(in))
-                return false;
+    RowFlat<> binmat;
+    if (!binmat.load(in))
+        return false;
 
-            matrix_ = std::move(binmat);
-        } break;
-        default: {
-            throw std::runtime_error("No other representations supported");
-        } break;
-    }
-
+    matrix_ = std::move(binmat);
     sdsl::int_vector<> v_load;
     v_load.load(in);
     values_ = v_load;
@@ -110,7 +93,7 @@ bool CSRMatrixFlat::load(std::istream &in) {
 
 void CSRMatrixFlat::serialize(std::ostream &out) const {
     serialize_number(out, num_columns_);
-    serialize_number(out, matrix_.index());
+    serialize_number(out, 0);
     serialize_number(out, values_.index());
     get_binary_matrix().serialize(out);
     std::visit([&](const auto &v) {
