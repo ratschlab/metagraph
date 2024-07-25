@@ -39,7 +39,8 @@ CSRMatrixFlat::CSRMatrixFlat(const std::function<void(const std::function<void(c
 std::vector<VectorMap<uint64_t, size_t>>
 CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                               sdsl::bit_vector *unmark_discarded) const {
-    bool keep_all_nonzeros = std::all_of(min_counts.begin(), min_counts.end(), [](size_t s) { return s; });
+    bool keep_all_nonzeros = min_counts.size() == num_columns_
+                                && std::all_of(min_counts.begin(), min_counts.end(), [](size_t s) { return s == 1; });
     constexpr uint8_t HIST_CUTOFF = 64;
     uint64_t n = num_rows();
     size_t num_tasks = get_num_threads() + 1;
@@ -104,7 +105,7 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
         uint64_t flat_begin = boundaries[thread_id];
         uint64_t flat_end = boundaries[thread_id + 1];
         uint64_t begin = flat_begin / num_columns_;
-        uint64_t end = flat_end / num_columns_;
+        int64_t end = flat_end / num_columns_;
 
         auto *v_use = v_main;
 
@@ -114,31 +115,13 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
         uint64_t r = flat.rank1(flat_begin) - flat[flat_begin];
         auto it = v_use->begin() + r;
 
-        uint64_t last_i = begin;
         uint64_t num_ones = flat_end ? flat.rank1(flat_end - 1) : 0;
 
-        if (false && keep_all_nonzeros) {
+        if (keep_all_nonzeros) {
+            int64_t last_i = static_cast<int64_t>(begin) - 1;
             for (uint64_t r = flat_begin ? flat.rank1(flat_begin - 1) + 1 : 1; r <= num_ones; ++r) {
                 uint64_t b = flat.select1(r);
-                uint64_t i = b / num_columns_;
-                if (i > last_i) {
-                    if (last_i == begin) {
-                        if (unmark_discarded)
-                            unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
-
-                        num_empty_rows.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    ++last_i;
-                    num_empty_rows.fetch_add(i - last_i, std::memory_order_relaxed);
-                    if (unmark_discarded) {
-                        for ( ; last_i < i; ++last_i) {
-                            unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
-                        }
-                    } else {
-                        last_i = i;
-                    }
-                }
-
+                int64_t i = b / num_columns_;
                 uint64_t j = b % num_columns_;
                 uint64_t val = *it;
                 ++it;
@@ -149,8 +132,33 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                     ++hists_map[j][val];
                 }
                 ++num_nonzeros[thread_id][j];
+
+                if (i - last_i > 1) {
+                    ++last_i;
+                    uint64_t num_added = i - last_i;
+                    num_empty_rows.fetch_add(num_added, std::memory_order_relaxed);
+                    if (unmark_discarded) {
+                        for ( ; last_i < i; ++last_i) {
+                            unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                        }
+                    }
+                }
+
+                last_i = i;
+            }
+
+            if (end - last_i > 1) {
+                ++last_i;
+                uint64_t num_added = end - last_i;
+                num_empty_rows.fetch_add(num_added, std::memory_order_relaxed);
+                if (unmark_discarded) {
+                    for ( ; last_i < end; ++last_i) {
+                        unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                    }
+                }
             }
         } else {
+            int64_t last_i = begin;
             std::vector<std::pair<uint64_t, size_t>> row;
             auto row_callback = [&](uint64_t row_i) __attribute__((always_inline)) {
                 bool keep = min_counts.empty();
@@ -183,7 +191,7 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
 
             for (uint64_t r = flat_begin ? flat.rank1(flat_begin - 1) + 1 : 1; r <= num_ones; ++r) {
                 uint64_t b = flat.select1(r);
-                uint64_t i = b / num_columns_;
+                int64_t i = b / num_columns_;
                 if (i > last_i) {
                     row_callback(last_i);
 
@@ -208,14 +216,13 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
             }
 
             row_callback(last_i);
-        }
+            ++last_i;
 
-        ++last_i;
-
-        num_empty_rows.fetch_add(end - last_i, std::memory_order_relaxed);
-        if (unmark_discarded) {
-            for ( ; last_i < end; ++last_i) {
-                unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+            num_empty_rows.fetch_add(end - last_i, std::memory_order_relaxed);
+            if (unmark_discarded) {
+                for ( ; last_i < end; ++last_i) {
+                    unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                }
             }
         }
 
@@ -245,7 +252,6 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
     for (size_t j = 0; j < num_columns_; ++j) {
         hists_maps_base[0][j][0] -= num_empty_rows;
         for (size_t i = 0; i < num_nonzeros.size(); ++i) {
-            common::logger->trace("NZ: {}: {}", i, fmt::join(num_nonzeros[i], ","));
             hists_maps_base[0][j][0] -= num_nonzeros[i][j];
         }
         for (size_t k = 0; k < HIST_CUTOFF; ++k) {
