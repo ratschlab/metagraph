@@ -450,7 +450,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
                         std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
 
                 // in stable graphs the order of input sequences
@@ -485,7 +484,6 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
                         std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
 
                 // in stable graphs the order of input sequences

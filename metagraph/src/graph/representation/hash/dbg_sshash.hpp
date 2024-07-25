@@ -7,7 +7,9 @@
 #include <dictionary.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "graph/annotated_dbg.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "sdsl/bit_vectors.hpp"
 
 namespace mtg::graph {
 
@@ -83,6 +85,7 @@ class DBGSSHash : public DeBruijnGraph {
     size_t indegree(node_index) const override;
 
     node_index kmer_to_node(std::string_view kmer) const override;
+    node_index kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id, bool check_reverse_complement) const;
 
     template <bool with_rc = true>
     std::pair<node_index, bool> kmer_to_node_with_rc(std::string_view kmer) const;
@@ -110,12 +113,21 @@ class DBGSSHash : public DeBruijnGraph {
 
     node_index reverse_complement(node_index node) const;
 
+    std::tuple<uint64_t, uint64_t, uint64_t> kmer_to_superkmer_node(std::string_view kmer) const ;
+
+    void load_superkmer_mask(std::string file);
+    void superkmer_bv(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const;
+    void superkmer_stats(const std::unique_ptr<AnnotatedDBG>& anno_graph) const;
+
   private:
     static const std::string alphabet_;
     dict_t dict_;
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+    int annotation_mode = 0; // 0: kmer annotation, 1: lossy superkmer annotation, 2: superkmer annotation with superkmer mask
+    bool loaded_mask = false;
+    sdsl::sd_vector<> superkmer_mask;
 
     size_t dict_size() const;
 };
