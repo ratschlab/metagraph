@@ -6,7 +6,8 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
-
+#include "common/seq_tools/reverse_complement.hpp"
+#include <cassert>
 
 namespace mtg {
 namespace test {
@@ -38,6 +39,9 @@ template<> size_t max_test_k<DBGHashFast>() {
 }
 template<> size_t max_test_k<DBGHashString>() {
     return 100;
+}
+template<> size_t max_test_k<DBGSSHash>() {
+    return 255 / DBGSSHash::kmer_t<uint64_t>::bits_per_char;
 }
 
 template <class Graph>
@@ -104,6 +108,8 @@ build_graph<DBGHashString>(uint64_t k,
     return graph;
 }
 
+
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGBitmap>(uint64_t k,
@@ -118,6 +124,56 @@ build_graph<DBGBitmap>(uint64_t k,
     }
 
     auto graph = std::make_shared<DBGBitmap>(&constructor);
+
+    if (mode == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(
+                std::static_pointer_cast<DeBruijnGraph>(graph), 2 /* cache size */);
+
+    return graph;
+}
+
+void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
+    std::ofstream fastaFile(outputFilename);
+
+    if (!fastaFile.is_open()) {
+        common::logger->error("Unable to open output file {}", outputFilename);
+        return;
+    }
+
+    for (size_t i = 0; i < sequences.size(); ++i) {
+        fastaFile << ">" << "\n" << sequences[i] << "\n";
+    }
+
+    fastaFile.close();
+}
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSSHash>(uint64_t k,
+                       std::vector<std::string> sequences,
+                       DeBruijnGraph::Mode mode) {
+    if (sequences.empty())
+        return std::make_shared<DBGSSHash>(k, mode);
+
+    // use DBGHashString to get contigs for SSHash
+    auto string_graph = build_graph<DBGHashString>(k, sequences, mode);
+
+    std::vector<std::string> contigs;
+    size_t num_kmers = 0;
+    size_t num_chars = 0;
+    string_graph->call_sequences([&](const std::string &contig, const auto &path) {
+        contigs.push_back(contig);
+        num_kmers += path.size();
+        num_chars += contig.size();
+    }, 1, mode != DeBruijnGraph::BASIC);
+
+    if (contigs.empty())
+        return std::make_shared<DBGSSHash>(k, mode);
+
+    std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
+    writeFastaFile(contigs, dump_path);
+
+    std::shared_ptr<DBGSSHash> graph;
+    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
 
     if (mode == DeBruijnGraph::PRIMARY)
         return std::make_shared<CanonicalDBG>(
@@ -282,6 +338,10 @@ build_graph_batch<DBGHashFast>(uint64_t, std::vector<std::string>, DeBruijnGraph
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashString>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSSHash>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -488,6 +548,7 @@ template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, b
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashString>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSSHash>(const std::string &, DeBruijnGraph::Mode, bool);
 
 } // namespace test
 } // namespace mtg

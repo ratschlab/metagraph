@@ -496,13 +496,14 @@ void DBGSuccinct::call_unitigs(const CallPath &callback,
 }
 
 void DBGSuccinct
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
     assert(boss_graph_.get());
     boss_graph_->call_kmers([&](auto index, const std::string &seq) {
         auto node = boss_to_kmer_index(index);
         assert(node != npos);
         callback(node, seq);
-    });
+    }, stop_early);
 }
 
 void DBGSuccinct

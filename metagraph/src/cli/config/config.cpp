@@ -243,6 +243,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
+        } else if (!strcmp(argv[i], "--num-chars")) {
+            num_chars = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
@@ -815,6 +817,8 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
 
+    } else if (string == "sshash") {
+        return GraphType::SSHASH;
     } else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
@@ -956,12 +960,13 @@ if (advanced) {
             fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct] / sshash\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
+            fprintf(stderr, "\t   --num-chars [INT]\tif the number of characters is known beforehand, enter it here [0]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
 #if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");

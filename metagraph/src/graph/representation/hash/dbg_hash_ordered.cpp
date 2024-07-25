@@ -68,13 +68,6 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const;
-    // Given a node index, call the source nodes of all edges incoming to it.
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const;
-
     size_t outdegree(node_index) const;
     bool has_single_outgoing(node_index) const;
     bool has_multiple_outgoing(node_index) const;
@@ -318,26 +311,6 @@ DBGHashOrderedImpl<KMER>::traverse_back(node_index node, char prev_char) const {
 #endif
 
     return get_index(kmer);
-}
-
-template <typename KMER>
-void
-DBGHashOrderedImpl<KMER>
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
-
-    call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
-}
-
-template <typename KMER>
-void
-DBGHashOrderedImpl<KMER>
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= num_nodes());
-
-    call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
 template <typename KMER>

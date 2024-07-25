@@ -415,7 +415,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                     }
 
                     if (label_it == label_end_it)
-                        throw std::bad_function_call();
+                        throw early_term();
 
                     if (c < *label_it)
                         return;
@@ -431,7 +431,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                     }
                 }
             );
-        } catch (const std::bad_function_call&) {}
+        } catch (const early_term&) {}
     }
 
     if (alignment.label_coordinates.empty())

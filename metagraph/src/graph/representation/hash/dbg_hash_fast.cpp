@@ -103,21 +103,6 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return get_node_index(kmer);
     }
 
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const {
-        assert(in_graph(node));
-
-        call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
-    }
-    // Given a node index, call the source nodes of all edges incoming to it.
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::function<void(node_index)> &callback) const {
-        assert(in_graph(node));
-
-        call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
-    }
-
     size_t outdegree(node_index) const;
     bool has_single_outgoing(node_index node) const {
         assert(in_graph(node));
