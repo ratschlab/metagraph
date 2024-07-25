@@ -20,10 +20,6 @@ TYPED_TEST_SUITE(StableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k);
@@ -43,10 +39,6 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test disabled for DBGSSHash");
-        return;
-    }
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k);
