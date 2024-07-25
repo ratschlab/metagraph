@@ -172,8 +172,7 @@ build_graph<DBGSSHash>(uint64_t k,
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, dump_path);
 
-    std::shared_ptr<DBGSSHash> graph;
-    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
+    auto graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
 
     if (mode == DeBruijnGraph::PRIMARY)
         return std::make_shared<CanonicalDBG>(

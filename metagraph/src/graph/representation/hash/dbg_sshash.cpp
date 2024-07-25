@@ -324,6 +324,24 @@ template
 std::pair<DBGSSHash::node_index, bool>
 DBGSSHash::kmer_to_node_with_rc<false>(std::string_view) const;
 
+DBGSSHash::node_index DBGSSHash::kmer_to_node_from_superkmer(std::string_view kmer, uint64_t s_id, bool check_reverse_complement) const {
+    uint64_t ssh_idx = std::visit([&](auto const& dict) {
+        return dict.look_up_from_superkmer_id(s_id, kmer.begin(), check_reverse_complement);
+    }, dict_);
+    return ssh_idx + 1;
+}
+
+std::tuple<uint64_t, uint64_t, uint64_t> DBGSSHash::kmer_to_superkmer_node(std::string_view kmer) const {
+    auto [kmer_idx, superkmer_idx, superkmer_id] = std::visit([&](auto const& dict) {
+        return dict.kmer_to_superkmer_idx(kmer.begin(), true);
+    }, dict_);
+    if(kmer_idx == sshash::constants::invalid_uint64){
+        return {npos, npos, sshash::constants::invalid_uint64};
+    }
+    // switch to DBG index
+    return {kmer_idx + 1, superkmer_idx + 1, superkmer_id};
+}
+
 DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     if (mode_ == CANONICAL) {
         auto res = kmer_to_node_with_rc<true>(kmer);
@@ -378,6 +396,12 @@ bool DBGSSHash::load(std::istream &in) {
     if (num_nodes_)
         std::visit([&](auto &d) { d.visit(loader); }, dict_);
 
+    if(annotation_mode == 2) {
+        // TODO: How to load annotations from istream?
+        std::string s_mask_name = /*utils::remove_suffix(filename, kExtension) +*/ "_sk_mask";
+        load_superkmer_mask(s_mask_name);
+    }
+
     return true;
 }
 
@@ -385,6 +409,59 @@ bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     std::ifstream fin(suffixed_filename, std::ios::binary);
     return load(fin);
+}
+
+sdsl::bit_vector mask_into_bit_vec(const std::vector<bool>& mask){
+    sdsl::bit_vector bv (mask.size());
+    for(size_t idx = 0; idx < mask.size(); idx++){
+        bv[idx] = mask[idx];
+    }
+    return bv;
+}
+
+void DBGSSHash::load_superkmer_mask(std::string file){
+    loaded_mask = load_from_file(superkmer_mask, file);
+    std::cout<< " successfully loaded " << file<<"?: " <<loaded_mask << std::endl;
+}
+
+void DBGSSHash::superkmer_stats(const std::unique_ptr<AnnotatedDBG>& anno_graph) const{
+    if(annotation_mode != 0){
+        throw std::runtime_error("Computing super-k-mer stats in wrong annotation mode!");
+    }
+    std::cout<< "Computing super-k-mer statistics ... \n";
+    std::visit([&](auto const& dict) {
+        dict.make_superkmer_stats(([&anno_graph](std::string_view str){return anno_graph->get_labels(str);}));
+    }, dict_);
+}
+void DBGSSHash::superkmer_bv(const std::unique_ptr<AnnotatedDBG>& anno_graph, std::string file_sk_mask) const{
+    if(annotation_mode != 0){
+        throw std::runtime_error("Building super-k-mer bit vector in wrong annotation mode!");
+    }
+    std::cout<< "Building super-k-mer bit vector... \n";   
+    //getting labels in batches
+    size_t num_labels = anno_graph->get_annotator().num_labels();
+    std::vector<uint64_t> superkmer_idxs = std::visit([&](auto const& dict) {
+        return dict.build_superkmer_bv([&anno_graph, num_labels](std::string_view sequence) {
+            auto labels = anno_graph->get_top_label_signatures(sequence, num_labels);
+            // since get_top_label_signatures returns only labels that were found, 
+            // if any entry is zero not all the kmers share all the same labels -> return false
+            for(auto pair : labels){
+                sdsl::rank_support_v rs;
+                sdsl::util::init_support(rs,&pair.second);
+                size_t bit_vec_size = pair.second.size();
+                if(rs(bit_vec_size) != bit_vec_size) return false;
+            }
+            return true;
+         });
+    }, dict_);
+    
+    // elias fano encoding
+    sdsl::sd_vector<> ef_bv (superkmer_idxs.begin(), superkmer_idxs.end()); 
+    
+    std::cout << "serializing bit vector..." << std::endl;
+    bool check = store_to_file(ef_bv, file_sk_mask);
+    std::cout<< " successfully stored " << file_sk_mask<<"?: " <<check<<std::endl;
+
 }
 
 } // namespace graph

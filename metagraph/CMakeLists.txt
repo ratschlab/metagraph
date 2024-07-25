@@ -546,6 +546,21 @@ target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph
 target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
 #-------------------
+# superkmer bit vector
+#-------------------
+add_executable(superkmer_stats scripts/run_superkmer_stats.cpp)
+target_include_directories(superkmer_stats PRIVATE src/graph/representation/hash
+                                                   src/graph/
+                                                   src/annotation/representation/base/
+                                                   src/cli/config
+                                                   src/cli/load
+                                                   src/common/utils/
+                                                   )
+
+target_link_libraries(superkmer_stats PRIVATE metagraph-core metagraph-cli ${METALIBS})
+target_compile_options(superkmer_stats PRIVATE -Wno-unused-parameter)
+
+#-------------------
 # Benchmarks
 #-------------------
 add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)

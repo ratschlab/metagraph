@@ -2,7 +2,6 @@
 
 #include "test_matrix_helpers.hpp"
 
-#include "../graph/all/test_dbg_helpers.hpp"
 
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
@@ -14,6 +13,8 @@
 // this next #include includes AnnotatedDBG. we need access to its protected
 // members to modify the underlying annotator
 #define protected public
+#include "../graph/all/test_dbg_helpers.hpp"
+
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
