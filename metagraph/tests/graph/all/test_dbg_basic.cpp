@@ -278,10 +278,6 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, AddSequences) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     {
         std::vector<std::string> sequences { "AAAC", "CAAC" };
         EXPECT_EQ(2u, build_graph<TypeParam>(4, sequences)->num_nodes());
@@ -331,10 +327,6 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
-        common::logger->warn("Test case disabled for DBGSSHash");
-        return;
-    }
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A') });
 
