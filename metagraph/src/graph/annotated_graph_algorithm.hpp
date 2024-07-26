@@ -22,6 +22,7 @@ struct DifferentialAssemblyConfig {
     bool clean = false;
     double family_wise_error_rate = 0.05;
     bool test_by_unitig = false;
+    bool output_pvals = false;
     std::string test_type = "nbinom_exact";
     bool assemble_shared = false;
     uint64_t min_count = 1;

@@ -96,6 +96,7 @@ void call_masked_graphs(std::shared_ptr<DeBruijnGraph> graph_ptr,
 
             DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
             diff_config.outfbase = config->outfbase;
+            diff_config.output_pvals = config->output_pvals;
 
             std::string exp_name = experiment["name"].asString()
                                     + (config->enumerate_out_sequences ? "." : "");

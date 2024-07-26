@@ -225,141 +225,140 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
     }
 
-    // std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
-    // std::function<double(int64_t)> compute_min_pval;
+    std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
+    std::function<double(int64_t)> compute_min_pval;
 
     std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps;
 
     common::logger->trace("Test: {}", config.test_type);
-    // if (config.test_type == "poisson_exact") {
-    //     compute_min_pval = [&](int64_t n) {
-    //         if (n == 0)
-    //             return 1.1;
+    if (config.test_type == "poisson_exact") {
+        compute_min_pval = [&](int64_t n) {
+            if (n == 0)
+                return 1.1;
 
-    //         double p = static_cast<double>(in_kmers) / total_kmers;
-    //         auto bdist = boost::math::binomial(n, p);
-    //         auto get_deviance = [&](double y, double mu) {
-    //             y += 1e-8;
-    //             mu += 1e-8;
-    //             return 2 * (y * log(y/mu) - y + mu);
-    //         };
+            double p = static_cast<double>(in_kmers) / total_kmers;
+            auto bdist = boost::math::binomial(n, p);
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
 
-    //         double mu1 = static_cast<double>(in_kmers) / nelem;
-    //         double mu2 = static_cast<double>(out_kmers) / nelem;
+            double mu1 = static_cast<double>(in_kmers) / nelem;
+            double mu2 = static_cast<double>(out_kmers) / nelem;
 
-    //         std::vector<double> devs;
-    //         devs.reserve(n + 1);
-    //         for (int64_t s = 0; s <= n; ++s) {
-    //             devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-    //         }
-    //         double max_d = *std::max_element(devs.begin(), devs.end());
-    //         double pval = 0.0;
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
+            double max_d = *std::max_element(devs.begin(), devs.end());
+            double pval = 0.0;
 
-    //         int64_t s = 0;
-    //         for ( ; s <= n; ++s) {
-    //             if (devs[s] != max_d)
-    //                 break;
-    //         }
-    //         if (s > 0)
-    //             pval += boost::math::cdf(bdist, s - 1);
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] != max_d)
+                    break;
+            }
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
 
-    //         int64_t sp = n;
-    //         for ( ; sp >= s; --sp) {
-    //             if (devs[sp] != max_d)
-    //                 break;
-    //         }
+            int64_t sp = n;
+            for ( ; sp >= s; --sp) {
+                if (devs[sp] != max_d)
+                    break;
+            }
 
-    //         if (sp < n)
-    //             pval += boost::math::cdf(boost::math::complement(bdist, sp));
+            if (sp < n)
+                pval += boost::math::cdf(boost::math::complement(bdist, sp));
 
-    //         return pval;
-    //     };
+            return pval;
+        };
 
-    //     compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row) {
-    //         if (row.empty())
-    //             return 1.1;
+        compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row) {
+            if (row.empty())
+                return 1.1;
 
-    //         int64_t n = in_sum + out_sum;
-    //         double p = static_cast<double>(in_kmers) / total_kmers;
-    //         auto bdist = boost::math::binomial(n, p);
-    //         auto get_deviance = [&](double y, double mu) {
-    //             y += 1e-8;
-    //             mu += 1e-8;
-    //             return 2 * (y * log(y/mu) - y + mu);
-    //         };
+            int64_t n = in_sum + out_sum;
+            double p = static_cast<double>(in_kmers) / total_kmers;
+            auto bdist = boost::math::binomial(n, p);
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
 
-    //         double mu1 = static_cast<double>(in_kmers) / nelem;
-    //         double mu2 = static_cast<double>(out_kmers) / nelem;
+            double mu1 = static_cast<double>(in_kmers) / nelem;
+            double mu2 = static_cast<double>(out_kmers) / nelem;
 
-    //         std::vector<double> devs;
-    //         devs.reserve(n + 1);
-    //         for (int64_t s = 0; s <= n; ++s) {
-    //             devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-    //         }
-    //         double pval = 0.0;
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
+            double pval = 0.0;
 
-    //         int64_t s = 0;
-    //         for ( ; s <= n; ++s) {
-    //             if (devs[s] < devs[in_sum])
-    //                 break;
-    //         }
-    //         if (s > 0)
-    //             pval += boost::math::cdf(bdist, s - 1);
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] < devs[in_sum])
+                    break;
+            }
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
 
-    //         int64_t sp = n;
-    //         for ( ; sp >= s; --sp) {
-    //             if (devs[sp] < devs[in_sum])
-    //                 break;
-    //         }
+            int64_t sp = n;
+            for ( ; sp >= s; --sp) {
+                if (devs[sp] < devs[in_sum])
+                    break;
+            }
 
-    //         if (sp < n)
-    //             pval += boost::math::cdf(boost::math::complement(bdist, sp));
+            if (sp < n)
+                pval += boost::math::cdf(boost::math::complement(bdist, sp));
 
-    //         return pval;
-    //     };
-    // } else if (config.test_type == "fisher") {
-    //     double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
+            return pval;
+        };
+    } else if (config.test_type == "fisher") {
+        double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
 
-    //     compute_min_pval = [&,lbase_shared](int64_t m1) {
-    //         if (m1 == 0)
-    //             return 1.1;
+        compute_min_pval = [&,lbase_shared](int64_t m1) {
+            if (m1 == 0)
+                return 1.1;
 
-    //         int64_t m2 = total_kmers - m1;
+            int64_t m2 = total_kmers - m1;
 
-    //         auto get_pval = [&](int64_t a) {
-    //             double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
+            auto get_pval = [&](int64_t a) {
+                double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
 
-    //             int64_t b = in_kmers - a;
-    //             int64_t c = m1 - a;
-    //             int64_t d = m2 - b;
-    //             assert(d == out_kmers - c);
+                int64_t b = in_kmers - a;
+                int64_t c = m1 - a;
+                int64_t d = m2 - b;
+                assert(d == out_kmers - c);
 
-    //             return out_kmers < c
-    //                 ? 1.0
-    //                 : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
-    //         };
+                return out_kmers < c
+                    ? 1.0
+                    : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
+            };
 
-    //         return std::min(get_pval(0), get_pval(std::min(in_kmers, m1)));
-    //     };
+            return std::min(get_pval(0), get_pval(std::min(in_kmers, m1)));
+        };
 
-    //     compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row) {
-    //         if (row.empty())
-    //             return 1.1;
+        compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row) {
+            if (row.empty())
+                return 1.1;
 
-    //         int64_t m1 = in_sum + out_sum;
-    //         int64_t m2 = total_kmers - m1;
+            int64_t m1 = in_sum + out_sum;
+            int64_t m2 = total_kmers - m1;
 
-    //         double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
+            double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
 
-    //         int64_t a = in_sum;
-    //         int64_t b = in_kmers - in_sum;
-    //         int64_t c = out_sum;
-    //         int64_t d = out_kmers - out_sum;
+            int64_t a = in_sum;
+            int64_t b = in_kmers - in_sum;
+            int64_t c = out_sum;
+            int64_t d = out_kmers - out_sum;
 
-    //         return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
-    //     };
-    // } else if (config.test_type == "nbinom_exact") {
-    // {
+            return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
+        };
+    } else if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
         auto get_rp = [&](size_t j, auto begin, auto end) {
             double mu = 0;
@@ -523,7 +522,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (fit_var / fit_mu - 1.0 < 1e-5)
             common::logger->warn("Fit parameters are close to a Poisson distribution");
 
-        auto compute_min_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t n) {
+        compute_min_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t n) {
             if (n == 0)
                 return 1.1;
 
@@ -570,7 +569,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::min(1.0, pval);
         };
 
-        auto compute_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t in_sum, int64_t out_sum, const auto &row) {
+        compute_pval = [&,lscaling_base,r_in,r_out,target_p,get_deviance,mu1,mu2](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
@@ -685,12 +684,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->error("Best achievable p-value is too big. Use poisson_exact instead");
             throw std::domain_error("Too few samples");
         }
-    // } else if (config.test_type == "notest") {
-    //     compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
-    //     compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
-    // } else {
-    //     throw std::runtime_error("Test not implemented");
-    // }
+    } else if (config.test_type == "notest") {
+        compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
+        compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
+    } else {
+        throw std::runtime_error("Test not implemented");
+    }
 
     common::logger->trace("Running differential tests");
     std::exception_ptr ex = nullptr;
@@ -762,9 +761,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::runtime_error("Test failed");
         }
 
+        auto &pvals = pvals_buckets[std::min(bucket_idx, pvals_buckets.size() - 1)];
         if (config.test_by_unitig) {
             assert(pvals_min);
-            auto &pvals = pvals_buckets[bucket_idx];
             pvals.push_back(bit_cast<uint64_t>(pval));
 
             std::lock_guard<std::mutex> lock(pval_mu);
@@ -772,7 +771,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
         } else {
             if (config.test_type != "notest")
-                pvals_buckets[bucket_idx].push_back(bit_cast<uint64_t>(pval));
+                pvals.push_back(bit_cast<uint64_t>(pval));
 
             if (pval < 1.1) {
                 uint64_t k = std::numeric_limits<uint64_t>::max();
@@ -790,7 +789,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
-                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, parallel, MO_RELAXED);
+                    bool use_atomic = parallel && (node % 64 == 0);
+                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
                 }
 
                 ++ms[bucket_idx][k];
@@ -800,39 +800,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    for (size_t i = 1; i < ms.size(); ++i) {
-        for (const auto &[k, c] : ms[i]) {
-            ms[0][k] += c;
-        }
-    }
-    VectorMap<size_t, size_t> m = std::move(ms[0]);
-    ms.resize(0);
-
-    std::unique_ptr<utils::TempFile> tmp_file;
-    PValStorage pvals;
-
-    if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
-        pvals = std::move(pvals_buckets[0]);
-    }
-
-    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
-        common::logger->trace("Merging buckets");
-        for (size_t i = 1; i < pvals_buckets.size(); ++i) {
-            for (size_t j = 0; j < pvals_buckets[i].size(); ++j) {
-                pvals_buckets[0].push_back(pvals_buckets[i][j]);
-            }
-            pvals_buckets[i].close();
-        }
-        pvals = std::move(pvals_buckets[0]);
-        pvals_buckets.resize(0);
-        tmp_file = std::move(tmp_buckets[0]);
-        tmp_buckets.resize(0);
-    }
-
     if (ex)
         std::rethrow_exception(ex);
 
     deallocate();
+
+    std::vector<size_t> boundaries;
+    boundaries.reserve(pvals_buckets.size() + 1);
+    boundaries.emplace_back(0);
+    for (size_t i = 0; i < pvals_buckets.size(); ++i) {
+        boundaries.emplace_back(boundaries.back() + pvals_buckets[i].size());
+    }
 
     if (config.test_by_unitig) {
         common::logger->trace("Allocating k-mer bitmasks");
@@ -857,11 +835,24 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double stat = 0;
             double stat_min = 0;
             int64_t comb_eff_size = 0;
+            std::vector<size_t> bucket_idxs;
+            bucket_idxs.reserve(path.size());
+            for (node_index node : path) {
+                for (size_t i = 0; i < boundaries.size(); ++i) {
+                    if (boundaries[i] > node) {
+                        bucket_idxs.emplace_back(i);
+                        break;
+                    }
+                }
+            }
+
             {
                 std::lock_guard<std::mutex> lock(pval_mu);
-                for (node_index node : path) {
+                for (size_t i = 0; i < path.size(); ++i) {
+                    node_index node = path[i];
+                    size_t bucket_idx = bucket_idxs[i];
                     comb_eff_size += bit_cast<int64_t, uint64_t>((*eff_size)[node]);
-                    double pval = bit_cast<double, uint64_t>(pvals[node]);
+                    double pval = bit_cast<double, uint64_t>(pvals_buckets[bucket_idx][node - boundaries[bucket_idx]]);
                     double pval_min = bit_cast<double, uint64_t>((*pvals_min)[node]);
                     stat += tan((0.5 - pval) * M_PI);
                     stat_min += tan((0.5 - pval_min) * M_PI);
@@ -894,13 +885,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             uint64_t comb_pval_enc = bit_cast<uint64_t, double>(comb_pval);
-
-            std::lock_guard<std::mutex> lock(pval_mu);
-            ++m[k];
-
-            pvals[path[0]] = comb_pval_enc;
+            size_t bucket_idx = bucket_idxs[0];
+            ++ms[bucket_idx][k];
+            pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
             for (size_t i = 1; i < path.size(); ++i) {
-                pvals[path[i]] = nullpval;
+                size_t bucket_idx = bucket_idxs[i];
+                pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
             }
         }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
@@ -908,6 +898,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         eff_size.reset();
         pvals_min.reset();
     }
+
+    for (size_t i = 1; i < ms.size(); ++i) {
+        for (const auto &[k, c] : ms[i]) {
+            ms[0][k] += c;
+        }
+    }
+    VectorMap<size_t, size_t> m = std::move(ms[0]);
+    ms.resize(0);
 
     if (config.test_type != "notest") {
         uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
@@ -941,27 +939,53 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->trace("k: {}\talpha_corr: {}", k, config.family_wise_error_rate / k);
 
                 std::atomic_thread_fence(std::memory_order_release);
-                #pragma omp parallel for ordered num_threads(num_threads)
-                for (size_t i = 0; i < indicator_in.size(); ++i) {
-                    if (fetch_bit(indicator_in.data(), i, parallel, MO_RELAXED)
-                            || fetch_bit(indicator_out.data(), i, parallel, MO_RELAXED)) {
-                        double p = 1.0;
-
-                        #pragma omp ordered
-                        p = bit_cast<double, uint64_t>(pvals[i]);
-
+                #pragma omp parallel for num_threads(num_threads)
+                for (size_t j = 0; j < boundaries.size() - 1; ++j) {
+                    size_t begin = boundaries[j];
+                    size_t end = boundaries[j + 1];
+                    call_ones(indicator_in, begin, end, [&](uint64_t i) {
+                        double p = bit_cast<double, uint64_t>(pvals_buckets[j][i - begin]);
                         if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
-                            unset_bit(indicator_in.data(), i, parallel, MO_RELAXED);
-                            unset_bit(indicator_out.data(), i, parallel, MO_RELAXED);
+                            unset_bit(indicator_in.data(), i, parallel, std::memory_order_release);
                         }
-                    }
+                    }, parallel, std::memory_order_acquire);
+                    call_ones(indicator_out, begin, end, [&](uint64_t i) {
+                        double p = bit_cast<double, uint64_t>(pvals_buckets[j][i - begin]);
+                        if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
+                            unset_bit(indicator_out.data(), i, parallel, std::memory_order_release);
+                        }
+                    }, parallel, std::memory_order_acquire);
                 }
                 std::atomic_thread_fence(std::memory_order_acquire);
             }
         }
     }
 
+    std::unique_ptr<utils::TempFile> tmp_file;
+    PValStorage pvals;
+
+    if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
+        pvals = std::move(pvals_buckets[0]);
+    }
+
+    if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+        if (config.output_pvals) {
+            common::logger->trace("Merging buckets");
+            for (size_t i = 1; i < pvals_buckets.size(); ++i) {
+                for (size_t j = 0; j < pvals_buckets[i].size(); ++j) {
+                    pvals_buckets[0].push_back(pvals_buckets[i][j]);
+                }
+                pvals_buckets[i].close();
+            }
+        }
+        pvals = std::move(pvals_buckets[0]);
+        pvals_buckets.resize(0);
+        tmp_file = std::move(tmp_buckets[0]);
+        tmp_buckets.resize(0);
+    }
+
     common::logger->trace("Done! Assembling contigs.");
+
     auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
         is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC

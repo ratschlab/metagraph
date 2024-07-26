@@ -92,7 +92,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
             size_t row_block_size = num_columns_ * 64;
             std::vector<uint64_t> boundaries;
             boundaries.emplace_back(0);
-            for (size_t r = 1; r <= num_set_bits; r += block_size) {
+            for (size_t r = block_size; r <= num_set_bits; r += block_size) {
                 uint64_t b = flat.select1(r);
                 uint64_t b_round_ncols_64 = (b + row_block_size - 1) / row_block_size * row_block_size;
                 if (b_round_ncols_64 > boundaries.back()) {

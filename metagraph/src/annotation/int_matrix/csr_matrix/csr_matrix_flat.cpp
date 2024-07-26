@@ -58,10 +58,6 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
         hists_maps_base[0][j][0] = n;
     }
 
-    std::atomic<uint64_t> num_empty_rows{0};
-
-    std::atomic_thread_fence(std::memory_order_release);
-
     const auto &flat = matrix_.data();
 
     sdsl::int_vector_buffer<> *v_main;
@@ -75,11 +71,11 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
     }, values_);
 
     uint64_t num_set_bits = flat.num_set_bits();
-    uint64_t block_size = num_set_bits / std::max(1u, get_num_threads() - 1);
+    uint64_t block_size = num_set_bits / get_num_threads();
     size_t row_block_size = num_columns_ * 64;
     std::vector<uint64_t> boundaries;
     boundaries.emplace_back(0);
-    for (size_t r = 1; r < num_set_bits; r += block_size) {
+    for (size_t r = block_size; r <= num_set_bits; r += block_size) {
         uint64_t b = flat.select1(r);
         uint64_t b_round_ncols_64 = (b + row_block_size - 1) / row_block_size * row_block_size;
         if (b_round_ncols_64 > boundaries.back()) {
@@ -97,9 +93,11 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
     std::vector<VectorMap<uint64_t, size_t>> hist_maps(num_columns_);
 
     common::logger->trace("Streaming rows");
+    uint64_t num_empty_rows = 0;
     ProgressBar progress_bar(n, "Constructed rows", std::cerr, !common::get_verbose());
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) reduction(+ : num_empty_rows)
     for (size_t thread_id = 0; thread_id < boundaries.size() - 1; ++thread_id) {
+        uint64_t local_num_empty_rows = 0;
         std::vector<tsl::hopscotch_map<uint64_t, size_t>> hists_map(get_binary_matrix().num_columns());
         auto &hists_map_base = hists_maps_base[thread_id];
         uint64_t flat_begin = boundaries[thread_id];
@@ -136,10 +134,10 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                 if (i - last_i > 1) {
                     ++last_i;
                     uint64_t num_added = i - last_i;
-                    num_empty_rows.fetch_add(num_added, std::memory_order_relaxed);
+                    local_num_empty_rows += num_added;
                     if (unmark_discarded) {
                         for ( ; last_i < i; ++last_i) {
-                            unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                            unset_bit(unmark_discarded->data(), last_i, false);
                         }
                     }
                 }
@@ -150,10 +148,10 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
             if (end - last_i > 1) {
                 ++last_i;
                 uint64_t num_added = end - last_i;
-                num_empty_rows.fetch_add(num_added, std::memory_order_relaxed);
+                local_num_empty_rows += num_added;
                 if (unmark_discarded) {
                     for ( ; last_i < end; ++last_i) {
-                        unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                        unset_bit(unmark_discarded->data(), last_i, false);
                     }
                 }
             }
@@ -174,9 +172,9 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
 
                 if (!keep) {
                     if (unmark_discarded)
-                        unset_bit(unmark_discarded->data(), row_i, false, std::memory_order_relaxed);
+                        unset_bit(unmark_discarded->data(), row_i, false);
 
-                    num_empty_rows.fetch_add(1, std::memory_order_relaxed);
+                    ++local_num_empty_rows;
                 } else {
                     for (const auto &[j, c] : row) {
                         if (c < HIST_CUTOFF) {
@@ -198,10 +196,10 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                     ++last_i;
                     row.clear();
 
-                    num_empty_rows.fetch_add(i - last_i, std::memory_order_relaxed);
+                    local_num_empty_rows += i - last_i;
                     if (unmark_discarded) {
                         for ( ; last_i < i; ++last_i) {
-                            unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                            unset_bit(unmark_discarded->data(), last_i, false);
                         }
                     } else {
                         last_i = i;
@@ -218,15 +216,18 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
             row_callback(last_i);
             ++last_i;
 
-            num_empty_rows.fetch_add(end - last_i, std::memory_order_relaxed);
+            local_num_empty_rows += end - last_i;
             if (unmark_discarded) {
                 for ( ; last_i < end; ++last_i) {
-                    unset_bit(unmark_discarded->data(), last_i, false, std::memory_order_relaxed);
+                    unset_bit(unmark_discarded->data(), last_i, false);
                 }
             }
         }
 
         progress_bar += end - begin;
+
+        #pragma omp atomic
+        num_empty_rows += local_num_empty_rows;
 
         #pragma omp critical
         {
@@ -237,8 +238,6 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
             }
         }
     }
-
-    std::atomic_thread_fence(std::memory_order_acquire);
 
     common::logger->trace("Merging histograms");
     for (size_t j = 0; j < num_columns_; ++j) {
