@@ -526,12 +526,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (n == 0)
                 return 1.1;
 
-            double lscaling = lgamma(n + 1) + lscaling_base;
+            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
             auto get_pmf = [&](int64_t s) {
                 int64_t t = n - s;
                 double rs = r_in + s;
                 double rt = r_out + t;
-                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
+                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt));
             };
 
             std::vector<double> devs;
@@ -575,34 +575,50 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             int64_t n = in_sum + out_sum;
 
-            double lscaling = lgamma(n + 1) + lscaling_base;
-            auto get_pmf = [&](int64_t s) {
-                int64_t t = n - s;
-                double rs = r_in + s;
-                double rt = r_out + t;
-                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt) - lgamma(rs + rt));
-            };
+            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
 
-            std::vector<double> devs;
-            devs.reserve(n + 1);
+            std::vector<double> devs(n + 1);
             for (int64_t s = 0; s <= n; ++s) {
-                devs.emplace_back(get_deviance(s, mu1, r_in) + get_deviance(n - s, mu2, r_out));
+                devs[s] = get_deviance(s, mu1, r_in) + get_deviance(n - s, mu2, r_out);
             }
             double pval = 0.0;
             int64_t s = 0;
-            for ( ; s <= n; ++s) {
-                if (devs[s] >= devs[in_sum]) {
-                    pval += get_pmf(s);
-                } else {
-                    break;
+            if (devs[s] >= devs[in_sum]) {
+                int64_t t = n;
+                double rs = r_in;
+                double rt = r_out + n;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (++s; s <= n; ++s) {
+                    if (devs[s] >= devs[in_sum]) {
+                        --t;
+                        ++rs;
+                        --rt;
+                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
                 }
             }
 
-            for (int64_t sp = n; sp >= s; --sp) {
-                if (devs[sp] >= devs[in_sum]) {
-                    pval += get_pmf(sp);
-                } else {
-                    break;
+            int64_t sp = n;
+            if (devs[sp] >= devs[in_sum]) {
+                int64_t t = 0;
+                double rs = r_in + sp;
+                double rt = r_out;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (--sp; sp >= s; --sp) {
+                    if (devs[sp] >= devs[in_sum]) {
+                        ++t;
+                        --rs;
+                        ++rt;
+                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
                 }
             }
 
@@ -888,9 +904,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t bucket_idx = bucket_idxs[0];
             ++ms[bucket_idx][k];
             pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
-            for (size_t i = 1; i < path.size(); ++i) {
-                size_t bucket_idx = bucket_idxs[i];
-                pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
+            if (config.output_pvals) {
+                for (size_t i = 1; i < path.size(); ++i) {
+                    size_t bucket_idx = bucket_idxs[i];
+                    pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
+                }
             }
         }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
