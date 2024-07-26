@@ -14,7 +14,7 @@ namespace matrix {
 using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 
-void IntMatrix::call_row_values(const std::function<void(uint64_t, RowValues&&, size_t)> &callback,
+void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
                                 bool ordered) const {
     size_t n = get_binary_matrix().num_rows();
     ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
@@ -26,9 +26,9 @@ void IntMatrix::call_row_values(const std::function<void(uint64_t, RowValues&&, 
 
         if (ordered) {
             #pragma omp ordered
-            callback(row_i, std::move(row_vals[0]), row_i);
+            callback(row_i, row_vals[0], row_i);
         } else {
-            callback(row_i, std::move(row_vals[0]), row_i);
+            callback(row_i, row_vals[0], row_i);
         }
     }
 }

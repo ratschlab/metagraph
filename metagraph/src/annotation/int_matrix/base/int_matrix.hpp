@@ -23,7 +23,7 @@ class IntMatrix {
     // |row| is in [0, num_rows), |column| is in [0, num_columns)
     virtual std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const = 0;
 
-    virtual void call_row_values(const std::function<void(uint64_t, RowValues&&, size_t)> &callback,
+    virtual void call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
                                  bool ordered = true) const;
 
     virtual std::vector<VectorMap<uint64_t, size_t>> get_histograms(const std::vector<size_t> &min_counts = {},

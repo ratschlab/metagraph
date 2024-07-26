@@ -33,7 +33,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
 
     std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const;
 
-    inline void call_row_values(const std::function<void(uint64_t, RowValues&&, size_t)> &callback,
+    inline void call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
                                 bool ordered = true) const override final {
         constexpr size_t kNumRowsInBlock = 50'000;
         const auto &flat = matrix_.data();
@@ -81,14 +81,14 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     uint64_t i = begin;
                     progress_bar += rows.size();
                     for (auto &row : rows) {
-                        callback(i++, std::move(row), thread_id);
+                        callback(i++, row, thread_id);
                         row = RowValues();
                     }
                 }
             }
         } else {
             uint64_t num_set_bits = flat.num_set_bits();
-            uint64_t block_size = num_set_bits / std::max(1u, get_num_threads() - 1);
+            uint64_t block_size = num_set_bits / get_num_threads();
             size_t row_block_size = num_columns_ * 64;
             std::vector<uint64_t> boundaries;
             boundaries.emplace_back(0);
@@ -117,7 +117,6 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                 uint64_t end = flat_end / num_columns_;
 
                 RowValues row;
-                row.reserve(2);
 
                 auto *v_use = v_main;
 
@@ -133,14 +132,13 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     uint64_t b = flat.select1(r);
                     uint64_t i = b / num_columns_;
                     if (i > last_i) {
-                        callback(last_i, std::move(row), thread_id);
+                        callback(last_i, row, thread_id);
 
                         ++last_i;
                         row = RowValues();
-                        row.reserve(2);
 
                         for ( ; last_i < i; ++last_i) {
-                            callback(last_i, RowValues(), thread_id);
+                            callback(last_i, row, thread_id);
                         }
                     }
 
@@ -151,11 +149,11 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     row.emplace_back(j, val);
                 }
 
-                callback(last_i, std::move(row), thread_id);
+                callback(last_i, row, thread_id);
                 ++last_i;
 
                 for ( ; last_i < end; ++last_i) {
-                    callback(last_i, RowValues(), thread_id);
+                    callback(last_i, row, thread_id);
                 }
 
                 progress_bar += end - begin;
