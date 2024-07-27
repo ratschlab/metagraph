@@ -516,112 +516,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (fit_var / fit_mu - 1.0 < 1e-5)
             common::logger->warn("Fit parameters are close to a Poisson distribution");
 
-        auto get_deviance1 = [mu=mu1+1e-8,invphi=r_in,logmuinvphi=log(mu1+1e-8+r_in),logmu=log(mu1+1e-8)](double y) {
-            y += 1e-8;
-            double logyshift = logmuinvphi - log(y + invphi);
-            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
-        };
-        auto get_deviance2 = [mu=mu2+1e-8,invphi=r_out,logmuinvphi=log(mu2+1e-8+r_out),logmu=log(mu2+1e-8)](double y) {
-            y += 1e-8;
-            double logyshift = logmuinvphi - log(y + invphi);
-            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
-        };
-
-        compute_min_pval = [lscaling_base,r_in,r_out,target_p,get_deviance1,get_deviance2](int64_t n) {
-            if (n == 0)
-                return 1.1;
-
-            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-            auto get_pmf = [&](int64_t s) {
-                int64_t t = n - s;
-                double rs = r_in + s;
-                double rt = r_out + t;
-                return exp(lscaling - lgamma(s + 1) - lgamma(t + 1) + lgamma(rs) + lgamma(rt));
-            };
-
-            std::vector<double> devs;
-            devs.reserve(n + 1);
-            for (int64_t s = 0; s <= n; ++s) {
-                devs.emplace_back(get_deviance1(s) + get_deviance2(n - s));
-            }
-            double max_d = *std::max_element(devs.begin(), devs.end());
-            double pval = 0.0;
-            int64_t s = 0;
-            for ( ; s <= n; ++s) {
-                if (devs[s] == max_d) {
-                    pval += get_pmf(s);
-                } else {
-                    break;
-                }
-            }
-
-            for (int64_t sp = n; sp >= s; --sp) {
-                if (devs[sp] == max_d) {
-                    pval += get_pmf(sp);
-                } else {
-                    break;
-                }
-            }
-
-            return std::min(1.0, pval);
-        };
-
-        compute_pval = [lscaling_base,r_in,r_out,target_p,get_deviance1,get_deviance2](int64_t in_sum, int64_t out_sum, const auto &row) {
-            if (row.empty())
-                return 1.1;
-
-            int64_t n = in_sum + out_sum;
-
-            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-
-            std::vector<double> devs(n + 1);
-            for (int64_t s = 0; s <= n; ++s) {
-                devs[s] = get_deviance1(s) + get_deviance2(n - s);
-            }
-            double pval = 0.0;
-            int64_t s = 0;
-            if (devs[s] >= devs[in_sum]) {
-                int64_t t = n;
-                double rs = r_in;
-                double rt = r_out + n;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (++s; s <= n; ++s) {
-                    if (devs[s] >= devs[in_sum]) {
-                        --t;
-                        ++rs;
-                        --rt;
-                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                        pval += exp(base);
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            int64_t sp = n;
-            if (devs[sp] >= devs[in_sum]) {
-                int64_t t = 0;
-                double rs = r_in + sp;
-                double rt = r_out;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (--sp; sp >= s; --sp) {
-                    if (devs[sp] >= devs[in_sum]) {
-                        ++t;
-                        --rs;
-                        ++rt;
-                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                        pval += exp(base);
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            return std::min(1.0, pval);
-        };
-
         count_maps.resize(groups.size());
 
         common::logger->trace("Computing quantile maps");
@@ -689,6 +583,139 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
         }
+        int64_t total_sum = in_sum + out_sum;
+
+        auto get_deviance1 = [mu=mu1+1e-8,invphi=r_in,logmuinvphi=log(mu1+1e-8+r_in),logmu=log(mu1+1e-8)](double y) {
+            y += 1e-8;
+            double logyshift = logmuinvphi - log(y + invphi);
+            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+        };
+        auto get_deviance2 = [mu=mu2+1e-8,invphi=r_out,logmuinvphi=log(mu2+1e-8+r_out),logmu=log(mu2+1e-8)](double y) {
+            y += 1e-8;
+            double logyshift = logmuinvphi - log(y + invphi);
+            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+        };
+
+        std::vector<double> deviances1(total_sum + 1);
+        std::vector<double> deviances2(total_sum + 1);
+        for (int64_t s = 0; s <= total_sum; ++s) {
+            deviances1[s] = get_deviance1(s);
+            deviances2[s] = get_deviance2(s);
+        }
+
+        compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n) {
+            if (n == 0)
+                return 1.1;
+
+            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+            std::vector<double> devs(n + 1);
+
+            for (int64_t s = 0; s <= n; ++s) {
+                devs[s] = deviances1[s] + deviances2[n - s];
+            }
+
+            double max_d = *std::max_element(devs.begin(), devs.end());
+            double pval = 0.0;
+            int64_t s = 0;
+            if (devs[s] == max_d) {
+                int64_t t = n;
+                double rs = r_in;
+                double rt = r_out + n;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (++s; s <= n; ++s) {
+                    if (devs[s] == max_d) {
+                        --t;
+                        ++rs;
+                        --rt;
+                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            int64_t sp = n;
+            if (devs[sp] == max_d) {
+                int64_t t = 0;
+                double rs = r_in + sp;
+                double rt = r_out;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (--sp; sp >= s; --sp) {
+                    if (devs[sp] == max_d) {
+                        ++t;
+                        --rs;
+                        ++rt;
+                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            return std::min(1.0, pval);
+        };
+
+        compute_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &row) {
+            if (row.empty())
+                return 1.1;
+
+            int64_t n = in_sum + out_sum;
+
+            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+
+            std::vector<double> devs(n + 1);
+
+            for (int64_t s = 0; s <= n; ++s) {
+                devs[s] = deviances1[s] + deviances2[n - s];
+            }
+
+            double pval = 0.0;
+            int64_t s = 0;
+            if (devs[s] >= devs[in_sum]) {
+                int64_t t = n;
+                double rs = r_in;
+                double rt = r_out + n;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (++s; s <= n; ++s) {
+                    if (devs[s] >= devs[in_sum]) {
+                        --t;
+                        ++rs;
+                        --rt;
+                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            int64_t sp = n;
+            if (devs[sp] >= devs[in_sum]) {
+                int64_t t = 0;
+                double rs = r_in + sp;
+                double rt = r_out;
+                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                pval += exp(base);
+                for (--sp; sp >= s; --sp) {
+                    if (devs[sp] >= devs[in_sum]) {
+                        ++t;
+                        --rs;
+                        ++rt;
+                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                        pval += exp(base);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            return std::min(1.0, pval);
+        };
 
         double pval = std::min(compute_pval(in_sum, 0, best_in_row),
                                compute_pval(0, out_sum, best_out_row));
