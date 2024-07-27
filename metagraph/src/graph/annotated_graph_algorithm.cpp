@@ -667,23 +667,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
 
-            std::vector<double> devs(n + 1);
-
-            for (int64_t s = 0; s <= n; ++s) {
-                devs[s] = deviances1[s] + deviances2[n - s];
-            }
+            double in_sum_total_deviance = deviances1[in_sum] + deviances2[out_sum];
 
             double pval = 0.0;
             int64_t s = 0;
-            if (devs[s] >= devs[in_sum]) {
-                int64_t t = n;
+            int64_t t = n;
+            if (deviances1[s] + deviances2[t] >= in_sum_total_deviance) {
                 double rs = r_in;
                 double rt = r_out + n;
                 double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
                 pval += exp(base);
                 for (++s; s <= n; ++s) {
-                    if (devs[s] >= devs[in_sum]) {
-                        --t;
+                    if (deviances1[s] + deviances2[--t] >= in_sum_total_deviance) {
                         ++rs;
                         --rt;
                         base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
@@ -695,15 +690,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             int64_t sp = n;
-            if (devs[sp] >= devs[in_sum]) {
-                int64_t t = 0;
+            t = 0;
+            if (deviances1[sp] + deviances2[t] >= in_sum_total_deviance) {
                 double rs = r_in + sp;
                 double rt = r_out;
                 double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
                 pval += exp(base);
                 for (--sp; sp >= s; --sp) {
-                    if (devs[sp] >= devs[in_sum]) {
-                        ++t;
+                    if (deviances1[sp] + deviances2[++t] >= in_sum_total_deviance) {
                         --rs;
                         ++rt;
                         base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
