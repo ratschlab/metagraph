@@ -232,20 +232,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Test: {}", config.test_type);
     if (config.test_type == "poisson_exact") {
-        compute_min_pval = [&](int64_t n) {
+        auto get_deviance = [&](double y, double mu) {
+            y += 1e-8;
+            mu += 1e-8;
+            return 2 * (y * log(y/mu) - y + mu);
+        };
+
+        compute_min_pval = [&,p=static_cast<double>(in_kmers)/total_kmers,
+                              mu1=static_cast<double>(in_kmers)/nelem,
+                              mu2=static_cast<double>(out_kmers)/nelem,
+                              get_deviance](int64_t n) {
             if (n == 0)
                 return 1.1;
 
-            double p = static_cast<double>(in_kmers) / total_kmers;
             auto bdist = boost::math::binomial(n, p);
-            auto get_deviance = [&](double y, double mu) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2 * (y * log(y/mu) - y + mu);
-            };
-
-            double mu1 = static_cast<double>(in_kmers) / nelem;
-            double mu2 = static_cast<double>(out_kmers) / nelem;
 
             std::vector<double> devs;
             devs.reserve(n + 1);
@@ -275,21 +275,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return pval;
         };
 
-        compute_pval = [&](int64_t in_sum, int64_t out_sum, const auto &row) {
+        compute_pval = [&,p=static_cast<double>(in_kmers)/total_kmers,
+                          mu1=static_cast<double>(in_kmers)/nelem,
+                          mu2=static_cast<double>(out_kmers)/nelem,
+                          get_deviance](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
                 return 1.1;
 
             int64_t n = in_sum + out_sum;
-            double p = static_cast<double>(in_kmers) / total_kmers;
             auto bdist = boost::math::binomial(n, p);
-            auto get_deviance = [&](double y, double mu) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2 * (y * log(y/mu) - y + mu);
-            };
-
-            double mu1 = static_cast<double>(in_kmers) / nelem;
-            double mu2 = static_cast<double>(out_kmers) / nelem;
 
             std::vector<double> devs;
             devs.reserve(n + 1);
