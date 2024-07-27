@@ -795,6 +795,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         }
                     }
 
+                    // std::lock_guard<std::mutex> lock(pval_mu);
+                    // num_obs = ++ms[log(bucket_idx + 1)][k];
+                    // num_obs = ++ms[0][k];
                     num_obs = ++ms[bucket_idx][k];
                 }
 
@@ -1215,7 +1218,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             config, num_threads, tmp_dir, num_threads
         );
     } else {
-        auto generate_rows = [&](const auto &callback, bool ordered) {
+        auto generate_rows = [&](const auto &callback, bool) {
             size_t bucket_size = matrix.num_rows() / num_threads;
             ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
             #pragma omp parallel for num_threads(num_threads) ordered
@@ -1229,12 +1232,8 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                     container.emplace_back(j, 1);
                 }
 
-                if (ordered) {
-                    #pragma omp ordered
-                    callback(row_i, container, row_i / bucket_size);
-                } else {
-                    callback(row_i, container, row_i / bucket_size);
-                }
+                #pragma omp ordered
+                callback(row_i, container, row_i / bucket_size);
             }
         };
 
