@@ -404,7 +404,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::vector<std::vector<std::pair<uint64_t, size_t>>::const_iterator> hist_its(groups.size());
         size_t matrix_size = 0;
 
-        #pragma omp parallel for num_threads(num_parallel_files)
+        #pragma omp parallel for num_threads(num_parallel_files) reduction(+:matrix_size)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &hist = hists[j];
             size_t total = 0;
@@ -417,8 +417,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             hist_its[j] = it;
             nb_params[j] = get_rp(j, hist.begin(), it);
 
-            #pragma omp critical
-            matrix_size += total + (hist.size() && hist[0].first == 0 ? hist[0].second : 0);
+            total += (hist.size() && hist[0].first == 0 ? hist[0].second : 0);
+
+            #pragma omp atomic
+            matrix_size += total;
         }
 
         common::logger->trace("Scaling distributions");
@@ -772,11 +774,29 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         double pval = 1.1;
         double pval_min = 1.1;
+        uint64_t k = std::numeric_limits<uint64_t>::max();
         try {
             pval_min = compute_min_pval(in_sum + out_sum);
 
-            if (pval_min < 1.1)
+            if (pval_min < 1.1) {
+                if (!config.test_by_unitig) {
+                    if (pval_min >= config.family_wise_error_rate) {
+                        k = 0;
+                    } else if (pval_min > 0) {
+                        double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
+                        if (lkd <= 64)
+                            k = pow(2.0, lkd);
+
+                        if (k == 0) {
+                            common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
+                            throw std::runtime_error("Min failed");
+                        }
+                    }
+
+                    ++ms[bucket_idx][k];
+                }
                 pval = compute_pval(in_sum, out_sum, row);
+            }
 
         } catch (...) {
             std::lock_guard<std::mutex> lock(pval_mu);
@@ -790,39 +810,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         auto &pvals = pvals_buckets[std::min(bucket_idx, pvals_buckets.size() - 1)];
-        if (config.test_by_unitig) {
-            assert(pvals_min);
+        if (config.test_type != "notest")
             pvals.push_back(bit_cast<uint64_t>(pval));
 
+        if (config.test_by_unitig) {
+            assert(pvals_min);
             std::lock_guard<std::mutex> lock(pval_mu);
             (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
             (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
-        } else {
-            if (config.test_type != "notest")
-                pvals.push_back(bit_cast<uint64_t>(pval));
-
-            if (pval < 1.1) {
-                uint64_t k = std::numeric_limits<uint64_t>::max();
-                if (pval_min >= config.family_wise_error_rate) {
-                    k = 0;
-                } else if (pval_min > 0) {
-                    double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
-                    if (lkd <= 64)
-                        k = pow(2.0, lkd);
-
-                    if (k == 0) {
-                        common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
-                        throw std::runtime_error("Min failed");
-                    }
-                }
-
-                if (in_kmer != out_kmer && (pval < config.family_wise_error_rate || config.test_by_unitig)) {
-                    bool use_atomic = parallel && (node % 64 == 0);
-                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
-                }
-
-                ++ms[bucket_idx][k];
-            }
+        } else if (in_kmer != out_kmer && pval < config.family_wise_error_rate) {
+            bool use_atomic = parallel && (node % 64 == 0);
+            set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
         }
     }, false);
 
