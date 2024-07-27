@@ -721,12 +721,128 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         throw std::runtime_error("Test not implemented");
     }
 
+    common::logger->trace("Computing minimum p-values");
+    std::vector<std::pair<double, size_t>> m;
+    {
+        std::vector<std::vector<std::pair<double, size_t>>> ms(pvals_buckets.size());
+        generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            int64_t out_stat_int = 0;
+            bool in_kmer = false;
+            bool out_kmer = false;
+            PairContainer row;
+            if (kept[row_i]) {
+                size_t count_in = 0;
+                size_t count_out = 0;
+                for (const auto &[j, raw_c] : raw_row) {
+                    uint64_t c = raw_c;
+                    if (count_maps.size())
+                        c = count_maps[j].find(c)->second.first;
+
+                    row.emplace_back(j, c);
+                    if (groups[j]) {
+                        out_sum += c;
+                        ++count_out;
+                    } else {
+                        in_sum += c;
+                        ++count_in;
+                    }
+                }
+
+                if (count_in + count_out >= config.min_recurrence) {
+                    double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                    if (out_stat != 0)
+                        out_stat_int = out_stat > 0 ? ceil(out_stat) : floor(out_stat);
+
+                    in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                    out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
+                }
+            }
+
+            bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
+            size_t n = in_sum + out_sum;
+            if (!in_kmer && !out_kmer) {
+                row.clear();
+                n = 0;
+            }
+
+            if (n >= ms[bucket_idx].size())
+                ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
+
+            if (n > 0 && ms[bucket_idx][n].first == 1.1)
+                ms[bucket_idx][n].first = compute_min_pval(n);
+
+            ++ms[bucket_idx][n].second;
+
+            // test_by_unitig
+            std::ignore = out_stat_int;
+            // (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
+            // (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
+        }, false);
+
+        common::logger->trace("Merging min p-value tables");
+        for (size_t i = 1; i < ms.size(); ++i) {
+            size_t end = std::min(ms[0].size(), ms[i].size());
+            for (size_t j = 0; j < end; ++j) {
+                assert(ms[0][j].first == 1.1 || ms[i][j].first == 1.1 || ms[0][j] == ms[i][j]);
+                ms[0][j].first = std::min(ms[0][j].first, ms[i][j].first);
+                ms[0][j].second += ms[i][j].second;
+            }
+
+            if (ms[i].size() > ms[0].size()) {
+                std::copy(std::make_move_iterator(ms[i].begin() + ms[0].size()),
+                          std::make_move_iterator(ms[i].end()),
+                          std::back_inserter(ms[0]));
+            }
+        }
+
+        m = std::move(ms[0]);
+    }
+
+    size_t k = 0;
+    size_t n_cutoff = 1;
+    if (!config.test_by_unitig) {
+        size_t acc = std::accumulate(m.begin(), m.end(), size_t(0),
+                                     [](size_t sum, const auto &a) { return sum + a.second; });
+        common::logger->trace("Calculating cutoffs for {}/{} tests", acc, nelem);
+        size_t last_k = 0;
+        for (size_t n = 0; n < m.size(); ++n) {
+            auto [pval_min, s] = m[n];
+            size_t cur_k = std::numeric_limits<size_t>::max();
+            if (pval_min >= config.family_wise_error_rate) {
+                cur_k = 0;
+            } else if (pval_min > 0) {
+                double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
+                if (lkd <= 64)
+                    cur_k = pow(2.0, lkd);
+
+                if (cur_k == 0) {
+                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}", cur_k, lkd, pval_min);
+                    throw std::runtime_error("Min failed");
+                }
+            }
+            if (s > 0)
+                common::logger->trace("k: {}\ts: {}\tm(k): {}\tn: {}\tpval_min: {}", cur_k, s, acc, n, pval_min);
+
+            if (cur_k != last_k && acc <= cur_k) {
+                k = std::max(acc, last_k + 1);
+                n_cutoff = n;
+                common::logger->trace("Picked: k: {}\tn: {}\tpval_min: {}", k, n_cutoff, config.family_wise_error_rate / k);
+                break;
+            }
+
+            last_k = cur_k;
+            acc -= s;
+        }
+
+        if (k == 0)
+            common::logger->trace("No significant k-mers found");
+    }
+
     common::logger->trace("Running differential tests");
     std::exception_ptr ex = nullptr;
-
     std::mutex pval_mu;
-
-    std::vector<VectorMap<size_t, size_t>> ms(pvals_buckets.size());
     std::atomic_thread_fence(std::memory_order_release);
 
     generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
@@ -735,7 +851,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         int64_t in_sum = 0;
         int64_t out_sum = 0;
-        int64_t out_stat_int = 0;
         bool in_kmer = false;
         bool out_kmer = false;
         PairContainer row;
@@ -759,77 +874,48 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             if (count_in + count_out >= config.min_recurrence) {
                 double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-                if (out_stat != 0)
-                    out_stat_int = out_stat > 0 ? ceil(out_stat) : floor(out_stat);
-
                 in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
                 out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
             }
         }
 
-        if (!in_kmer && !out_kmer)
+        size_t n = in_sum + out_sum;
+        if (!in_kmer && !out_kmer) {
             row.clear();
+            n = 0;
+        }
 
-        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-
-        double pval = 1.1;
-        double pval_min = 1.1;
-        uint64_t k = std::numeric_limits<uint64_t>::max();
-        bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
-        try {
-            pval_min = compute_min_pval(in_sum + out_sum);
-
-            if (pval_min < 1.1) {
-                size_t num_obs = 0;
-                if (!config.test_by_unitig) {
-                    if (pval_min >= config.family_wise_error_rate) {
-                        k = 0;
-                    } else if (pval_min > 0) {
-                        double lkd = log2(config.family_wise_error_rate) - log2(pval_min);
-                        if (lkd <= 64)
-                            k = pow(2.0, lkd);
-
-                        if (k == 0) {
-                            common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, pval_min, pval);
-                            throw std::runtime_error("Min failed");
-                        }
-                    }
-
-                    // std::lock_guard<std::mutex> lock(pval_mu);
-                    // num_obs = ++ms[log(bucket_idx + 1)][k];
-                    // num_obs = ++ms[0][k];
-                    num_obs = ++ms[bucket_idx][k];
-                }
-
-                // only compute a p-value if it is needed for later, or if it
-                // has a chance of being significant after correction
-                if (config.output_pvals || config.test_by_unitig || num_obs < k)
-                    pval = compute_pval(in_sum, out_sum, row);
+        if (config.output_pvals || config.test_by_unitig || n >= n_cutoff) {
+            if (m[n].first == 1.1) {
+                common::logger->error("Min p-val too small: {}\tn: {}\ts: {}", m[n].first, n, m[n].second);
+                throw std::runtime_error("Test failed");
             }
 
-        } catch (...) {
-            std::lock_guard<std::mutex> lock(pval_mu);
-            ex = std::current_exception();
-            return;
-        }
+            double pval = 1.1;
+            try {
+                pval = compute_pval(in_sum, out_sum, row);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(pval_mu);
+                ex = std::current_exception();
+                return;
+            }
 
-        if (pval < 1.1 && pval_min - pval > 1e-10) {
-            common::logger->error("Min p-val estimate too high: min {} > cur {}\ttest: {}", pval_min, pval, config.test_type);
-            throw std::runtime_error("Test failed");
-        }
+            if (pval < 1.1 && m[n].first - pval > 1e-10) {
+                common::logger->error("Min p-val estimate too high: min {} > cur {}\tn: {}\ttest: {}", m[n].first, pval, n, config.test_type);
+                throw std::runtime_error("Test failed");
+            }
 
-        auto &pvals = pvals_buckets[bucket_idx];
-        if (config.test_type != "notest")
-            pvals.push_back(bit_cast<uint64_t>(pval));
+            if (config.test_type != "notest" && (config.output_pvals || config.test_by_unitig)) {
+                bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
+                auto &pvals = pvals_buckets[bucket_idx];
+                pvals.push_back(bit_cast<uint64_t>(pval));
+            }
 
-        if (config.test_by_unitig) {
-            assert(pvals_min);
-            std::lock_guard<std::mutex> lock(pval_mu);
-            (*pvals_min)[node] = bit_cast<uint64_t>(pval_min);
-            (*eff_size)[node] = bit_cast<uint64_t, int64_t>(in_sum - out_stat_int);
-        } else if (in_kmer != out_kmer && pval < config.family_wise_error_rate) {
-            bool use_atomic = parallel && (node % 64 == 0);
-            set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
+            if (!config.test_by_unitig && in_kmer != out_kmer && pval * k < config.family_wise_error_rate) {
+                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                bool use_atomic = parallel && (node % 64 == 0);
+                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
+            }
         }
     }, false);
 
@@ -840,163 +926,101 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     deallocate();
 
-    std::vector<size_t> boundaries;
-    boundaries.reserve(pvals_buckets.size() + 1);
-    boundaries.emplace_back(0);
-    for (size_t i = 0; i < pvals_buckets.size(); ++i) {
-        boundaries.emplace_back(boundaries.back() + pvals_buckets[i].size());
-    }
+    // std::vector<size_t> boundaries;
+    // boundaries.reserve(pvals_buckets.size() + 1);
+    // boundaries.emplace_back(0);
+    // for (size_t i = 0; i < pvals_buckets.size(); ++i) {
+    //     boundaries.emplace_back(boundaries.back() + pvals_buckets[i].size());
+    // }
 
-    if (config.test_by_unitig) {
-        common::logger->trace("Allocating k-mer bitmasks");
-        indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
-        indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+    // if (config.test_by_unitig) {
+    //     common::logger->trace("Allocating k-mer bitmasks");
+    //     indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+    //     indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
 
-        common::logger->trace("Combining p-values within unitigs");
-        MaskedDeBruijnGraph clean_masked_graph(
-            graph_ptr,
-            [&](node_index node) {
-                return node != DeBruijnGraph::npos
-                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
-            },
-            true,
-            is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-        );
+    //     common::logger->trace("Combining p-values within unitigs");
+    //     MaskedDeBruijnGraph clean_masked_graph(
+    //         graph_ptr,
+    //         [&](node_index node) {
+    //             return node != DeBruijnGraph::npos
+    //                     && kept[AnnotatedDBG::graph_to_anno_index(node)];
+    //         },
+    //         true,
+    //         is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+    //     );
 
-        auto dist = boost::math::cauchy();
+    //     auto dist = boost::math::cauchy();
 
-        std::atomic_thread_fence(std::memory_order_release);
-        clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
-            double stat = 0;
-            double stat_min = 0;
-            int64_t comb_eff_size = 0;
-            std::vector<size_t> bucket_idxs;
-            bucket_idxs.reserve(path.size());
-            for (node_index node : path) {
-                for (size_t i = 0; i < boundaries.size(); ++i) {
-                    if (boundaries[i] > node) {
-                        bucket_idxs.emplace_back(i);
-                        break;
-                    }
-                }
-            }
+    //     std::atomic_thread_fence(std::memory_order_release);
+    //     clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
+    //         double stat = 0;
+    //         double stat_min = 0;
+    //         int64_t comb_eff_size = 0;
+    //         std::vector<size_t> bucket_idxs;
+    //         bucket_idxs.reserve(path.size());
+    //         for (node_index node : path) {
+    //             for (size_t i = 0; i < boundaries.size(); ++i) {
+    //                 if (boundaries[i] > node) {
+    //                     bucket_idxs.emplace_back(i);
+    //                     break;
+    //                 }
+    //             }
+    //         }
 
-            {
-                std::lock_guard<std::mutex> lock(pval_mu);
-                for (size_t i = 0; i < path.size(); ++i) {
-                    node_index node = path[i];
-                    size_t bucket_idx = bucket_idxs[i];
-                    comb_eff_size += bit_cast<int64_t, uint64_t>((*eff_size)[node]);
-                    double pval = bit_cast<double, uint64_t>(pvals_buckets[bucket_idx][node - boundaries[bucket_idx]]);
-                    double pval_min = bit_cast<double, uint64_t>((*pvals_min)[node]);
-                    stat += tan((0.5 - pval) * M_PI);
-                    stat_min += tan((0.5 - pval_min) * M_PI);
-                }
-            }
-            stat /= path.size();
-            stat_min /= path.size();
-            double comb_pval = boost::math::cdf(boost::math::complement(dist, stat));
-            if (comb_pval < config.family_wise_error_rate && comb_eff_size != 0) {
-                auto *data = comb_eff_size > 0 ? indicator_in.data() : indicator_out.data();
-                for (node_index node : path) {
-                    set_bit(data, node, parallel, MO_RELAXED);
-                }
-            }
+    //         {
+    //             std::lock_guard<std::mutex> lock(pval_mu);
+    //             for (size_t i = 0; i < path.size(); ++i) {
+    //                 node_index node = path[i];
+    //                 size_t bucket_idx = bucket_idxs[i];
+    //                 comb_eff_size += bit_cast<int64_t, uint64_t>((*eff_size)[node]);
+    //                 double pval = bit_cast<double, uint64_t>(pvals_buckets[bucket_idx][node - boundaries[bucket_idx]]);
+    //                 double pval_min = bit_cast<double, uint64_t>((*pvals_min)[node]);
+    //                 stat += tan((0.5 - pval) * M_PI);
+    //                 stat_min += tan((0.5 - pval_min) * M_PI);
+    //             }
+    //         }
+    //         stat /= path.size();
+    //         stat_min /= path.size();
+    //         double comb_pval = boost::math::cdf(boost::math::complement(dist, stat));
+    //         if (comb_pval < config.family_wise_error_rate && comb_eff_size != 0) {
+    //             auto *data = comb_eff_size > 0 ? indicator_in.data() : indicator_out.data();
+    //             for (node_index node : path) {
+    //                 set_bit(data, node, parallel, MO_RELAXED);
+    //             }
+    //         }
 
-            double comb_pval_min = boost::math::cdf(boost::math::complement(dist, stat_min));
+    //         double comb_pval_min = boost::math::cdf(boost::math::complement(dist, stat_min));
 
-            uint64_t k = std::numeric_limits<uint64_t>::max();
-            if (comb_pval_min >= config.family_wise_error_rate) {
-                k = 0;
-            } else if (comb_pval_min > 0) {
-                double lkd = log2(config.family_wise_error_rate) - log2(comb_pval_min);
-                if (lkd <= 64)
-                    k = pow(2.0, lkd);
+    //         uint64_t k = std::numeric_limits<uint64_t>::max();
+    //         if (comb_pval_min >= config.family_wise_error_rate) {
+    //             k = 0;
+    //         } else if (comb_pval_min > 0) {
+    //             double lkd = log2(config.family_wise_error_rate) - log2(comb_pval_min);
+    //             if (lkd <= 64)
+    //                 k = pow(2.0, lkd);
 
-                if (k == 0) {
-                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, comb_pval_min, comb_pval);
-                    throw std::runtime_error("Min failed");
-                }
-            }
+    //             if (k == 0) {
+    //                 common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, comb_pval_min, comb_pval);
+    //                 throw std::runtime_error("Min failed");
+    //             }
+    //         }
 
-            uint64_t comb_pval_enc = bit_cast<uint64_t, double>(comb_pval);
-            size_t bucket_idx = bucket_idxs[0];
-            ++ms[bucket_idx][k];
-            pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
-            if (config.output_pvals) {
-                for (size_t i = 1; i < path.size(); ++i) {
-                    size_t bucket_idx = bucket_idxs[i];
-                    pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
-                }
-            }
-        }, num_threads);
-        std::atomic_thread_fence(std::memory_order_acquire);
+    //         uint64_t comb_pval_enc = bit_cast<uint64_t, double>(comb_pval);
+    //         size_t bucket_idx = bucket_idxs[0];
+    //         ++ms[bucket_idx][k];
+    //         pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
+    //         if (config.output_pvals) {
+    //             for (size_t i = 1; i < path.size(); ++i) {
+    //                 size_t bucket_idx = bucket_idxs[i];
+    //                 pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
+    //             }
+    //         }
+    //     }, num_threads);
+    //     std::atomic_thread_fence(std::memory_order_acquire);
 
-        eff_size.reset();
-        pvals_min.reset();
-    }
-
-    for (size_t i = 1; i < ms.size(); ++i) {
-        for (const auto &[k, c] : ms[i]) {
-            ms[0][k] += c;
-        }
-    }
-    VectorMap<size_t, size_t> m = std::move(ms[0]);
-    ms.resize(0);
-
-    if (config.test_type != "notest") {
-        uint64_t total_sig = sdsl::util::cnt_one_bits(indicator_in) + sdsl::util::cnt_one_bits(indicator_out);
-        auto m_data = const_cast<std::vector<std::pair<size_t, size_t>>&&>(m.values_container());
-
-        std::sort(m_data.begin(), m_data.end(), utils::LessFirst());
-        size_t acc = std::accumulate(m_data.begin(), m_data.end(), size_t(0),
-                                     [](size_t sum, const auto &a) { return sum + a.second; });
-        common::logger->trace("Performed {}/{} tests", acc, nelem);
-        common::logger->trace("Correcting {}/{} significant p-values", total_sig, acc);
-
-        if (total_sig) {
-            size_t k = 0;
-            size_t last_k = 0;
-            for (const auto &[cur_k, s] : m_data) {
-                common::logger->trace("k: {}\tm(k): {}", cur_k, acc);
-                if (acc <= cur_k) {
-                    k = std::max(acc, last_k + 1);
-                    break;
-                }
-
-                last_k = cur_k;
-                acc -= s;
-            }
-
-            if (k == 0) {
-                common::logger->trace("No significant k-mers found");
-                sdsl::util::set_to_value(indicator_in, false);
-                sdsl::util::set_to_value(indicator_out, false);
-            } else {
-                common::logger->trace("k: {}\talpha_corr: {}", k, config.family_wise_error_rate / k);
-
-                std::atomic_thread_fence(std::memory_order_release);
-                #pragma omp parallel for num_threads(num_threads)
-                for (size_t j = 0; j < boundaries.size() - 1; ++j) {
-                    size_t begin = boundaries[j];
-                    size_t end = boundaries[j + 1];
-                    call_ones(indicator_in, begin, end, [&](uint64_t i) {
-                        double p = bit_cast<double, uint64_t>(pvals_buckets[j][i - begin]);
-                        if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
-                            unset_bit(indicator_in.data(), i, parallel, std::memory_order_release);
-                        }
-                    }, parallel, std::memory_order_acquire);
-                    call_ones(indicator_out, begin, end, [&](uint64_t i) {
-                        double p = bit_cast<double, uint64_t>(pvals_buckets[j][i - begin]);
-                        if (p < config.family_wise_error_rate && p * k >= config.family_wise_error_rate) {
-                            unset_bit(indicator_out.data(), i, parallel, std::memory_order_release);
-                        }
-                    }, parallel, std::memory_order_acquire);
-                }
-                std::atomic_thread_fence(std::memory_order_acquire);
-            }
-        }
-    }
+    //     eff_size.reset();
+    //     pvals_min.reset();
+    // }
 
     std::unique_ptr<utils::TempFile> tmp_file;
     PValStorage pvals;
