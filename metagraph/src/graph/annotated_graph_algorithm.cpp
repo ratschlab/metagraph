@@ -775,10 +775,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double pval = 1.1;
         double pval_min = 1.1;
         uint64_t k = std::numeric_limits<uint64_t>::max();
+        bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
         try {
             pval_min = compute_min_pval(in_sum + out_sum);
 
             if (pval_min < 1.1) {
+                size_t num_obs = 0;
                 if (!config.test_by_unitig) {
                     if (pval_min >= config.family_wise_error_rate) {
                         k = 0;
@@ -793,9 +795,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         }
                     }
 
-                    ++ms[bucket_idx][k];
+                    num_obs = ++ms[bucket_idx][k];
                 }
-                pval = compute_pval(in_sum, out_sum, row);
+
+                // only compute a p-value if it is needed for later, or if it
+                // has a chance of being significant after correction
+                if (config.output_pvals || config.test_by_unitig || num_obs < k)
+                    pval = compute_pval(in_sum, out_sum, row);
             }
 
         } catch (...) {
@@ -809,7 +815,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::runtime_error("Test failed");
         }
 
-        auto &pvals = pvals_buckets[std::min(bucket_idx, pvals_buckets.size() - 1)];
+        auto &pvals = pvals_buckets[bucket_idx];
         if (config.test_type != "notest")
             pvals.push_back(bit_cast<uint64_t>(pval));
 
