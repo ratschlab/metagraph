@@ -977,11 +977,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::vector<size_t> bucket_idxs;
             bucket_idxs.reserve(path.size());
             for (node_index node : path) {
+                bucket_idxs.emplace_back(0);
                 for (size_t i = 0; i < boundaries.size(); ++i) {
-                    if (boundaries[i] > node) {
-                        bucket_idxs.emplace_back(i);
+                    if (boundaries[i] > node)
                         break;
-                    }
+
+                    ++bucket_idxs.back();
                 }
             }
 
@@ -1041,12 +1042,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             comb_m[comb_n].first = comb_pval;
             ++comb_m[comb_n].second;
             pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
-            if (config.output_pvals) {
-                for (size_t i = 1; i < path.size(); ++i) {
-                    size_t bucket_idx = bucket_idxs[i];
-                    pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
-                }
-            }
+
+            // TODO: how do I only output one p-value per unitig?
+            // if (config.output_pvals) {
+            //     for (size_t i = 1; i < path.size(); ++i) {
+            //         size_t bucket_idx = bucket_idxs[i];
+            //         pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
+            //     }
+            // }
         }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -1056,6 +1059,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         tmp_sum_buckets.resize(0);
 
         std::tie(k, n_cutoff) = correct_pvals(comb_m);
+        auto b_it = boundaries.begin();
+        call_ones(indicator_in, [&](node_index node) {
+            for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
+            --b_it;
+            size_t bucket_idx = b_it - boundaries.begin();
+            size_t node_idx = node - *b_it;
+            const auto &pval = pvals_buckets[bucket_idx][node_idx];
+            if (pval * k >= config.family_wise_error_rate)
+                unset_bit(indicator_in.data(), node, parallel, MO_RELAXED);
+        });
+        b_it = boundaries.begin();
+        call_ones(indicator_out, [&](node_index node) {
+            for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
+            --b_it;
+            size_t bucket_idx = b_it - boundaries.begin();
+            size_t node_idx = node - *b_it;
+            const auto &pval = pvals_buckets[bucket_idx][node_idx];
+            if (pval * k >= config.family_wise_error_rate)
+                unset_bit(indicator_out.data(), node, parallel, MO_RELAXED);
+        });
     }
 
     std::unique_ptr<utils::TempFile> tmp_file;
