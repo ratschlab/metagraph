@@ -248,7 +248,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                               mu2=static_cast<double>(out_kmers)/nelem,
                               get_deviance](int64_t n) {
             if (n == 0)
-                return 1.1;
+                return 1.0;
 
             auto bdist = boost::math::binomial(n, p);
 
@@ -285,7 +285,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           mu2=static_cast<double>(out_kmers)/nelem,
                           get_deviance](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
-                return 1.1;
+                return 1.0;
 
             int64_t n = in_sum + out_sum;
             auto bdist = boost::math::binomial(n, p);
@@ -321,7 +321,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         compute_min_pval = [&,lbase_shared](int64_t m1) {
             if (m1 == 0)
-                return 1.1;
+                return 1.0;
 
             int64_t m2 = total_kmers - m1;
 
@@ -343,7 +343,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
-                return 1.1;
+                return 1.0;
 
             int64_t m1 = in_sum + out_sum;
             int64_t m2 = total_kmers - m1;
@@ -538,7 +538,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 for (const auto &[k, c] : hist) {
                     if (!count_maps[j].count(k)) {
                         uint64_t new_k = map_value(k, scale, nb, nb_out);
-                        count_maps[j][k] = std::make_pair(std::max(new_k, uint64_t(1)), c);
+                        count_maps[j][k] = std::make_pair(new_k, c);
                     } else {
                         count_maps[j][k].second += c;
                     }
@@ -566,20 +566,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
         total_kmers = in_kmers + out_kmers;
-        common::logger->trace("Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
+        common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
-        PairContainer best_in_row;
-        PairContainer best_out_row;
         int64_t in_sum = 0;
         int64_t out_sum = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
             if (hists[j].size()) {
                 uint64_t k = count_maps[j].find(hists[j].back().first)->second.first;
                 if (groups[j]) {
-                    best_out_row.emplace_back(j, k);
                     out_sum += k;
                 } else {
-                    best_in_row.emplace_back(j, k);
                     in_sum += k;
                 }
             }
@@ -606,7 +602,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n) {
             if (n == 0)
-                return 1.1;
+                return 1.0;
 
             double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
             std::vector<double> devs(n + 1);
@@ -662,7 +658,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         compute_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &row) {
             if (row.empty())
-                return 1.1;
+                return 1.0;
 
             int64_t n = in_sum + out_sum;
 
@@ -711,14 +707,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return std::min(1.0, pval);
         };
-
-        double pval = std::min(compute_pval(in_sum, 0, best_in_row),
-                               compute_pval(0, out_sum, best_out_row));
-        common::logger->trace("Best achievable p-value: {}\tin_sum: {}\tout_sum: {}", pval, in_sum, out_sum);
-        if (pval >= config.family_wise_error_rate) {
-            common::logger->error("Best achievable p-value is too big. Use poisson_exact instead");
-            throw std::domain_error("Too few samples");
-        }
     } else if (config.test_type == "notest") {
         compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
         compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
@@ -763,6 +751,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
                     out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
                 }
+            } else {
+                return;
             }
 
             bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
@@ -775,7 +765,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (n >= ms[bucket_idx].size())
                 ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
 
-            if (n > 0 && ms[bucket_idx][n].first == 1.1)
+            if (ms[bucket_idx][n].first == 1.1)
                 ms[bucket_idx][n].first = compute_min_pval(n);
 
             ++ms[bucket_idx][n].second;
@@ -808,7 +798,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     }
 
     auto correct_pvals = [&](const std::vector<std::pair<double, size_t>> &m) {
-        size_t k = 1;
+        size_t k = 0;
         size_t n_cutoff = 1;
         size_t acc = std::accumulate(m.begin(), m.end(), size_t(0),
                                      [](size_t sum, const auto &a) { return sum + a.second; });
@@ -829,8 +819,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     throw std::runtime_error("Min failed");
                 }
             }
-            if (s > 0)
-                common::logger->trace("k: {}\ts: {}\tm(k): {}\tn: {}\tpval_min: {}", cur_k, s, acc, n, pval_min);
+
+            // if (s > 0)
+            //     common::logger->trace("k: {}\ts: {}\tm(k): {}\tn: {}\tpval_min: {}", cur_k, s, acc, n, pval_min);
 
             if (cur_k != last_k && acc <= cur_k) {
                 k = std::max(acc, last_k + 1);
@@ -844,241 +835,252 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         if (k == 0)
-            common::logger->trace("No significant k-mers found");
+            common::logger->warn("No significant p-values achievable");
 
         return std::make_pair(k, n_cutoff);
     };
 
-    size_t k = 1;
+    size_t k = 0;
     size_t n_cutoff = 1;
     if (!config.test_by_unitig)
         std::tie(k, n_cutoff) = correct_pvals(m);
 
-    common::logger->trace("Running differential tests");
-    std::exception_ptr ex = nullptr;
-    std::mutex ex_mu;
-    std::atomic_thread_fence(std::memory_order_release);
+    if (k > 0) {
+        common::logger->trace("Running differential tests");
+        std::exception_ptr ex = nullptr;
+        std::mutex ex_mu;
+        bool keep_all_pvals = config.output_pvals || config.test_by_unitig;
+        std::atomic_thread_fence(std::memory_order_release);
 
-    generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
-        if (ex)
-            return;
+        generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
+            if (ex)
+                return;
 
-        int64_t in_sum = 0;
-        int64_t out_sum = 0;
-        bool in_kmer = false;
-        bool out_kmer = false;
-        PairContainer row;
-        if (kept[row_i]) {
-            size_t count_in = 0;
-            size_t count_out = 0;
-            for (const auto &[j, raw_c] : raw_row) {
-                uint64_t c = raw_c;
-                if (count_maps.size())
-                    c = count_maps[j].find(c)->second.first;
-
-                row.emplace_back(j, c);
-                if (groups[j]) {
-                    out_sum += c;
-                    ++count_out;
-                } else {
-                    in_sum += c;
-                    ++count_in;
-                }
-            }
-
-            if (count_in + count_out >= config.min_recurrence) {
-                double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-                in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
-                out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
-            }
-        }
-
-        size_t n = in_sum + out_sum;
-        if (!in_kmer && !out_kmer) {
-            row.clear();
-            n = 0;
-        }
-
-        if (config.output_pvals || config.test_by_unitig || n >= n_cutoff) {
-            if (m[n].first == 1.1) {
-                common::logger->error("Min p-val too small: {}\tn: {}\ts: {}", m[n].first, n, m[n].second);
-                throw std::runtime_error("Test failed");
-            }
-
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            bool in_kmer = false;
+            bool out_kmer = false;
+            PairContainer row;
+            bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
             double pval = 1.1;
-            try {
-                pval = compute_pval(in_sum, out_sum, row);
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(ex_mu);
-                ex = std::current_exception();
+            if (kept[row_i]) {
+                size_t count_in = 0;
+                size_t count_out = 0;
+                for (const auto &[j, raw_c] : raw_row) {
+                    uint64_t c = raw_c;
+                    if (count_maps.size())
+                        c = count_maps[j].find(c)->second.first;
+
+                    row.emplace_back(j, c);
+                    if (groups[j]) {
+                        out_sum += c;
+                        ++count_out;
+                    } else {
+                        in_sum += c;
+                        ++count_in;
+                    }
+                }
+
+                if (count_in + count_out >= config.min_recurrence) {
+                    double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                    in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                    out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
+                }
+            } else {
+                if (keep_all_pvals) {
+                    auto &pvals = pvals_buckets[bucket_idx];
+                    pvals.push_back(bit_cast<uint64_t>(pval));
+                }
                 return;
             }
 
-            if (pval < 1.1 && m[n].first - pval > 1e-10) {
-                common::logger->error("Min p-val estimate too high: min {} > cur {}\tn: {}\ttest: {}", m[n].first, pval, n, config.test_type);
-                throw std::runtime_error("Test failed");
+            size_t n = in_sum + out_sum;
+            if (!in_kmer && !out_kmer) {
+                row.clear();
+                n = 0;
             }
 
-            if (config.test_type != "notest" && (config.output_pvals || config.test_by_unitig)) {
-                bucket_idx = std::min(bucket_idx, pvals_buckets.size() - 1);
-                auto &pvals = pvals_buckets[bucket_idx];
-                pvals.push_back(bit_cast<uint64_t>(pval));
-            }
+            if (keep_all_pvals || n >= n_cutoff) {
+                if (m[n].first == 1.1) {
+                    common::logger->error("Min p-val too small: {}\tn: {}\ts: {}", m[n].first, n, m[n].second);
+                    throw std::runtime_error("Test failed");
+                }
 
-            if (!config.test_by_unitig && in_kmer != out_kmer && pval * k < config.family_wise_error_rate) {
-                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                bool use_atomic = parallel && (node % 64 == 0);
-                set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
-            }
-        }
-    }, false);
+                try {
+                    pval = compute_pval(in_sum, out_sum, row);
+                } catch (...) {
+                    std::lock_guard<std::mutex> lock(ex_mu);
+                    ex = std::current_exception();
+                    return;
+                }
 
-    std::atomic_thread_fence(std::memory_order_acquire);
+                if (pval < 1.1 && m[n].first - pval > 1e-10) {
+                    common::logger->error("Min p-val estimate too high: min {} > cur {}\tn: {}\ttest: {}", m[n].first, pval, n, config.test_type);
+                    throw std::runtime_error("Test failed");
+                }
 
-    if (ex)
-        std::rethrow_exception(ex);
+                if (config.test_type != "notest" && keep_all_pvals) {
+                    auto &pvals = pvals_buckets[bucket_idx];
+                    pvals.push_back(bit_cast<uint64_t>(pval));
+                }
 
-    deallocate();
-
-    std::vector<size_t> boundaries;
-    boundaries.reserve(pvals_buckets.size() + 1);
-    boundaries.emplace_back(0);
-    for (size_t i = 0; i < pvals_buckets.size(); ++i) {
-        boundaries.emplace_back(boundaries.back() + pvals_buckets[i].size());
-    }
-
-    if (config.test_by_unitig) {
-        std::vector<std::pair<double, size_t>> comb_m;
-        std::mutex pval_mu;
-
-        common::logger->trace("Allocating k-mer bitmasks");
-        indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
-        indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
-
-        common::logger->trace("Combining p-values within unitigs");
-        MaskedDeBruijnGraph clean_masked_graph(
-            graph_ptr,
-            [&](node_index node) {
-                return node != DeBruijnGraph::npos
-                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
-            },
-            true,
-            is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
-        );
-
-        auto dist = boost::math::cauchy();
-
-        std::atomic_thread_fence(std::memory_order_release);
-        clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
-            double stat = 0;
-            double stat_min = 0;
-            int64_t comb_eff_size = 0;
-            size_t comb_n = 0;
-            std::vector<size_t> bucket_idxs;
-            bucket_idxs.reserve(path.size());
-            for (node_index node : path) {
-                bucket_idxs.emplace_back(0);
-                for (size_t i = 0; i < boundaries.size(); ++i) {
-                    if (boundaries[i] > node)
-                        break;
-
-                    ++bucket_idxs.back();
+                if (!config.test_by_unitig && in_kmer != out_kmer && pval * k < config.family_wise_error_rate) {
+                    node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                    bool use_atomic = parallel && (node % 64 == 0);
+                    set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
                 }
             }
+        }, false);
 
-            {
-                std::lock_guard<std::mutex> lock(pval_mu);
-                for (size_t i = 0; i < path.size(); ++i) {
-                    node_index node = path[i];
-                    size_t bucket_idx = bucket_idxs[i];
-                    size_t node_shift = node - boundaries[bucket_idx];
-
-                    comb_eff_size += bit_cast<int64_t, uint64_t>(eff_size_buckets[bucket_idx][node_shift]);
-
-                    size_t n = sum_buckets[bucket_idx][node_shift];
-                    comb_n += n;
-
-                    double pval_min = m[n].first;
-                    stat_min += tan((0.5 - pval_min) * M_PI);
-
-                    double pval = bit_cast<double, uint64_t>(pvals_buckets[bucket_idx][node_shift]);
-                    stat += tan((0.5 - pval) * M_PI);
-                }
-            }
-            stat /= path.size();
-            stat_min /= path.size();
-            double comb_pval = boost::math::cdf(boost::math::complement(dist, stat));
-            if (comb_pval < config.family_wise_error_rate && comb_eff_size != 0) {
-                auto *data = comb_eff_size > 0 ? indicator_in.data() : indicator_out.data();
-                for (node_index node : path) {
-                    set_bit(data, node, parallel, MO_RELAXED);
-                }
-            }
-
-            double comb_pval_min = boost::math::cdf(boost::math::complement(dist, stat_min));
-
-            uint64_t k = std::numeric_limits<uint64_t>::max();
-            if (comb_pval_min >= config.family_wise_error_rate) {
-                k = 0;
-            } else if (comb_pval_min > 0) {
-                double lkd = log2(config.family_wise_error_rate) - log2(comb_pval_min);
-                if (lkd <= 64)
-                    k = pow(2.0, lkd);
-
-                if (k == 0) {
-                    common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, comb_pval_min, comb_pval);
-                    throw std::runtime_error("Min failed");
-                }
-            }
-
-            uint64_t comb_pval_enc = bit_cast<uint64_t, double>(comb_pval);
-            size_t bucket_idx = bucket_idxs[0];
-
-            std::lock_guard<std::mutex> lock(pval_mu);
-            if (comb_n >= comb_m.size())
-                comb_m.resize(comb_n + 1, std::make_pair(1.1, 0));
-
-            assert(comb_m[comb_n].first == 1.1 || comb_m[comb_n].first == comb_pval);
-            comb_m[comb_n].first = comb_pval;
-            ++comb_m[comb_n].second;
-            pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
-
-            // TODO: how do I only output one p-value per unitig?
-            // if (config.output_pvals) {
-            //     for (size_t i = 1; i < path.size(); ++i) {
-            //         size_t bucket_idx = bucket_idxs[i];
-            //         pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
-            //     }
-            // }
-        }, num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        eff_size_buckets.resize(0);
-        tmp_eff_buckets.resize(0);
-        sum_buckets.resize(0);
-        tmp_sum_buckets.resize(0);
+        if (ex)
+            std::rethrow_exception(ex);
 
-        std::tie(k, n_cutoff) = correct_pvals(comb_m);
-        auto b_it = boundaries.begin();
-        call_ones(indicator_in, [&](node_index node) {
-            for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
-            --b_it;
-            size_t bucket_idx = b_it - boundaries.begin();
-            size_t node_idx = node - *b_it;
-            const auto &pval = pvals_buckets[bucket_idx][node_idx];
-            if (pval * k >= config.family_wise_error_rate)
-                unset_bit(indicator_in.data(), node, parallel, MO_RELAXED);
-        });
-        b_it = boundaries.begin();
-        call_ones(indicator_out, [&](node_index node) {
-            for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
-            --b_it;
-            size_t bucket_idx = b_it - boundaries.begin();
-            size_t node_idx = node - *b_it;
-            const auto &pval = pvals_buckets[bucket_idx][node_idx];
-            if (pval * k >= config.family_wise_error_rate)
-                unset_bit(indicator_out.data(), node, parallel, MO_RELAXED);
-        });
+        deallocate();
+
+        std::vector<size_t> boundaries;
+        boundaries.reserve(pvals_buckets.size() + 1);
+        boundaries.emplace_back(0);
+        for (size_t i = 0; i < pvals_buckets.size(); ++i) {
+            boundaries.emplace_back(boundaries.back() + pvals_buckets[i].size());
+        }
+
+        if (config.test_by_unitig) {
+            std::vector<std::pair<double, size_t>> comb_m;
+            std::mutex pval_mu;
+
+            common::logger->trace("Allocating k-mer bitmasks");
+            indicator_in = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+            indicator_out = sdsl::bit_vector(graph_ptr->max_index() + 1, false);
+
+            common::logger->trace("Combining p-values within unitigs");
+            MaskedDeBruijnGraph clean_masked_graph(
+                graph_ptr,
+                [&](node_index node) {
+                    return node != DeBruijnGraph::npos
+                            && kept[AnnotatedDBG::graph_to_anno_index(node)];
+                },
+                true,
+                is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+            );
+
+            auto dist = boost::math::cauchy();
+
+            std::atomic_thread_fence(std::memory_order_release);
+            clean_masked_graph.call_unitigs([&](const std::string&, const auto &path) {
+                double stat = 0;
+                double stat_min = 0;
+                int64_t comb_eff_size = 0;
+                size_t comb_n = 0;
+                std::vector<size_t> bucket_idxs;
+                bucket_idxs.reserve(path.size());
+                for (node_index node : path) {
+                    bucket_idxs.emplace_back(0);
+                    for (size_t i = 0; i < boundaries.size(); ++i) {
+                        if (boundaries[i] > node)
+                            break;
+
+                        ++bucket_idxs.back();
+                    }
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(pval_mu);
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        node_index node = path[i];
+                        size_t bucket_idx = bucket_idxs[i];
+                        size_t node_shift = node - boundaries[bucket_idx];
+
+                        comb_eff_size += bit_cast<int64_t, uint64_t>(eff_size_buckets[bucket_idx][node_shift]);
+
+                        size_t n = sum_buckets[bucket_idx][node_shift];
+                        comb_n += n;
+
+                        double pval_min = m[n].first;
+                        stat_min += tan((0.5 - pval_min) * M_PI);
+
+                        double pval = bit_cast<double, uint64_t>(pvals_buckets[bucket_idx][node_shift]);
+                        stat += tan((0.5 - pval) * M_PI);
+                    }
+                }
+                stat /= path.size();
+                stat_min /= path.size();
+                double comb_pval = boost::math::cdf(boost::math::complement(dist, stat));
+                if (comb_pval < config.family_wise_error_rate && comb_eff_size != 0) {
+                    auto *data = comb_eff_size > 0 ? indicator_in.data() : indicator_out.data();
+                    for (node_index node : path) {
+                        set_bit(data, node, parallel, MO_RELAXED);
+                    }
+                }
+
+                double comb_pval_min = boost::math::cdf(boost::math::complement(dist, stat_min));
+
+                uint64_t k = std::numeric_limits<uint64_t>::max();
+                if (comb_pval_min >= config.family_wise_error_rate) {
+                    k = 0;
+                } else if (comb_pval_min > 0) {
+                    double lkd = log2(config.family_wise_error_rate) - log2(comb_pval_min);
+                    if (lkd <= 64)
+                        k = pow(2.0, lkd);
+
+                    if (k == 0) {
+                        common::logger->error("k: {}\tlog k: {}\tpval_min: {}\tpval: {}", k, lkd, comb_pval_min, comb_pval);
+                        throw std::runtime_error("Min failed");
+                    }
+                }
+
+                uint64_t comb_pval_enc = bit_cast<uint64_t, double>(comb_pval);
+                size_t bucket_idx = bucket_idxs[0];
+
+                std::lock_guard<std::mutex> lock(pval_mu);
+                if (comb_n >= comb_m.size())
+                    comb_m.resize(comb_n + 1, std::make_pair(1.1, 0));
+
+                assert(comb_m[comb_n].first == 1.1 || comb_m[comb_n].first == comb_pval);
+                comb_m[comb_n].first = comb_pval;
+                ++comb_m[comb_n].second;
+                pvals_buckets[bucket_idx][path[0] - boundaries[bucket_idx]] = comb_pval_enc;
+
+                // TODO: how do I only output one p-value per unitig?
+                // if (config.output_pvals) {
+                //     for (size_t i = 1; i < path.size(); ++i) {
+                //         size_t bucket_idx = bucket_idxs[i];
+                //         pvals_buckets[bucket_idx][path[i] - boundaries[bucket_idx]] = nullpval;
+                //     }
+                // }
+            }, num_threads);
+            std::atomic_thread_fence(std::memory_order_acquire);
+
+            eff_size_buckets.resize(0);
+            tmp_eff_buckets.resize(0);
+            sum_buckets.resize(0);
+            tmp_sum_buckets.resize(0);
+
+            std::tie(k, n_cutoff) = correct_pvals(comb_m);
+            auto b_it = boundaries.begin();
+            call_ones(indicator_in, [&](node_index node) {
+                for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
+                --b_it;
+                size_t bucket_idx = b_it - boundaries.begin();
+                size_t node_idx = node - *b_it;
+                const auto &pval = pvals_buckets[bucket_idx][node_idx];
+                if (pval * k >= config.family_wise_error_rate)
+                    unset_bit(indicator_in.data(), node, parallel, MO_RELAXED);
+            });
+            b_it = boundaries.begin();
+            call_ones(indicator_out, [&](node_index node) {
+                for ( ; b_it != boundaries.end() && *b_it <= node; ++b_it) {}
+                --b_it;
+                size_t bucket_idx = b_it - boundaries.begin();
+                size_t node_idx = node - *b_it;
+                const auto &pval = pvals_buckets[bucket_idx][node_idx];
+                if (pval * k >= config.family_wise_error_rate)
+                    unset_bit(indicator_out.data(), node, parallel, MO_RELAXED);
+            });
+        }
+    } else {
+        deallocate();
     }
 
     std::unique_ptr<utils::TempFile> tmp_file;
