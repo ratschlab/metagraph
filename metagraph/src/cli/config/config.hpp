@@ -112,7 +112,9 @@ class Config {
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
     bool alignment_post_chain = false;
+    bool alignment_global_xdrop = true;
     bool alignment_seed_complexity_filter = true;
+    bool alignment_all_suffix_matches = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;
@@ -124,12 +126,12 @@ class Config {
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
-    size_t alignment_num_alternative_paths = 1;
+    size_t alignment_num_alternative_paths = std::numeric_limits<size_t>::max();
     size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = 1000;
 
-    double alignment_rel_score_cutoff = 0.95;
+    double alignment_rel_score_cutoff = 0.00;
 
     double discovery_fraction = 0.7;
     double presence_fraction = 0.0;

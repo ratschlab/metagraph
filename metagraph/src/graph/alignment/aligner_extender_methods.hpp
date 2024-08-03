@@ -191,8 +191,9 @@ class DefaultColumnExtender : public SeedFilteringExtender {
      */
 
     // stop considering new points from which to start backtracking
-    virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
-        return extensions.size() >= config_.num_alternative_paths;
+    virtual bool terminate_backtrack_start(score_t start_score,
+                                           const std::vector<Alignment> &extensions) const {
+        return extensions.size() && start_score < extensions.back().get_score();
     }
 
     // skip a backtracking start point
@@ -205,6 +206,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> & /* trace */,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -213,7 +215,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                  score_t extra_score,
                                  const std::function<void(Alignment&&)> &callback) {
         callback(construct_alignment(ops, clipping, window, path, match, end_score,
-                                     offset, extra_score));
+                                     offset, score_trace, extra_score));
     }
 
     Alignment construct_alignment(Cigar cigar,
@@ -223,6 +225,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   std::string match,
                                   score_t score,
                                   size_t offset,
+                                  const std::vector<score_t> &score_trace,
                                   score_t extra_score) const;
 
   private:

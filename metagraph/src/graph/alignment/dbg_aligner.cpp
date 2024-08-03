@@ -102,50 +102,89 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
     return ret_val;
 }
 
-void filter_seed(const Alignment &prev, Alignment &a) {
-    if (prev.label_columns.empty()) {
-        a = Alignment();
-    } else if (prev.label_coordinates.empty()) {
-        Vector<Alignment::Column> diff;
-        std::set_difference(a.label_columns.begin(),
-                            a.label_columns.end(),
-                            prev.label_columns.begin(),
-                            prev.label_columns.end(),
-                            std::back_inserter(diff));
-        if (diff.empty()) {
-            a = Alignment();
-        } else {
-            std::swap(a.label_columns, diff);
-        }
-    } else {
-        Vector<Alignment::Column> diff;
-        Vector<Alignment::Tuple> diff_coords;
-        utils::match_indexed_values(
-            a.label_columns.begin(), a.label_columns.end(),
-            a.label_coordinates.begin(),
-            prev.label_columns.begin(), prev.label_columns.end(),
-            prev.label_coordinates.begin(),
-            [&](auto col, const auto &coords, const auto &other_coords) {
-                Alignment::Tuple set;
-                // filter_seed: clear the seed a if it has no unexplored labels or coordinates
-                // relative to the seed prev
-                std::set_difference(coords.begin(), coords.end(),
-                                    other_coords.begin(), other_coords.end(),
-                                    std::back_inserter(set));
-                if (set.size()) {
-                    diff.push_back(col);
-                    diff_coords.push_back(std::move(set));
-                }
-            }
-        );
-        if (diff.empty()) {
-            a = Alignment();
-        } else {
-            std::swap(a.label_columns, diff);
-            std::swap(a.label_coordinates, diff_coords);
-        }
+Alignment filter_seed(const Alignment &prev, Alignment &a) {
+    if (!prev.label_columns) {
+        Alignment filtered;
+        std::swap(filtered, a);
+        return filtered;
     }
 
+    if (prev.label_coordinates.empty()) {
+        Vector<Alignment::Column> inter;
+        Vector<Alignment::Column> diff;
+        utils::set_intersection_difference(a.get_columns().begin(),
+                                           a.get_columns().end(),
+                                           prev.get_columns().begin(),
+                                           prev.get_columns().end(),
+                                           std::back_inserter(inter),
+                                           std::back_inserter(diff));
+        Alignment filtered;
+
+        if (inter.size()) {
+            filtered = a;
+            filtered.set_columns(std::move(inter));
+        }
+
+        if (diff.empty()) {
+            a = Alignment();
+        } else {
+            a.set_columns(std::move(diff));
+        }
+
+        return filtered;
+    }
+
+    Vector<Alignment::Column> diff;
+    Vector<Alignment::Tuple> diff_coords;
+    Vector<Alignment::Column> inter;
+    Vector<Alignment::Tuple> inter_coords;
+    utils::match_indexed_values(
+        a.get_columns().begin(), a.get_columns().end(),
+        a.label_coordinates.begin(),
+        prev.get_columns().begin(), prev.get_columns().end(),
+        prev.label_coordinates.begin(),
+        [&](auto col, const auto &coords, const auto &other_coords) {
+            Alignment::Tuple set_intersection;
+            Alignment::Tuple set_diff;
+            // filter_seed: clear the seed a if it has no unexplored labels or coordinates
+            // relative to the seed prev
+            utils::set_intersection_difference(coords.begin(), coords.end(),
+                                               other_coords.begin(), other_coords.end(),
+                                               std::back_inserter(set_intersection),
+                                               std::back_inserter(set_diff));
+            if (set_intersection.size()) {
+                inter.push_back(col);
+                inter_coords.push_back(std::move(set_intersection));
+            }
+
+            if (set_diff.size()) {
+                diff.push_back(col);
+                diff_coords.push_back(std::move(set_diff));
+            }
+        },
+        [&](auto col, const auto &coords) {
+            diff.push_back(col);
+            diff_coords.push_back(coords);
+        },
+        [&](auto, const auto&) {}
+    );
+
+    Alignment filtered;
+
+    if (inter.size()) {
+        filtered = a;
+        filtered.set_columns(std::move(inter));
+        std::swap(filtered.label_coordinates, inter_coords);
+    }
+
+    if (diff.empty()) {
+        a = Alignment();
+    } else {
+        a.set_columns(std::move(diff));
+        std::swap(a.label_coordinates, diff_coords);
+    }
+
+    return filtered;
 }
 
 // Extend the alignment first until it reaches the end of the alignment second.
@@ -193,8 +232,12 @@ bool align_connect(const DeBruijnGraph &graph,
 template <class Seeder, class Extender, class AlignmentCompare>
 auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
+                const std::vector<AlignmentResults> &wrapped_seqs,
+                std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
+    discarded_seeds.clear();
+    discarded_seeds.resize(seq_batch.size());
+
     BatchSeeders result;
     result.reserve(seq_batch.size());
 
@@ -215,15 +258,13 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         std::shared_ptr<ISeeder> seeder
             = std::make_shared<Seeder>(graph_, this_query, false,
                                        std::vector<node_index>(nodes), config_);
-        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
-            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
 
         std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
+        if (graph_.get_mode() != DeBruijnGraph::CANONICAL
+                && config_.forward_and_reverse_complement) {
             nodes_rc = nodes;
             std::string dummy(query);
             if (config_.max_seed_length >= graph_.get_k()) {
@@ -237,8 +278,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
-            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
-                seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
@@ -257,7 +296,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         paths.emplace_back(query);
     }
 
-    auto seeders = build_seeders(seq_batch, paths);
+    std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> discarded_seeds;
+    auto seeders = build_seeders(seq_batch, paths, discarded_seeds);
     assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
@@ -271,14 +311,55 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
-            aggregator.add_alignment(std::move(alignment));
+            if (alignment.get_score() >= config_.min_path_score)
+                aggregator.add_alignment(std::move(alignment));
         };
 
-        auto get_min_path_score = [&](const Alignment &seed) {
-            return std::max(config_.min_path_score,
-                            seed.label_columns.size()
-                                ? aggregator.get_score_cutoff(seed.label_columns)
-                                : aggregator.get_global_cutoff());
+        std::vector<Alignment> discarded_alignments[2];
+        auto add_discarded = [&](Alignment&& alignment) {
+            assert(alignment.get_nodes().size());
+            bool orientation = alignment.get_orientation();
+            discarded_alignments[orientation].emplace_back(std::move(alignment));
+        };
+
+        for (auto &seed : discarded_seeds[i].first) {
+            add_discarded(Alignment(seed, config_));
+        }
+        for (auto &seed : discarded_seeds[i].second) {
+            add_discarded(Alignment(seed, config_));
+        }
+
+        DEBUG_LOG("Length: {}; Length cutoff: {}; Fwd num matches: {}"
+#if ! _PROTEIN_GRAPH
+            "; Bwd num matches: {}"
+#endif
+            ,
+            query.size(),
+            static_cast<size_t>(ceil(query.size() * config_.min_exact_match)),
+            seeder->get_num_matches()
+#if ! _PROTEIN_GRAPH
+            , seeder_rc ? seeder_rc->get_num_matches() : 0
+#endif
+        );
+
+        if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
+            for (auto &seed : seeder->get_seeds()) {
+                add_discarded(Alignment(seed, config_));
+            }
+            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+        }
+
+#if ! _PROTEIN_GRAPH
+        if (seeder_rc && seeder_rc->get_num_matches() < query.size() * config_.min_exact_match) {
+            for (auto &seed : seeder_rc->get_seeds()) {
+                add_discarded(Alignment(seed, config_));
+            }
+            seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+        }
+#endif
+
+        auto get_min_path_score = [&]() {
+            return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
 
         std::string_view this_query = paths[i].get_query(false);
@@ -287,36 +368,87 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
-        if (seeder_rc) {
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL || seeder_rc) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
 
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
-                                      add_alignment, get_min_path_score);
+                                      add_alignment, add_discarded, get_min_path_score);
 
             num_seeds += seeds;
             num_extensions += extensions + extender_rc.num_extensions();
             num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
 
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false);
         }
 #else
         if (config_.chain_alignments) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
-                                      add_alignment, get_min_path_score);
+                                      add_alignment, add_discarded, get_min_path_score);
 
             num_seeds += seeds;
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false);
         }
 #endif
+
+        for (size_t i = 0; i < 2; ++i) {
+            if (discarded_alignments[i].empty())
+                continue;
+
+            DEBUG_LOG("Merging discarded seeds into MEMs per label");
+            std::vector<Alignment> split_seeds;
+            for (auto &a : discarded_alignments[i]) {
+                if (!a.has_annotation()) {
+                    split_seeds.emplace_back(std::move(a));
+                } else {
+                    for (auto c : a.get_columns()) {
+                        auto &seed = split_seeds.emplace_back(a);
+                        seed.set_columns(Vector<Alignment::Column>(1, c));
+                    }
+                }
+            }
+            discarded_alignments[i].clear();
+
+            std::sort(split_seeds.begin(), split_seeds.end(), [](const auto &a, const auto &b) {
+                return a.label_columns < b.label_columns;
+            });
+
+            auto last_it = split_seeds.begin();
+            while (last_it != split_seeds.end()) {
+                auto cur_it = last_it + 1;
+                while (cur_it != split_seeds.end() && cur_it->label_columns == last_it->label_columns) {
+                    ++cur_it;
+                }
+
+                merge_into_mums(graph_, config_, last_it, cur_it, config_.min_seed_length);
+
+                last_it = cur_it;
+            }
+
+            auto end = std::remove_if(split_seeds.begin(), split_seeds.end(),
+                                      [](const auto &a) { return a.empty(); });
+
+            DEBUG_LOG("Merging MEMs by label");
+            if (end != split_seeds.end() && split_seeds[0].has_annotation()) {
+                end = merge_alignments_by_label(split_seeds.begin(), end);
+                assert(std::all_of(split_seeds.begin(), end, [this](const auto &a) {
+                    return a.is_valid(graph_, &config_);
+                }));
+            }
+
+            DEBUG_LOG("Done merging");
+            std::for_each(std::make_move_iterator(split_seeds.begin()),
+                          std::make_move_iterator(end),
+                          add_alignment);
+        }
 
         num_explored_nodes += extender.num_explored_nodes();
         num_extensions += extender.num_extensions();
@@ -325,18 +457,78 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
-        for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
-                                                                   paths[i].get_query(false),
-                                                                   paths[i].get_query(true),
-                                                                   config_,
-                                                                   graph_.get_k() - 1)) {
-            assert(alignment.is_valid(graph_, &config_));
-            if (alignment.get_score() > best_score) {
-                best_score = alignment.get_score();
-                query_coverage = alignment.get_query_view().size();
-            }
-            paths[i].emplace_back(std::move(alignment));
+        auto alns = aggregator.get_alignments();
+
+        for (const auto &aln : alns) {
+            best_score = std::max(best_score, aln.get_score());
+            query_coverage = std::max(query_coverage,
+                                      aln.get_query_view().size());
         }
+
+        if (alns.size() && config_.post_chain_alignments) {
+            tsl::hopscotch_map<Alignment::Column, size_t> best_label_counts;
+            std::vector<Alignment> rest;
+            for (const auto &a : alns) {
+                if (a.get_clipping() || a.get_end_clipping()) {
+                    rest.emplace_back(a);
+
+                    for (auto c : a.get_columns()) {
+                        auto it = best_label_counts.try_emplace(c, a.get_sequence().size()).first;
+                        it.value() = std::max(it.value(), a.get_sequence().size());
+                    }
+                }
+            }
+
+            std::vector<Alignment> chains;
+            size_t last_size = 0;
+            chain_alignments(*this, std::move(rest),
+                [&](Alignment::Column col, size_t aln_size, score_t score) {
+                    if (score < config_.min_path_score)
+                        return false;
+
+                    auto it = best_label_counts.find(col);
+                    assert(it != best_label_counts.end());
+                    if (aln_size > it.value()) {
+                        it.value() = aln_size;
+                        return true;
+                    }
+
+                    return score >= best_score;
+                },
+                [&](auto&& alignment) {
+                    assert(alignment.is_valid(graph_, &config_));
+                    assert(alignment.get_score() >= config_.min_path_score);
+                    best_score = std::max(best_score, alignment.get_score());
+                    query_coverage = std::max(query_coverage,
+                                              alignment.get_query_view().size());
+                    if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
+                        chains.erase(merge_alignments_by_label(chains.begin() + last_size,
+                                                               chains.end()),
+                                     chains.end());
+                        assert(std::all_of(chains.begin() + last_size, chains.end(),
+                                           [this](const auto &a) {
+                                               return a.is_valid(graph_, &config_);
+                                           }));
+                        last_size = chains.size();
+                    }
+
+                    chains.emplace_back(std::move(alignment));
+                }
+            );
+
+            if (chains.size()) {
+                chains.insert(chains.end(),
+                              std::make_move_iterator(alns.begin()),
+                              std::make_move_iterator(alns.end()));
+                std::sort(chains.begin(), chains.end(), AlignmentCompare());
+                std::reverse(chains.begin(), chains.end());
+                std::swap(chains, alns);
+            }
+        }
+
+        std::for_each(std::make_move_iterator(alns.begin()),
+                      std::make_move_iterator(alns.end()),
+                      [&](auto&& a) { paths[i].emplace_back(std::move(a)); });
 
         double explored_nodes_d = num_explored_nodes;
         double explored_nodes_per_kmer =
@@ -361,15 +553,19 @@ template <class Seeder, class Extender>
 void align_core(const Seeder &seeder,
                 Extender &extender,
                 const std::function<void(Alignment&&)> &callback,
-                const std::function<score_t(const Alignment&)> &get_min_path_score,
+                const std::function<void(Alignment&&)> &callback_discarded,
+                const std::function<score_t()> &get_min_path_score,
                 bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
+    std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
 
     for (size_t i = 0; i < seeds.size(); ++i) {
         if (seeds[i].empty())
             continue;
 
-        score_t min_path_score = get_min_path_score(seeds[i]);
+        score_t min_path_score = get_min_path_score();
 
         for (auto&& extension : extender.get_extensions(seeds[i], min_path_score,
                                                         force_fixed_seed)) {
@@ -377,8 +573,13 @@ void align_core(const Seeder &seeder,
         }
 
         for (size_t j = i + 1; j < seeds.size(); ++j) {
-            if (seeds[j].size() && !extender.check_seed(seeds[j]))
-                filter_seed(seeds[i], seeds[j]);
+            if (seeds[j].size() && !extender.check_seed(seeds[j])) {
+                auto filtered = filter_seed(seeds[i], seeds[j]);
+                if (filtered.size()) {
+                    callback_discarded(std::move(filtered));
+                    callback_discarded(Alignment(seeds[i]));
+                }
+            }
         }
     }
 }
@@ -534,11 +735,12 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_both_directions(std::string_view forward,
                         std::string_view reverse,
                         const ISeeder &forward_seeder,
-                        const ISeeder &reverse_seeder,
+                        std::shared_ptr<ISeeder> reverse_seeder,
                         Extender &forward_extender,
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
-                        const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+                        const std::function<void(Alignment&&)> &callback_discarded,
+                        const std::function<score_t()> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
@@ -551,12 +753,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto fwd_seeds = forward_seeder.get_seeds();
 
-#if ! _PROTEIN_GRAPH
-        auto bwd_seeds = reverse_seeder.get_seeds();
-#else
         std::vector<Seed> bwd_seeds;
-        std::ignore = reverse_seeder;
-#endif
+        if (reverse_seeder)
+            bwd_seeds = reverse_seeder->get_seeds();
 
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
@@ -564,10 +763,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
         tsl::hopscotch_set<Alignment::Column> all_columns;
         for (const auto &seed : fwd_seeds) {
-            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+            all_columns.insert(seed.get_columns().begin(), seed.get_columns().end());
         }
         for (const auto &seed : bwd_seeds) {
-            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+            all_columns.insert(seed.get_columns().begin(), seed.get_columns().end());
         }
 
         try {
@@ -604,7 +803,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                      : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
-                        auto cur_columns = aln.label_columns;
+                        const auto &cur_columns = aln.get_columns();
                         if (!aggregator.add_alignment(std::move(aln))) {
                             finished_columns.insert(cur_columns.begin(), cur_columns.end());
                         }
@@ -616,7 +815,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         } catch (const early_term&) {}
 
         for (Alignment &alignment : aggregator.get_alignments()) {
-            if (alignment.get_score() < get_min_path_score(alignment))
+            if (alignment.get_score() < get_min_path_score())
                 continue;
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL && alignment.get_orientation()) {
@@ -639,7 +838,17 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
     auto fwd_seeds = forward_seeder.get_alignments();
-    auto bwd_seeds = reverse_seeder.get_alignments();
+    std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
+
+    std::vector<Alignment> bwd_seeds;
+    if (reverse_seeder)
+        bwd_seeds = reverse_seeder->get_alignments();
+
+    std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));
@@ -658,8 +867,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         std::string_view query_rc,
                         std::vector<Alignment>&& seeds,
                         Extender &fwd_extender,
-                        Extender &bwd_extender,
-                        const std::function<void(Alignment&&)> &callback) {
+                        Extender &bwd_extender) {
         fwd_extender.set_graph(graph_);
         bwd_extender.set_graph(rc_graph);
         num_seeds += seeds.size();
@@ -676,7 +884,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
             std::vector<Alignment> rc_of_alignments;
             for (Alignment &path : extensions) {
-                if (path.get_score() >= get_min_path_score(path)) {
+                if (path.get_score() >= get_min_path_score()) {
                     if (is_reversible(path)) {
                         Alignment out_path = path;
                         out_path.reverse_complement(graph_, query_rc);
@@ -697,8 +905,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     continue;
                 }
 
-                // Remove any character skipping from the end so that the
-                // alignment can proceed
                 assert(path.get_end_clipping());
                 assert(path.is_valid(rc_graph, &config_));
 
@@ -721,36 +927,41 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
 
                     assert(path.is_valid(graph_, &config_));
-
                     callback(std::move(path));
                 },
+                [](auto&&) {},
                 get_min_path_score,
                 true /* alignments must have the seed as a prefix */
             );
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {
-                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j]))
-                    filter_seed(seeds[i], seeds[j]);
+                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j])) {
+                    auto filtered = filter_seed(seeds[i], seeds[j]);
+                    if (filtered.size()) {
+                        callback_discarded(std::move(filtered));
+                        callback_discarded(Alignment(seeds[i]));
+                    }
+                }
             }
         }
     };
 
     size_t fwd_num_matches = forward_seeder.get_num_matches();
-    size_t bwd_num_matches = reverse_seeder.get_num_matches();
+    size_t bwd_num_matches = reverse_seeder ? reverse_seeder->get_num_matches() : 0;
 
     if (fwd_num_matches >= bwd_num_matches) {
         aln_both(forward, reverse, std::move(fwd_seeds),
-                 forward_extender, reverse_extender, callback);
+                 forward_extender, reverse_extender);
         if (bwd_num_matches >= fwd_num_matches * config_.rel_score_cutoff) {
             aln_both(reverse, forward, std::move(bwd_seeds),
-                     reverse_extender, forward_extender, callback);
+                     reverse_extender, forward_extender);
         }
     } else {
         aln_both(reverse, forward, std::move(bwd_seeds),
-                 reverse_extender, forward_extender, callback);
+                 reverse_extender, forward_extender);
         if (fwd_num_matches >= bwd_num_matches * config_.rel_score_cutoff) {
             aln_both(forward, reverse, std::move(fwd_seeds),
-                     forward_extender, reverse_extender, callback);
+                     forward_extender, reverse_extender);
         }
     }
 

@@ -53,7 +53,9 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
         .post_chain_alignments = config.alignment_post_chain,
+        .global_xdrop = config.alignment_global_xdrop,
         .seed_complexity_filter = config.alignment_seed_complexity_filter,
+        .all_suffix_matches = config.alignment_all_suffix_matches,
         .alignment_edit_distance = config.alignment_edit_distance,
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
@@ -62,6 +64,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
     };
 
     c.set_scoring_matrix();
+    c.set_node_insertion_penalty(graph.get_k());
 
     c.print_summary();
 

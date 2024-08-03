@@ -21,7 +21,7 @@ class AnnotationBuffer {
     typedef AnnotatedDBG::Annotator Annotator;
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment::Tuple Tuple;
-    typedef Alignment::Columns Columns;
+    typedef Vector<Alignment::Column> Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
@@ -64,6 +64,9 @@ class AnnotationBuffer {
         assert(i < column_sets_.size());
         return column_sets_.data()[i];
     }
+
+    bool labels_valid(const Alignment &alignment) const;
+    bool check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const;
 
   private:
     const DeBruijnGraph &graph_;

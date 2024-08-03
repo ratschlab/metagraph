@@ -235,12 +235,16 @@ Config::Config(int argc, char *argv[]) {
             align_sequences = true;
         } else if (!strcmp(argv[i], "--align-only-forwards")) {
             align_only_forwards = true;
+        } else if (!strcmp(argv[i], "--align-all-suffix-matches")) {
+            alignment_all_suffix_matches = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
+        } else if (!strcmp(argv[i], "--align-local-xdrop")) {
+            alignment_global_xdrop = false;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
         } else if (!strcmp(argv[i], "--num-chars")) {
@@ -518,12 +522,6 @@ Config::Config(int argc, char *argv[]) {
         std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
         print_usage_and_exit = true;
     }
-
-    // only the best alignment is used in query
-    // |alignment_num_alternative_paths| must be set to 1
-    if (identity == QUERY && align_sequences
-                          && alignment_num_alternative_paths != 1)
-        print_usage_and_exit = true;
 
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
@@ -1059,21 +1057,22 @@ if (advanced) {
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
-            fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
+            fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\tdisable the filter for low-complexity seeds. [off]\n");
+            fprintf(stderr, "\t   --align-all-suffix-matches \t\t\tat each position in the query, take all suffix matches. [off]\n");
 }
-            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe maximum number of paths to report per seed [inf]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
-            fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
+            fprintf(stderr, "\t   --align-post-chain \t\t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.00]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
-            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.95]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -1081,7 +1080,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
@@ -1329,6 +1328,7 @@ if (advanced) {
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-all-suffix-matches \t\t\tat each position in the query, take all suffix matches. [off]\n");
 }
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
@@ -1340,9 +1340,9 @@ if (advanced) {
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\n");
 if (advanced) {
-            fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");
-            fprintf(stderr, "\t   --max-hull-forks [INT]\tmaximum number of forks to take when expanding query graph [4]\n");
-            fprintf(stderr, "\t   --max-hull-depth [INT]\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
+            fprintf(stderr, "\t   --batch-align \t\t\t\talign against query graph [off]\n");
+            fprintf(stderr, "\t   --max-hull-forks [INT]\t\t\tmaximum number of forks to take when expanding query graph [4]\n");
+            fprintf(stderr, "\t   --max-hull-depth [INT]\t\t\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
             fprintf(stderr, "\n");
 }
             fprintf(stderr, "Advanced options for scoring:\n");
@@ -1352,7 +1352,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
 }
             fprintf(stderr, "\n");

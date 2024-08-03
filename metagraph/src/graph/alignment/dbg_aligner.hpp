@@ -66,7 +66,8 @@ class DBGAligner : public IDBGAligner {
     typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
-                                       const std::vector<AlignmentResults> &wrapped_seqs) const;
+                                       const std::vector<AlignmentResults> &wrapped_seqs,
+                                       std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const;
 
   private:
     /**
@@ -81,11 +82,12 @@ class DBGAligner : public IDBGAligner {
     align_both_directions(std::string_view forward,
                           std::string_view reverse,
                           const ISeeder &forward_seeder,
-                          const ISeeder &reverse_seeder,
+                          std::shared_ptr<ISeeder> reverse_seeder,
                           Extender &forward_extender,
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
-                          const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+                          const std::function<void(Alignment&&)> &callback_discarded,
+                          const std::function<score_t()> &get_min_path_score) const;
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.

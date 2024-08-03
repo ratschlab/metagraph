@@ -107,6 +107,7 @@ void LabeledExtender::flush() {
 
         auto cur_labels = annotation_buffer_.get_labels(table_elem.node);
         assert(cur_labels);
+        assert(cur_labels->size());
 
 #ifndef NDEBUG
         if (table[parent_i].offset >= 0
@@ -141,14 +142,15 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         return false;
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
-                    [&](node_index n) {
-                        return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);
-                    }));
+                       [&](node_index n) {
+                           return n == DeBruijnGraph::npos
+                                    || annotation_buffer_.get_labels(n);
+                       }));
 
     // the first node of the seed has already been flushed
     last_flushed_table_i_ = 1;
 
-    remaining_labels_i_ = annotation_buffer_.cache_column_set(seed.label_columns);
+    remaining_labels_i_ = seed.label_columns;
     assert(remaining_labels_i_ != nannot);
     node_labels_.assign(1, remaining_labels_i_);
     base_coords_ = seed.label_coordinates;
@@ -217,7 +219,7 @@ void LabeledExtender
     assert(annotation_buffer_.get_labels(node));
 
     // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+    auto columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
 
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
@@ -226,6 +228,7 @@ void LabeledExtender
         for (const auto &[next, c, score] : outgoing) {
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
+            assert(next_labels->size());
 
             Columns intersect_labels;
             std::set_intersection(columns.begin(), columns.end(),
@@ -250,17 +253,26 @@ void LabeledExtender
     size_t dist = next_offset - graph_->get_k() + 1;
 
     for (const auto &[next, c, score] : outgoing) {
-        const Columns *base_labels = &seed_->label_columns;
+        const Columns *base_labels = &seed_->get_columns();
         const CoordinateSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
             = annotation_buffer_.get_labels_and_coords(next);
 
         assert(next_coords);
+        assert(next_labels);
+        assert(next_labels->size());
 
         // if we are traversing backwards, then negate the coordinate delta
         if (dynamic_cast<const RCDBG*>(graph_)) {
             std::swap(base_labels, next_labels);
             std::swap(base_coords, next_coords);
+        }
+
+        if (next_labels->empty()) {
+            assert(next_offset < graph_->get_k());
+            node_labels_.push_back(node_labels_[table_i]);
+            callback(next, c, score);
+            continue;
         }
 
         // check if at least one label has consistent coordinates
@@ -307,8 +319,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
 
     // if this alignment tree node has been visited previously, ignore it
     assert(remaining_labels_i_);
-    if (!prev_starts.emplace(i).second)
-        return true;
+    prev_starts.emplace(i);
 
     // check if this starting point involves seed labels which have not been considered yet
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);
@@ -327,7 +338,8 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
 
 void LabeledExtender::call_alignments(score_t end_score,
                                       const std::vector<node_index> &path,
-                                      const std::vector<size_t> & /* trace */,
+                                      const std::vector<size_t> &trace,
+                                      const std::vector<score_t> &score_trace,
                                       const Cigar &ops,
                                       size_t clipping,
                                       size_t offset,
@@ -336,8 +348,8 @@ void LabeledExtender::call_alignments(score_t end_score,
                                       score_t extra_score,
                                       const std::function<void(Alignment&&)> &callback) {
     Alignment alignment = construct_alignment(ops, clipping, window, path, match,
-                                              end_score, offset, extra_score);
-    alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+                                              end_score, offset, score_trace, extra_score);
+    alignment.label_encoder = &annotation_buffer_;
 
     auto [base_labels, base_coords]
         = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
@@ -345,10 +357,11 @@ void LabeledExtender::call_alignments(score_t end_score,
     assert(base_labels->size());
 
     if (!clipping)
-        base_labels = &seed_->label_columns;
+        base_labels = &seed_->get_columns();
 
     auto call_alignment = [&]() {
-        assert(alignment.label_columns.size());
+        assert(alignment.label_columns);
+        assert(alignment.label_columns != nannot);
         if (label_diff_.size() && label_diff_.back() == nannot) {
             label_diff_.pop_back();
             remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
@@ -356,11 +369,18 @@ void LabeledExtender::call_alignments(score_t end_score,
             label_diff_ = Columns{};
         }
 
+        alignment.label_encoder = &annotation_buffer_;
         callback(std::move(alignment));
     };
 
+    const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[trace[0]]);
     if (!annotation_buffer_.has_coordinates()) {
-        alignment.label_columns = std::move(label_intersection_);
+        Vector<Alignment::Column> columns;
+        const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+        std::set_intersection(end_labels.begin(), end_labels.end(),
+                              remaining.begin(), remaining.end(),
+                              std::back_inserter(columns));
+        alignment.label_columns = annotation_buffer_.cache_column_set(std::move(columns));
         call_alignment();
         return;
     }
@@ -373,9 +393,9 @@ void LabeledExtender::call_alignments(score_t end_score,
             dist = alignment.get_sequence().size() - seed_->get_sequence().size();
     }
 
-    auto label_it = label_intersection_.begin();
-    auto label_end_it = label_intersection_.end();
-
+    auto label_it = end_labels.begin();
+    auto label_end_it = end_labels.end();
+    Vector<Column> columns;
     if (alignment.get_nodes().size() == 1) {
         auto it = base_labels->begin();
         auto end = base_labels->end();
@@ -387,7 +407,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                 ++it;
                 ++c_it;
             } else {
-                alignment.label_columns.emplace_back(*it);
+                columns.emplace_back(*it);
                 alignment.label_coordinates.emplace_back(*c_it);
                 ++it;
                 ++c_it;
@@ -426,7 +446,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                                             std::back_inserter(overlap),
                                             dist);
                     if (overlap.size()) {
-                        alignment.label_columns.emplace_back(c);
+                        columns.emplace_back(c);
                         alignment.label_coordinates.emplace_back(std::move(overlap));
                     }
                 }
@@ -444,6 +464,7 @@ void LabeledExtender::call_alignments(score_t end_score,
             }
         }
     }
+    alignment.set_columns(std::move(columns));
 
     call_alignment();
 }
@@ -454,7 +475,8 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator) {
+        annotation_buffer_(graph, annotator),
+        max_seed_length_(this->config_.max_seed_length) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
         logger->trace("Coordinates detected. Enabling seed chaining");
@@ -478,9 +500,12 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>::~LabeledAligner() {
 template <class Seeder, class Extender, class AlignmentCompare>
 auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
+                const std::vector<AlignmentResults> &wrapped_seqs,
+                std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const -> BatchSeeders {
     BatchSeeders seeders
-        = DBGAligner<Seeder, Extender, AlignmentCompare>::build_seeders(seq_batch, wrapped_seqs);
+        = DBGAligner<Seeder, Extender, AlignmentCompare>::build_seeders(seq_batch, wrapped_seqs, discarded_seeds);
+
+    assert(discarded_seeds.size() == seq_batch.size());
 
     // now we're going to filter the seeds
     logger->trace("Filtering seeds by label. Cur mem usage {} MB", get_curr_RSS() / 1e6);
@@ -489,6 +514,8 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     size_t num_seeds = 0;
     size_t num_seeds_rc = 0;
+    size_t covered = 0;
+    size_t covered_rc = 0;
 
 #if ! _PROTEIN_GRAPH
     std::vector<bool> has_rc;
@@ -496,6 +523,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
     for (auto &[seeder, seeder_rc] : seeders) {
+        covered += seeder->get_num_matches();
         counted_seeds.emplace_back(seeder->get_seeds(), seeder->get_num_matches());
         seeder.reset();
         num_seeds += counted_seeds.back().first.size();
@@ -511,6 +539,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #if ! _PROTEIN_GRAPH
         has_rc.emplace_back(seeder_rc);
         if (seeder_rc) {
+            covered_rc += seeder_rc->get_num_matches();
             counted_seeds_rc.emplace_back(seeder_rc->get_seeds(),
                                           seeder_rc->get_num_matches());
             seeder_rc.reset();
@@ -520,19 +549,25 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
-    logger->trace("Prefetching labels for {} seeds. Cur mem usage {} MB",
-                  num_seeds + num_seeds_rc, get_curr_RSS() / 1e6);
+    logger->trace("Prefetching labels for {} seeds covering {} characters. Cur mem usage {} MB",
+                  num_seeds + num_seeds_rc,
+                  std::max(covered, covered_rc),
+                  get_curr_RSS() / 1e6);
     annotation_buffer_.fetch_queued_annotations();
     logger->trace("Done prefetching. Cur mem usage {} MB", get_curr_RSS() / 1e6);
 
     size_t num_seeds_left = 0;
     size_t num_seeds_rc_left = 0;
+    size_t num_discarded_seeds = 0;
 
     for (size_t i = 0; i < counted_seeds.size(); ++i) {
         auto &[seeder, seeder_rc] = seeders[i];
         auto &[seeds, num_matching] = counted_seeds[i];
         if (seeds.size()) {
-            num_matching = filter_seeds(seeds);
+            filter_seeds(seeds, discarded_seeds[i].first);
+            if (seeds.empty())
+                num_matching = 0;
+
             num_seeds_left += seeds.size();
         }
 
@@ -542,18 +577,24 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
         if (has_rc[i]) {
             auto &[seeds, num_matching] = counted_seeds_rc[i];
             if (seeds.size()) {
-                num_matching = filter_seeds(seeds);
+                filter_seeds(seeds, discarded_seeds[i].second);
+                if (seeds.empty())
+                    num_matching = 0;
+
                 num_seeds_rc_left += seeds.size();
             }
 
             seeder_rc = make_shared<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
         }
 #endif
+
+        num_discarded_seeds += discarded_seeds[i].first.size() + discarded_seeds[i].second.size();
     }
 
-    logger->trace("Old seed count: {}\tNew seed count: {}",
+    logger->trace("Old seed count: {}\tSeeds to extend: {}\tSeeds to report: {}",
                   num_seeds + num_seeds_rc,
-                  num_seeds_left + num_seeds_rc_left);
+                  num_seeds_left + num_seeds_rc_left,
+                  num_discarded_seeds);
 
     return seeders;
 }
@@ -609,15 +650,17 @@ void matched_intersection(AIt a_begin, AIt a_end, BIt a_c_begin,
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
-size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
-::filter_seeds(std::vector<Seed> &seeds) const {
+void LabeledAligner<Seeder, Extender, AlignmentCompare>
+::filter_seeds(std::vector<Seed> &seeds,
+               std::vector<Seed> &discarded_seeds) const {
     if (seeds.empty())
-        return 0;
+        return;
 
     size_t query_size = seeds[0].get_clipping() + seeds[0].get_end_clipping()
                             + seeds[0].get_query_view().size();
 
     Columns labels;
+    Columns discarded_labels;
 
     {
         VectorMap<Column, sdsl::bit_vector> label_mapper;
@@ -642,7 +685,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         if (label_mapper.empty()) {
             seeds.clear();
-            return 0;
+            return;
         }
 
         std::vector<std::pair<Column, uint64_t>> label_counts;
@@ -660,65 +703,120 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         DEBUG_LOG("Keeping {} / {} labels",
                   std::distance(label_counts.begin(), it), label_counts.size());
 
-        label_counts.erase(it, label_counts.end());
+        labels.reserve(it - label_counts.begin());
+        discarded_labels.reserve(label_counts.end() - it);
 
-        labels.reserve(label_counts.size());
-        for (const auto &[label, count] : label_counts) {
-            labels.push_back(label);
-        }
-    }
-
-    if (labels.empty()) {
-        seeds.clear();
-        return 0;
+        std::transform(label_counts.begin(), it, std::back_inserter(labels),
+                       [&](const auto &a) { return a.first; });
+        std::transform(it, label_counts.end(), std::back_inserter(discarded_labels),
+                       [&](const auto &a) { return a.first; });
     }
 
     std::sort(labels.begin(), labels.end());
+    std::sort(discarded_labels.begin(), discarded_labels.end());
 
     for (size_t j = 0; j < seeds.size(); ++j) {
         Seed &seed = seeds[j];
         const std::vector<node_index> &nodes = seed.get_nodes();
         assert(nodes.size() == 1);
-        if (!seed.label_encoder) {
-            seed.label_columns.clear();
-            auto [fetch_labels, fetch_coords] = annotation_buffer_.get_labels_and_coords(nodes[0]);
-            assert(fetch_labels);
-            if (annotation_buffer_.has_coordinates()) {
-                assert(fetch_coords);
-                matched_intersection(fetch_labels->begin(), fetch_labels->end(),
-                                     fetch_coords->begin(),
-                                     labels.begin(), labels.end(),
-                                     std::back_inserter(seed.label_columns),
-                                     std::back_inserter(seed.label_coordinates));
-                if (seed.get_offset() && seed.label_coordinates.size()) {
-                    for (auto &tuple : seed.label_coordinates) {
+
+        // if a seed already as labels, use them
+        if (seed.label_encoder)
+            continue;
+
+        auto [fetch_labels, fetch_coords] = annotation_buffer_.get_labels_and_coords(nodes[0]);
+        assert(fetch_labels);
+        if (annotation_buffer_.has_coordinates()) {
+            Vector<Alignment::Column> kept_columns;
+            Vector<Alignment::Column> discarded_columns;
+            Alignment::CoordinateSet discarded_coords;
+            bool added_discarded = false;
+            assert(fetch_coords);
+            assert(seed.label_coordinates.empty());
+            matched_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                 fetch_coords->begin(),
+                                 labels.begin(), labels.end(),
+                                 std::back_inserter(kept_columns),
+                                 std::back_inserter(seed.label_coordinates));
+            matched_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                 fetch_coords->begin(),
+                                 discarded_labels.begin(), discarded_labels.end(),
+                                 std::back_inserter(discarded_columns),
+                                 std::back_inserter(discarded_coords));
+
+            if (kept_columns.size()) {
+                seed.label_encoder = &annotation_buffer_;
+                seed.set_columns(std::move(kept_columns));
+            }
+
+            if (discarded_columns.size()) {
+                added_discarded = true;
+                auto &discarded_seed = discarded_seeds.emplace_back(seed);
+                discarded_seed.label_encoder = &annotation_buffer_;
+                discarded_seed.set_columns(std::move(discarded_columns));
+                std::swap(discarded_seed.label_coordinates, discarded_coords);
+            }
+
+            if (seed.get_offset()) {
+                for (auto &tuple : seed.label_coordinates) {
+                    for (auto &coord : tuple) {
+                        coord += seed.get_offset();
+                    }
+                }
+
+                if (added_discarded) {
+                    for (auto &tuple : discarded_seeds.back().label_coordinates) {
                         for (auto &coord : tuple) {
-                            coord += seed.get_offset();
+                            coord += discarded_seeds.back().get_offset();
                         }
                     }
                 }
-            } else {
-                std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
-                                      labels.begin(), labels.end(),
-                                      std::back_inserter(seed.label_columns));
+            }
+        } else {
+            Vector<Alignment::Column> kept_columns;
+            Vector<Alignment::Column> discarded_columns;
+
+            std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                  labels.begin(), labels.end(),
+                                  std::back_inserter(kept_columns));
+
+            std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                  discarded_labels.begin(), discarded_labels.end(),
+                                  std::back_inserter(discarded_columns));
+
+            if (discarded_columns.size()) {
+                auto &discarded_seed = discarded_seeds.emplace_back(seed);
+                discarded_seed.label_encoder = &annotation_buffer_;
+                discarded_seed.set_columns(std::move(discarded_columns));
             }
 
-            if (seed.label_columns.size())
-                seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+            if (kept_columns.size()) {
+                seed.label_encoder = &annotation_buffer_;
+                seed.set_columns(std::move(kept_columns));
+            }
         }
     }
 
-    auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
-        return !a.label_encoder || a.label_columns.empty();
+    auto end = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+        return !a.label_encoder || !a.label_columns;
     });
 
-    seeds.erase(seed_it, seeds.end());
+    seeds.erase(merge_into_mums(this->graph_, this->config_, seeds.begin(), end,
+                                this->config_.min_seed_length, true, max_seed_length_),
+                seeds.end());
 
-    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
-        return a.get_query_view().size() >= this->config_.min_seed_length;
+    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &seed) {
+        return seed.get_query_view().size() >= this->config_.min_seed_length;
     }));
 
-    return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
+    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &seed) {
+        return std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+            [&](node_index n) {
+                return n == DeBruijnGraph::npos
+                         || annotation_buffer_.get_labels(n);
+            }
+        );
+    }));
 }
 
 template class LabeledAligner<>;
