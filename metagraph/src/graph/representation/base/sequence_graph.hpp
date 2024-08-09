@@ -1,6 +1,8 @@
 #ifndef __SEQUENCE_GRAPH_HPP__
 #define __SEQUENCE_GRAPH_HPP__
 
+#include "common/vectors/bit_vector.hpp"
+
 #include <vector>
 #include <string>
 #include <functional>
@@ -203,6 +205,7 @@ class DeBruijnGraph : public SequenceGraph {
                             const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
+    virtual bool has_no_outgoing(node_index node) const { return outdegree(node) == 0; }
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
     virtual bool has_multiple_outgoing(node_index node) const { return outdegree(node) > 1; }
 
@@ -243,6 +246,15 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    virtual std::shared_ptr<const bit_vector> get_last() const;
+
+    virtual void row_diff_traverse(size_t num_threads,
+                                   size_t max_length,
+                                   const bit_vector &rd_succ,
+                                   sdsl::bit_vector *terminal) const;
+
+    virtual node_index row_diff_successor(node_index node, const bit_vector &rd_succ) const;
 };
 
 
