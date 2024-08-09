@@ -710,10 +710,18 @@ void AnnotatedSequenceGraph
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
-        return canonical->get_graph().max_index() == annotator_->num_objects();
+    uint64_t max_index;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get())) {
+        max_index = canonical->get_graph().max_index();
+    } else {
+        max_index = graph_->max_index();
+    }
 
-    return graph_->max_index() == annotator_->num_objects();
+    uint64_t num_obs = annotator_->num_objects();
+    if (max_index != num_obs)
+        common::logger->error("Graph: {}\tAnnotator: {}", max_index, num_obs);
+
+    return max_index == num_obs;
 }
 
 

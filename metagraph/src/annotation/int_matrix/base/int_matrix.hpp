@@ -3,7 +3,10 @@
 
 #include <vector>
 
+#include <sdsl/int_vector.hpp>
+
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -19,6 +22,12 @@ class IntMatrix {
 
     // |row| is in [0, num_rows), |column| is in [0, num_columns)
     virtual std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const = 0;
+
+    virtual void call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
+                                 bool ordered = true) const;
+
+    virtual std::vector<VectorMap<uint64_t, size_t>> get_histograms(const std::vector<size_t> &min_counts = {},
+                                                                    sdsl::bit_vector *unmark_discarded = nullptr) const;
 
     // sum up values for each column with at least |min_count| non-zero values
     virtual RowValues

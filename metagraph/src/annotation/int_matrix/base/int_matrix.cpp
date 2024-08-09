@@ -1,5 +1,11 @@
 #include "int_matrix.hpp"
 
+#include <progress_bar.hpp>
+
+#include "common/logger.hpp"
+#include "common/threads/threading.hpp"
+#include "common/vectors/vector_algorithm.hpp"
+
 
 namespace mtg {
 namespace annot {
@@ -8,6 +14,65 @@ namespace matrix {
 using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 
+void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
+                                bool ordered) const {
+    size_t n = get_binary_matrix().num_rows();
+    ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
+    #pragma omp parallel for num_threads(get_num_threads()) ordered
+    for (size_t row_i = 0; row_i < n; ++row_i) {
+        ++progress_bar;
+        std::vector<Row> row_ids { row_i };
+        auto row_vals = get_row_values(row_ids);
+
+        if (ordered) {
+            #pragma omp ordered
+            callback(row_i, row_vals[0], row_i);
+        } else {
+            callback(row_i, row_vals[0], row_i);
+        }
+    }
+}
+
+std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(const std::vector<size_t> &min_counts,
+                                                                   sdsl::bit_vector *unmark_discarded) const {
+    common::logger->trace("Calculating count histograms");
+    bool parallel = get_num_threads() > 0;
+    std::vector<VectorMap<uint64_t, size_t>> hists_map(get_binary_matrix().num_columns());
+    std::atomic_thread_fence(std::memory_order_release);
+    call_row_values([&](uint64_t row_i, const auto &row, size_t) {
+        if (min_counts.size()) {
+            bool keep_row = false;
+            for (const auto &[j, c] : row) {
+                if (c >= min_counts[j]) {
+                    keep_row = true;
+                    break;
+                }
+            }
+
+            if (!keep_row) {
+                if (unmark_discarded)
+                    unset_bit(unmark_discarded->data(), row_i, parallel, std::memory_order_relaxed);
+
+                return;
+            }
+        }
+
+        Vector<uint64_t> counts(hists_map.size());
+        for (const auto &[j, raw_c] : row) {
+            counts[j] = raw_c;
+        }
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < counts.size(); ++j) {
+                ++hists_map[j][counts[j]];
+            }
+        }
+    }, false);
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    return hists_map;
+}
 
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
