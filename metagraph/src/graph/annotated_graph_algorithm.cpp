@@ -11,6 +11,7 @@
 #include <boost/math/distributions/binomial.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
 #include <boost/math/tools/roots.hpp>
+#include <boost/math/tools/minima.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
 #include <boost/math/distributions/cauchy.hpp>
@@ -120,6 +121,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         size_t n_cutoff = 1;
         size_t acc = std::accumulate(m.begin(), m.end(), size_t(0),
                                      [](size_t sum, const auto &a) { return sum + a.second; });
+        size_t total = acc;
         common::logger->trace("Calculating cutoffs for {}/{} tests", acc, nelem);
         size_t last_k = 0;
         for (size_t n = 0; n < m.size(); ++n) {
@@ -151,6 +153,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (k == 0)
             common::logger->warn("No significant p-values achievable");
 
+        common::logger->trace("Kept {} / {}", acc, total);
         return std::make_pair(k, n_cutoff);
     };
 
@@ -396,7 +399,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
         };
-    } else if (config.test_type == "nbinom_exact") {
+    } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
         auto get_rp = [&](size_t j, auto begin, auto end) {
             double mu = 0;
@@ -621,135 +624,340 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
         int64_t total_sum = in_sum + out_sum;
 
-        auto get_deviance1 = [mu=mu1,invphi=r_in,logmuinvphi=log(mu1+r_in),logmu=log(mu1),zv=2.0*r_in*log((r_in*mu1)/r_in)](double y) {
-            if (y == 0)
-                return zv;
+        if (config.test_type == "nbinom_exact") {
+            auto get_deviance1 = [mu=mu1,invphi=r_in,logmuinvphi=log(mu1+r_in),logmu=log(mu1),zv=2.0*r_in*log((r_in*mu1)/r_in)](double y) {
+                if (y == 0)
+                    return zv;
 
-            double logyshift = logmuinvphi - log(y + invphi);
-            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
-        };
-        auto get_deviance2 = [mu=mu2,invphi=r_out,logmuinvphi=log(mu2+r_out),logmu=log(mu2),zv=2.0*r_out*log((r_out*mu2)/r_out)](double y) {
-            if (y == 0)
-                return zv;
+                double logyshift = logmuinvphi - log(y + invphi);
+                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+            };
+            auto get_deviance2 = [mu=mu2,invphi=r_out,logmuinvphi=log(mu2+r_out),logmu=log(mu2),zv=2.0*r_out*log((r_out*mu2)/r_out)](double y) {
+                if (y == 0)
+                    return zv;
 
-            double logyshift = logmuinvphi - log(y + invphi);
-            return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
-        };
+                double logyshift = logmuinvphi - log(y + invphi);
+                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+            };
 
-        std::vector<double> deviances1(total_sum + 1);
-        std::vector<double> deviances2(total_sum + 1);
-        for (int64_t s = 0; s <= total_sum; ++s) {
-            deviances1[s] = get_deviance1(s);
-            deviances2[s] = get_deviance2(s);
-        }
-
-        compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n) {
-            if (n == 0)
-                return 1.0;
-
-            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-            std::vector<double> devs(n + 1);
-
-            for (int64_t s = 0; s <= n; ++s) {
-                devs[s] = deviances1[s] + deviances2[n - s];
+            std::vector<double> deviances1(total_sum + 1);
+            std::vector<double> deviances2(total_sum + 1);
+            for (int64_t s = 0; s <= total_sum; ++s) {
+                deviances1[s] = get_deviance1(s);
+                deviances2[s] = get_deviance2(s);
             }
+            compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n) {
+                if (n == 0)
+                    return 1.0;
 
-            double max_d = *std::max_element(devs.begin(), devs.end());
-            double pval = 0.0;
-            int64_t s = 0;
-            if (devs[s] == max_d) {
+                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+                std::vector<double> devs(n + 1);
+
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs[s] = deviances1[s] + deviances2[n - s];
+                }
+
+                double max_d = *std::max_element(devs.begin(), devs.end());
+                double pval = 0.0;
+                int64_t s = 0;
+                if (devs[s] == max_d) {
+                    int64_t t = n;
+                    double rs = r_in;
+                    double rt = r_out + n;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (++s; s <= n; ++s) {
+                        if (devs[s] == max_d) {
+                            --t;
+                            ++rs;
+                            --rt;
+                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                int64_t sp = n;
+                if (devs[sp] == max_d) {
+                    int64_t t = 0;
+                    double rs = r_in + sp;
+                    double rt = r_out;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (--sp; sp >= s; --sp) {
+                        if (devs[sp] == max_d) {
+                            ++t;
+                            --rs;
+                            ++rt;
+                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                return std::min(1.0, pval);
+            };
+
+            compute_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &row) {
+                if (row.empty())
+                    return 1.0;
+
+                int64_t n = in_sum + out_sum;
+
+                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+
+                double in_sum_total_deviance = deviances1[in_sum] + deviances2[out_sum];
+
+                double pval = 0.0;
+                int64_t s = 0;
                 int64_t t = n;
-                double rs = r_in;
-                double rt = r_out + n;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (++s; s <= n; ++s) {
-                    if (devs[s] == max_d) {
-                        --t;
-                        ++rs;
-                        --rt;
-                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                        pval += exp(base);
+                if (deviances1[s] + deviances2[t] >= in_sum_total_deviance) {
+                    double rs = r_in;
+                    double rt = r_out + n;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (++s; s <= n; ++s) {
+                        if (deviances1[s] + deviances2[--t] >= in_sum_total_deviance) {
+                            ++rs;
+                            --rt;
+                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                int64_t sp = n;
+                t = 0;
+                if (deviances1[sp] + deviances2[t] >= in_sum_total_deviance) {
+                    double rs = r_in + sp;
+                    double rt = r_out;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (--sp; sp >= s; --sp) {
+                        if (deviances1[sp] + deviances2[++t] >= in_sum_total_deviance) {
+                            --rs;
+                            ++rt;
+                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                return std::min(1.0, pval);
+            };
+        } else {
+            common::logger->trace("Computing merged histograms");
+            std::mutex hist_mu;
+            tsl::hopscotch_map<uint64_t, size_t> merged_hist_in;
+            tsl::hopscotch_map<uint64_t, size_t> merged_hist_out;
+            tsl::hopscotch_map<uint64_t, size_t> merged_hist_null;
+            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t) {
+                int64_t in_sum = 0;
+                int64_t out_sum = 0;
+                bool in_kmer = false;
+                bool out_kmer = false;
+                if (kept[row_i]) {
+                    size_t count_in = 0;
+                    size_t count_out = 0;
+                    for (const auto &[j, raw_c] : raw_row) {
+                        uint64_t c = raw_c;
+                        if (count_maps.size())
+                            c = count_maps[j].find(c)->second.first;
+
+                        if (groups[j]) {
+                            out_sum += c;
+                            ++count_out;
+                        } else {
+                            in_sum += c;
+                            ++count_in;
+                        }
+                    }
+
+                    if (count_in + count_out >= config.min_recurrence) {
+                        double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                        in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                        out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
+                    }
+                } else {
+                    return;
+                }
+
+                if (!in_kmer && !out_kmer)
+                    return;
+
+                size_t n = in_sum + out_sum;
+                std::lock_guard<std::mutex> lock(hist_mu);
+                ++merged_hist_in[in_sum];
+                ++merged_hist_out[out_sum];
+                ++merged_hist_null[n];
+            }, false);
+
+            auto get_rp_zinb = [&](const tsl::hopscotch_map<uint64_t, size_t> &hist, double r_guess) {
+                size_t total_nzeros = 0;
+                size_t total_zeros = 0;
+                size_t sum = 0;
+                for (const auto &[k, c] : hist) {
+                    if (k != 0) {
+                        sum += k * c;
+                        total_nzeros += c;
+                    } else {
+                        total_zeros += c;
+                    }
+                }
+                size_t total = total_nzeros + total_zeros;
+
+                auto get_p = [&](double r) {
+                    return boost::math::tools::newton_raphson_iterate([&](double p) {
+                        double dl = r * total_nzeros * (1.0 - p) - p * (1 - pow(p, r)) * sum;
+                        double ddl = (r + 1) * pow(p, r) * sum - r * total_nzeros - sum;
+                        return std::make_pair(dl, ddl);
+                    }, 0.5, 0.0, 1.0, 30);
+                };
+
+                double r = boost::math::tools::newton_raphson_iterate([&](double r) {
+                    double p = get_p(r);
+                    double dl = (log(p) / (1.0 - pow(p, r)) - boost::math::digamma(r)) * total_nzeros;
+                    double ddl = (log(p) * r / pow(1.0 - pow(p, r), 2.0) * pow(p, r - 1.0) - boost::math::trigamma(r)) * total_nzeros;
+                    for (const auto &[k, c] : hist) {
+                        if (k != 0) {
+                            dl += boost::math::digamma(r + k) * c;
+                            ddl += boost::math::trigamma(r + k) * c;
+                        }
+                    }
+
+                    return std::make_pair(dl, ddl);
+                }, r_guess, std::numeric_limits<double>::min(), static_cast<double>(sum), 30);
+
+                double p = get_p(r);
+                double mu = static_cast<double>(sum) / total;
+
+                double pi = 1.0 - (mu * p / r / (1.0 - p));
+
+                size_t exp_extra_zeros = total * pi;
+                size_t exp_zeros = total * (1.0 - pi) * pow(p, r) + exp_extra_zeros;
+                common::logger->trace("r: {}\tp: {}\tpi: {}\tobs_total: {}\tobs_zeros: {}\texp_zeros: {}\texp_extra_zeros: {}\texp_nb_zeros: {}",
+                                      r, p, pi,
+                                      total, total_zeros,
+                                      exp_zeros, exp_extra_zeros, exp_zeros - exp_extra_zeros);
+
+                return std::make_tuple(r, p, pi);
+            };
+
+            auto [r_in, p_in, pi_in] = get_rp_zinb(merged_hist_in, r_map * num_labels_in);
+            auto [r_out, p_out, pi_out] = get_rp_zinb(merged_hist_out, r_map * num_labels_out);
+            auto [r_null, p_null, pi_null] = get_rp_zinb(merged_hist_null, r_map * (num_labels_in + num_labels_out));
+
+            double mu1 = r_in * (1.0 - p_in) / p_in * (1.0 - pi_in);
+            double mu2 = r_out * (1.0 - p_out) / p_out * (1.0 - pi_out);
+
+            auto get_zv = [](double r, double mu, double pi) {
+                return -2 * log(pi + (1.0 - pi) * pow((1.0-pi)*r/(mu + (1.0-pi)*r), r));
+            };
+
+            auto get_deviance1 = [r=r_in,mu=mu1,mpir=(1.0-pi_in)*r_in,zv=get_zv(r_in,mu1,pi_in)](double y) {
+                if (y == 0)
+                    return zv;
+
+                return 2.0 * ((r + y) * log((mu + mpir)/(y + mpir)) + y * log(y / mu));
+            };
+            auto get_deviance2 = [r=r_out,mu=mu2,mpir=(1.0-pi_out)*r_out,zv=get_zv(r_out,mu2,pi_out)](double y) {
+                if (y == 0)
+                    return zv;
+
+                return 2.0 * ((r + y) * log((mu + mpir)/(y + mpir)) + y * log(y / mu));
+            };
+
+            std::vector<double> deviances1(total_sum + 1);
+            std::vector<double> deviances2(total_sum + 1);
+            for (int64_t s = 0; s <= total_sum; ++s) {
+                deviances1[s] = get_deviance1(s);
+                deviances2[s] = get_deviance2(s);
+            }
+
+            auto get_lprob_zinb = [&](int64_t s, double r, double p, double pi) {
+                return s == 0
+                    ? log(pi + (1.0 - pi) * pow(p, r))
+                    : log1p(-pi) + lgamma(r + s) - lgamma(r) - lgamma(s + 1) + r * log(p) + log1p(-p) * s;
+            };
+
+            auto get_lprob_ztnb = [&](int64_t s, double r, double p) {
+                return lgamma(r + s) - lgamma(r) - lgamma(s + 1) + r * log(p) + log1p(-p) * s - log1p(pow(p, r));
+            };
+
+            compute_min_pval = [r_in,p_in,pi_in,r_out,p_out,pi_out,r_null,p_null,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n) {
+                if (n == 0)
+                    return 1.0;
+
+                std::vector<double> devs(n + 1);
+
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs[s] = deviances1[s] + deviances2[n - s];
+                }
+
+                double max_d = *std::max_element(devs.begin(), devs.end());
+                double pval = 0.0;
+                double base_lprob = get_lprob_ztnb(n, r_null, p_null);
+                for (int64_t s = 0; s <= n; ++s) {
+                    if (devs[s] == max_d)
+                        pval += exp(get_lprob_zinb(s, r_in, p_in, pi_in) + get_lprob_zinb(n - s, r_out, p_out, pi_out) - base_lprob);
+                }
+
+                if (pval > 1.0) {
+                    common::logger->error("fail: {}", pval);
+                    throw std::runtime_error("FOO");
+                }
+
+                return pval;
+            };
+
+            compute_pval = [r_in,p_in,pi_in,r_out,p_out,pi_out,r_null,p_null,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &) {
+                int64_t n = in_sum + out_sum;
+
+                if (n == 0)
+                    return 1.0;
+
+                std::vector<double> devs(n + 1);
+
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs[s] = deviances1[s] + deviances2[n - s];
+                }
+
+                double target_d = devs[in_sum];
+                double pval = 0.0;
+                double base_lprob = get_lprob_ztnb(n, r_null, p_null);
+                int64_t s = 0;
+                for ( ; s <= n; ++s) {
+                    if (devs[s] >= target_d) {
+                        pval += exp(get_lprob_zinb(s, r_in, p_in, pi_in) + get_lprob_zinb(n - s, r_out, p_out, pi_out) - base_lprob);
                     } else {
                         break;
                     }
                 }
-            }
 
-            int64_t sp = n;
-            if (devs[sp] == max_d) {
-                int64_t t = 0;
-                double rs = r_in + sp;
-                double rt = r_out;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (--sp; sp >= s; --sp) {
-                    if (devs[sp] == max_d) {
-                        ++t;
-                        --rs;
-                        ++rt;
-                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                        pval += exp(base);
+                for (int64_t ns = n; ns > s; --ns) {
+                    if (devs[ns] >= target_d) {
+                        pval += exp(get_lprob_zinb(ns, r_in, p_in, pi_in) + get_lprob_zinb(n - ns, r_out, p_out, pi_out) - base_lprob);
                     } else {
                         break;
                     }
                 }
-            }
 
-            return std::min(1.0, pval);
-        };
-
-        compute_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &row) {
-            if (row.empty())
-                return 1.0;
-
-            int64_t n = in_sum + out_sum;
-
-            double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-
-            double in_sum_total_deviance = deviances1[in_sum] + deviances2[out_sum];
-
-            double pval = 0.0;
-            int64_t s = 0;
-            int64_t t = n;
-            if (deviances1[s] + deviances2[t] >= in_sum_total_deviance) {
-                double rs = r_in;
-                double rt = r_out + n;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (++s; s <= n; ++s) {
-                    if (deviances1[s] + deviances2[--t] >= in_sum_total_deviance) {
-                        ++rs;
-                        --rt;
-                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                        pval += exp(base);
-                    } else {
-                        break;
-                    }
+                if (pval > 1.0) {
+                    common::logger->error("fail: {}", pval);
+                    throw std::runtime_error("FOO");
                 }
-            }
 
-            int64_t sp = n;
-            t = 0;
-            if (deviances1[sp] + deviances2[t] >= in_sum_total_deviance) {
-                double rs = r_in + sp;
-                double rt = r_out;
-                double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                pval += exp(base);
-                for (--sp; sp >= s; --sp) {
-                    if (deviances1[sp] + deviances2[++t] >= in_sum_total_deviance) {
-                        --rs;
-                        ++rt;
-                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                        pval += exp(base);
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            return std::min(1.0, pval);
-        };
+                return pval;
+            };
+        }
     } else if (config.test_type == "notest") {
         compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
         compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
@@ -929,40 +1137,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::sort(comb_m.begin(), comb_m.end(), utils::GreaterFirst());
         std::tie(k, n_cutoff) = correct_pvals(comb_m, nelem);
         common::logger->trace("Picked: k: {}\tpval_min: {}", k, config.family_wise_error_rate / k);
-
-        // common::logger->trace("Marking testable unitigs");
-        // std::atomic_thread_fence(std::memory_order_release);
-        // clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
-        //     std::vector<size_t> bucket_idxs;
-        //     bucket_idxs.reserve(path.size());
-        //     for (node_index node : path) {
-        //         bucket_idxs.emplace_back(0);
-        //         for (size_t i = 1; i < boundaries.size(); ++i) {
-        //             if (boundaries[i] > node)
-        //                 break;
-
-        //             ++bucket_idxs.back();
-        //         }
-        //     }
-
-        //     std::vector<double> pvals_min;
-        //     pvals_min.reserve(path.size());
-        //     {
-        //         std::lock_guard<std::mutex> lock(pval_mu);
-        //         for (size_t i = 0; i < path.size(); ++i) {
-        //             size_t bucket_idx = bucket_idxs[i];
-        //             size_t n = sum_buckets[bucket_idx][path[i] - boundaries[bucket_idx]];
-        //             pvals_min.emplace_back(m[n].first);
-        //         }
-        //     }
-
-        //     double comb_pval = combine_pvals(pvals_min);
-        //     if (comb_pval * k < config.family_wise_error_rate) {
-        //         for (node_index node : path) {
-        //             set_bit(unitig_start.data(), node, parallel, MO_RELAXED);
-        //         }
-        //     }
-        // }, num_threads);
 
         sum_buckets.resize(0);
         tmp_sum_buckets.resize(0);
