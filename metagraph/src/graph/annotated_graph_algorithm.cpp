@@ -800,63 +800,70 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++merged_hist_null[n];
             }, false);
 
-            auto get_rp_zinb = [&](const tsl::hopscotch_map<uint64_t, size_t> &hist, double r_guess) {
-                size_t total_nzeros = 0;
-                size_t total_zeros = 0;
-                size_t sum = 0;
-                for (const auto &[k, c] : hist) {
-                    if (k != 0) {
-                        sum += k * c;
-                        total_nzeros += c;
-                    } else {
-                        total_zeros += c;
-                    }
-                }
-                size_t total = total_nzeros + total_zeros;
-
-                auto get_p = [&](double r) {
-                    return boost::math::tools::newton_raphson_iterate([&](double p) {
-                        double dl = r * total_nzeros * (1.0 - p) - p * (1 - pow(p, r)) * sum;
-                        double ddl = (r + 1) * pow(p, r) * sum - r * total_nzeros - sum;
-                        return std::make_pair(dl, ddl);
-                    }, 0.5, 0.0, 1.0, 30);
-                };
-
-                double r = boost::math::tools::newton_raphson_iterate([&](double r) {
-                    double p = get_p(r);
-                    double dl = (log(p) / (1.0 - pow(p, r)) - boost::math::digamma(r)) * total_nzeros;
-                    double ddl = (log(p) * r / pow(1.0 - pow(p, r), 2.0) * pow(p, r - 1.0) - boost::math::trigamma(r)) * total_nzeros;
+            auto get_rp_zinb = [&](const tsl::hopscotch_map<uint64_t, size_t> &hist_in,
+                                   const tsl::hopscotch_map<uint64_t, size_t> &hist_out) {
+                auto get_stats = [&](const auto &hist) {
+                    size_t total_nzeros = 0;
+                    size_t total_zeros = 0;
+                    size_t sum = 0;
                     for (const auto &[k, c] : hist) {
                         if (k != 0) {
-                            dl += boost::math::digamma(r + k) * c;
-                            ddl += boost::math::trigamma(r + k) * c;
+                            sum += k * c;
+                            total_nzeros += c;
+                        } else {
+                            total_zeros += c;
                         }
                     }
+                    size_t total = total_nzeros + total_zeros;
 
-                    return std::make_pair(dl, ddl);
-                }, r_guess, std::numeric_limits<double>::min(), static_cast<double>(sum), 30);
+                    return std::make_tuple(total_nzeros, total_zeros, sum, total);
+                };
 
-                double p = get_p(r);
-                double mu = static_cast<double>(sum) / total;
+                auto [total_nzeros_in, total_zeros_in, sum_in, total_in] = get_stats(hist_in);
+                auto [total_nzeros_out, total_zeros_out, sum_out, total_out] = get_stats(hist_out);
 
-                double pi = 1.0 - (mu * p / r / (1.0 - p));
+                auto get_r = [&](const auto &hist, size_t total, double total_nzeros, double p, double r_guess, double sum) {
+                    return boost::math::tools::newton_raphson_iterate([&](double r) {
+                        double dl = (log(p) - boost::math::digamma(r)) * total_nzeros + log(total_nzeros / total) * (total - total_nzeros);
+                        double ddl = -boost::math::trigamma(r) * total_nzeros;
+                        for (const auto &[k, c] : hist) {
+                            if (k != 0) {
+                                dl += boost::math::digamma(r + k) * c;
+                                ddl += boost::math::trigamma(r + k) * c;
+                            }
+                        }
 
-                size_t exp_extra_zeros = total * pi;
-                size_t exp_zeros = total * (1.0 - pi) * pow(p, r) + exp_extra_zeros;
-                common::logger->trace("r: {}\tp: {}\tpi: {}\tobs_total: {}\tobs_zeros: {}\texp_zeros: {}\texp_extra_zeros: {}\texp_nb_zeros: {}",
-                                      r, p, pi,
-                                      total, total_zeros,
-                                      exp_zeros, exp_extra_zeros, exp_zeros - exp_extra_zeros);
+                        return std::make_pair(dl, ddl);
+                    }, r_guess, std::numeric_limits<double>::min(), sum, 30);
+                };
 
-                return std::make_tuple(r, p, pi);
+                double p = boost::math::tools::newton_raphson_iterate([&](double p) {
+                    auto r_in = get_r(hist_in, total_in, total_nzeros_in, p, r_map * num_labels_in, sum_in);
+                    auto r_out = get_r(hist_out, total_out, total_nzeros_out, p, r_map * num_labels_out, sum_out);
+
+                    double dl_in = r_in * total_nzeros_in / p / (1.0 - pow(p, r_in)) - sum_in / (1.0 - p);
+                    double dl_out = r_out * total_nzeros_out / p / (1.0 - pow(p, r_out)) - sum_out / (1.0 - p);
+                    double ddl_in = -r_in * total_nzeros_in / p / p / (1.0 - pow(p, r_in)) / (1.0 - pow(p, r_in)) * ((1.0-pow(p, r_in)) - p * r_in * pow(p, r_in-1)) - static_cast<double>(sum_in) / (1.0-p) / (1.0-p);
+                    double ddl_out = -r_out * total_nzeros_out / p / p / (1.0 - pow(p, r_out)) / (1.0 - pow(p, r_out)) * ((1.0-pow(p, r_out)) - p * r_out * pow(p, r_out-1)) - static_cast<double>(sum_out) / (1.0-p) / (1.0-p);
+                    return std::make_pair(dl_in + dl_out, ddl_in + ddl_out);
+                }, target_p, 0.0, 1.0, 30);
+
+                double r_in = get_r(hist_in, total_in, total_nzeros_in, p, r_map * num_labels_in, sum_in);
+                double r_out = get_r(hist_out, total_out, total_nzeros_out, p, r_map * num_labels_out, sum_out);
+
+                double pi_in = (static_cast<double>(total_in - total_nzeros_in) / total_in - pow(p, r_in)) / (1.0 - pow(p, r_in));
+                double pi_out = (static_cast<double>(total_out - total_nzeros_out) / total_out - pow(p, r_out)) / (1.0 - pow(p, r_out));
+
+                return std::make_tuple(r_in, pi_in, r_out, pi_out, p);
             };
 
-            auto [r_in, p_in, pi_in] = get_rp_zinb(merged_hist_in, r_map * num_labels_in);
-            auto [r_out, p_out, pi_out] = get_rp_zinb(merged_hist_out, r_map * num_labels_out);
-            auto [r_null, p_null, pi_null] = get_rp_zinb(merged_hist_null, r_map * (num_labels_in + num_labels_out));
+            auto [r_in, pi_in, r_out, pi_out, p] = get_rp_zinb(merged_hist_in, merged_hist_in);
 
-            double mu1 = r_in * (1.0 - p_in) / p_in * (1.0 - pi_in);
-            double mu2 = r_out * (1.0 - p_out) / p_out * (1.0 - pi_out);
+            common::logger->trace("r: ({}, {})\tp: {}\tpi: ({}, {})",
+                                  r_in, r_out, p, pi_in, pi_out);
+
+            double mu1 = r_in * (1.0 - p) / p * (1.0 - pi_in);
+            double mu2 = r_out * (1.0 - p) / p * (1.0 - pi_out);
 
             auto get_zv = [](double r, double mu, double pi) {
                 return -2 * log(pi + (1.0 - pi) * pow((1.0-pi)*r/(mu + (1.0-pi)*r), r));
@@ -882,17 +889,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 deviances2[s] = get_deviance2(s);
             }
 
-            auto get_lprob_zinb = [&](int64_t s, double r, double p, double pi) {
+            auto get_lprob_zinb = [](int64_t s, double r, double p, double pi) {
                 return s == 0
                     ? log(pi + (1.0 - pi) * pow(p, r))
                     : log1p(-pi) + lgamma(r + s) - lgamma(r) - lgamma(s + 1) + r * log(p) + log1p(-p) * s;
             };
 
-            auto get_lprob_ztnb = [&](int64_t s, double r, double p) {
-                return lgamma(r + s) - lgamma(r) - lgamma(s + 1) + r * log(p) + log1p(-p) * s - log1p(pow(p, r));
+            auto get_lprob_ztnb = [get_lprob_zinb](int64_t s, double r_in, double r_out, double p, double pi_in, double pi_out) {
+                double pval = 0.0;
+                for (int64_t ss = 0; ss <= s; ++ss) {
+                    int64_t tt = s - ss;
+                    pval += exp(get_lprob_zinb(ss, r_in, p, pi_in) + get_lprob_zinb(tt, r_out, p, pi_out));
+                }
+                return log(pval);
+                // double lp1 = get_lprob_zinb(0, r_in, p, pi_in) + get_lprob_zinb(s, r_out, p, pi_out);
+                // double lp2 = get_lprob_zinb(s, r_in, p, pi_in) + get_lprob_zinb(0, r_out, p, pi_out);
+                // double lp3 = log1p(-pi_in) + log1p(-pi_out) + get_lprob_zinb(s, r_in + r_out, p, 0.0);
+                // return log(exp(lp1) + exp(lp2) + exp(lp3));
             };
 
-            compute_min_pval = [r_in,p_in,pi_in,r_out,p_out,pi_out,r_null,p_null,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n) {
+            compute_min_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n) {
                 if (n == 0)
                     return 1.0;
 
@@ -904,7 +920,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double max_d = *std::max_element(devs.begin(), devs.end());
                 double pval = 0.0;
-                double base_lprob = get_lprob_ztnb(n, r_null, p_null);
+                double base_lprob = get_lprob_ztnb(n, r_in, r_out, p_in, pi_in, pi_out);
                 for (int64_t s = 0; s <= n; ++s) {
                     if (devs[s] == max_d)
                         pval += exp(get_lprob_zinb(s, r_in, p_in, pi_in) + get_lprob_zinb(n - s, r_out, p_out, pi_out) - base_lprob);
@@ -918,7 +934,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return pval;
             };
 
-            compute_pval = [r_in,p_in,pi_in,r_out,p_out,pi_out,r_null,p_null,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &) {
+            compute_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &) {
                 int64_t n = in_sum + out_sum;
 
                 if (n == 0)
@@ -932,7 +948,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double target_d = devs[in_sum];
                 double pval = 0.0;
-                double base_lprob = get_lprob_ztnb(n, r_null, p_null);
+                double base_lprob = get_lprob_ztnb(n, r_in, r_out, p_in, pi_in, pi_out);
                 int64_t s = 0;
                 for ( ; s <= n; ++s) {
                     if (devs[s] >= target_d) {
