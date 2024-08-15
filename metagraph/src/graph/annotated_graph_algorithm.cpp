@@ -1013,12 +1013,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             };
         } else {
             size_t total = nelem * (num_labels_in + num_labels_out);
+            size_t total_zeros = 0;
             double mu = static_cast<double>(total_kmers) / total;
             int64_t ssq = 0;
             for (size_t j = 0; j < groups.size(); ++j) {
                 for (const auto &[k, m] : count_maps[j]) {
                     const auto &[v, c] = m;
                     ssq += v * v * c;
+                    if (v == 0)
+                        total_zeros += c;
                 }
             }
             double mu2 = mu * mu;
@@ -1042,8 +1045,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     dl *= alpha;
                     ddl *= alpha * alpha / beta / beta;
 
-                    dl += (beta - alpha * log(p)) * total;
-                    ddl += total;
+                    dl += (beta - alpha * log(p) + alpha * boost::math::digamma(alpha / beta)) * total;
+                    ddl += (1.0 - alpha * alpha / beta / beta * boost::math::trigamma(alpha / beta)) * total;
                     return std::make_pair(dl, ddl);
                 }, old_beta, 0.0, real_sum, 30);
             };
@@ -1061,8 +1064,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     dl /= beta;
                     ddl /= beta * beta;
 
-                    dl += (-boost::math::digamma(alpha) + log(p) / beta - 1.0/alpha + log(alpha) - 0.5/alpha/alpha) * total;
-                    ddl += (-boost::math::trigamma(alpha) + 1.0/alpha/alpha + 1.0/alpha + 1.0/alpha/alpha/alpha) * total;
+                    dl += 0.5 * total_kmers / alpha / alpha + (-boost::math::digamma(alpha) + log(p) / beta - 1.0/alpha - 0.5/alpha/alpha + log(alpha) - boost::math::digamma(alpha/beta)/beta) * total;
+                    ddl += -1.0 / alpha/alpha/alpha * total_kmers + (-boost::math::trigamma(alpha) - boost::math::trigamma(alpha/beta)/beta/beta + 1.0/alpha/alpha + 1.0/alpha/alpha/alpha + 1.0/alpha) * total;
                     return std::make_pair(dl, ddl);
                 }, old_alpha, 0.0, real_sum, 30);
             };
@@ -1072,12 +1075,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 beta = 1.0;
 
             double alpha = beta * p / (1.0 - p) * mu;
-            common::logger->trace("Initial guess: a: {}\tb: {}", alpha, beta);
+            common::logger->trace("Initial MoM guess: a: {}\tb: {}", alpha, beta);
             while (true) {
                 double old_alpha = alpha;
                 double old_beta = beta;
-                alpha = get_alpha(old_alpha, beta);
-                beta = get_beta(alpha, old_beta);
+
+                alpha = get_alpha(alpha, beta);
+                common::logger->trace("Cur: a: {}\tb: {}", alpha, beta);
+                beta = get_beta(alpha, beta);
+                common::logger->trace("Cur: a: {}\tb: {}", alpha, beta);
+
                 if ((alpha - old_alpha) / alpha < 1e-5 && (beta - old_beta) / beta < 1e-5)
                     break;
             }
