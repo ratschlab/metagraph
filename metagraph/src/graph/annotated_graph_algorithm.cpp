@@ -4,14 +4,11 @@
 #include <mutex>
 #include <variant>
 
-#include <sdust.h>
-
 #include <boost/math/distributions/chi_squared.hpp>
 #include <boost/math/distributions/poisson.hpp>
 #include <boost/math/distributions/binomial.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
 #include <boost/math/tools/roots.hpp>
-#include <boost/math/tools/minima.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
 #include <boost/math/distributions/cauchy.hpp>
