@@ -273,7 +273,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     }
 
     std::function<double(int64_t, int64_t, const PairContainer&)> compute_pval;
-    std::function<double(int64_t)> compute_min_pval;
+    std::function<double(int64_t, const PairContainer&)> compute_min_pval;
 
     std::vector<VectorMap<uint64_t, std::pair<size_t, uint64_t>>> count_maps;
 
@@ -288,7 +288,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         compute_min_pval = [&,p=static_cast<double>(in_kmers)/total_kmers,
                               mu1=static_cast<double>(in_kmers)/nelem,
                               mu2=static_cast<double>(out_kmers)/nelem,
-                              get_deviance](int64_t n) {
+                              get_deviance](int64_t n, const PairContainer&) {
             if (n == 0)
                 return 1.0;
 
@@ -361,7 +361,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     } else if (config.test_type == "fisher") {
         double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
 
-        compute_min_pval = [&,lbase_shared](int64_t m1) {
+        compute_min_pval = [&,lbase_shared](int64_t m1, const PairContainer&) {
             if (m1 == 0)
                 return 1.0;
 
@@ -399,7 +399,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
         };
-    } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact") {
+    } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact" || config.test_type == "gnb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
         auto get_rp = [&](size_t j, auto begin, auto end) {
             double mu = 0;
@@ -529,6 +529,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::domain_error("Fit failed");
         }
 
+        double p_min = std::min(target_mu / target_var, double(1.0));
+        double p_max = std::min(target_mu / (target_var - target_mu2), double(1.0));
+
+        if (p_min == 1.0) {
+            common::logger->error("Invalid bounds: {} < p < {}", p_min, p_max);
+            throw std::runtime_error("FOo");
+        }
+
+        if (p_max == 1.0) {
+            p_max = std::max(real_sum_sq / (real_sum_sq + target_mu), p_min);
+        }
+
+        // (p_min * target_mu)/(1-p_min) = r_map
+        double r_min = p_min * target_mu / (1.0 - p_min);
+        double r_max = p_max * target_mu / (1.0 - p_max);
+
+        common::logger->trace("Bounds: min: {},{}\tmax: {},{}", r_min,p_min, r_max,p_max);
+        // if (r_guess <= r_min || r_guess >= r_max)
+        //     r_guess = (r_min + r_max) / 2;
+
         double r_map = boost::math::tools::newton_raphson_iterate([&](double r) {
             double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
             double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
@@ -541,7 +561,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 });
             }
             return std::make_pair(dl, ddl);
-        }, r_guess, std::numeric_limits<double>::min(), real_sum, 30);
+        }, r_guess, 0.0, real_sum, 30);
+        // }, r_guess, r_min, r_max, 30);
+
         double target_p = r_map / (r_map + target_mu);
         double fit_mu = r_map * (1.0 - target_p) / target_p;
         double fit_var = fit_mu / target_p;
@@ -646,7 +668,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 deviances1[s] = get_deviance1(s);
                 deviances2[s] = get_deviance2(s);
             }
-            compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n) {
+            compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n, const PairContainer&) {
                 if (n == 0)
                     return 1.0;
 
@@ -753,12 +775,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 return std::min(1.0, pval);
             };
-        } else {
+        } else if (config.test_type == "zinb_exact") {
             common::logger->trace("Computing merged histograms");
             std::mutex hist_mu;
             tsl::hopscotch_map<uint64_t, size_t> merged_hist_in;
             tsl::hopscotch_map<uint64_t, size_t> merged_hist_out;
             tsl::hopscotch_map<uint64_t, size_t> merged_hist_null;
+            int64_t p12_sum = 0;
+            int64_t p11_sum = 0;
+            double m0 = 0;
+            double m1 = 0;
+            for (const auto &[k, m] : count_maps[0]) {
+                const auto &[v, c] = m;
+                m0 += v * c;
+            }
+            for (const auto &[k, m] : count_maps[1]) {
+                const auto &[v, c] = m;
+                m1 += v * c;
+            }
+            m0 /= nelem;
+            m1 /= nelem;
             generate_rows([&](uint64_t row_i, const auto &raw_row, size_t) {
                 int64_t in_sum = 0;
                 int64_t out_sum = 0;
@@ -767,10 +803,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (kept[row_i]) {
                     size_t count_in = 0;
                     size_t count_out = 0;
+                    double p0 = -m0;
+                    double p1 = -m1;
                     for (const auto &[j, raw_c] : raw_row) {
                         uint64_t c = raw_c;
                         if (count_maps.size())
                             c = count_maps[j].find(c)->second.first;
+
+                        if (j == 0) {
+                            p0 = c - m0;
+                        } else if (j == 1) {
+                            p1 = c - m1;
+                        }
 
                         if (groups[j]) {
                             out_sum += c;
@@ -780,6 +824,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                             ++count_in;
                         }
                     }
+
+                    p12_sum += p0 * p1;
+                    p11_sum += p0 * p0;
 
                     if (count_in + count_out >= config.min_recurrence) {
                         double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
@@ -799,6 +846,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++merged_hist_out[out_sum];
                 ++merged_hist_null[n];
             }, false);
+
+            double obs_cov = static_cast<double>(p12_sum) / (nelem - 1);
+            double obs_11_cov = static_cast<double>(p11_sum) / (nelem - 1);
+            common::logger->trace("Var: {}\tExp cov: {}\tObs11 cov: {}\tobs12 cov: {}",
+                                  r_map * (1.0 - target_p) / target_p / target_p,
+                                  (1.0 - target_p) / target_p / target_p,
+                                  obs_11_cov,
+                                  obs_cov);
 
             auto get_rp_zinb = [&](const tsl::hopscotch_map<uint64_t, size_t> &hist_in,
                                    const tsl::hopscotch_map<uint64_t, size_t> &hist_out) {
@@ -908,7 +963,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 // return log(exp(lp1) + exp(lp2) + exp(lp3));
             };
 
-            compute_min_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n) {
+            compute_min_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n, const PairContainer&) {
                 if (n == 0)
                     return 1.0;
 
@@ -973,9 +1028,238 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 return pval;
             };
+        } else {
+            size_t total = nelem * (num_labels_in + num_labels_out);
+            double mu = static_cast<double>(total_kmers) / total;
+            int64_t ssq = 0;
+            for (size_t j = 0; j < groups.size(); ++j) {
+                for (const auto &[k, m] : count_maps[j]) {
+                    const auto &[v, c] = m;
+                    ssq += v * v * c;
+                }
+            }
+            double mu2 = mu * mu;
+            double var = static_cast<double>(ssq) / total - mu2;
+            if (mu >= var) {
+                throw std::runtime_error("Data is underdispersed");
+            }
+
+            double p = target_p;
+            auto get_beta = [&](double alpha, double old_beta) {
+                return boost::math::tools::newton_raphson_iterate([&](double beta) {
+                    double dl = 0;
+                    double ddl = 0;
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        for (const auto &[k, m] : count_maps[j]) {
+                            const auto &[v, c] = m;
+                            dl -= boost::math::digamma(alpha / beta + v) * c;
+                            ddl += boost::math::trigamma(alpha / beta + v) * c;
+                        }
+                    }
+                    dl *= alpha;
+                    ddl *= alpha * alpha / beta / beta;
+
+                    dl += (beta - alpha * log(p)) * total;
+                    ddl += total;
+                    return std::make_pair(dl, ddl);
+                }, old_beta, 0.0, real_sum, 30);
+            };
+            auto get_alpha = [&](double old_alpha, double beta) {
+                return boost::math::tools::newton_raphson_iterate([&](double alpha) {
+                    double dl = 0;
+                    double ddl = 0;
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        for (const auto &[k, m] : count_maps[j]) {
+                            const auto &[v, c] = m;
+                            dl += boost::math::digamma(alpha / beta + v) * c;
+                            ddl += boost::math::trigamma(alpha / beta + v) * c;
+                        }
+                    }
+                    dl /= beta;
+                    ddl /= beta * beta;
+
+                    dl += (-boost::math::digamma(alpha) + log(p) / beta - 1.0/alpha + log(alpha) - 0.5/alpha/alpha) * total;
+                    ddl += (-boost::math::trigamma(alpha) + 1.0/alpha/alpha + 1.0/alpha + 1.0/alpha/alpha/alpha) * total;
+                    return std::make_pair(dl, ddl);
+                }, old_alpha, 0.0, real_sum, 30);
+            };
+
+            double beta = (1.0 - p) * mu / (p * var - mu);
+            if (beta <= 0)
+                beta = 1.0;
+
+            double alpha = beta * p / (1.0 - p) * mu;
+            common::logger->trace("Initial guess: a: {}\tb: {}", alpha, beta);
+            while (true) {
+                double old_alpha = alpha;
+                double old_beta = beta;
+                alpha = get_alpha(old_alpha, beta);
+                common::logger->trace("Cur: a: {}\tb: {}", alpha, beta);
+                beta = get_beta(alpha, old_beta);
+                common::logger->trace("Cur: a: {}\tb: {}", alpha, beta);
+                if ((alpha - old_alpha) / alpha < 1e-5 && (beta - old_beta) / beta < 1e-5)
+                    break;
+            }
+
+            double gamma_mu = alpha / beta;
+            common::logger->trace("Gamma-NB EM fit: p: {}\ta: {}\tb: {}\tE[r]: {}\tVar(r): {}",
+                                  p, alpha, beta, gamma_mu, gamma_mu / beta);
+
+            auto get_r = [alpha,beta,lp=log(p),sum=static_cast<double>(total_kmers),gamma_mu,gs=groups.size()](const PairContainer &row) {
+                return boost::math::tools::newton_raphson_iterate([&](double r) {
+                    double dl = (lp + (alpha - 1)/r - beta - boost::math::digamma(r)) * gs;
+                    double ddl = (-(alpha - 1)/r/r - boost::math::trigamma(r)) * gs;
+                    for (const auto &[j, c] : row) {
+                        dl += boost::math::digamma(r + c);
+                        ddl += boost::math::trigamma(r + c);
+                    }
+                    dl += boost::math::digamma(r) * (gs - row.size());
+                    ddl += boost::math::trigamma(r) * (gs - row.size());
+                    return std::make_pair(dl, ddl);
+                }, gamma_mu, 0.0, sum, 30);
+            };
+
+            auto get_deviance = [p](double invphi, double y) {
+                double mu = invphi * (1.0 - p) / p;
+                if (y == 0)
+                    return 2.0*invphi*log((invphi*mu)/invphi);
+
+                double logmuinvphi = log(mu+invphi);
+                double logmu = log(mu);
+                double logyshift = logmuinvphi - log(y + invphi);
+                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+            };
+
+            compute_min_pval = [get_r,num_labels_in,num_labels_out,get_deviance](int64_t n, const auto &row) {
+                if (n == 0)
+                    return 1.0;
+
+                double r = get_r(row);
+                double r_in = r * num_labels_in;
+                double r_out = r * num_labels_out;
+                double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+
+                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+
+                std::vector<double> devs(n + 1);
+
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs[s] = get_deviance(r_in, s) + get_deviance(r_out, n - s);
+                }
+
+                double max_d = *std::max_element(devs.begin(), devs.end());
+
+                double pval = 0.0;
+                int64_t s = 0;
+                int64_t t = n;
+                if (devs[s] == max_d) {
+                    double rs = r_in;
+                    double rt = r_out + n;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (++s; s <= n; ++s) {
+                        --t;
+                        if (devs[s] == max_d) {
+                            ++rs;
+                            --rt;
+                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                int64_t sp = n;
+                t = 0;
+                if (devs[sp] == max_d) {
+                    double rs = r_in + sp;
+                    double rt = r_out;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (--sp; sp >= s; --sp) {
+                        ++t;
+                        if (devs[sp] == max_d) {
+                            --rs;
+                            ++rt;
+                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                return std::min(1.0, pval);
+            };
+
+            compute_pval = [get_r,num_labels_in,num_labels_out,get_deviance](int64_t in_sum, int64_t out_sum, const auto &row) {
+                if (row.empty())
+                    return 1.0;
+
+                double r = get_r(row);
+                double r_in = r * num_labels_in;
+                double r_out = r * num_labels_out;
+                double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+
+                int64_t n = in_sum + out_sum;
+
+                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+
+                std::vector<double> devs(n + 1);
+
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs[s] = get_deviance(r_in, s) + get_deviance(r_out, n - s);
+                }
+
+                double in_sum_total_deviance = devs[in_sum];
+
+                double pval = 0.0;
+                int64_t s = 0;
+                int64_t t = n;
+                if (devs[s] >= in_sum_total_deviance) {
+                    double rs = r_in;
+                    double rt = r_out + n;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (++s; s <= n; ++s) {
+                        --t;
+                        if (devs[s] >= in_sum_total_deviance) {
+                            ++rs;
+                            --rt;
+                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                int64_t sp = n;
+                t = 0;
+                if (devs[sp] >= in_sum_total_deviance) {
+                    double rs = r_in + sp;
+                    double rt = r_out;
+                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    pval += exp(base);
+                    for (--sp; sp >= s; --sp) {
+                        ++t;
+                        if (devs[sp] >= in_sum_total_deviance) {
+                            --rs;
+                            ++rt;
+                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                            pval += exp(base);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                return std::min(1.0, pval);
+            };
         }
     } else if (config.test_type == "notest") {
-        compute_min_pval = [&](int64_t n) { return n > 0 ? 0.0 : 1.1; };
+        compute_min_pval = [&](int64_t n, const PairContainer&) { return n > 0 ? 0.0 : 1.1; };
         compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
     } else {
         throw std::runtime_error("Test not implemented");
@@ -1032,7 +1316,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
 
             if (ms[bucket_idx][n].first == 1.1)
-                ms[bucket_idx][n].first = compute_min_pval(n);
+                ms[bucket_idx][n].first = compute_min_pval(n, row);
 
             ++ms[bucket_idx][n].second;
 
