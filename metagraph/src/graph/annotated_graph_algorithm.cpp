@@ -1071,217 +1071,60 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++merged_hist[n];
             }, false);
 
-            double rsum = 0;
-            double lrsum = 0;
-            double rlrsum = 0;
+            size_t total = nelem * groups.size();
+            double ln_mu = 0.0;
+            double ln_var = 0.0;
             for (const auto &[n, c] : merged_hist) {
                 double r = p1p * n / groups.size();
-                r = 1.0 / r;
-                rsum += r * c;
-                lrsum += log(r) * c;
-                rlrsum += r * log(r) * c;
+                double a = 1.0 / r;
+                ln_mu += log(a) * c;
+                ln_var += log(a) * log(a) * c;
             }
+            ln_mu /= total;
+            ln_var = ln_var / total - ln_mu * ln_mu;
+            common::logger->trace("Log-normal fit: mu: {}\tvar: {}\texp(-mu): {}", ln_mu, ln_var, exp(-ln_mu));
 
-            size_t total = nelem * groups.size();
-            double mu = rsum / total;
-            double mul = lrsum / total;
+            auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
+                double a_guess = 0.0;
+                for (const auto &[j, c] : row) {
+                    a_guess += c;
+                }
+                a_guess /= total;
+                a_guess = p1p * a_guess;
 
-            double theta = rlrsum / total - mu * mul;
-            double alpha = mu / theta;
-
-            theta = theta * total / (total - 1);
-            alpha -= (alpha * 3 - alpha * 2 / 3 / (alpha + 1) - alpha * 4 / 5 / (alpha + 1) / alpha + 1) / total;
-
-            double beta = 1.0 / theta;
-
-            // size_t total = nelem * (num_labels_in + num_labels_out);
-            // size_t total_zeros = 0;
-            // double mu = static_cast<double>(total_kmers) / total;
-            // int64_t ssq = 0;
-            // VectorMap<int64_t, size_t> joint_map;
-            // size_t meas_total = 0;
-            // int64_t meas_total_kmers = 0;
-            // for (size_t j = 0; j < groups.size(); ++j) {
-            //     for (const auto &[k, m] : count_maps[j]) {
-            //         const auto &[v, c] = m;
-            //         joint_map[v] += c;
-            //         ssq += v * v * c;
-            //         meas_total_kmers += v * c;
-            //         if (v == 0)
-            //             total_zeros += c;
-            //         meas_total += c;
-            //     }
-            // }
-            // if (meas_total != total) {
-            //     common::logger->error("{} != {}", meas_total, total);
-            //     throw std::runtime_error("internal");
-            // }
-            // if (meas_total_kmers != total_kmers) {
-            //     common::logger->error("{} != {}", meas_total_kmers, total_kmers);
-            //     throw std::runtime_error("internal2");
-            // }
-            // auto joint_counts = const_cast<std::vector<std::pair<int64_t, size_t>>&&>(joint_map.values_container());
-            // std::sort(joint_counts.begin(), joint_counts.end());
-
-            // double mu2 = mu * mu;
-            // double var = static_cast<double>(ssq) / total - mu2;
-            // if (mu >= var) {
-            //     common::logger->error("{} >= {}", mu, var);
-            //     throw std::runtime_error("Data is underdispersed");
-            // }
-
-            // double p = target_p;
-
-            // double beta = (1.0 - p) * mu / (p * var - mu);
-            // if (beta <= 0) {
-            //     common::logger->warn("Underdispersed data: b: {}", beta);
-            //     beta = 1.0;
-            // }
-
-            // double alpha = beta * p / (1.0 - p) * mu;
-
-            // double base_l = 0;
-            // for (const auto &[k, c] : joint_counts) {
-            //     base_l += (log1p(-p) * k - lgamma(k + 1)) * c;
-            // }
-
-            // auto get_nb_l = [&](double r) {
-            //     double l = base_l - lgamma(r) * total + r * log(p);
-            //     for (const auto &[k, c] : joint_counts) {
-            //         l += lgamma(r + k) * c;
-            //     }
-
-            //     return l;
-            // };
-
-            // auto get_gamma_l = [&](double r, double alpha, double beta) {
-            //     return alpha * log(beta) - lgamma(alpha) + (alpha-1) * log(r) - beta * r;
-            // };
-
-            // auto get_base_exp = [&](double alpha, double beta) {
-            //     return base_l + (alpha * log(beta) - lgamma(alpha)) * total;
-            // };
-
-            // auto get_exp = [&](double l, double alpha, double beta) {
-            //     double r_mu = alpha / beta;
-            //     double lgm1 = lgamma(r_mu + 1);
-            //     double tg1 = boost::math::trigamma(1);
-            //     for (const auto &[k, c] : joint_counts) {
-            //         if (k > 1) {
-            //             l += (lgamma(r_mu + k) - lgm1) * c;
-            //             l += (boost::math::trigamma(k) - tg1) * r_mu / 2 / beta * c;
-            //         }
-            //     }
-            //     l += (r_mu * log(p) - alpha) * total + (boost::math::digamma(alpha) - log(beta)) * ((alpha-1) * total + total - total_zeros);
-            //     return l;
-            // };
-            // common::logger->trace("Initial MoM guess: a: {}\tb: {}\tE[r]: {}\tVar(r): {}\tE[log(r)]: {}\tl: {}",
-            //                       alpha, beta,
-            //                       alpha/beta, alpha/beta/beta,
-            //                       boost::math::digamma(alpha) - log(beta),
-            //                       get_exp(get_base_exp(alpha, beta), alpha, beta));
-
-            // auto get_alpha_dl_ddl = [&](double alpha, double beta) {
-            //     double dl = 0;
-            //     double ddl = 0;
-            //     for (const auto &[k, c] : joint_counts) {
-            //         if (k > 1) {
-            //             dl += (boost::math::digamma(alpha/beta + k) - boost::math::digamma(alpha/beta+1) + boost::math::trigamma(k)/2/beta) * c;
-            //             ddl += (boost::math::trigamma(alpha/beta + k) - boost::math::trigamma(alpha/beta+1)) * c;
-            //         }
-            //     }
-            //     dl = dl / beta + (log(beta) - boost::math::digamma(alpha) + log(p)/beta - 1 + (alpha-1)*boost::math::trigamma(alpha) + boost::math::digamma(alpha)) * total;
-            //     ddl += dl / beta / beta + ((alpha-1) * boost::math::polygamma(2, alpha) + boost::math::trigamma(alpha)) * total;
-            //     return std::make_pair(dl, ddl);
-            // };
-            // uintmax_t max_iter = 10;
-            // auto get_alpha = [&](double alpha, double beta) {
-            //     double old_alpha = alpha;
-            //     alpha = boost::math::tools::newton_raphson_iterate([&](double alpha) {
-            //         return get_alpha_dl_ddl(alpha, beta);
-            //     }, alpha, 0.0, real_sum, 30);
-            //     auto [dl, ddl] = get_alpha_dl_ddl(alpha, beta);
-            //     if (ddl > 0) {
-            //         common::logger->warn("Found local minimum: a: {}\tb: {}\tdl: {}\tddl: {}", alpha, beta, dl, ddl);
-            //         return boost::math::tools::brent_find_minima([&](double alpha) {
-            //             return -get_exp(get_base_exp(alpha, beta), alpha, beta);
-            //         }, old_alpha / 1.05, old_alpha * 1.05, 10, max_iter);
-            //         // throw std::runtime_error("Fail");
-            //     }
-            //     return std::make_pair(alpha, -get_exp(get_base_exp(alpha, beta), alpha, beta));
-            // };
-
-            // double nl = 0;
-            // while (true) {
-            //     double old_alpha = alpha;
-            //     double old_beta = beta;
-
-            //     // maximize log likelihood (using terms dependent on r)
-            //     while (true) {
-            //         double old_alpha = alpha;
-            //         double old_beta = beta;
-            //         std::tie(alpha, nl) = get_alpha(alpha, beta);
-            //         // std::tie(alpha, nl) = boost::math::tools::brent_find_minima([&](double alpha) {
-            //         //     return -get_exp(get_base_exp(alpha, beta), alpha, beta);
-            //         // }, old_alpha / 1.05, old_alpha * 1.05, 10, max_iter);
-            //         common::logger->trace("A: a: {}\tb: {}\tE[r]: {}\tVar(r): {}\tl: {}", alpha, beta, alpha/beta, alpha/beta/beta, -nl);
-
-            //         std::tie(beta, nl) = boost::math::tools::brent_find_minima([&](double beta) {
-            //             return -get_exp(get_base_exp(alpha, beta), alpha, beta);
-            //         }, old_beta / 1.05, old_beta * 1.05, 10, max_iter);
-            //         common::logger->trace("B: a: {}\tb: {}\tE[r]: {}\tVar(r): {}\tl: {}", alpha, beta, alpha/beta, alpha/beta/beta, -nl);
-
-            //         if (abs(alpha - old_alpha) / alpha < 1e-5 && abs(beta - old_beta) / beta < 1e-5)
-            //             break;
-            //     }
-
-            //     if (abs(alpha - old_alpha) / alpha < 1e-5 && abs(beta - old_beta) / beta < 1e-5)
-            //         break;
-            // }
-
-            double gamma_mu = alpha / beta;
-            common::logger->trace("Gamma-NB EM fit: p: {}\ta: {}\tb: {}\tE[r]: {}\tVar(r): {}",
-                                  p, alpha, beta,
-                                  gamma_mu, gamma_mu/beta);
-
-            auto get_r = [alpha,beta,lp=log(p),sum=static_cast<double>(total_kmers),gamma_mu,gs=groups.size()](const PairContainer &row) {
                 auto get_dl_ddl = [&](double a) {
-                    double r = 1.0/a;
-                    double dl = (a * (alpha-1) - beta * a * a - lp) * gs;
-                    double ddl = (alpha-1 - 2.0 * beta * a) * gs;
+                    double r = 1.0 / a;
+                    double dl = (-lp + boost::math::digamma(r) + a - (a*(log(a)-ln_mu))/ln_var) * gs;
+                    double ddl = (-r*r*boost::math::trigamma(r) + 1 - (log(a)-ln_mu)/ln_var - 1.0/ln_var) * gs;
+
                     for (const auto &[j, c] : row) {
-                        dl -= boost::math::digamma(r + c) - boost::math::digamma(r);
-                        ddl -= (boost::math::trigamma(r + c) - boost::math::trigamma(r)) * r * r;
+                        dl -= boost::math::digamma(r + c);
+                        ddl += boost::math::trigamma(r + c) * r * r;
                     }
-                    // double r = 1.0/a;
-                    // double dl = (lp - (alpha-1)/r - beta/r/r - boost::math::digamma(r)) * gs;
-                    // double ddl = ((alpha-1)/r/r + 2.0*beta/r/r/r - boost::math::trigamma(r)) * gs;
-                    // for (const auto &[j, c] : row) {
-                    //     dl += boost::math::digamma(r + c);
-                    //     ddl += boost::math::trigamma(r + c);
-                    // }
-                // auto get_dl_ddl = [&](double r) {
-                    // r = 1.0 / r;
-                    // double dl = (lp + (alpha - 1)/r - beta - boost::math::digamma(r)) * gs;
-                    // double ddl = (-(alpha - 1)/r/r - boost::math::trigamma(r)) * gs;
-                    // for (const auto &[j, c] : row) {
-                    //     dl += boost::math::digamma(r + c);
-                    //     ddl += boost::math::trigamma(r + c);
-                    // }
-                    // dl += boost::math::digamma(r) * (gs - row.size());
-                    // ddl += boost::math::trigamma(r) * (gs - row.size());
+
+                    dl -= boost::math::digamma(r) * (gs - row.size());
+                    ddl += boost::math::trigamma(r) * r * r * (gs - row.size());
+
                     return std::make_pair(dl, ddl);
                 };
 
-                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, gamma_mu, 1.0 / sum, 10000.0, 30);
-                double r = 1.0/a;
+                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, a_guess, 1.0 / real_sum, real_sum, 30);
                 auto [dl, ddl] = get_dl_ddl(a);
                 if (ddl > 0) {
-                    common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
-                    throw std::domain_error("GGG");
+                    a = boost::math::tools::brent_find_minima([&](double a) {
+                        double r = 1.0 / a;
+                        double l = (lp * r - lgamma(r) - log(a) - pow(log(a)-ln_mu, 2.0)/(2*ln_var)) * gs;
+                        for (const auto &[j, c] : row) {
+                            l += lgamma(r + c);
+                        }
+                        l += lgamma(r) * (gs - row.size());
+                        return -l;
+                    }, 1.0 / real_sum, real_sum, 30).first;
+                    // common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
+                    // throw std::domain_error("GGG");
                 }
 
-                return r;
+                return 1.0 / a;
             };
 
             auto get_deviance = [p](double invphi, double y) {
