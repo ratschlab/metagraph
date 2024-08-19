@@ -1090,6 +1090,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     n += c;
                 }
                 double r_guess = p1p * n / gs;
+                auto get_l = [&](double a) {
+                    double r = 1.0 / a;
+                    double l = (lp * r - log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var) * gs - lgamma(r) * row.size();
+                    for (const auto &[j, c] : row) {
+                        l += lgamma(r + c);
+                    }
+                    return l;
+                };
                 auto get_dl_ddl = [&](double a) {
                     double r = 1.0 / a;
                     double dl = (-lp + a - (a*(log(a)-ln_mu))/ln_var) * gs + boost::math::digamma(r) * row.size();
@@ -1102,16 +1110,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     return std::make_pair(dl, ddl);
                 };
-                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, 1.0 / r_guess, 1.0 / real_sum, real_sum, 30);
+
+                auto [a, l] = boost::math::tools::brent_find_minima(
+                    [&](double a) { return -get_l(a); },
+                    1.0 / real_sum, real_sum, 30
+                );
+                l *= -1;
+                // double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, 1.0 / r_guess, 1.0 / real_sum, real_sum, 30);
                 auto [dl, ddl] = get_dl_ddl(a);
                 if (ddl > 0) {
-                    // return 0.0;
                     std::vector<int64_t> counts(gs);
                     for (const auto &[j, c] : row) {
                         counts[j] = c;
                     }
-                    common::logger->warn("Found local minimum instead: r_guess: {}\tr: {}\tdl: {}\tddl: {}\tc: {}", r_guess, 1/a, dl, ddl, fmt::join(counts,","));
-                    // // common::logger->warn("Found local minimum instead: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, get_l(a), dl, ddl);
+                    common::logger->warn("Found local minimum instead: r_guess: {}\tr: {}\tl: {}\tdl: {}\tddl: {}\tc: {}", r_guess, 1/a, l, dl, ddl, fmt::join(counts,","));
                     throw std::domain_error("GGG");
                 }
 
