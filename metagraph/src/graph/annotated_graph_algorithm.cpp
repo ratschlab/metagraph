@@ -617,6 +617,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
         in_kmers = 0;
         out_kmers = 0;
+        int64_t total_kmers_sq = 0;
+        size_t total_nonzeros = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
@@ -625,6 +627,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 } else {
                     in_kmers += v * c;
                 }
+
+                if (v > 0)
+                    total_nonzeros += c;
+
+                total_kmers_sq += v * v * c;
             }
         }
         total_kmers = in_kmers + out_kmers;
@@ -1029,82 +1036,33 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         } else {
             double p = target_p;
             double p1p = exp(log(p) - log1p(-p));
-            common::logger->trace("Computing merged histograms");
             size_t total = nelem * groups.size();
-            std::vector<std::vector<size_t>> sum_counts_pt(num_threads + 1);
 
-            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                bool in_kmer = false;
-                bool out_kmer = false;
-                if (kept[row_i]) {
-                    size_t count_in = 0;
-                    size_t count_out = 0;
-                    for (const auto &[j, raw_c] : raw_row) {
-                        uint64_t c = raw_c;
-                        if (count_maps.size())
-                            c = count_maps[j].find(c)->second.first;
+            double mu = static_cast<double>(total_kmers) / total;
+            double mu2 = static_cast<double>(total_kmers_sq) / total;
 
-                        if (groups[j]) {
-                            out_sum += c;
-                            ++count_out;
-                        } else {
-                            in_sum += c;
-                            ++count_in;
-                        }
-                    }
+            double ln_var = log(p * mu2 - mu) - log(p) - 2.0 * log(mu);
+            double ln_mu = log(mu) + log(p) - log1p(-p) - ln_var / 2;
 
-                    if (count_in + count_out >= config.min_recurrence) {
-                        double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-                        in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
-                        out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
-                    }
-                } else {
-                    return;
-                }
+            auto get_l = [&](double mu, double var) {
+                return (exp(-mu + var/2)*log(p)-log(sqrt(var))) * total - mu * (total + total_nonzeros);
+            };
 
-                if (!in_kmer && !out_kmer)
-                    return;
+            common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
 
-                size_t n = in_sum + out_sum;
-
-                if (sum_counts_pt[bucket_idx].size() <= n)
-                    sum_counts_pt[bucket_idx].resize(n + 1);
-
-                ++sum_counts_pt[bucket_idx][n];
-            }, false);
-
-            std::vector<size_t> sum_counts = std::move(sum_counts_pt[0]);
-            for (size_t j = 1; j < sum_counts_pt.size(); ++j) {
-                size_t overlap_n = std::min(sum_counts_pt[j].size(), sum_counts.size());
-                for (size_t n = 0; n < overlap_n; ++n) {
-                    sum_counts[n] += sum_counts_pt[j][n];
-                }
-
-                if (sum_counts_pt[j].size() > sum_counts.size()) {
-                    std::copy(sum_counts_pt[j].begin() + sum_counts.size(),
-                              sum_counts_pt[j].end(),
-                              std::back_inserter(sum_counts));
-                }
+            while (true) {
+                double old_ln_mu = ln_mu;
+                double old_ln_var = ln_var;
+                ln_mu = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_l(ln_mu, old_ln_var); },
+                                                              0.0, real_sum, 30).first;
+                ln_var = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_l(ln_mu, ln_var); },
+                                                               0.0, real_sum, 30).first;
+                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
+                if (abs(ln_mu - old_ln_mu)/ln_mu < 1e-5 && abs(ln_var - old_ln_var)/ln_var < 1e-5)
+                    break;
             }
 
-            double ln_mu = 0.0;
-            double ln_var = 0.0;
-            for (size_t n = 0; n < sum_counts.size(); ++n) {
-                size_t c = sum_counts[n];
-                if (c > 0) {
-                    double r = p1p * n / groups.size();
-                    double a = 1.0 / r;
-                    ln_mu += log(a) * c;
-                    ln_var += log(a) * log(a) * c;
-                }
-            }
-
-            ln_mu /= total;
-            ln_var = ln_var / total - ln_mu * ln_mu;
-
-            common::logger->trace("Log-normal fit: mu: {}\tvar: {}\texp(-mu): {}", ln_mu, ln_var, exp(-ln_mu));
+            // common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
                 auto get_l = [&](double a) {
@@ -1115,20 +1073,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                     return l;
                 };
-                // auto get_dl_ddl_dddl = [&](double a) {
-                //     double r = 1.0 / a;
-                //     double dl = (-lp + a - (a*(log(a)-ln_mu))/ln_var) * gs + boost::math::digamma(r) * row.size();
-                //     double ddl = (1.0 - (log(a)-ln_mu)/ln_var - 1.0/ln_var) * gs - r*r*boost::math::trigamma(r) * row.size();
-                //     double dddl = -gs * r / ln_var + (2.0*r*r*boost::math::trigamma(r)+r*r*r*boost::math::polygamma(2,r)) * r * row.size();
-
-                //     for (const auto &[j, c] : row) {
-                //         dl -= boost::math::digamma(r + c);
-                //         ddl += boost::math::trigamma(r + c) * r * r;
-                //         dddl -= boost::math::trigamma(r + c) * 2 * r * r * r + boost::math::polygamma(2.0, r + c) * r * r * r * r;
-                //     }
-
-                //     return std::make_tuple(dl, ddl, dddl);
-                // };
 
                 auto [a, l] = boost::math::tools::brent_find_minima(
                     [&](double a) { return -get_l(a); },
