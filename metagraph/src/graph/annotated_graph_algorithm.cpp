@@ -1030,9 +1030,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double p = target_p;
             double p1p = exp(log(p) - log1p(-p));
             common::logger->trace("Computing merged histograms");
-            std::mutex hist_mu;
-            tsl::hopscotch_map<uint64_t, size_t> merged_hist;
-            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t) {
+            size_t total = nelem * groups.size();
+            std::vector<std::vector<size_t>> sum_counts_pt(num_threads + 1);
+
+            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
                 int64_t in_sum = 0;
                 int64_t out_sum = 0;
                 bool in_kmer = false;
@@ -1067,21 +1068,42 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return;
 
                 size_t n = in_sum + out_sum;
-                std::lock_guard<std::mutex> lock(hist_mu);
-                ++merged_hist[n];
+
+                if (sum_counts_pt[bucket_idx].size() <= n)
+                    sum_counts_pt[bucket_idx].resize(n + 1);
+
+                ++sum_counts_pt[bucket_idx][n];
             }, false);
 
-            size_t total = nelem * groups.size();
+            std::vector<size_t> sum_counts = std::move(sum_counts_pt[0]);
+            for (size_t j = 1; j < sum_counts_pt.size(); ++j) {
+                size_t overlap_n = std::min(sum_counts_pt[j].size(), sum_counts.size());
+                for (size_t n = 0; n < overlap_n; ++n) {
+                    sum_counts[n] += sum_counts_pt[j][n];
+                }
+
+                if (sum_counts_pt[j].size() > sum_counts.size()) {
+                    std::copy(sum_counts_pt[j].begin() + sum_counts.size(),
+                              sum_counts_pt[j].end(),
+                              std::back_inserter(sum_counts));
+                }
+            }
+
             double ln_mu = 0.0;
             double ln_var = 0.0;
-            for (const auto &[n, c] : merged_hist) {
-                double r = p1p * n / groups.size();
-                double a = 1.0 / r;
-                ln_mu += log(a) * c;
-                ln_var += log(a) * log(a) * c;
+            for (size_t n = 0; n < sum_counts.size(); ++n) {
+                size_t c = sum_counts[n];
+                if (c > 0) {
+                    double r = p1p * n / groups.size();
+                    double a = 1.0 / r;
+                    ln_mu += log(a) * c;
+                    ln_var += log(a) * log(a) * c;
+                }
             }
+
             ln_mu /= total;
             ln_var = ln_var / total - ln_mu * ln_mu;
+
             common::logger->trace("Log-normal fit: mu: {}\tvar: {}\texp(-mu): {}", ln_mu, ln_var, exp(-ln_mu));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
