@@ -1085,6 +1085,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("Log-normal fit: mu: {}\tvar: {}\texp(-mu): {}", ln_mu, ln_var, exp(-ln_mu));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
+                int64_t n = 0;
+                for (const auto &[j, c] : row) {
+                    n += c;
+                }
+                double r_guess = p1p * n / gs;
                 auto get_dl_ddl = [&](double a) {
                     double r = 1.0 / a;
                     double dl = (-lp + a - (a*(log(a)-ln_mu))/ln_var) * gs + boost::math::digamma(r) * row.size();
@@ -1097,17 +1102,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     return std::make_pair(dl, ddl);
                 };
-                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, ln_mu, 1.0 / real_sum, real_sum, 30);
+                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, 1.0 / r_guess, 1.0 / real_sum, real_sum, 30);
                 auto [dl, ddl] = get_dl_ddl(a);
                 if (ddl > 0) {
-                    return 0.0;
-                    // std::vector<int64_t> counts(gs);
-                    // for (const auto &[j, c] : row) {
-                    //     counts[j] = c;
-                    // }
-                    // common::logger->warn("Found local minimum instead: r: {}\tdl: {}\tddl: {}\tc: {}", 1/a, dl, ddl, fmt::join(counts,","));
+                    // return 0.0;
+                    std::vector<int64_t> counts(gs);
+                    for (const auto &[j, c] : row) {
+                        counts[j] = c;
+                    }
+                    common::logger->warn("Found local minimum instead: r_guess: {}\tr: {}\tdl: {}\tddl: {}\tc: {}", r_guess, 1/a, dl, ddl, fmt::join(counts,","));
                     // // common::logger->warn("Found local minimum instead: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, get_l(a), dl, ddl);
-                    // throw std::domain_error("GGG");
+                    throw std::domain_error("GGG");
                 }
 
                 // std::vector<int64_t> counts(gs);
