@@ -1085,44 +1085,110 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("Log-normal fit: mu: {}\tvar: {}\texp(-mu): {}", ln_mu, ln_var, exp(-ln_mu));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
-                double a_guess = 0.0;
-                for (const auto &[j, c] : row) {
-                    a_guess += c;
-                }
-                a_guess /= total;
-                a_guess = p1p * a_guess;
-
                 auto get_dl_ddl = [&](double a) {
                     double r = 1.0 / a;
-                    double dl = (-lp + boost::math::digamma(r) + a - (a*(log(a)-ln_mu))/ln_var) * gs;
-                    double ddl = (-r*r*boost::math::trigamma(r) + 1 - (log(a)-ln_mu)/ln_var - 1.0/ln_var) * gs;
+                    double dl = (-lp + a - (a*(log(a)-ln_mu))/ln_var) * gs + boost::math::digamma(r) * row.size();
+                    double ddl = (1.0 - (log(a)-ln_mu)/ln_var - 1.0/ln_var) * gs - r*r*boost::math::trigamma(r) * row.size();
 
                     for (const auto &[j, c] : row) {
                         dl -= boost::math::digamma(r + c);
                         ddl += boost::math::trigamma(r + c) * r * r;
                     }
 
-                    dl -= boost::math::digamma(r) * (gs - row.size());
-                    ddl += boost::math::trigamma(r) * r * r * (gs - row.size());
-
                     return std::make_pair(dl, ddl);
                 };
-
-                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, a_guess, 1.0 / real_sum, real_sum, 30);
+                double a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, ln_mu, 1.0 / real_sum, real_sum, 30);
                 auto [dl, ddl] = get_dl_ddl(a);
                 if (ddl > 0) {
-                    a = boost::math::tools::brent_find_minima([&](double a) {
-                        double r = 1.0 / a;
-                        double l = (lp * r - lgamma(r) - log(a) - pow(log(a)-ln_mu, 2.0)/(2*ln_var)) * gs;
-                        for (const auto &[j, c] : row) {
-                            l += lgamma(r + c);
-                        }
-                        l += lgamma(r) * (gs - row.size());
-                        return -l;
-                    }, 1.0 / real_sum, real_sum, 30).first;
-                    // common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
+                    return 0.0;
+                    // std::vector<int64_t> counts(gs);
+                    // for (const auto &[j, c] : row) {
+                    //     counts[j] = c;
+                    // }
+                    // common::logger->warn("Found local minimum instead: r: {}\tdl: {}\tddl: {}\tc: {}", 1/a, dl, ddl, fmt::join(counts,","));
+                    // // common::logger->warn("Found local minimum instead: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, get_l(a), dl, ddl);
                     // throw std::domain_error("GGG");
                 }
+
+                // std::vector<int64_t> counts(gs);
+                // double a_guess = 0.0;
+                // for (const auto &[j, c] : row) {
+                //     a_guess += c;
+                //     counts[j] = c;
+                // }
+                // a_guess /= total;
+                // a_guess = p1p * a_guess;
+
+                // auto get_l = [&](double a) {
+                //     double r = 1.0 / a;
+                //     double l = (lp * r - lgamma(r) - log(a) - pow(log(a)-ln_mu, 2.0)/(2*ln_var)) * gs;
+                //     for (const auto &[j, c] : row) {
+                //         l += lgamma(r + c);
+                //     }
+                //     l += lgamma(r) * (gs - row.size());
+                //     return l;
+                // };
+
+                // auto get_dl_ddl = [&](double a) {
+                //     double r = 1.0 / a;
+                //     double dl = (-lp + boost::math::digamma(r) + a - (a*(log(a)-ln_mu))/ln_var) * gs;
+                //     double ddl = (-r*r*boost::math::trigamma(r) + 1 - (log(a)-ln_mu)/ln_var - 1.0/ln_var) * gs;
+
+                //     for (const auto &[j, c] : row) {
+                //         dl -= boost::math::digamma(r + c);
+                //         ddl += boost::math::trigamma(r + c) * r * r;
+                //     }
+
+                //     dl -= boost::math::digamma(r) * (gs - row.size());
+                //     ddl += boost::math::trigamma(r) * r * r * (gs - row.size());
+
+                //     return std::make_pair(dl, ddl);
+                // };
+
+                // double a = a_guess;
+                // double l = -std::numeric_limits<double>::max();
+                // uintmax_t max_iter = 100;
+                // double margin = 1.1;
+                // while (true) {
+                //     double old_a = a;
+                //     double old_l = l;
+                //     try {
+                //         std::tie(a, l) = boost::math::tools::brent_find_minima([&](double a) { return -get_l(a); },
+                //                                                             a_guess / margin, a_guess * margin, 30, max_iter);
+                //         common::logger->trace("a: {}\tl: {}\tc: {}", a, l, fmt::join(counts, ","));
+                //         if (l < old_l) {
+                //             auto [dl, ddl] = get_dl_ddl(a);
+                //             common::logger->warn("Moving down: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, l, dl, ddl);
+                //             throw std::domain_error("FFF");
+                //         }
+                //         if (abs(a - old_a) / a < 1e-5) {
+                //             auto [dl, ddl] = get_dl_ddl(a);
+                //             if (ddl > 0) {
+                //                 common::logger->warn("Found local minimum instead: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, l, dl, ddl);
+                //                 throw std::domain_error("GGG");
+                //             }
+                //             break;
+                //         }
+                //     } catch (...) {
+                //         common::logger->error("Something happened: r: {}", 1/a);
+                //         throw std::runtime_error("FOFOF");
+                //     }
+                //     margin /= 2;
+                // }
+                // try {
+                //     a = boost::math::tools::newton_raphson_iterate(get_dl_ddl, a_guess, 1.0 / real_sum, real_sum, 30);
+                //     auto [dl, ddl] = get_dl_ddl(a);
+                //     if (ddl > 0) {
+                //         common::logger->warn("Found local minimum instead: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, get_l(a), dl, ddl);
+                //         throw std::domain_error("GGG");
+                //     }
+                // } catch (std::domain_error &e) {
+                //     double l;
+                //     std::tie(a, l) = boost::math::tools::brent_find_minima([&](double a) { return -get_l(a); },
+                //                                               1.0 / real_sum, real_sum, 30);
+                //     auto [dl, ddl] = get_dl_ddl(a);
+                //     common::logger->warn("Best values: r: {}\tl: {}\tdl: {}\tddl: {}", 1/a, l, dl, ddl);
+                // }
 
                 return 1.0 / a;
             };
@@ -1138,11 +1204,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
             };
 
-            compute_min_pval = [get_r,num_labels_in,num_labels_out,get_deviance](int64_t n, const auto &row) {
+            compute_min_pval = [get_r,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t n, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
                 double r = get_r(row);
+                if (r == 0.0)
+                    return 1.0;
+
                 double r_in = r * num_labels_in;
                 double r_out = r * num_labels_out;
                 double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
@@ -1201,11 +1270,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return std::min(1.0, pval);
             };
 
-            compute_pval = [get_r,num_labels_in,num_labels_out,get_deviance](int64_t in_sum, int64_t out_sum, const auto &row) {
+            compute_pval = [get_r,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t in_sum, int64_t out_sum, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
                 double r = get_r(row);
+
+                if (r == 0.0)
+                    return 1.0;
+
                 double r_in = r * num_labels_in;
                 double r_out = r * num_labels_out;
                 double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
