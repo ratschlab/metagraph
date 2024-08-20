@@ -1045,8 +1045,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (mu >= p * (mu2 - mu*mu))
                 common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
 
-            double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu),
-                                     std::numeric_limits<double>::min());
+            double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu), 0);
             double ln_mu = log(mu) + log(p) - log1p(-p) - ln_var / 2;
 
             common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
@@ -1054,7 +1053,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
                 if (ln_var == 0)
-                    return exp(ln_mu);
+                    return exp(-ln_mu);
 
                 auto get_l = [&](double a) {
                     double r = 1.0 / a;
