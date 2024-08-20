@@ -618,10 +618,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         in_kmers = 0;
         out_kmers = 0;
         int64_t total_kmers_sq = 0;
-        size_t total_nonzeros = 0;
+        int64_t total_nonzeros = 0;
+        std::vector<int64_t> counts;
         for (size_t j = 0; j < groups.size(); ++j) {
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
+                if (v >= counts.size())
+                    counts.resize(v + 1);
+
+                counts[v] += c;
+
                 if (groups[j]) {
                     out_kmers += v * c;
                 } else {
@@ -634,7 +640,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 total_kmers_sq += v * v * c;
             }
         }
+
         total_kmers = in_kmers + out_kmers;
+
+        std::partial_sum(counts.rbegin(), counts.rend(), counts.rbegin());
+        if (counts[0] != static_cast<int64_t>(nelem * groups.size()) || counts[1] != total_nonzeros) {
+            throw std::runtime_error("FSFJKHJFSL");
+        }
+
         common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
         int64_t in_sum = 0;
@@ -1048,8 +1061,35 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu), 0.0);
             double ln_mu = ln_var / 2 - log(mu) - log(p) + log1p(-p);
 
-            common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
-                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
+            auto get_exp_l = [&](double mu, double var) {
+                double ex = exp(-mu + var/2);
+                double vr = exp(-mu * 2 + var) * (exp(var) - 1);
+                double l = (-log(sqrt(var)) + ex*log(p) - mu) * total - mu * total_nonzeros;
+                for (size_t j = 1; j < counts.size() - 1; ++j) {
+                    l += (log(j + ex) - vr/pow(j + ex, 2.0)) * counts[j + 1];
+                }
+                // common::logger->trace("{}\t{}\t{}", mu, var, l);
+                return l;
+            };
+
+            double nl = -get_exp_l(ln_mu, ln_var);
+
+            common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+
+            double range = 1.5;
+            while (true) {
+                double old_nl = nl;
+                std::tie(ln_mu, nl) = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_exp_l(ln_mu, ln_var); }, -abs(ln_mu) / range, abs(ln_mu) * range, 30);
+                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+                std::tie(ln_var, nl) = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_exp_l(ln_mu, ln_var); }, ln_var / range, ln_var * range, 30);
+                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+
+                if (abs(nl - old_nl) / abs(nl) < 1e-3)
+                    break;
+            }
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
                 if (ln_var == 0)
