@@ -1046,7 +1046,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
 
             double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu), 0.0);
-            double ln_mu = log(mu) + log(p) - log1p(-p) - ln_var / 2;
+            double ln_mu = ln_var / 2 - log(mu) - log(p) + log1p(-p);
 
             common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
                                   ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
@@ -1064,10 +1064,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return l;
                 };
 
-                uintmax_t max_iter = 100;
                 auto [a, l] = boost::math::tools::brent_find_minima(
                     [&](double a) { return -get_l(a); },
-                    1.0 / real_sum, real_sum, 30, max_iter
+                    1.0 / real_sum, real_sum, 30
                 );
                 l *= -1;
 
