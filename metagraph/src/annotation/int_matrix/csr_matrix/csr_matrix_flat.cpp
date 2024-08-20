@@ -115,6 +115,8 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
 
         uint64_t num_ones = flat_end ? flat.rank1(flat_end - 1) : 0;
 
+        size_t rows_per_update = 10000;
+        size_t last_output_i = begin;
         if (keep_all_nonzeros) {
             int64_t last_i = static_cast<int64_t>(begin) - 1;
             for (uint64_t r = flat_begin ? flat.rank1(flat_begin - 1) + 1 : 1; r <= num_ones; ++r) {
@@ -133,6 +135,7 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
 
                 if (i - last_i > 1) {
                     ++last_i;
+
                     uint64_t num_added = i - last_i;
                     local_num_empty_rows += num_added;
                     if (unmark_discarded) {
@@ -143,6 +146,11 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                 }
 
                 last_i = i;
+
+                if (i - last_output_i > rows_per_update) {
+                    progress_bar += i - last_output_i;
+                    last_output_i = i;
+                }
             }
 
             if (end - last_i > 1) {
@@ -155,10 +163,17 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                     }
                 }
             }
+
+            progress_bar += end - last_output_i;;
         } else {
             int64_t last_i = begin;
             std::vector<std::pair<uint64_t, size_t>> row;
             auto row_callback = [&](uint64_t row_i) __attribute__((always_inline)) {
+                if (row_i - last_output_i > rows_per_update) {
+                    progress_bar += row_i - last_output_i;
+                    last_output_i = row_i;
+                }
+
                 bool keep = min_counts.empty();
 
                 if (min_counts.size()) {
@@ -222,9 +237,9 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                     unset_bit(unmark_discarded->data(), last_i, false);
                 }
             }
-        }
 
-        progress_bar += end - begin;
+            progress_bar += end - last_output_i;
+        }
 
         #pragma omp atomic
         num_empty_rows += local_num_empty_rows;

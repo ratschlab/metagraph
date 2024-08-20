@@ -107,6 +107,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
             if (boundaries.back() != flat.size())
                 boundaries.emplace_back(flat.size());
 
+            size_t rows_per_update = 10000;
             common::logger->trace("Streaming rows");
             ProgressBar progress_bar(n, "Constructed rows", std::cerr, !common::get_verbose());
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -127,6 +128,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                 auto it = v_use->begin() + r;
 
                 uint64_t last_i = begin;
+                size_t last_output_i = begin;
                 uint64_t num_ones = flat_end ? flat.rank1(flat_end - 1) : 0;
                 for (uint64_t r = flat_begin ? flat.rank1(flat_begin - 1) + 1 : 1; r <= num_ones; ++r) {
                     uint64_t b = flat.select1(r);
@@ -147,6 +149,11 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     ++it;
 
                     row.emplace_back(j, val);
+
+                    if (last_i - last_output_i > rows_per_update) {
+                        progress_bar += last_i - last_output_i;
+                        last_output_i = last_i;
+                    }
                 }
 
                 callback(last_i, row, thread_id);
@@ -156,7 +163,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
                     callback(last_i, row, thread_id);
                 }
 
-                progress_bar += end - begin;
+                progress_bar += end - last_output_i;
             }
         }
     }
