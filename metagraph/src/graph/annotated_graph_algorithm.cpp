@@ -1034,37 +1034,141 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return pval;
             };
         } else {
+            tsl::hopscotch_map<int64_t, std::vector<size_t>> row_sums;
+            std::mutex nmu;
+            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t) {
+                int64_t in_sum = 0;
+                int64_t out_sum = 0;
+                bool in_kmer = false;
+                bool out_kmer = false;
+                size_t count_in = 0;
+                size_t count_out = 0;
+                if (kept[row_i]) {
+                    for (const auto &[j, raw_c] : raw_row) {
+                        uint64_t c = raw_c;
+                        if (count_maps.size())
+                            c = count_maps[j].find(c)->second.first;
+
+                        if (groups[j]) {
+                            out_sum += c;
+                            ++count_out;
+                        } else {
+                            in_sum += c;
+                            ++count_in;
+                        }
+                    }
+
+                    if (count_in + count_out >= config.min_recurrence) {
+                        double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                        in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                        out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
+                    }
+                } else {
+                    return;
+                }
+
+                if (!in_kmer && !out_kmer)
+                    return;
+
+                std::lock_guard<std::mutex> lock(nmu);
+                auto &bucket = row_sums[in_sum + out_sum];
+                if (bucket.empty())
+                    bucket.resize(groups.size());
+
+                ++bucket[count_in + count_out - 1];
+            }, false);
+
             double p = target_p;
+
             double p1p = exp(log(p) - log1p(-p));
             size_t total = nelem * groups.size();
 
             double mu = static_cast<double>(total_kmers) / total;
             double mu2 = static_cast<double>(total_kmers_sq) / total;
 
+            if (mu >= p * (mu2 - mu*mu))
+                common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
+
             double ln_var = log(p * mu2 - mu) - log(p) - 2.0 * log(mu);
             double ln_mu = log(mu) + log(p) - log1p(-p) - ln_var / 2;
 
+            if (ln_var < 0) {
+                common::logger->warn("Flipping sign of var");
+                ln_var *= -1;
+            }
+
             auto get_l = [&](double mu, double var) {
-                return (exp(-mu + var/2)*log(p)-log(sqrt(var))) * total - mu * (total + total_nonzeros);
+                double l = (-log(sqrt(var))-mu*mu/2/var) * total;
+                for (const auto &[n, bucket] : row_sums) {
+                    for (size_t j = 0; j < groups.size(); ++j) {
+                        auto [phi, nl] = boost::math::tools::brent_find_minima([&](double phi) {
+                            size_t adj = phi < 1 ? n : j + 1;
+                            return -(log(p)/phi - static_cast<double>(groups.size() + adj)/groups.size()*log(phi) - log(phi)*(log(phi)-2*mu)/(2*var));
+                        }, 0.0, real_sum, 30);
+                        l -= nl * bucket[j] * groups.size();
+                    }
+                }
+
+                return l;
             };
 
-            common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
+            double nl = -get_l(ln_mu, ln_var);
+            common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
 
             while (true) {
-                double old_ln_mu = ln_mu;
-                double old_ln_var = ln_var;
-                ln_mu = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_l(ln_mu, old_ln_var); },
-                                                              0.0, real_sum, 30).first;
-                ln_var = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_l(ln_mu, ln_var); },
-                                                               0.0, real_sum, 30).first;
-                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
-                if (abs(ln_mu - old_ln_mu)/ln_mu < 1e-5 && abs(ln_var - old_ln_var)/ln_var < 1e-5)
+                double old_nl = nl;
+                std::tie(ln_mu, nl) = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_l(ln_mu, ln_var); }, -real_sum, real_sum, 30);
+                common::logger->trace("Lognormal fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                      ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+                std::tie(ln_var, nl) = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_l(ln_mu, ln_var); }, 0.0, real_sum, 30);
+                common::logger->trace("Lognormal fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                      ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+                if (abs(nl - old_nl) / abs(nl) < 1e-5)
                     break;
             }
 
-            // common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
+            // // common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\texp(-mu): {}\tN: {}\tNnz: {}\tl: {} + C",
+            // //                       ln_mu, ln_var, exp(-ln_mu), total, total_nonzeros, get_l(ln_mu, ln_var));
+
+            // // while (true) {
+            // //     double old_ln_mu = ln_mu;
+            // //     double old_ln_var = ln_var;
+            // //     ln_mu = old_ln_var / 2 - log(-static_cast<double>(total+total_nonzeros)/total/log(p));
+            // //     common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
+            // //     ln_var = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_l(ln_mu, ln_var); },
+            // //                                                    0.0, real_sum, 30).first;
+            // //     common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C", ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
+            // //     if (abs(ln_mu - old_ln_mu)/ln_mu < 1e-5 && abs(ln_var - old_ln_var)/ln_var < 1e-5)
+            // //         break;
+            // // }
+            // // ln_mu = - log(-static_cast<double>(total+total_nonzeros)/total/log(p));
+            // // ln_var = 0;
+
+            // while (true) {
+            //     double old_ln_mu = ln_mu;
+            //     double old_ln_var = ln_var;
+            //     auto get_l = [&](double mu, double var) {
+            //         double l = 0;
+            //         for (size_t j = 0; j < groups.size(); ++j) {
+            //             for (const auto &[k, m] : count_maps[j]) {
+            //                 const auto &[v, c] = m;
+            //                 l -= log(sqrt(var))
+            //             }
+            //         }
+            //     };
+            // }
+
+            // common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}",
+            //                       ln_mu, ln_var, exp(-ln_mu));
+
+            // common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\texp(-mu): {}\tl: {} + C",
+            //                       ln_mu, ln_var, exp(-ln_mu), get_l(ln_mu, ln_var));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
+                if (ln_var == 0)
+                    return exp(ln_mu);
+
                 auto get_l = [&](double a) {
                     double r = 1.0 / a;
                     double l = (lp * r - log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var) * gs - lgamma(r) * row.size();
