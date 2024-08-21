@@ -1049,46 +1049,52 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         } else {
             double p = target_p;
 
-            double p1p = exp(log(p) - log1p(-p));
             size_t total = nelem * groups.size();
 
             double mu = static_cast<double>(total_kmers) / total;
             double mu2 = static_cast<double>(total_kmers_sq) / total;
 
-            if (mu >= p * (mu2 - mu*mu))
-                common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
-
             double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu), 0.0);
             double ln_mu = ln_var / 2 - log(mu) - log(p) + log1p(-p);
 
-            auto get_exp_l = [&](double mu, double var) {
-                double ex = exp(-mu + var/2);
-                double vr = exp(-mu * 2 + var) * (exp(var) - 1);
-                double l = -log(sqrt(var)) - mu + ex*log(p) * total - mu * total_nonzeros;
+            if (mu >= p * (mu2 - mu*mu)) {
+                common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
+                ln_var = 1;
+            }
+
+            auto get_exp = [&](double mu, double var) { return exp(mu + var/2); };
+            auto get_var = [&](double mu, double var) { return exp(mu*2 + var) * (exp(var)-1); };
+
+            auto get_l = [&](double mu, double var) {
+                double l = get_exp(-mu, var) * log(p) * total - mu * total_nonzeros;
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
-                    l += (log(j + ex) - vr/pow(j + ex, 2.0)) * counts[j + 1];
+                    l += (log(j + get_exp(-mu, var)) - get_var(-mu, var)/pow(j + get_exp(-mu, var), 2.0)) * counts[j + 1];
                 }
                 return l;
             };
 
-            double nl = -get_exp_l(ln_mu, ln_var);
-
+            double l = get_l(ln_mu, ln_var);
             common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
+                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
 
-            double range = 1.1;
+            double factor = 1.1;
             while (true) {
-                double old_exp = exp(ln_mu + ln_var/2);
-                std::tie(ln_mu, nl) = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_exp_l(ln_mu, ln_var); }, -abs(ln_mu) / range, abs(ln_mu) * range, 30);
-                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
-                std::tie(ln_var, nl) = boost::math::tools::brent_find_minima([&](double ln_var) { return -get_exp_l(ln_mu, ln_var); }, ln_var / range, ln_var * range, 30);
-                common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
-
-                if (ln_var == 0 || abs(exp(ln_mu + ln_var/2) - old_exp) / exp(ln_mu + ln_var/2) < 1e-5)
+                double old_l = l;
+                std::tie(ln_mu, l) = boost::math::tools::brent_find_minima([&](double mu) { return -get_l(mu, ln_var); },
+                                                                           -abs(ln_mu) / factor, abs(ln_mu) * factor, 30);
+                l *= -1;
+                common::logger->trace("Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+                std::tie(ln_var, l) = boost::math::tools::brent_find_minima([&](double var) { return -get_l(ln_mu, var); },
+                                                                           0.0, ln_var * factor, 30);
+                l *= -1;
+                common::logger->trace("Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+                if (abs(l - old_l) / abs(l) < 1e-5)
                     break;
             }
+
+            double p1p = exp(log(p) - log1p(-p));
 
             auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
                 if (ln_var == 0)
