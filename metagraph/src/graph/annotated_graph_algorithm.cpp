@@ -1064,11 +1064,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto get_exp_l = [&](double mu, double var) {
                 double ex = exp(-mu + var/2);
                 double vr = exp(-mu * 2 + var) * (exp(var) - 1);
-                double l = (-log(sqrt(var)) + ex*log(p) - mu) * total - mu * total_nonzeros;
+                double l = -log(sqrt(var)) - mu + ex*log(p) * total - mu * total_nonzeros;
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
                     l += (log(j + ex) - vr/pow(j + ex, 2.0)) * counts[j + 1];
                 }
-                // common::logger->trace("{}\t{}\t{}", mu, var, l);
                 return l;
             };
 
@@ -1077,9 +1076,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                   ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
 
-            double range = 1.5;
+            double range = 1.1;
             while (true) {
-                double old_nl = nl;
+                double old_exp = exp(ln_mu + ln_var/2);
                 std::tie(ln_mu, nl) = boost::math::tools::brent_find_minima([&](double ln_mu) { return -get_exp_l(ln_mu, ln_var); }, -abs(ln_mu) / range, abs(ln_mu) * range, 30);
                 common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                 ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
@@ -1087,7 +1086,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->trace("Lognormal EM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                 ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), -nl);
 
-                if (abs(nl - old_nl) / abs(nl) < 1e-3)
+                if (ln_var == 0 || abs(exp(ln_mu + ln_var/2) - old_exp) / exp(ln_mu + ln_var/2) < 1e-5)
                     break;
             }
 
@@ -1097,18 +1096,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 auto get_l = [&](double a) {
                     double r = 1.0 / a;
-                    double l = (lp * r - log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var) * gs - lgamma(r) * row.size();
+                    double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * row.size();
                     for (const auto &[j, c] : row) {
                         l += lgamma(r + c);
                     }
                     return l;
                 };
 
-                auto [a, l] = boost::math::tools::brent_find_minima(
+                auto [a, nl] = boost::math::tools::brent_find_minima(
                     [&](double a) { return -get_l(a); },
                     1.0 / real_sum, real_sum, 30
                 );
-                l *= -1;
 
                 return 1.0 / a;
             };
