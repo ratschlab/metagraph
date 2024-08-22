@@ -1094,10 +1094,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     row_sum_counts_ms[bucket_idx].resize(n + 1);
 
                 ++row_sum_counts_ms[bucket_idx][n];
-                // double r = p1p * n / groups.size();
-                // std::lock_guard<std::mutex> lock(hist_mu);
-                // ln_mu += -log(r);
-                // ln_var += log(r) * log(r);
             }, false);
 
             std::vector<size_t> row_sum_counts = std::move(row_sum_counts_ms[0]);
@@ -1120,91 +1116,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ln_var += log(r) * log(r) * row_sum_counts[n];
             }
 
-            // double c = 0;
-            // for (size_t j = 1; j < counts.size() - 1; ++j) {
-            //     c += static_cast<double>(counts[j + 1]) / 2 / j / j;
-            // }
-
             size_t total = nelem * groups.size();
             ln_mu /= total;
             ln_var = ln_var / total - ln_mu * ln_mu;
-
-            // double mu = static_cast<double>(total_kmers) / total;
-            // double mu2 = static_cast<double>(total_kmers_sq) / total;
-
-            // double ln_var = std::max(log(p * mu2 - mu) - log(p) - 2.0 * log(mu), 0.0);
-            // double ln_mu = ln_var / 2 - log(mu) - log(p) + log1p(-p);
-
-            // if (mu >= p * (mu2 - mu*mu)) {
-            //     common::logger->warn("Data is underdispersed: {} >= {}", mu, p * (mu2 - mu*mu));
-            //     ln_var = 1;
-            // }
-
-            // auto get_exp = [&](double mu, double var) { return exp(mu + var/2); };
-            // auto get_var = [&](double mu, double var) { return exp(mu*2 + var) * (exp(var)-1); };
-
-            // auto get_l = [&](double mu, double var) {
-            //     double ev = get_exp(-mu, var);
-            //     double vr = get_var(-mu, var);
-            //     double l = ev * log(p) * total - mu * total_nonzeros - c * vr;
-            //     for (size_t j = 1; j < counts.size() - 1; ++j) {
-            //         l += log(ev + j) * counts[j + 1];
-            //     }
-            //     return l;
-            // };
-
-            // auto get_dl_ddl_mu = [&](double mu, double var) {
-            //     double ev = get_exp(-mu, var);
-            //     double vr = get_var(-mu, var);
-            //     double dl = -ev * log(p) * total - total_nonzeros + c * 2 * vr;
-            //     double ddl = ev * log(p) * total - c * 4 * vr;
-            //     for (size_t j = 1; j < counts.size() - 1; ++j) {
-            //         dl -= ev / (ev + j) * counts[j + 1];
-            //         ddl += ev / pow(ev + j, 2.0) * j * counts[j + 1];
-            //     }
-            //     return std::make_pair(dl, ddl);
-            // };
-
-            // auto get_dl_ddl_sd = [&](double mu, double sd) {
-            //     double var = sd * sd;
-            //     double ev = get_exp(-mu, var);
-            //     double dl = sd * log(p) * total - c * exp(-mu) * sd * (3.0 * exp(var) - 1);
-            //     double ddl = log(p) * total - c * exp(-mu) * (exp(var)*3 - 1) - c*6*exp(-mu)*var*exp(var);
-            //     for (size_t j = 1; j < counts.size() - 1; ++j) {
-            //         dl += sd * counts[j + 1] / (ev + j);
-            //         ddl -= (ev * (1-var) + j) / pow(ev + j, 2.0);
-            //     }
-            //     return std::make_pair(dl, ddl);
-            // };
-
-            // double l = get_l(ln_mu, ln_var);
-            // common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-            //                       ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
-
-            // while (true) {
-            //     double old_l = l;
-            //     ln_mu = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, ln_mu, -real_sum, real_sum, 30);
-            //     auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
-            //     if (ddl >= 0)
-            //         throw std::domain_error("");
-
-            //     l = get_l(ln_mu, ln_var);
-            //     common::logger->trace("M: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-            //                     ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
-
-            //     double ln_sd_try = boost::math::tools::newton_raphson_iterate([&](double sd) { return get_dl_ddl_sd(ln_mu, sd); }, sqrt(ln_var), -real_sum, real_sum, 30);
-            //     auto [dl_sd, ddl_sd] = get_dl_ddl_sd(ln_mu, ln_sd_try);
-            //     if (ddl_sd >= 0)
-            //         throw std::domain_error("");
-
-            //     ln_var = ln_sd_try * ln_sd_try;
-            //     l = get_l(ln_mu, ln_var);
-            //     common::logger->trace("V: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-            //                     ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
-
-            //     if (abs(l - old_l) / abs(l) < 1e-5)
-            //         break;
-            // }
 
             common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
                             ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
