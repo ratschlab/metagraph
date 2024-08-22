@@ -1066,11 +1066,38 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto get_var = [&](double mu, double var) { return exp(mu*2 + var) * (exp(var)-1); };
 
             auto get_l = [&](double mu, double var) {
-                double l = get_exp(-mu, var) * log(p) * total - mu * total_nonzeros;
+                double ev = get_exp(-mu, var);
+                double vr = get_var(-mu, var);
+                double l = ev * log(p) * total - mu * total_nonzeros;
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
-                    l += (log(j + get_exp(-mu, var)) - get_var(-mu, var)/pow(j + get_exp(-mu, var), 2.0)) * counts[j + 1];
+                    l += (log(j + ev) - vr/2/j/j) * counts[j + 1];
                 }
                 return l;
+            };
+
+            auto get_dl_ddl_mu = [&](double mu, double var) {
+                double ev = get_exp(-mu, var);
+                double vr = get_var(-mu, var);
+                double ddl = ev * log(p) * total;
+                double dl = -ddl - total_nonzeros;
+                for (size_t j = 1; j < counts.size() - 1; ++j) {
+                    dl += (vr / j / j - ev / (ev + j)) * counts[j + 1];
+                    ddl -= (vr * 2 / j / j - ev * j/pow(ev + j, 2.0)) * counts[j + 1];
+                }
+                return std::make_pair(dl, ddl);
+            };
+
+            auto get_dl_ddl_var = [&](double mu, double var) {
+                double ev = get_exp(-mu, var);
+                double vr = get_var(-mu, var);
+                double dl = 0;
+                double ddl = 0;
+                for (size_t j = 1; j < counts.size() - 1; ++j) {
+                    dl += (ev/(ev+j)-(vr*(1+0.5/ev)+ev*ev)/j/j) * counts[j + 1];
+                    ddl += (0.5*ev/(ev+j) - ev*ev/2/pow(ev+j, 2.0) - ((vr*2+ev*ev)*(1+0.5/ev)-vr/4/ev + ev*ev)/j/j) * counts[j + 1];
+                }
+
+                return std::make_pair(dl, ddl);
             };
 
             double l = get_l(ln_mu, ln_var);
@@ -1080,15 +1107,44 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double factor = 1.1;
             while (true) {
                 double old_l = l;
-                std::tie(ln_mu, l) = boost::math::tools::brent_find_minima([&](double mu) { return -get_l(mu, ln_var); },
-                                                                           -abs(ln_mu) / factor, abs(ln_mu) * factor, 30);
-                l *= -1;
-                common::logger->trace("Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+
+                double old_ln_mu = ln_mu;
+                ln_mu = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, old_ln_mu, -real_sum, real_sum, 30);
+                auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
+                if (ddl >= 0) {
+                    l = -std::numeric_limits<double>::max();
+                } else {
+                    l = get_l(ln_mu, ln_var);
+                }
+
+                auto [b_ln_mu, b_l] = boost::math::tools::brent_find_minima([&](double mu) { return -get_l(mu, ln_var); },
+                                                                             -abs(old_ln_mu) / factor, abs(old_ln_mu) * factor, 30);
+                b_l *= -1;
+                if (b_l > l) {
+                    l = b_l;
+                    ln_mu = b_ln_mu;
+                }
+                common::logger->trace("M: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                   ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
-                std::tie(ln_var, l) = boost::math::tools::brent_find_minima([&](double var) { return -get_l(ln_mu, var); },
-                                                                           0.0, ln_var * factor, 30);
-                l *= -1;
-                common::logger->trace("Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+
+                double old_ln_var = ln_var;
+                ln_var = boost::math::tools::newton_raphson_iterate([&](double var) { return get_dl_ddl_mu(ln_mu, var); }, old_ln_var, 0.0, real_sum, 30);
+                std::tie(dl, ddl) = get_dl_ddl_var(ln_mu, ln_var);
+                if (ddl >= 0) {
+                    l = -std::numeric_limits<double>::max();
+                } else {
+                    l = get_l(ln_mu, ln_var);
+                }
+
+                double b_ln_var;
+                std::tie(b_ln_var, b_l) = boost::math::tools::brent_find_minima([&](double var) { return -get_l(ln_mu, var); },
+                                                                                0.0, old_ln_var * factor, 30);
+                b_l *= -1;
+                if (b_l > l) {
+                    l = b_l;
+                    ln_var = b_ln_var;
+                }
+                common::logger->trace("V: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                   ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
                 if (abs(l - old_l) / abs(l) < 1e-5)
                     break;
