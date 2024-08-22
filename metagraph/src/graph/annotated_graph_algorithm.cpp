@@ -1049,6 +1049,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         } else {
             double p = target_p;
 
+            double c = 0;
+            for (size_t j = 1; j < counts.size() - 1; ++j) {
+                c += static_cast<double>(counts[j + 1]) / 2 / j / j;
+            }
+
             size_t total = nelem * groups.size();
 
             double mu = static_cast<double>(total_kmers) / total;
@@ -1068,9 +1073,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto get_l = [&](double mu, double var) {
                 double ev = get_exp(-mu, var);
                 double vr = get_var(-mu, var);
-                double l = ev * log(p) * total - mu * total_nonzeros;
+                double l = ev * log(p) * total - mu * total_nonzeros - c * vr;
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
-                    l += (log(j + ev) - vr/2/j/j) * counts[j + 1];
+                    l += log(ev + j) * counts[j + 1];
                 }
                 return l;
             };
@@ -1078,81 +1083,178 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto get_dl_ddl_mu = [&](double mu, double var) {
                 double ev = get_exp(-mu, var);
                 double vr = get_var(-mu, var);
-                double ddl = ev * log(p) * total;
-                double dl = -ddl - total_nonzeros;
+                double dl = -ev * log(p) * total - total_nonzeros + c * 2 * vr;
+                double ddl = ev * log(p) * total - c * 4 * vr;
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
-                    dl += (vr / j / j - ev / (ev + j)) * counts[j + 1];
-                    ddl -= (vr * 2 / j / j - ev * j/pow(ev + j, 2.0)) * counts[j + 1];
+                    dl -= ev / (ev + j) * counts[j + 1];
+                    ddl += ev / pow(ev + j, 2.0) * j * counts[j + 1];
                 }
                 return std::make_pair(dl, ddl);
             };
 
-            auto get_dl_ddl_var = [&](double mu, double var) {
+            auto get_dl_ddl_sd = [&](double mu, double sd) {
+                double var = sd * sd;
                 double ev = get_exp(-mu, var);
-                double vr = get_var(-mu, var);
-                double dl = 0;
-                double ddl = 0;
+                double dl = log(p) * total - c * exp(-mu) * (3.0 * exp(var) - 1);
+                double ddl = c * -6 * sd * exp(-mu + var);
                 for (size_t j = 1; j < counts.size() - 1; ++j) {
-                    dl += (ev/(ev+j)-(vr*(1+0.5/ev)+ev*ev)/j/j) * counts[j + 1];
-                    ddl += (0.5*ev/(ev+j) - ev*ev/2/pow(ev+j, 2.0) - ((vr*2+ev*ev)*(1+0.5/ev)-vr/4/ev + ev*ev)/j/j) * counts[j + 1];
+                    dl += static_cast<double>(counts[j + 1])/(ev + j);
+                    ddl -= sd * ev * counts[j + 1] / pow(ev + j, 2.0);
                 }
-
                 return std::make_pair(dl, ddl);
             };
 
             double l = get_l(ln_mu, ln_var);
             common::logger->trace("Lognormal MoM fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
                                   ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+            // common::logger->trace("Lognormal MoM test fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+            //                       ln_mu, 0, exp(ln_mu), 0, exp(-ln_mu), get_l(ln_mu, 0));
 
-            double factor = 1.1;
             while (true) {
                 double old_l = l;
+                ln_mu = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, ln_mu, -real_sum, real_sum, 30);
+                auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
+                if (ddl >= 0)
+                    throw std::domain_error("");
 
-                double old_ln_mu = ln_mu;
-                // ln_mu = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, old_ln_mu, -real_sum, real_sum, 30);
-                // auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
-                // if (ddl >= 0) {
-                //     l = -std::numeric_limits<double>::max();
-                // } else {
-                //     l = get_l(ln_mu, ln_var);
-                // }
-
-                auto [b_ln_mu, b_l] = boost::math::tools::brent_find_minima([&](double mu) { return -get_l(mu, ln_var); },
-                                                                             -abs(old_ln_mu) / factor, abs(old_ln_mu) * factor, 30);
-                b_l *= -1;
-                ln_mu = b_ln_mu;
-                l = b_l;
-                // if (b_l > l) {
-                //     l = b_l;
-                //     ln_mu = b_ln_mu;
-                // }
+                l = get_l(ln_mu, ln_var);
                 common::logger->trace("M: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
 
-                double old_ln_var = ln_var;
-                // ln_var = boost::math::tools::newton_raphson_iterate([&](double var) { return get_dl_ddl_mu(ln_mu, var); }, old_ln_var, 0.0, real_sum, 30);
-                // std::tie(dl, ddl) = get_dl_ddl_var(ln_mu, ln_var);
-                // if (ddl >= 0) {
-                //     l = -std::numeric_limits<double>::max();
-                // } else {
-                //     l = get_l(ln_mu, ln_var);
-                // }
+                l = -std::numeric_limits<double>::max();
+                double ln_sd_try = 0;
+                try {
+                    double ln_sd_try1 = boost::math::tools::newton_raphson_iterate([&](double sd) { return get_dl_ddl_sd(ln_mu, sd); }, sqrt(ln_var), -real_sum, real_sum, 30);
+                    auto [dl_sd, ddl_sd] = get_dl_ddl_sd(ln_mu, ln_sd_try1);
+                    if (ddl_sd >= 0)
+                        throw std::domain_error("");
 
-                double b_ln_var;
-                std::tie(b_ln_var, b_l) = boost::math::tools::brent_find_minima([&](double var) { return -get_l(ln_mu, var); },
-                                                                                0.0, old_ln_var * factor, 30);
-                b_l *= -1;
-                // if (b_l > l) {
-                //     l = b_l;
-                //     ln_var = b_ln_var;
-                // }
-                ln_var = b_ln_var;
-                l = b_l;
+                    double l_try1 = get_l(ln_mu, ln_sd_try1 * ln_sd_try1);
+                    double l_try2 = get_l(ln_mu, 0);
+                    if (l_try1 >= l_try2) {
+                        ln_sd_try = ln_sd_try1;
+                        l = l_try1;
+                    } else {
+                        l = l_try2;
+                    }
+                } catch (boost::wrapexcept<boost::math::evaluation_error> &) {
+                    l = get_l(ln_mu, 0);
+                } catch (std::domain_error &) {
+                    l = get_l(ln_mu, 0);
+                }
+
+                ln_var = ln_sd_try * ln_sd_try;
                 common::logger->trace("V: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
-                                  ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+                                ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+
                 if (abs(l - old_l) / abs(l) < 1e-5)
                     break;
             }
+
+            // double factor = 1.1;
+            // while (true) {
+            //     double old_l = l;
+
+            //     double old_ln_mu = ln_mu;
+            //     // ln_mu = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, old_ln_mu, -real_sum, real_sum, 30);
+            //     // auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
+            //     // if (ddl >= 0) {
+            //     //     l = -std::numeric_limits<double>::max();
+            //     // } else {
+            //     //     l = get_l(ln_mu, ln_var);
+            //     // }
+
+            //     auto [b_ln_mu, b_l] = boost::math::tools::brent_find_minima([&](double mu) { return -get_l(mu, ln_var); },
+            //                                                                  -abs(old_ln_mu) / factor, abs(old_ln_mu) * factor, 30);
+            //     b_l *= -1;
+            //     ln_mu = b_ln_mu;
+            //     l = b_l;
+            //     // if (b_l > l) {
+            //     //     l = b_l;
+            //     //     ln_mu = b_ln_mu;
+            //     // }
+            //     common::logger->trace("M: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+            //                       ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+
+            //     double old_ln_var = ln_var;
+            //     // ln_var = boost::math::tools::newton_raphson_iterate([&](double var) { return get_dl_ddl_mu(ln_mu, var); }, old_ln_var, 0.0, real_sum, 30);
+            //     // std::tie(dl, ddl) = get_dl_ddl_var(ln_mu, ln_var);
+            //     // if (ddl >= 0) {
+            //     //     l = -std::numeric_limits<double>::max();
+            //     // } else {
+            //     //     l = get_l(ln_mu, ln_var);
+            //     // }
+
+            //     double b_ln_var;
+            //     std::tie(b_ln_var, b_l) = boost::math::tools::brent_find_minima([&](double var) { return -get_l(ln_mu, var); },
+            //                                                                     0.0, old_ln_var * factor, 30);
+            //     b_l *= -1;
+            //     // if (b_l > l) {
+            //     //     l = b_l;
+            //     //     ln_var = b_ln_var;
+            //     // }
+            //     ln_var = b_ln_var;
+            //     l = b_l;
+            //     common::logger->trace("V: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+            //                       ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+
+            //     try {
+            //         double ln_mu_try = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, ln_mu, -real_sum, real_sum, 30);
+            //         auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
+            //         if (ddl >= 0)
+            //             throw std::domain_error("");
+
+            //         double ln_sd_try1 = boost::math::tools::newton_raphson_iterate([&](double sd) { return get_dl_ddl_sd(ln_mu_try, sd); }, sqrt(ln_var), -real_sum, real_sum, 30);
+            //         auto [dl_sd, ddl_sd] = get_dl_ddl_sd(ln_mu, ln_sd_try1);
+            //         double ln_sd_try2 = 0;
+            //         double l_try1 = ddl_sd < 0 ? get_l(ln_mu, ln_sd_try1 * ln_sd_try2) : -std::numeric_limits<double>::max();
+            //         double l_try2 = get_l(ln_mu, 0);
+            //         double ln_sd_try = l_try1 >= l_try2 ? ln_sd_try1 : ln_sd_try2;
+
+            //         ln_mu = ln_mu_try;
+            //         ln_var = ln_sd_try * ln_sd_try;
+
+            //         l = std::max(l_try1, l_try2);
+            //         common::logger->trace("G: Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+            //                         ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+            //     } catch (std::domain_error &e) {
+            //         l = old_l;
+            //         ln_mu = old_ln_mu;
+            //         ln_var = old_ln_var;
+            //         factor *= factor;
+            //         common::logger->warn("I'm lost :'(. Increasing factor to: {}", factor);
+            //         // if (factor == 1.5)
+            //         //     throw std::runtime_error("I'm lost :'(");
+
+            //         continue;
+            //     }
+
+
+            //     if (abs(l - old_l) / abs(l) < 1e-5)
+            //         break;
+            // }
+
+            // while (true) {
+            //     double old_l = l;
+            //     double ln_mu_try = boost::math::tools::newton_raphson_iterate([&](double mu) { return get_dl_ddl_mu(mu, ln_var); }, ln_mu, -real_sum, real_sum, 30);
+            //     auto [dl, ddl] = get_dl_ddl_mu(ln_mu, ln_var);
+            //     if (ddl >= 0)
+            //         break;
+
+            //     double ln_var_try = boost::math::tools::newton_raphson_iterate([&](double var) { return get_dl_ddl_mu(ln_mu_try, var); }, ln_var, 0.0, real_sum, 30);
+            //     std::tie(dl, ddl) = get_dl_ddl_var(ln_mu, ln_var);
+            //     if (ddl >= 0)
+            //         break;
+
+            //     ln_mu = ln_mu_try;
+            //     ln_var = ln_var_try;
+
+            //     l = get_l(ln_mu, ln_var);
+            //     common::logger->trace("Lognormal MLE fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}\tl: {}",
+            //                       ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2), l);
+            //     if (abs(l - old_l) / abs(l) < 1e-5)
+            //         break;
+            // }
 
             double p1p = exp(log(p) - log1p(-p));
 
