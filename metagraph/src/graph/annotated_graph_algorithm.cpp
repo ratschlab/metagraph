@@ -1053,7 +1053,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>> vector_counts_ms(num_threads + 1);
+            std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
 
             generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
                 int64_t in_sum = 0;
@@ -1093,33 +1093,47 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (!in_kmer && !out_kmer)
                     return;
 
+                size_t n = in_sum + out_sum;
+                if (n >= vector_counts_ms[bucket_idx].size())
+                    vector_counts_ms[bucket_idx].resize(n + 1);
+
                 std::sort(vec.begin(), vec.end());
-                ++vector_counts_ms[bucket_idx][vec];
+                ++vector_counts_ms[bucket_idx][n][vec];
             }, false);
 
-            size_t total_elems = 0;
+            std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>> vector_counts = std::move(vector_counts_ms[0]);
+            size_t max_size = vector_counts.size();
             for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
-                total_elems += vector_counts_ms[j].size();
+                max_size = std::max(max_size, vector_counts_ms[j].size());
             }
+            vector_counts.resize(max_size);
 
-            tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash> vector_counts = std::move(vector_counts_ms[0]);
             {
-                ProgressBar progress_bar(total_elems, "Merging row", std::cerr, !common::get_verbose());
-                for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
-                    for (const auto &[v, c] : vector_counts_ms[j]) {
-                        vector_counts[v] += c;
-                        ++progress_bar;
+                ProgressBar progress_bar(vector_counts.size() - 1, "Merging row", std::cerr, !common::get_verbose());
+                #pragma omp parallel for num_threads(num_threads)
+                for (size_t n = 1; n < vector_counts.size(); ++n) {
+                    for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                        if (n < vector_counts_ms[j].size()) {
+                            for (const auto &[v, c] : vector_counts_ms[j][n]) {
+                                vector_counts[n][v] += c;
+                            }
+                        }
                     }
+                    ++progress_bar;
                 }
 
                 vector_counts_ms.resize(0);
             }
 
-            for (const auto &[v, c] : vector_counts) {
-                int64_t n = std::accumulate(v.begin(), v.end(), int64_t(0));
+            for (size_t n = 1; n < vector_counts.size(); ++n) {
                 double r = p1p * n / groups.size();
-                ln_mu += -log(r) * c;
-                ln_var += log(r) * log(r) * c;
+                size_t total = 0;
+                for (const auto &[v, c] : vector_counts[n]) {
+                    total += c;
+                }
+
+                ln_mu += -log(r) * total;
+                ln_var += log(r) * log(r) * total;
             }
 
             size_t total = nelem * groups.size();
@@ -1151,14 +1165,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             };
 
             {
-                ProgressBar progress_bar(vector_counts.size(), "Precomputing r's", std::cerr, !common::get_verbose());
-                #pragma omp parallel
-                #pragma omp single
-                for (auto it = vector_counts.begin(); it != vector_counts.end(); ++it) {
-                    #pragma omp task
-                    it.value() = get_r(it->first);
-                    ++progress_bar;
+                std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>::iterator> its;
+                for (size_t n = 1; n < vector_counts.size(); ++n) {
+                    for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
+                        its.emplace_back(it);
+                    }
                 }
+
+                ProgressBar progress_bar(its.size(), "Precomputing r's", std::cerr, !common::get_verbose());
+                #pragma omp parallel for num_threads(num_threads)
+                for (size_t i = 0; i < its.size(); ++i) {
+                    if (i > 0 && i % 1000 == 0)
+                        progress_bar += 1000;
+
+                    its[i].value() = get_r(its[i]->first);
+                }
+                progress_bar += its.size() % 1000;
             }
 
             auto get_deviance = [p](double invphi, double y) {
@@ -1176,13 +1198,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (row.empty())
                     return 1.0;
 
-                std::vector<int64_t> counts;
-                counts.reserve(row.size());
-                for (const auto &[j, c] : row) {
-                    counts.emplace_back(c);
+                auto it = vector_counts[n].begin();
+                if (vector_counts[n].size() > 1) {
+                    std::vector<int64_t> counts;
+                    counts.reserve(row.size());
+                    for (const auto &[j, c] : row) {
+                        counts.emplace_back(c);
+                    }
+                    std::sort(counts.begin(), counts.end());
+                    it = vector_counts[n].find(counts);
                 }
-                std::sort(counts.begin(), counts.end());
-                auto it = vector_counts.find(counts);
                 double r = it->second;
                 if (r == 0.0)
                     return 1.0;
@@ -1249,13 +1274,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (row.empty())
                     return 1.0;
 
-                std::vector<int64_t> counts;
-                counts.reserve(row.size());
-                for (const auto &[j, c] : row) {
-                    counts.emplace_back(c);
+                auto it = vector_counts[in_sum + out_sum].begin();
+                if (vector_counts[in_sum + out_sum].size() > 1) {
+                    std::vector<int64_t> counts;
+                    counts.reserve(row.size());
+                    for (const auto &[j, c] : row) {
+                        counts.emplace_back(c);
+                    }
+                    std::sort(counts.begin(), counts.end());
+                    it = vector_counts[in_sum + out_sum].find(counts);
                 }
-                std::sort(counts.begin(), counts.end());
-                auto it = vector_counts.find(counts);
                 double r = it->second;
 
                 if (r == 0.0)
