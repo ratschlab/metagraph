@@ -1097,14 +1097,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++vector_counts_ms[bucket_idx][vec];
             }, false);
 
-            tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash> vector_counts = std::move(vector_counts_ms[0]);
+            size_t total_elems = 0;
             for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
-                for (const auto &[v, c] : vector_counts_ms[j]) {
-                    vector_counts[v] += c;
-                }
+                total_elems += vector_counts_ms[j].size();
             }
 
-            vector_counts_ms.resize(0);
+            tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash> vector_counts = std::move(vector_counts_ms[0]);
+            {
+                ProgressBar progress_bar(total_elems, "Merging row", std::cerr, !common::get_verbose());
+                for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                    for (const auto &[v, c] : vector_counts_ms[j]) {
+                        vector_counts[v] += c;
+                        ++progress_bar;
+                    }
+                }
+
+                vector_counts_ms.resize(0);
+            }
 
             for (const auto &[v, c] : vector_counts) {
                 int64_t n = std::accumulate(v.begin(), v.end(), int64_t(0));
@@ -1141,8 +1150,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 1.0 / a;
             };
 
-            for (auto it = vector_counts.begin(); it != vector_counts.end(); ++it) {
-                it.value() = get_r(it->first);
+            {
+                ProgressBar progress_bar(vector_counts.size(), "Precomputing r's", std::cerr, !common::get_verbose());
+                #pragma omp parallel
+                #pragma omp single
+                for (auto it = vector_counts.begin(); it != vector_counts.end(); ++it) {
+                    #pragma omp task
+                    it.value() = get_r(it->first);
+                    ++progress_bar;
+                }
             }
 
             auto get_deviance = [p](double invphi, double y) {
