@@ -1053,14 +1053,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            std::vector<std::vector<size_t>> row_sum_counts_ms(num_threads + 1);
+            std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>> vector_counts_ms(num_threads + 1);
 
             generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
                 int64_t in_sum = 0;
                 int64_t out_sum = 0;
                 bool in_kmer = false;
                 bool out_kmer = false;
+                std::vector<int64_t> vec;
                 if (kept[row_i]) {
+                    vec.reserve(raw_row.size());
                     size_t count_in = 0;
                     size_t count_out = 0;
                     for (const auto &[j, raw_c] : raw_row) {
@@ -1075,6 +1077,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                             in_sum += c;
                             ++count_in;
                         }
+
+                        vec.emplace_back(c);
                     }
 
                     if (count_in + count_out >= config.min_recurrence) {
@@ -1089,31 +1093,24 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (!in_kmer && !out_kmer)
                     return;
 
-                size_t n = in_sum + out_sum;
-                if (row_sum_counts_ms[bucket_idx].size() <= n)
-                    row_sum_counts_ms[bucket_idx].resize(n + 1);
-
-                ++row_sum_counts_ms[bucket_idx][n];
+                std::sort(vec.begin(), vec.end());
+                ++vector_counts_ms[bucket_idx][vec];
             }, false);
 
-            std::vector<size_t> row_sum_counts = std::move(row_sum_counts_ms[0]);
-            for (size_t j = 1; j < row_sum_counts_ms.size(); ++j) {
-                size_t ms = std::min(row_sum_counts_ms[j].size(), row_sum_counts.size());
-                for (size_t i = 0; i < ms; ++i) {
-                    row_sum_counts[i] += row_sum_counts_ms[j][i];
-                }
-                if (row_sum_counts_ms[j].size() > row_sum_counts.size()) {
-                    std::copy(row_sum_counts_ms[j].begin() + row_sum_counts.size(),
-                              row_sum_counts_ms[j].end(),
-                              std::back_inserter(row_sum_counts));
+            tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash> vector_counts = std::move(vector_counts_ms[0]);
+            for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                for (const auto &[v, c] : vector_counts_ms[j]) {
+                    vector_counts[v] += c;
                 }
             }
-            row_sum_counts_ms.resize(0);
 
-            for (size_t n = 1; n < row_sum_counts.size(); ++n) {
+            vector_counts_ms.resize(0);
+
+            for (const auto &[v, c] : vector_counts) {
+                int64_t n = std::accumulate(v.begin(), v.end(), int64_t(0));
                 double r = p1p * n / groups.size();
-                ln_mu += -log(r) * row_sum_counts[n];
-                ln_var += log(r) * log(r) * row_sum_counts[n];
+                ln_mu += -log(r) * c;
+                ln_var += log(r) * log(r) * c;
             }
 
             size_t total = nelem * groups.size();
@@ -1123,14 +1120,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
                             ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
 
-            auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const PairContainer &row) {
+            auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
                 if (ln_var == 0)
                     return exp(-ln_mu);
 
                 auto get_l = [&](double a) {
                     double r = 1.0 / a;
-                    double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * row.size();
-                    for (const auto &[j, c] : row) {
+                    double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * counts.size();
+                    for (int64_t c : counts) {
                         l += lgamma(r + c);
                     }
                     return l;
@@ -1144,6 +1141,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 1.0 / a;
             };
 
+            for (auto it = vector_counts.begin(); it != vector_counts.end(); ++it) {
+                it.value() = get_r(it->first);
+            }
+
             auto get_deviance = [p](double invphi, double y) {
                 double mu = invphi * (1.0 - p) / p;
                 if (y == 0)
@@ -1155,11 +1156,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
             };
 
-            compute_min_pval = [get_r,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t n, const auto &row) {
+            compute_min_pval = [vector_counts,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t n, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
-                double r = get_r(row);
+                std::vector<int64_t> counts;
+                counts.reserve(row.size());
+                for (const auto &[j, c] : row) {
+                    counts.emplace_back(c);
+                }
+                std::sort(counts.begin(), counts.end());
+                auto it = vector_counts.find(counts);
+                double r = it->second;
                 if (r == 0.0)
                     return 1.0;
 
@@ -1221,11 +1229,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return std::min(1.0, pval);
             };
 
-            compute_pval = [get_r,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t in_sum, int64_t out_sum, const auto &row) {
+            compute_pval = [vector_counts,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t in_sum, int64_t out_sum, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
-                double r = get_r(row);
+                std::vector<int64_t> counts;
+                counts.reserve(row.size());
+                for (const auto &[j, c] : row) {
+                    counts.emplace_back(c);
+                }
+                std::sort(counts.begin(), counts.end());
+                auto it = vector_counts.find(counts);
+                double r = it->second;
 
                 if (r == 0.0)
                     return 1.0;
