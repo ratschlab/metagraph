@@ -551,8 +551,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double r_out = r_map * num_labels_out;
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
-        double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-
         if (fit_var / fit_mu - 1.0 < 1e-5)
             common::logger->warn("Fit parameters are close to a Poisson distribution");
 
@@ -638,7 +636,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         int64_t total_sum = in_sum + out_sum;
 
         if (config.test_type == "nbinom_exact") {
-            compute_min_pval = [lscaling_base,r=r_in+r_out,r_in,r_out](int64_t n, const PairContainer&) {
+            double r = r_in + r_out;
+            double lscaling_base = lgamma(r);
+            compute_min_pval = [lscaling_base,r,r_in,r_out](int64_t n, const PairContainer&) {
                 if (n == 0)
                     return 1.0;
 
@@ -650,15 +650,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double pval = 0.0;
                 if (dist0 >= distn)
-                    pval += exp(lscaling + lgamma(r_in) + lgamma(r_out + n));
+                    pval += exp(lscaling + lgamma(r_out + n) - lgamma(r_out));
 
                 if (dist0 <= distn)
-                    pval += exp(lscaling + lgamma(r_in + n) + lgamma(r_out));
+                    pval += exp(lscaling + lgamma(r_in + n) - lgamma(r_in));
 
                 return std::min(1.0, pval);
             };
 
-            compute_pval = [lscaling_base,r=r_in+r_out,r_in,r_out](int64_t in_sum, int64_t out_sum, const auto &row) {
+            compute_pval = [lscaling_base,r,r_in,r_out](int64_t in_sum, int64_t out_sum, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
@@ -666,7 +666,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return 1.0;
 
                 int64_t n = in_sum + out_sum;
-                double lscaling = lscaling_base - lgamma(r_in + r_out + n);
+                double lscaling = lscaling_base - lgamma(r + n);
                 double argmin_d = r_in / r * n;
 
                 double dist_insum = abs(argmin_d - in_sum);
@@ -677,17 +677,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (argmin_d >= dist_insum) {
                     double rs = r_in;
                     double rt = r_out + n;
-                    double base = lscaling + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rt) - lgamma(r_out);
                     pval += exp(base);
-                    for (++s,--t; s <= n; ++s,--t) {
-                        if (abs(s - argmin_d) >= dist_insum) {
-                            ++rs;
-                            --rt;
-                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
+                    for (++s,--t; s <= n && abs(s - argmin_d) >= dist_insum; ++s,--t) {
+                        ++rs;
+                        --rt;
+                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                        pval += exp(base);
                     }
                 }
 
@@ -696,17 +692,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (abs(argmin_d - sp) >= dist_insum) {
                     double rs = r_in + sp;
                     double rt = r_out;
-                    double base = lscaling + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rs) - lgamma(r_in);
                     pval += exp(base);
-                    for (--sp,++t; sp >= s; --sp,++t) {
-                        if (abs(argmin_d - sp) >= dist_insum) {
-                            --rs;
-                            ++rt;
-                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
+                    for (--sp,++t; sp >= s && abs(argmin_d - sp) >= dist_insum; --sp,++t) {
+                        --rs;
+                        ++rt;
+                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                        pval += exp(base);
                     }
                 }
 
@@ -907,17 +899,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 progress_bar += its.size() % 1000;
             }
 
-            auto get_deviance = [](double r, double p, double y) {
-                if (y == 0)
-                    return -2.0*r*log(p);
-
-                double yshift = y + r;
-                double l1pp = log1p(-p);
-                double rlogrp = r * (log(r) - log(p));
-                return 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
-            };
-
-            compute_min_pval = [vector_counts,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t n, const auto &row) {
+            compute_min_pval = [vector_counts,num_labels_in,num_labels_out](int64_t n, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
@@ -931,70 +913,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     std::sort(counts.begin(), counts.end());
                     it = vector_counts[n].find(counts);
                 }
-                double r = it->second;
-                if (r == 0.0)
+                double r_base = it->second;
+                if (r_base == 0.0)
                     return 1.0;
 
-                double p = r / (r + static_cast<double>(n) / gs);
-                double r_in = r * num_labels_in;
-                double r_out = r * num_labels_out;
-                double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+                double r_in = r_base * num_labels_in;
+                double r_out = r_base * num_labels_out;
+                double r = r_in + r_out;
 
-                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+                double lscaling = lgamma(r) - lgamma(r + n);
+                double argmin_d = r_in / r * n;
 
-                std::vector<double> devs(n + 1);
-
-                for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = get_deviance(r_in, p, s) + get_deviance(r_out, p, n - s);
-                }
-
-                double max_d = *std::max_element(devs.begin(), devs.end());
+                double dist0 = argmin_d;
+                double distn = static_cast<double>(n) - argmin_d;
 
                 double pval = 0.0;
-                int64_t s = 0;
-                int64_t t = n;
-                if (devs[s] == max_d) {
-                    double rs = r_in;
-                    double rt = r_out + n;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                    pval += exp(base);
-                    for (++s; s <= n; ++s) {
-                        --t;
-                        if (devs[s] == max_d) {
-                            ++rs;
-                            --rt;
-                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
-                    }
-                }
+                if (dist0 >= distn)
+                    pval += exp(lscaling + lgamma(r_out + n) - lgamma(r_out));
 
-                int64_t sp = n;
-                t = 0;
-                if (devs[sp] == max_d) {
-                    double rs = r_in + sp;
-                    double rt = r_out;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                    pval += exp(base);
-                    for (--sp; sp >= s; --sp) {
-                        ++t;
-                        if (devs[sp] == max_d) {
-                            --rs;
-                            ++rt;
-                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
-                    }
-                }
+                if (dist0 <= distn)
+                    pval += exp(lscaling + lgamma(r_in + n) - lgamma(r_in));
 
                 return std::min(1.0, pval);
             };
 
-            compute_pval = [vector_counts,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t in_sum, int64_t out_sum, const auto &row) {
+            compute_pval = [vector_counts,num_labels_in,num_labels_out](int64_t in_sum, int64_t out_sum, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
@@ -1008,65 +951,49 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     std::sort(counts.begin(), counts.end());
                     it = vector_counts[in_sum + out_sum].find(counts);
                 }
-                double r = it->second;
+                double r_base = it->second;
 
-                if (r == 0.0)
+                if (r_base == 0.0)
                     return 1.0;
 
                 int64_t n = in_sum + out_sum;
-                double p = r / (r + static_cast<double>(n) / gs);
-                double r_in = r * num_labels_in;
-                double r_out = r * num_labels_out;
-                double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
+                double r_in = r_base * num_labels_in;
+                double r_out = r_base * num_labels_out;
+                double r = r_in + r_out;
 
-                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
+                double lscaling = lgamma(r) - lgamma(r + n);
+                double argmin_d = r_in / r * n;
 
-                std::vector<double> devs(n + 1);
-
-                for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = get_deviance(r_in, p, s) + get_deviance(r_out, p, n - s);
-                }
-
-                double in_sum_total_deviance = devs[in_sum];
+                double dist_insum = abs(argmin_d - in_sum);
 
                 double pval = 0.0;
                 int64_t s = 0;
                 int64_t t = n;
-                if (devs[s] >= in_sum_total_deviance) {
+                if (argmin_d >= dist_insum) {
                     double rs = r_in;
                     double rt = r_out + n;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rt) - lgamma(r_out);
                     pval += exp(base);
-                    for (++s; s <= n; ++s) {
-                        --t;
-                        if (devs[s] >= in_sum_total_deviance) {
-                            ++rs;
-                            --rt;
-                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
+                    for (++s,--t; s <= n && abs(s - argmin_d) >= dist_insum; ++s,--t) {
+                        ++rs;
+                        --rt;
+                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
+                        pval += exp(base);
                     }
                 }
 
                 int64_t sp = n;
                 t = 0;
-                if (devs[sp] >= in_sum_total_deviance) {
+                if (abs(argmin_d - sp) >= dist_insum) {
                     double rs = r_in + sp;
                     double rt = r_out;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rs) - lgamma(r_in);
                     pval += exp(base);
-                    for (--sp; sp >= s; --sp) {
-                        ++t;
-                        if (devs[sp] >= in_sum_total_deviance) {
-                            --rs;
-                            ++rt;
-                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
+                    for (--sp,++t; sp >= s && abs(argmin_d - sp) >= dist_insum; --sp,++t) {
+                        --rs;
+                        ++rt;
+                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
+                        pval += exp(base);
                     }
                 }
 
