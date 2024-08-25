@@ -657,14 +657,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         int64_t total_sum = in_sum + out_sum;
 
         if (config.test_type == "nbinom_exact") {
-            auto get_deviance1 = [mu=mu1,invphi=r_in,logmuinvphi=log(mu1+r_in),logmu=log(mu1),zv=2.0*r_in*log((r_in+mu1)/r_in)](double y) {
+            auto get_deviance1 = [mu=mu1,invphi=r_in,logmuinvphi=log(mu1+r_in),logmu=log(mu1),zv=-2.0*r_in*log(target_p)](double y) {
                 if (y == 0)
                     return zv;
 
                 double logyshift = logmuinvphi - log(y + invphi);
                 return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
             };
-            auto get_deviance2 = [mu=mu2,invphi=r_out,logmuinvphi=log(mu2+r_out),logmu=log(mu2),zv=2.0*r_out*log((r_out+mu2)/r_out)](double y) {
+            auto get_deviance2 = [mu=mu2,invphi=r_out,logmuinvphi=log(mu2+r_out),logmu=log(mu2),zv=-2.0*r_out*log(target_p)](double y) {
                 if (y == 0)
                     return zv;
 
