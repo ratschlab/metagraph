@@ -1493,7 +1493,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<int64_t> m_sums;
     {
         std::vector<std::vector<std::pair<double, size_t>>> ms(num_threads + 1);
-        std::vector<tsl::hopscotch_map<std::vector<int64_t>, std::pair<double, size_t>, utils::VectorHash>> ms_vecs(num_threads + 1);
+        std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, std::pair<double, size_t>, utils::VectorHash>>> ms_vecs(num_threads + 1);
         generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
             int64_t in_sum = 0;
             int64_t out_sum = 0;
@@ -1551,9 +1551,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++ms[bucket_idx][n].second;
             } else {
                 std::sort(vals.begin(), vals.end());
-                auto find = ms_vecs[bucket_idx].find(vals);
-                if (find == ms_vecs[bucket_idx].end()) {
-                    ms_vecs[bucket_idx][vals] = std::make_pair(compute_min_pval(n, row), 1);
+                if (ms_vecs[bucket_idx].size() <= n)
+                    ms_vecs[bucket_idx].resize(n + 1);
+
+                auto find = ms_vecs[bucket_idx][n].find(vals);
+                if (find == ms_vecs[bucket_idx][n].end()) {
+                    ms_vecs[bucket_idx][n][vals] = std::make_pair(compute_min_pval(n, row), 1);
                 } else {
                     ++find.value().second;
                 }
@@ -1599,37 +1602,23 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             m = std::move(ms[0]);
             ms.resize(0);
         } else {
-            for (size_t i = 1; i < ms_vecs.size(); ++i) {
-                for (const auto &[vec, v] : ms_vecs[i]) {
-                    auto find = ms_vecs[0].find(vec);
-                    if (find == ms_vecs[0].end()) {
-                        ms_vecs[0][vec] = v;
-                    } else {
-                        find.value().second += v.second;
+            std::vector<std::tuple<double, int64_t, size_t>> mn;
+            for (size_t i = 0; i < ms_vecs.size(); ++i) {
+                for (size_t n = 1; n < ms_vecs[i].size(); ++n) {
+                    for (const auto &[vec, v] : ms_vecs[i][n]) {
+                        mn.emplace_back(v.first, n, v.second);
                     }
                 }
             }
-            ms_vecs.resize(1);
-
-            std::vector<std::tuple<double, int64_t, size_t>> mn;
-            mn.reserve(ms_vecs[0].size());
-            for (const auto &[vec, v] : ms_vecs[0]) {
-                mn.emplace_back(
-                    v.first,
-                    std::accumulate(vec.begin(), vec.end(), int64_t(0)),
-                    v.second
-                );
-            }
+            ms_vecs.resize(0);
             std::sort(mn.begin(), mn.end(), utils::GreaterFirst());
 
-            m.reserve(ms_vecs[0].size());
-            m_sums.reserve(ms_vecs[0].size());
+            m.reserve(mn.size());
+            m_sums.reserve(mn.size());
             for (const auto &[p, s, c] : mn) {
                 m.emplace_back(p, c);
                 m_sums.emplace_back(s);
             }
-
-            ms_vecs.resize(0);
         }
     }
 
