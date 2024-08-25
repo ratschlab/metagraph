@@ -407,7 +407,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact" || config.test_type == "gnb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
-        auto get_rp = [&](const auto &generate) {
+        auto get_rp = [&](const auto &generate,
+                          const auto &add_dl,
+                          const auto &add_ddl) {
             double mu = 0;
             double var = 0;
             size_t total = 0;
@@ -432,7 +434,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 generate([&](auto k, auto c) {
                     dl += boost::math::digamma(k + r) * c;
                 });
-                return dl;
+                return dl + add_dl(r);
             };
 
             auto get_ddl = [&](double r) {
@@ -440,7 +442,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 generate([&](auto k, auto c) {
                     ddl += boost::math::trigamma(k + r) * c;
                 });
-                return ddl;
+                return ddl + add_ddl(r);
             };
 
             double r_min = r_guess;
@@ -528,7 +530,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const auto &[k, c] = a;
                     callback(k, c);
                 });
-            });
+            }, [](double) { return 0; }, [](double) { return 0; });
             const auto &[r, p] = nb_params[j];
             common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
                                   j, sums[j], (it - 1)->first, r * (1-p)/p, r*(1-p)/p/p, r, p);
@@ -557,7 +559,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     callback(f * k, c);
                 });
             }
-        });
+        }, [](double) { return 0; }, [](double) { return 0; });
 
         double fit_mu = r_map * (1.0 - target_p) / target_p;
         double fit_var = fit_mu / target_p;
