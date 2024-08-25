@@ -422,12 +422,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double mu2 = mu * mu;
             var = (var - mu2 * total) / (total - 1);
 
+            double r_guess = mu * mu / (var - mu);
+
             if (mu >= var) {
                 common::logger->warn("Fit failed, falling back to Poisson: mu: {} >= var: {}", mu, var);
                 return std::make_pair(0.0, 1.0);
             }
-
-            double r_guess = mu * mu / (var - mu);
 
             auto get_dl = [&](double r) {
                 double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
@@ -1134,31 +1134,36 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
-            for (size_t n = 1; n < vector_counts.size(); ++n) {
-                size_t total = 0;
-                for (const auto &[v, c] : vector_counts[n]) {
-                    total += c;
+            {
+                ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
+                #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
+                for (size_t n = 1; n < vector_counts.size(); ++n) {
+                    size_t total = 0;
+                    for (const auto &[v, c] : vector_counts[n]) {
+                        total += c;
+                    }
+
+                    double r = target_p / (1.0 - target_p) * n / groups.size();
+
+                    // auto [r, p] = get_rp([&](const auto &callback) {
+                    //     for (const auto &[v, c] : vector_counts[n]) {
+                    //         for (int64_t k : v) {
+                    //             callback(k, c);
+                    //         }
+
+                    //         if (v.size() < groups.size())
+                    //             callback(0, (groups.size() - v.size()) * c);
+                    //     }
+                    // }, [](double) { return 0; }, [](double) { return 0; });
+
+                    #pragma omp atomic
+                    ln_mu += -log(r) * total;
+
+                    #pragma omp atomic
+                    ln_var += log(r) * log(r) * total;
+
+                    ++progress_bar;
                 }
-
-                double r = target_p / (1.0 - target_p) * n / groups.size();
-
-                // auto [r, p] = get_rp([&](const auto &callback) {
-                //     for (const auto &[v, c] : vector_counts[n]) {
-                //         for (int64_t k : v) {
-                //             callback(k, c);
-                //         }
-
-                //         if (v.size() < groups.size())
-                //             callback(0, (groups.size() - v.size()) * c);
-                //     }
-                // });
-
-                #pragma omp atomic
-                ln_mu += -log(r) * total;
-
-                #pragma omp atomic
-                ln_var += log(r) * log(r) * total;
             }
 
             size_t total = nelem * groups.size();
