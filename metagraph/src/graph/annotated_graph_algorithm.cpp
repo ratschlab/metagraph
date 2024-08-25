@@ -1056,12 +1056,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return pval;
             };
         } else {
-            double p = target_p;
-            double p1p = exp(log(p) - log1p(-p));
-
-            double ln_mu = 0.0;
-            double ln_var = 0.0;
-
             std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
 
             generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
@@ -1134,14 +1128,34 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 vector_counts_ms.resize(0);
             }
 
+            common::logger->trace("Fitting LN prior distribution for dispersions");
+            double ln_mu = 0.0;
+            double ln_var = 0.0;
+
+            #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
             for (size_t n = 1; n < vector_counts.size(); ++n) {
-                double r = p1p * n / groups.size();
                 size_t total = 0;
                 for (const auto &[v, c] : vector_counts[n]) {
                     total += c;
                 }
 
+                double r = target_p / (1.0 - target_p) * n / groups.size();
+
+                // auto [r, p] = get_rp([&](const auto &callback) {
+                //     for (const auto &[v, c] : vector_counts[n]) {
+                //         for (int64_t k : v) {
+                //             callback(k, c);
+                //         }
+
+                //         if (v.size() < groups.size())
+                //             callback(0, (groups.size() - v.size()) * c);
+                //     }
+                // });
+
+                #pragma omp atomic
                 ln_mu += -log(r) * total;
+
+                #pragma omp atomic
                 ln_var += log(r) * log(r) * total;
             }
 
@@ -1150,19 +1164,36 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             ln_var = ln_var / total - ln_mu * ln_mu;
 
             common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
-                            ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
+                                  ln_mu, ln_var,
+                                  exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1),
+                                  exp(-ln_mu - ln_var/2));
 
-            auto get_r = [ln_mu,ln_var,real_sum=total_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
-                if (ln_var == 0)
-                    return exp(-ln_mu);
+            auto get_rp = [ln_mu,ln_var,real_sum=total_sum,total,sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
+                double mu = 0;
+                double var = 0;
+                for (int64_t c : counts) {
+                    mu += c;
+                    var += c * c;
+                }
+                mu /= gs;
 
-                double a_guess = p1p * std::accumulate(counts.begin(), counts.end(), int64_t(0)) / gs;
+                if (ln_var == 0) {
+                    double r = exp(-ln_mu);
+                    return std::make_pair(r, r / (r + mu));
+                }
+
+                double mu2 = mu * mu;
+                var = var / gs - mu2;
+
+                double a_guess = var > mu ? (var - mu) / mu2 : 1.0;
 
                 auto get_l = [&](double a) {
                     if (a == 0)
                         return -std::numeric_limits<double>::max();
 
                     double r = 1.0 / a;
+                    double p = r / (r + mu);
+                    double lp = log(p);
                     double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * counts.size();
                     for (int64_t c : counts) {
                         l += lgamma(r + c);
@@ -1172,6 +1203,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 auto get_dl_ddl = [&](double a) {
                     double r = 1.0 / a;
+                    double p = r / (r + mu);
+                    double lp = log(p);
                     double dl = -a - a*(log(a)-ln_mu)/ln_var - gs*lp + boost::math::digamma(r)*counts.size();
                     double ddl = a + a*(log(a)-ln_mu)/ln_var - a/ln_var + lp*gs*2 - boost::math::digamma(r)*counts.size()*2 - r*counts.size()*boost::math::trigamma(r);
                     for (int64_t c : counts) {
@@ -1217,23 +1250,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         [&](double a) { return get_dl_ddl(a).first; },
                         a_min, a_max, boost::math::tools::eps_tolerance<double>(1e-5)
                     );
-                    // a_min = boost::math::tools::newton_raphson_iterate(get_dl_ddl, a_guess, a_min, a_max, 30);
-                    // a_max = a_min;
                 }
 
-
-                // while (a_max - a_min >= 1e-5) {
-                //     double a_mid = (a_max + a_min) / 2;
-                //     auto [dl_mid, ddl_mid] = get_dl_ddl(a_mid);
-                //     if (dl_mid == 0) {
-                //         a_min = a_mid;
-                //         a_max = a_mid;
-                //     } else if (dl_mid > 0) {
-                //         a_min = a_mid;
-                //     } else {
-                //         a_max = a_mid;
-                //     }
-                // }
                 a = a_min;
 
                 std::tie(dl, ddl) = get_dl_ddl(a);
@@ -1247,9 +1265,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     throw std::domain_error("");
                 }
 
-                return 1.0 / a;
-                // a = boost::math::tools::brent_find_minima([&](double a) { return -get_l(a); },
-                //                                             0.0, real_sum, 30).first;
+                double r = 1.0 / a;
+                double p = r / (r + mu);
+                return std::make_pair(r, p);
             };
 
             {
@@ -1266,12 +1284,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     if (i > 0 && i % 1000 == 0)
                         progress_bar += 1000;
 
-                    its[i].value() = get_r(its[i]->first);
+                    its[i].value() = get_rp(its[i]->first).first;
                 }
                 progress_bar += its.size() % 1000;
             }
 
-            auto get_deviance = [p](double invphi, double y) {
+            auto get_deviance = [](double invphi, double p, double y) {
                 double mu = invphi * (1.0 - p) / p;
                 if (y == 0)
                     return 2.0*invphi*log((invphi*mu)/invphi);
@@ -1300,6 +1318,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (r == 0.0)
                     return 1.0;
 
+                double p = r / (r + static_cast<double>(n) / gs);
                 double r_in = r * num_labels_in;
                 double r_out = r * num_labels_out;
                 double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
@@ -1309,7 +1328,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 std::vector<double> devs(n + 1);
 
                 for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = get_deviance(r_in, s) + get_deviance(r_out, n - s);
+                    devs[s] = get_deviance(r_in, p, s) + get_deviance(r_out, p, n - s);
                 }
 
                 double max_d = *std::max_element(devs.begin(), devs.end());
@@ -1377,18 +1396,18 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (r == 0.0)
                     return 1.0;
 
+                int64_t n = in_sum + out_sum;
+                double p = r / (r + static_cast<double>(n) / gs);
                 double r_in = r * num_labels_in;
                 double r_out = r * num_labels_out;
                 double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-
-                int64_t n = in_sum + out_sum;
 
                 double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
 
                 std::vector<double> devs(n + 1);
 
                 for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = get_deviance(r_in, s) + get_deviance(r_out, n - s);
+                    devs[s] = get_deviance(r_in, p, s) + get_deviance(r_out, p, n - s);
                 }
 
                 double in_sum_total_deviance = devs[in_sum];
