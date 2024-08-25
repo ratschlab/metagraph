@@ -428,29 +428,88 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double r_guess = mu * mu / (var - mu);
             double p_guess = mu / var;
-            double r = r_guess;
-            try {
-                auto get_dl_ddl = [&](double r) {
-                    double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
-                    double ddl = (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r)) * total;
-                    std::for_each(begin, end, [&](const auto &a) {
-                        const auto &[k, c] = a;
-                        dl += boost::math::digamma(k + r) * c;
-                        ddl += boost::math::trigamma(k + r) * c;
-                    });
-                    return std::make_pair(dl, ddl);
-                };
-                r = boost::math::tools::newton_raphson_iterate(get_dl_ddl, r_guess,
-                                                               std::numeric_limits<double>::min(), mu * total, 30);
-                auto [dl, ddl] = get_dl_ddl(r);
-                if (ddl > 0) {
-                    common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
-                    throw std::domain_error("FFF");
+
+            auto get_dl = [&](double r) {
+                double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
+                std::for_each(begin, end, [&](const auto &a) {
+                    const auto &[k, c] = a;
+                    dl += boost::math::digamma(k + r) * c;
+                });
+                return dl;
+            };
+
+            auto get_ddl = [&](double r) {
+                double ddl = (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r)) * total;
+                std::for_each(begin, end, [&](const auto &a) {
+                    const auto &[k, c] = a;
+                    ddl += boost::math::trigamma(k + r) * c;
+                });
+                return ddl;
+            };
+
+            double r_min = r_guess;
+            double r_max = r_guess;
+
+            while (true) {
+                double dl_min = get_dl(r_min);
+                double dl_max = get_dl(r_max);
+
+                if (dl_min == 0) {
+                    r_max = r_min;
+                    break;
                 }
-            } catch (std::exception &e) {
-                common::logger->warn("Caught exception for sample {}: Falling back to initial guess", j);
-                common::logger->warn("{}", e.what());
-                r = r_guess;
+
+                if (dl_max == 0) {
+                    r_min = r_max;
+                    break;
+                }
+
+                if (dl_min < 0)
+                    r_min /= 2;
+
+                if (dl_max > 0)
+                    r_max *= 2;
+
+                if (dl_min > 0 && dl_max < 0)
+                    break;
+            }
+
+            while (true) {
+                double r = (r_min + r_max) / 2;
+                double dl = get_dl(r);
+                if (dl > 0) {
+                    if (r == r_min) {
+                        break;
+                    }
+
+                    r_min = r;
+                }
+
+                if (dl < 0) {
+                    if (r == r_max) {
+                        break;
+                    }
+
+                    r_max = r;
+                }
+
+                if (abs(dl) <= 1e-4) {
+                    r_max = r;
+                    r_min = r;
+                    break;
+                }
+            }
+
+            double r = r_max;
+            double dl = get_dl(r);
+            double ddl = get_ddl(r);
+            // if (abs(dl) > 1e-4) {
+            //     common::logger->error("Not close enough to local maximum: r: [{}:{}]\tdl: [{},{}]", r_min, r_max, get_dl(r_min), get_dl(r_max));
+            //     throw std::domain_error("FFF");
+            // }
+            if (ddl > 0) {
+                common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
+                throw std::domain_error("FFF");
             }
 
             double p = r / (r + mu);
@@ -542,25 +601,105 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             throw std::domain_error("Fit failed");
         }
 
-        auto get_dl_ddl = [&](double r) {
+        auto get_dl = [&](double r) {
             double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
-            double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
                 std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
                     const auto &[k, c] = a;
                     dl += boost::math::digamma(f * k + r) * c;
+                });
+            }
+            return dl;
+        };
+
+        auto get_ddl = [&](double r) {
+            double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
+            for (size_t j = 0; j < groups.size(); ++j) {
+                double f = target_sum / sums[j];
+                std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
+                    const auto &[k, c] = a;
                     ddl += boost::math::trigamma(f * k + r) * c;
                 });
             }
-            return std::make_pair(dl, ddl);
+            return ddl;
         };
-        double r_map = boost::math::tools::newton_raphson_iterate(get_dl_ddl, r_guess, 0.0, real_sum, 30);
-        auto [dl, ddl] = get_dl_ddl(r_map);
+
+        double r_min = r_guess;
+        double r_max = r_guess;
+
+        while (true) {
+            double dl_min = get_dl(r_min);
+            double dl_max = get_dl(r_max);
+
+            if (dl_min == 0) {
+                r_max = r_min;
+                break;
+            }
+
+            if (dl_max == 0) {
+                r_min = r_max;
+                break;
+            }
+
+            if (dl_min < 0)
+                r_min /= 2;
+
+            if (dl_max > 0)
+                r_max *= 2;
+
+            if (dl_min > 0 && dl_max < 0)
+                break;
+        }
+
+        while (true) {
+            double r = (r_min + r_max) / 2;
+            double dl = get_dl(r);
+            if (dl > 0) {
+                if (r == r_min) {
+                    break;
+                }
+
+                r_min = r;
+            }
+
+            if (dl < 0) {
+                if (r == r_max) {
+                    break;
+                }
+
+                r_max = r;
+            }
+
+            if (abs(dl) <= 1e-4) {
+                r_max = r;
+                r_min = r;
+                break;
+            }
+        }
+
+        double r_map = r_max;
+        double dl = get_dl(r_map);
+        double ddl = get_ddl(r_map);
+        // if (abs(dl) > 1e-4) {
+        //     common::logger->error("Not close enough to local maximum: r: [{}:{}]\tdl: [{},{}]", r_min, r_max, get_dl(r_min), get_dl(r_max));
+        //     throw std::domain_error("FFF");
+        // }
         if (ddl > 0) {
             common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
-            throw std::domain_error("GGG");
+            throw std::domain_error("FFF");
         }
+
+        // double r_map = boost::math::tools::newton_raphson_iterate(get_dl_ddl, r_guess, 0.0, real_sum, 30);
+        // auto [dl, ddl] = get_dl_ddl(r_map);
+        // if (ddl > 0) {
+        //     common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
+        //     throw std::domain_error("GGG");
+        // }
+        // if (abs(dl) > 1e-5) {
+        //     common::logger->error("Not close enough to local maximum: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
+        //     throw std::domain_error("FFF");
+        // }
 
         double target_p = r_map / (r_map + target_mu);
         double fit_mu = r_map * (1.0 - target_p) / target_p;
@@ -1147,7 +1286,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (ln_var == 0)
                     return exp(-ln_mu);
 
+                double a_guess = p1p * std::accumulate(counts.begin(), counts.end(), int64_t(0)) / gs;
+
                 auto get_l = [&](double a) {
+                    if (a == 0)
+                        return -std::numeric_limits<double>::max();
+
                     double r = 1.0 / a;
                     double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * counts.size();
                     for (int64_t c : counts) {
@@ -1156,12 +1300,86 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return l;
                 };
 
-                auto [a, nl] = boost::math::tools::brent_find_minima(
-                    [&](double a) { return -get_l(a); },
-                    1.0 / real_sum, real_sum, 30
-                );
+                auto get_dl_ddl = [&](double a) {
+                    double r = 1.0 / a;
+                    double dl = -a - a*(log(a)-ln_mu)/ln_var - gs*lp + boost::math::digamma(r)*counts.size();
+                    double ddl = a + a*(log(a)-ln_mu)/ln_var - a/ln_var + lp*gs*2 - boost::math::digamma(r)*counts.size()*2 - r*counts.size()*boost::math::trigamma(r);
+                    for (int64_t c : counts) {
+                        dl -= boost::math::digamma(r + c);
+                        ddl += 2.0*boost::math::digamma(r + c) + r*boost::math::trigamma(r + c);
+                    }
+
+                    return std::make_pair(r*r * dl, r*r*r * ddl);
+                };
+
+                double dl = 0;
+                double ddl = 0;
+                double a = a_guess;
+
+                double a_min = a_guess;
+                double a_max = a_guess;
+                while (true) {
+                    a_guess = (a_min + a_max) / 2;
+                    auto [dl_min, ddl_min] = get_dl_ddl(a_min);
+                    auto [dl_max, ddl_max] = get_dl_ddl(a_max);
+                    if (dl_min == 0) {
+                        a_max = a_min;
+                        break;
+                    }
+
+                    if (dl_max == 0) {
+                        a_min = a_max;
+                        break;
+                    }
+
+                    if (dl_min < 0)
+                        a_min /= 2;
+
+                    if (dl_max > 0)
+                        a_max *= 2;
+
+                    if (dl_min > 0 && dl_max < 0)
+                        break;
+                }
+
+                if (a_min < a_max) {
+                    std::tie(a_min, a_max) = boost::math::tools::bisect(
+                        [&](double a) { return get_dl_ddl(a).first; },
+                        a_min, a_max, boost::math::tools::eps_tolerance<double>(1e-5)
+                    );
+                    // a_min = boost::math::tools::newton_raphson_iterate(get_dl_ddl, a_guess, a_min, a_max, 30);
+                    // a_max = a_min;
+                }
+
+
+                // while (a_max - a_min >= 1e-5) {
+                //     double a_mid = (a_max + a_min) / 2;
+                //     auto [dl_mid, ddl_mid] = get_dl_ddl(a_mid);
+                //     if (dl_mid == 0) {
+                //         a_min = a_mid;
+                //         a_max = a_mid;
+                //     } else if (dl_mid > 0) {
+                //         a_min = a_mid;
+                //     } else {
+                //         a_max = a_mid;
+                //     }
+                // }
+                a = a_min;
+
+                std::tie(dl, ddl) = get_dl_ddl(a);
+                if (ddl >= 0) {
+                    common::logger->error("a_min: {}\ta_guess: {}\ta_max: {}", a_min, a_guess, a_max);
+                    common::logger->error("fa_min: {}\tfa_guess: {}\tfa_max: {}", get_dl_ddl(a_min).first, get_dl_ddl(a_guess).first, get_dl_ddl(a_max).first);
+                    common::logger->error("Failed to find maximum, eval error: a_guess: {}\tf'(a_guess): {}\tf''(a_guess): {}\ta: {}\tf'(a): {}\tf''(a): {}\t{}",
+                                          a_guess, get_dl_ddl(a_guess).first,get_dl_ddl(a_guess).second,
+                                          a,get_dl_ddl(a).first,get_dl_ddl(a).second,
+                                          fmt::join(counts, ","));
+                    throw std::domain_error("");
+                }
 
                 return 1.0 / a;
+                // a = boost::math::tools::brent_find_minima([&](double a) { return -get_l(a); },
+                //                                             0.0, real_sum, 30).first;
             };
 
             {
