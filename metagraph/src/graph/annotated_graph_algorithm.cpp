@@ -228,7 +228,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     std::vector<PValStorage> pvals_buckets;
     std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
+    std::vector<PValStorage> pvals_min_buckets;
+    std::vector<std::unique_ptr<utils::TempFile>> tmp_min_buckets;
     constexpr bool preallocated = std::is_same_v<PValStorage, std::vector<uint64_t>>;
+
     if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
         auto &pvals = pvals_buckets.emplace_back();
         pvals.resize(graph_ptr->max_index() + 1, nullpval);
@@ -240,6 +243,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             pvals_buckets.emplace_back(tmp_file->name(), std::ios::out);
         }
         pvals_buckets[0].push_back(nullpval);
+    }
+
+    if (config.test_type == "gnb_exact" && config.test_by_unitig) {
+        if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
+            auto &pvals_min = pvals_min_buckets.emplace_back();
+            pvals_min.resize(graph_ptr->max_index() + 1, nullpval);
+        }
+
+        if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+            for (size_t i = 0; i < get_num_threads() + 1; ++i) {
+                auto &tmp_file = tmp_min_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
+                pvals_min_buckets.emplace_back(tmp_file->name(), std::ios::out);
+            }
+            pvals_min_buckets[0].push_back(nullpval);
+        }
     }
 
     std::vector<PValStorage> eff_size_buckets;
@@ -1521,6 +1539,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 n = 0;
             }
 
+            double pval_min = 0;
             if (config.test_type != "gnb_exact") {
                 if (n >= ms[bucket_idx].size())
                     ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
@@ -1528,6 +1547,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (ms[bucket_idx][n].first == 1.1)
                     ms[bucket_idx][n].first = compute_min_pval(n, row);
 
+                pval_min = ms[bucket_idx][n].first;
                 ++ms[bucket_idx][n].second;
             } else {
                 std::sort(vals.begin(), vals.end());
@@ -1537,6 +1557,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 } else {
                     ++find.value().second;
                 }
+
+                pval_min = find->second.first;
             }
 
             if (config.test_by_unitig) {
@@ -1546,9 +1568,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
                     eff_size_buckets[bucket_idx][node] = eff_size;
                     sum_buckets[bucket_idx][node] = n;
+                    if (config.test_type == "gnb_exact")
+                        pvals_min_buckets[bucket_idx][node] = bit_cast<uint64_t>(pval_min);
                 } else {
                     eff_size_buckets[bucket_idx].push_back(eff_size);
                     sum_buckets[bucket_idx].push_back(n);
+                    if (config.test_type == "gnb_exact")
+                        pvals_min_buckets[bucket_idx].push_back(bit_cast<uint64_t>(pval_min));
                 }
             }
 
@@ -1671,9 +1697,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 std::lock_guard<std::mutex> lock(pval_mu);
                 for (size_t i = 0; i < path.size(); ++i) {
                     size_t bucket_idx = bucket_idxs[i];
-                    size_t n = sum_buckets[bucket_idx][path[i] - boundaries[bucket_idx]];
+                    size_t node_shift = path[i] - boundaries[bucket_idx];
+                    size_t n = sum_buckets[bucket_idx][node_shift];
                     n_sum += n;
-                    pvals_min.emplace_back(m[n].first);
+
+                    if (config.test_type == "gnb_exact") {
+                        pvals_min.emplace_back(bit_cast<double, uint64_t>(pvals_min_buckets[bucket_idx][node_shift]));
+                    } else {
+                        pvals_min.emplace_back(m[n].first);
+                    }
                 }
             }
 
@@ -1703,6 +1735,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         sum_buckets.resize(0);
         tmp_sum_buckets.resize(0);
+        pvals_min_buckets.resize(0);
+        tmp_min_buckets.resize(0);
     }
 
     if (k > 0) {
