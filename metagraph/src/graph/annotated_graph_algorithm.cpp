@@ -552,8 +552,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         double lscaling_base = lgamma(r_in + r_out) - lgamma(r_in) - lgamma(r_out);
-        double mu1 = r_in * (1.0 - target_p) / target_p;
-        double mu2 = r_out * (1.0 - target_p) / target_p;
 
         if (fit_var / fit_mu - 1.0 < 1e-5)
             common::logger->warn("Fit parameters are close to a Poisson distribution");
@@ -609,36 +607,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
         in_kmers = 0;
         out_kmers = 0;
-        int64_t total_kmers_sq = 0;
-        int64_t total_nonzeros = 0;
-        std::vector<int64_t> counts;
         for (size_t j = 0; j < groups.size(); ++j) {
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
-                if (v >= counts.size())
-                    counts.resize(v + 1);
-
-                counts[v] += c;
 
                 if (groups[j]) {
                     out_kmers += v * c;
                 } else {
                     in_kmers += v * c;
                 }
-
-                if (v > 0)
-                    total_nonzeros += c;
-
-                total_kmers_sq += v * v * c;
             }
         }
 
         total_kmers = in_kmers + out_kmers;
-
-        std::partial_sum(counts.rbegin(), counts.rend(), counts.rbegin());
-        if (counts[0] != static_cast<int64_t>(nelem * groups.size()) || counts[1] != total_nonzeros) {
-            throw std::runtime_error("FSFJKHJFSL");
-        }
 
         common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
@@ -657,19 +638,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         int64_t total_sum = in_sum + out_sum;
 
         if (config.test_type == "nbinom_exact") {
-            auto get_deviance1 = [mu=mu1,invphi=r_in,logmuinvphi=log(mu1+r_in),logmu=log(mu1),zv=-2.0*r_in*log(target_p)](double y) {
-                if (y == 0)
-                    return zv;
-
-                double logyshift = logmuinvphi - log(y + invphi);
-                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+            auto get_deviance1 = [p=target_p,r=r_in,l1pp=log1p(-target_p),rlogrp=r_in*(log(r_in)-log(target_p)),zv=-2.0*r_in*log(target_p)](double y) {
+                double yshift = y + r;
+                return y == 0 ? zv : 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
             };
-            auto get_deviance2 = [mu=mu2,invphi=r_out,logmuinvphi=log(mu2+r_out),logmu=log(mu2),zv=-2.0*r_out*log(target_p)](double y) {
-                if (y == 0)
-                    return zv;
-
-                double logyshift = logmuinvphi - log(y + invphi);
-                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+            auto get_deviance2 = [p=target_p,r=r_out,l1pp=log1p(-target_p),rlogrp=r_out*(log(r_out)-log(target_p)),zv=-2.0*r_out*log(target_p)](double y) {
+                double yshift = y + r;
+                return y == 0 ? zv : 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
             };
 
             std::vector<double> deviances1(total_sum + 1);
@@ -784,259 +759,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 return std::min(1.0, pval);
-            };
-        } else if (config.test_type == "zinb_exact") {
-            common::logger->trace("Computing merged histograms");
-            std::mutex hist_mu;
-            tsl::hopscotch_map<uint64_t, size_t> merged_hist_in;
-            tsl::hopscotch_map<uint64_t, size_t> merged_hist_out;
-            tsl::hopscotch_map<uint64_t, size_t> merged_hist_null;
-            int64_t p12_sum = 0;
-            int64_t p11_sum = 0;
-            double m0 = 0;
-            double m1 = 0;
-            for (const auto &[k, m] : count_maps[0]) {
-                const auto &[v, c] = m;
-                m0 += v * c;
-            }
-            for (const auto &[k, m] : count_maps[1]) {
-                const auto &[v, c] = m;
-                m1 += v * c;
-            }
-            m0 /= nelem;
-            m1 /= nelem;
-            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t) {
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                bool in_kmer = false;
-                bool out_kmer = false;
-                if (kept[row_i]) {
-                    size_t count_in = 0;
-                    size_t count_out = 0;
-                    double p0 = -m0;
-                    double p1 = -m1;
-                    for (const auto &[j, raw_c] : raw_row) {
-                        uint64_t c = raw_c;
-                        if (count_maps.size())
-                            c = count_maps[j].find(c)->second.first;
-
-                        if (j == 0) {
-                            p0 = c - m0;
-                        } else if (j == 1) {
-                            p1 = c - m1;
-                        }
-
-                        if (groups[j]) {
-                            out_sum += c;
-                            ++count_out;
-                        } else {
-                            in_sum += c;
-                            ++count_in;
-                        }
-                    }
-
-                    p12_sum += p0 * p1;
-                    p11_sum += p0 * p0;
-
-                    if (count_in + count_out >= config.min_recurrence) {
-                        double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-                        in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
-                        out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
-                    }
-                } else {
-                    return;
-                }
-
-                if (!in_kmer && !out_kmer)
-                    return;
-
-                size_t n = in_sum + out_sum;
-                std::lock_guard<std::mutex> lock(hist_mu);
-                ++merged_hist_in[in_sum];
-                ++merged_hist_out[out_sum];
-                ++merged_hist_null[n];
-            }, false);
-
-            double obs_cov = static_cast<double>(p12_sum) / (nelem - 1);
-            double obs_11_cov = static_cast<double>(p11_sum) / (nelem - 1);
-            common::logger->trace("Var: {}\tExp cov: {}\tObs11 cov: {}\tobs12 cov: {}",
-                                  r_map * (1.0 - target_p) / target_p / target_p,
-                                  (1.0 - target_p) / target_p / target_p,
-                                  obs_11_cov,
-                                  obs_cov);
-
-            auto get_rp_zinb = [&](const tsl::hopscotch_map<uint64_t, size_t> &hist_in,
-                                   const tsl::hopscotch_map<uint64_t, size_t> &hist_out) {
-                auto get_stats = [&](const auto &hist) {
-                    size_t total_nzeros = 0;
-                    size_t total_zeros = 0;
-                    size_t sum = 0;
-                    for (const auto &[k, c] : hist) {
-                        if (k != 0) {
-                            sum += k * c;
-                            total_nzeros += c;
-                        } else {
-                            total_zeros += c;
-                        }
-                    }
-                    size_t total = total_nzeros + total_zeros;
-
-                    return std::make_tuple(total_nzeros, total_zeros, sum, total);
-                };
-
-                auto [total_nzeros_in, total_zeros_in, sum_in, total_in] = get_stats(hist_in);
-                auto [total_nzeros_out, total_zeros_out, sum_out, total_out] = get_stats(hist_out);
-
-                auto get_r = [&](const auto &hist, size_t total, double total_nzeros, double p, double r_guess, double sum) {
-                    return boost::math::tools::newton_raphson_iterate([&](double r) {
-                        double dl = (log(p) - boost::math::digamma(r)) * total_nzeros + log(total_nzeros / total) * (total - total_nzeros);
-                        double ddl = -boost::math::trigamma(r) * total_nzeros;
-                        for (const auto &[k, c] : hist) {
-                            if (k != 0) {
-                                dl += boost::math::digamma(r + k) * c;
-                                ddl += boost::math::trigamma(r + k) * c;
-                            }
-                        }
-
-                        return std::make_pair(dl, ddl);
-                    }, r_guess, std::numeric_limits<double>::min(), sum, 30);
-                };
-
-                double p = boost::math::tools::newton_raphson_iterate([&](double p) {
-                    auto r_in = get_r(hist_in, total_in, total_nzeros_in, p, r_map * num_labels_in, sum_in);
-                    auto r_out = get_r(hist_out, total_out, total_nzeros_out, p, r_map * num_labels_out, sum_out);
-
-                    double dl_in = r_in * total_nzeros_in / p / (1.0 - pow(p, r_in)) - sum_in / (1.0 - p);
-                    double dl_out = r_out * total_nzeros_out / p / (1.0 - pow(p, r_out)) - sum_out / (1.0 - p);
-                    double ddl_in = -r_in * total_nzeros_in / p / p / (1.0 - pow(p, r_in)) / (1.0 - pow(p, r_in)) * ((1.0-pow(p, r_in)) - p * r_in * pow(p, r_in-1)) - static_cast<double>(sum_in) / (1.0-p) / (1.0-p);
-                    double ddl_out = -r_out * total_nzeros_out / p / p / (1.0 - pow(p, r_out)) / (1.0 - pow(p, r_out)) * ((1.0-pow(p, r_out)) - p * r_out * pow(p, r_out-1)) - static_cast<double>(sum_out) / (1.0-p) / (1.0-p);
-                    return std::make_pair(dl_in + dl_out, ddl_in + ddl_out);
-                }, target_p, 0.0, 1.0, 30);
-
-                double r_in = get_r(hist_in, total_in, total_nzeros_in, p, r_map * num_labels_in, sum_in);
-                double r_out = get_r(hist_out, total_out, total_nzeros_out, p, r_map * num_labels_out, sum_out);
-
-                double pi_in = (static_cast<double>(total_in - total_nzeros_in) / total_in - pow(p, r_in)) / (1.0 - pow(p, r_in));
-                double pi_out = (static_cast<double>(total_out - total_nzeros_out) / total_out - pow(p, r_out)) / (1.0 - pow(p, r_out));
-
-                return std::make_tuple(r_in, pi_in, r_out, pi_out, p);
-            };
-
-            auto [r_in, pi_in, r_out, pi_out, p] = get_rp_zinb(merged_hist_in, merged_hist_in);
-
-            common::logger->trace("r: ({}, {})\tp: {}\tpi: ({}, {})",
-                                  r_in, r_out, p, pi_in, pi_out);
-
-            double mu1 = r_in * (1.0 - p) / p * (1.0 - pi_in);
-            double mu2 = r_out * (1.0 - p) / p * (1.0 - pi_out);
-
-            auto get_zv = [](double r, double mu, double pi) {
-                return -2 * log(pi + (1.0 - pi) * pow((1.0-pi)*r/(mu + (1.0-pi)*r), r));
-            };
-
-            auto get_deviance1 = [r=r_in,mu=mu1,mpir=(1.0-pi_in)*r_in,zv=get_zv(r_in,mu1,pi_in)](double y) {
-                if (y == 0)
-                    return zv;
-
-                return 2.0 * ((r + y) * log((mu + mpir)/(y + mpir)) + y * log(y / mu));
-            };
-            auto get_deviance2 = [r=r_out,mu=mu2,mpir=(1.0-pi_out)*r_out,zv=get_zv(r_out,mu2,pi_out)](double y) {
-                if (y == 0)
-                    return zv;
-
-                return 2.0 * ((r + y) * log((mu + mpir)/(y + mpir)) + y * log(y / mu));
-            };
-
-            std::vector<double> deviances1(total_sum + 1);
-            std::vector<double> deviances2(total_sum + 1);
-            for (int64_t s = 0; s <= total_sum; ++s) {
-                deviances1[s] = get_deviance1(s);
-                deviances2[s] = get_deviance2(s);
-            }
-
-            auto get_lprob_zinb = [](int64_t s, double r, double p, double pi) {
-                return s == 0
-                    ? log(pi + (1.0 - pi) * pow(p, r))
-                    : log1p(-pi) + lgamma(r + s) - lgamma(r) - lgamma(s + 1) + r * log(p) + log1p(-p) * s;
-            };
-
-            auto get_lprob_ztnb = [get_lprob_zinb](int64_t s, double r_in, double r_out, double p, double pi_in, double pi_out) {
-                double pval = 0.0;
-                for (int64_t ss = 0; ss <= s; ++ss) {
-                    int64_t tt = s - ss;
-                    pval += exp(get_lprob_zinb(ss, r_in, p, pi_in) + get_lprob_zinb(tt, r_out, p, pi_out));
-                }
-                return log(pval);
-                // double lp1 = get_lprob_zinb(0, r_in, p, pi_in) + get_lprob_zinb(s, r_out, p, pi_out);
-                // double lp2 = get_lprob_zinb(s, r_in, p, pi_in) + get_lprob_zinb(0, r_out, p, pi_out);
-                // double lp3 = log1p(-pi_in) + log1p(-pi_out) + get_lprob_zinb(s, r_in + r_out, p, 0.0);
-                // return log(exp(lp1) + exp(lp2) + exp(lp3));
-            };
-
-            compute_min_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t n, const PairContainer&) {
-                if (n == 0)
-                    return 1.0;
-
-                std::vector<double> devs(n + 1);
-
-                for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = deviances1[s] + deviances2[n - s];
-                }
-
-                double max_d = *std::max_element(devs.begin(), devs.end());
-                double pval = 0.0;
-                double base_lprob = get_lprob_ztnb(n, r_in, r_out, p_in, pi_in, pi_out);
-                for (int64_t s = 0; s <= n; ++s) {
-                    if (devs[s] == max_d)
-                        pval += exp(get_lprob_zinb(s, r_in, p_in, pi_in) + get_lprob_zinb(n - s, r_out, p_out, pi_out) - base_lprob);
-                }
-
-                if (pval > 1.0) {
-                    common::logger->error("fail: {}", pval);
-                    throw std::runtime_error("FOO");
-                }
-
-                return pval;
-            };
-
-            compute_pval = [r_in,p_in=p,pi_in,r_out,p_out=p,pi_out,get_lprob_zinb,get_lprob_ztnb,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &) {
-                int64_t n = in_sum + out_sum;
-
-                if (n == 0)
-                    return 1.0;
-
-                std::vector<double> devs(n + 1);
-
-                for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = deviances1[s] + deviances2[n - s];
-                }
-
-                double target_d = devs[in_sum];
-                double pval = 0.0;
-                double base_lprob = get_lprob_ztnb(n, r_in, r_out, p_in, pi_in, pi_out);
-                int64_t s = 0;
-                for ( ; s <= n; ++s) {
-                    if (devs[s] >= target_d) {
-                        pval += exp(get_lprob_zinb(s, r_in, p_in, pi_in) + get_lprob_zinb(n - s, r_out, p_out, pi_out) - base_lprob);
-                    } else {
-                        break;
-                    }
-                }
-
-                for (int64_t ns = n; ns > s; --ns) {
-                    if (devs[ns] >= target_d) {
-                        pval += exp(get_lprob_zinb(ns, r_in, p_in, pi_in) + get_lprob_zinb(n - ns, r_out, p_out, pi_out) - base_lprob);
-                    } else {
-                        break;
-                    }
-                }
-
-                if (pval > 1.0) {
-                    common::logger->error("fail: {}", pval);
-                    throw std::runtime_error("FOO");
-                }
-
-                return pval;
             };
         } else {
             std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
@@ -1233,15 +955,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 progress_bar += its.size() % 1000;
             }
 
-            auto get_deviance = [](double invphi, double p, double y) {
-                double mu = invphi * (1.0 - p) / p;
+            auto get_deviance = [](double r, double p, double y) {
                 if (y == 0)
-                    return 2.0*invphi*log((invphi+mu)/invphi);
+                    return -2.0*r*log(p);
 
-                double logmuinvphi = log(mu+invphi);
-                double logmu = log(mu);
-                double logyshift = logmuinvphi - log(y + invphi);
-                return 2.0 * (y * (log(y) - logmu + logyshift) + invphi * logyshift);
+                double yshift = y + r;
+                double l1pp = log1p(-p);
+                double rlogrp = r * (log(r) - log(p));
+                return 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
             };
 
             compute_min_pval = [vector_counts,num_labels_in,num_labels_out,get_deviance,gs=groups.size()](int64_t n, const auto &row) {
