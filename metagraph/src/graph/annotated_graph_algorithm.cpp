@@ -407,12 +407,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
     } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact" || config.test_type == "gnb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
-        auto get_rp = [&](size_t j, auto begin, auto end) {
+        auto get_rp = [&](const auto &generate) {
             double mu = 0;
             double var = 0;
             size_t total = 0;
-            std::for_each(begin, end, [&](const auto &a) {
-                const auto &[k, c] = a;
+            generate([&](auto k, auto c) {
                 mu += k * c;
                 var += k * k * c;
                 total += c;
@@ -422,17 +421,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             var = (var - mu2 * total) / (total - 1);
 
             if (mu >= var) {
-                common::logger->warn("Fit {} failed, falling back to Poisson: mu: {} >= var: {}", j, mu, var);
+                common::logger->warn("Fit failed, falling back to Poisson: mu: {} >= var: {}", mu, var);
                 return std::make_pair(0.0, 1.0);
             }
 
             double r_guess = mu * mu / (var - mu);
-            double p_guess = mu / var;
 
             auto get_dl = [&](double r) {
                 double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
-                std::for_each(begin, end, [&](const auto &a) {
-                    const auto &[k, c] = a;
+                generate([&](auto k, auto c) {
                     dl += boost::math::digamma(k + r) * c;
                 });
                 return dl;
@@ -440,8 +437,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto get_ddl = [&](double r) {
                 double ddl = (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r)) * total;
-                std::for_each(begin, end, [&](const auto &a) {
-                    const auto &[k, c] = a;
+                generate([&](auto k, auto c) {
                     ddl += boost::math::trigamma(k + r) * c;
                 });
                 return ddl;
@@ -503,19 +499,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double r = r_max;
             double dl = get_dl(r);
             double ddl = get_ddl(r);
-            // if (abs(dl) > 1e-4) {
-            //     common::logger->error("Not close enough to local maximum: r: [{}:{}]\tdl: [{},{}]", r_min, r_max, get_dl(r_min), get_dl(r_max));
-            //     throw std::domain_error("FFF");
-            // }
             if (ddl > 0) {
                 common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
                 throw std::domain_error("FFF");
             }
 
             double p = r / (r + mu);
-            common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmoment est:\tr: {}\tp: {}\tmle: r: {}\tp: {}",
-                                  j, sums[j], (end - 1)->first, mu, var, r_guess, p_guess, r, p);
-
             return std::make_pair(r, p);
         };
 
@@ -534,7 +523,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     total += it->second;
             }
             hist_its[j] = it;
-            nb_params[j] = get_rp(j, hist.begin(), it);
+            nb_params[j] = get_rp([&](const auto &callback) {
+                std::for_each(hist.begin(), it, [&](const auto &a) {
+                    const auto &[k, c] = a;
+                    callback(k, c);
+                });
+            });
+            const auto &[r, p] = nb_params[j];
+            common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
+                                  j, sums[j], (it - 1)->first, r * (1-p)/p, r*(1-p)/p/p, r, p);
 
             total += (hist.size() && hist[0].first == 0 ? hist[0].second : 0);
 
@@ -551,161 +548,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         target_sum = exp(target_sum / groups.size());
 
         common::logger->trace("Finding common p and r.");
-        double real_sum = 0.0;
-        double real_sum_sq = 0.0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            double f = target_sum / sums[j];
-            common::logger->trace("{}: scale factor: {}", j, f);
-            std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                const auto &[k, c] = a;
-                if (k != 0) {
-                    double val = f * k;
-                    real_sum += val * c;
-                    real_sum_sq += val * val * c;
-                }
-            });
-        }
 
-        double r_guess = 0.0;
-        double target_mu = 0.0;
-        double target_var = 0.0;
-
-        auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
-            double cdf = boost::math::cdf(old_dist, k);
-
-            if (cdf < 1.0)
-                return boost::math::quantile(new_dist, cdf);
-
-            double ccdf = boost::math::cdf(boost::math::complement(old_dist, k));
-
-            if (ccdf > 0.0)
-                return boost::math::quantile(boost::math::complement(new_dist, ccdf));
-
-            return ceil(scale * k);
-        };
-
-        // nelem * r * groups.size() / p - target_sum * groups.size() / (1 - p) = 0
-        // nelem * r / p = target_sum / (1 - p)
-        // r / target_mu = p / (1 - p)
-        // r / target_mu = p + p * r / target_mu
-        // p = r / target_mu / (r / target_mu + 1)
-        // p = r / (r + target_mu)
-        target_mu = real_sum / matrix_size;
-        double target_mu2 = target_mu * target_mu;
-        target_var = (real_sum_sq - target_mu2 * matrix_size) / (matrix_size - 1);
-
-        if (target_var > target_mu) {
-            r_guess = target_mu2 / (target_var - target_mu);
-        } else {
-            common::logger->error("Data is underdispersed: {} >= {}. Use poisson_exact instead", target_mu, target_var);
-            throw std::domain_error("Fit failed");
-        }
-
-        auto get_dl = [&](double r) {
-            double dl = (log(r) - log(r + target_mu) - boost::math::digamma(r)) * matrix_size;
+        auto [r_map, target_p] = get_rp([&](const auto &callback) {
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
                 std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
                     const auto &[k, c] = a;
-                    dl += boost::math::digamma(f * k + r) * c;
+                    callback(f * k, c);
                 });
             }
-            return dl;
-        };
+        });
 
-        auto get_ddl = [&](double r) {
-            double ddl = (1.0 / r - 1.0 / (r + target_mu) - boost::math::trigamma(r)) * matrix_size;
-            for (size_t j = 0; j < groups.size(); ++j) {
-                double f = target_sum / sums[j];
-                std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                    const auto &[k, c] = a;
-                    ddl += boost::math::trigamma(f * k + r) * c;
-                });
-            }
-            return ddl;
-        };
-
-        double r_min = r_guess;
-        double r_max = r_guess;
-
-        while (true) {
-            double dl_min = get_dl(r_min);
-            double dl_max = get_dl(r_max);
-
-            if (dl_min == 0) {
-                r_max = r_min;
-                break;
-            }
-
-            if (dl_max == 0) {
-                r_min = r_max;
-                break;
-            }
-
-            if (dl_min < 0)
-                r_min /= 2;
-
-            if (dl_max > 0)
-                r_max *= 2;
-
-            if (dl_min > 0 && dl_max < 0)
-                break;
-        }
-
-        while (true) {
-            double r = (r_min + r_max) / 2;
-            double dl = get_dl(r);
-            if (dl > 0) {
-                if (r == r_min) {
-                    break;
-                }
-
-                r_min = r;
-            }
-
-            if (dl < 0) {
-                if (r == r_max) {
-                    break;
-                }
-
-                r_max = r;
-            }
-
-            if (abs(dl) <= 1e-4) {
-                r_max = r;
-                r_min = r;
-                break;
-            }
-        }
-
-        double r_map = r_max;
-        double dl = get_dl(r_map);
-        double ddl = get_ddl(r_map);
-        // if (abs(dl) > 1e-4) {
-        //     common::logger->error("Not close enough to local maximum: r: [{}:{}]\tdl: [{},{}]", r_min, r_max, get_dl(r_min), get_dl(r_max));
-        //     throw std::domain_error("FFF");
-        // }
-        if (ddl > 0) {
-            common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
-            throw std::domain_error("FFF");
-        }
-
-        // double r_map = boost::math::tools::newton_raphson_iterate(get_dl_ddl, r_guess, 0.0, real_sum, 30);
-        // auto [dl, ddl] = get_dl_ddl(r_map);
-        // if (ddl > 0) {
-        //     common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
-        //     throw std::domain_error("GGG");
-        // }
-        // if (abs(dl) > 1e-5) {
-        //     common::logger->error("Not close enough to local maximum: r: {}\tdl: {}\tddl: {}", r_map, dl, ddl);
-        //     throw std::domain_error("FFF");
-        // }
-
-        double target_p = r_map / (r_map + target_mu);
         double fit_mu = r_map * (1.0 - target_p) / target_p;
         double fit_var = fit_mu / target_p;
-        common::logger->trace("Common params: r_guess: {}\tr: {}\tp: {}\tmu: {}\tvar: {}",
-                              r_guess, r_map, target_p, fit_mu, fit_var);
+        common::logger->trace("Common params: r: {}\tp: {}\tmu: {}\tvar: {}",
+                              r_map, target_p, fit_mu, fit_var);
 
         double r_in = r_map * num_labels_in;
         double r_out = r_map * num_labels_out;
@@ -721,6 +578,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         count_maps.resize(groups.size());
 
         common::logger->trace("Computing quantile maps");
+        auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
+            double cdf = boost::math::cdf(old_dist, k);
+
+            if (cdf < 1.0)
+                return boost::math::quantile(new_dist, cdf);
+
+            double ccdf = boost::math::cdf(boost::math::complement(old_dist, k));
+
+            if (ccdf > 0.0)
+                return boost::math::quantile(boost::math::complement(new_dist, ccdf));
+
+            return ceil(scale * k);
+        };
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
@@ -1282,7 +1152,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
                             ln_mu, ln_var, exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1), exp(-ln_mu - ln_var/2));
 
-            auto get_r = [ln_mu,ln_var,real_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
+            auto get_r = [ln_mu,ln_var,real_sum=total_sum,p1p,total,lp=log(p),sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
                 if (ln_var == 0)
                     return exp(-ln_mu);
 
