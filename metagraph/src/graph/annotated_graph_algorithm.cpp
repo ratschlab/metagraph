@@ -455,14 +455,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return dl + add_dl(r);
             };
 
-            // auto get_ddl = [&](double r) {
-            //     double ddl = (1.0 / r - 1.0 / (r + mu) - boost::math::trigamma(r)) * total;
-            //     generate([&](auto k, auto c) {
-            //         ddl += boost::math::trigamma(k + r) * c;
-            //     });
-            //     return ddl + add_ddl(r);
-            // };
-
             double r_min = r_guess;
             double r_max = r_guess;
 
@@ -494,40 +486,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 get_dl, r_min, r_max, boost::math::tools::eps_tolerance<double>(1e-5)
             );
 
-            // while (true) {
-            //     double r = (r_min + r_max) / 2;
-            //     double dl = get_dl(r);
-            //     if (dl > 0) {
-            //         if (r == r_min) {
-            //             break;
-            //         }
-
-            //         r_min = r;
-            //     }
-
-            //     if (dl < 0) {
-            //         if (r == r_max) {
-            //             break;
-            //         }
-
-            //         r_max = r;
-            //     }
-
-            //     if (abs(dl) <= 1e-4) {
-            //         r_max = r;
-            //         r_min = r;
-            //         break;
-            //     }
-            // }
-
             double r = r_max;
-            // double dl = get_dl(r);
-            // double ddl = get_ddl(r);
-            // if (ddl > 0) {
-            //     common::logger->error("Found local minimum instead: r: {}\tdl: {}\tddl: {}", r, dl, ddl);
-            //     throw std::domain_error("FFF");
-            // }
-
             double p = r / (r + mu);
             return std::make_pair(r, p);
         };
@@ -1167,17 +1126,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     double r = target_p / (1.0 - target_p) * n / groups.size();
 
-                    // auto [r, p] = get_rp([&](const auto &callback) {
-                    //     for (const auto &[v, c] : vector_counts[n]) {
-                    //         for (int64_t k : v) {
-                    //             callback(k, c);
-                    //         }
-
-                    //         if (v.size() < groups.size())
-                    //             callback(0, (groups.size() - v.size()) * c);
-                    //     }
-                    // }, [](double) { return 0; }, [](double) { return 0; });
-
                     #pragma omp atomic
                     ln_mu += -log(r) * total;
 
@@ -1216,20 +1164,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double a_guess = var > mu ? (var - mu) / mu2 : 1.0;
 
-                // auto get_l = [&](double a) {
-                //     if (a == 0)
-                //         return -std::numeric_limits<double>::max();
-
-                //     double r = 1.0 / a;
-                //     double p = r / (r + mu);
-                //     double lp = log(p);
-                //     double l = -log(a) - pow(log(a)-ln_mu, 2.0)/2/ln_var + lp * r * gs - lgamma(r) * counts.size();
-                //     for (int64_t c : counts) {
-                //         l += lgamma(r + c);
-                //     }
-                //     return l;
-                // };
-
                 auto get_dl = [&](double a) {
                     double r = 1.0 / a;
                     double p = r / (r + mu);
@@ -1241,32 +1175,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return dl;
                 };
 
-                // auto get_dl_ddl = [&](double a) {
-                //     double r = 1.0 / a;
-                //     double p = r / (r + mu);
-                //     double lp = log(p);
-                //     double dl = -a - a*(log(a)-ln_mu)/ln_var - gs*lp + boost::math::digamma(r)*counts.size();
-                //     double ddl = a + a*(log(a)-ln_mu)/ln_var - a/ln_var + lp*gs*2 - boost::math::digamma(r)*counts.size()*2 - r*counts.size()*boost::math::trigamma(r);
-                //     for (int64_t c : counts) {
-                //         dl -= boost::math::digamma(r + c);
-                //         ddl += 2.0*boost::math::digamma(r + c) + r*boost::math::trigamma(r + c);
-                //     }
-
-                //     return std::make_pair(r*r * dl, r*r*r * ddl);
-                // };
-
-                // double dl = 0;
-                // double ddl = 0;
-                // double a = a_guess;
-
                 double a_min = a_guess;
                 double a_max = a_guess;
                 while (true) {
                     a_guess = (a_min + a_max) / 2;
                     double dl_min = get_dl(a_min);
                     double dl_max = get_dl(a_max);
-                    // auto [dl_min, ddl_min] = get_dl_ddl(a_min);
-                    // auto [dl_max, ddl_max] = get_dl_ddl(a_max);
                     if (dl_min == 0) {
                         a_max = a_min;
                         break;
@@ -1295,18 +1209,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 double a = a_min;
-
-                // std::tie(dl, ddl) = get_dl_ddl(a);
-                // if (ddl >= 0) {
-                //     common::logger->error("a_min: {}\ta_guess: {}\ta_max: {}", a_min, a_guess, a_max);
-                //     common::logger->error("fa_min: {}\tfa_guess: {}\tfa_max: {}", get_dl_ddl(a_min).first, get_dl_ddl(a_guess).first, get_dl_ddl(a_max).first);
-                //     common::logger->error("Failed to find maximum, eval error: a_guess: {}\tf'(a_guess): {}\tf''(a_guess): {}\ta: {}\tf'(a): {}\tf''(a): {}\t{}",
-                //                           a_guess, get_dl_ddl(a_guess).first,get_dl_ddl(a_guess).second,
-                //                           a,get_dl_ddl(a).first,get_dl_ddl(a).second,
-                //                           fmt::join(counts, ","));
-                //     throw std::domain_error("");
-                // }
-
                 double r = 1.0 / a;
                 double p = r / (r + mu);
                 return std::make_pair(r, p);
