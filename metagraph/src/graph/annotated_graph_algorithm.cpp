@@ -638,97 +638,49 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         int64_t total_sum = in_sum + out_sum;
 
         if (config.test_type == "nbinom_exact") {
-            auto get_deviance1 = [p=target_p,r=r_in,l1pp=log1p(-target_p),rlogrp=r_in*(log(r_in)-log(target_p)),zv=-2.0*r_in*log(target_p)](double y) {
-                double yshift = y + r;
-                return y == 0 ? zv : 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
-            };
-            auto get_deviance2 = [p=target_p,r=r_out,l1pp=log1p(-target_p),rlogrp=r_out*(log(r_out)-log(target_p)),zv=-2.0*r_out*log(target_p)](double y) {
-                double yshift = y + r;
-                return y == 0 ? zv : 2.0 * (y * (log(y) - l1pp) - yshift * log(yshift) + rlogrp);
-            };
-
-            std::vector<double> deviances1(total_sum + 1);
-            std::vector<double> deviances2(total_sum + 1);
-            for (int64_t s = 0; s <= total_sum; ++s) {
-                deviances1[s] = get_deviance1(s);
-                deviances2[s] = get_deviance2(s);
-            }
-            compute_min_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t n, const PairContainer&) {
+            compute_min_pval = [lscaling_base,r=r_in+r_out,r_in,r_out](int64_t n, const PairContainer&) {
                 if (n == 0)
                     return 1.0;
 
-                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-                std::vector<double> devs(n + 1);
+                double lscaling = lscaling_base - lgamma(r + n);
+                double argmin_d = r_in / r * n;
 
-                for (int64_t s = 0; s <= n; ++s) {
-                    devs[s] = deviances1[s] + deviances2[n - s];
-                }
+                double dist0 = argmin_d;
+                double distn = static_cast<double>(n) - argmin_d;
 
-                double max_d = *std::max_element(devs.begin(), devs.end());
                 double pval = 0.0;
-                int64_t s = 0;
-                if (devs[s] == max_d) {
-                    int64_t t = n;
-                    double rs = r_in;
-                    double rt = r_out + n;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                    pval += exp(base);
-                    for (++s; s <= n; ++s) {
-                        if (devs[s] == max_d) {
-                            --t;
-                            ++rs;
-                            --rt;
-                            base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
-                    }
-                }
+                if (dist0 >= distn)
+                    pval += exp(lscaling + lgamma(r_in) + lgamma(r_out + n));
 
-                int64_t sp = n;
-                if (devs[sp] == max_d) {
-                    int64_t t = 0;
-                    double rs = r_in + sp;
-                    double rt = r_out;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
-                    pval += exp(base);
-                    for (--sp; sp >= s; --sp) {
-                        if (devs[sp] == max_d) {
-                            ++t;
-                            --rs;
-                            ++rt;
-                            base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                            pval += exp(base);
-                        } else {
-                            break;
-                        }
-                    }
-                }
+                if (dist0 <= distn)
+                    pval += exp(lscaling + lgamma(r_in + n) + lgamma(r_out));
 
                 return std::min(1.0, pval);
             };
 
-            compute_pval = [lscaling_base,r_in,r_out,target_p,deviances1,deviances2](int64_t in_sum, int64_t out_sum, const auto &row) {
+            compute_pval = [lscaling_base,r=r_in+r_out,r_in,r_out](int64_t in_sum, int64_t out_sum, const auto &row) {
                 if (row.empty())
                     return 1.0;
 
+                if (r_in == r_out && in_sum == out_sum)
+                    return 1.0;
+
                 int64_t n = in_sum + out_sum;
+                double lscaling = lscaling_base - lgamma(r_in + r_out + n);
+                double argmin_d = r_in / r * n;
 
-                double lscaling = lgamma(n + 1) - lgamma(r_in + r_out + n) + lscaling_base;
-
-                double in_sum_total_deviance = deviances1[in_sum] + deviances2[out_sum];
+                double dist_insum = abs(argmin_d - in_sum);
 
                 double pval = 0.0;
                 int64_t s = 0;
                 int64_t t = n;
-                if (deviances1[s] + deviances2[t] >= in_sum_total_deviance) {
+                if (argmin_d >= dist_insum) {
                     double rs = r_in;
                     double rt = r_out + n;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rs) + lgamma(rt);
                     pval += exp(base);
-                    for (++s; s <= n; ++s) {
-                        if (deviances1[s] + deviances2[--t] >= in_sum_total_deviance) {
+                    for (++s,--t; s <= n; ++s,--t) {
+                        if (abs(s - argmin_d) >= dist_insum) {
                             ++rs;
                             --rt;
                             base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
@@ -741,13 +693,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 int64_t sp = n;
                 t = 0;
-                if (deviances1[sp] + deviances2[t] >= in_sum_total_deviance) {
+                if (abs(argmin_d - sp) >= dist_insum) {
                     double rs = r_in + sp;
                     double rt = r_out;
-                    double base = lscaling - lgamma(n + 1) + lgamma(rs) + lgamma(rt);
+                    double base = lscaling + lgamma(rs) + lgamma(rt);
                     pval += exp(base);
-                    for (--sp; sp >= s; --sp) {
-                        if (deviances1[sp] + deviances2[++t] >= in_sum_total_deviance) {
+                    for (--sp,++t; sp >= s; --sp,++t) {
+                        if (abs(argmin_d - sp) >= dist_insum) {
                             --rs;
                             ++rt;
                             base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
