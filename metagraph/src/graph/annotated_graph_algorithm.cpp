@@ -941,22 +941,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (row.empty())
                     return 1.0;
 
-                auto it = vector_counts[in_sum + out_sum].begin();
-                if (vector_counts[in_sum + out_sum].size() > 1) {
+                if (num_labels_in == num_labels_out && in_sum == out_sum)
+                    return 1.0;
+
+                int64_t n = in_sum + out_sum;
+                auto it = vector_counts[n].begin();
+                if (vector_counts[n].size() > 1) {
                     std::vector<int64_t> counts;
                     counts.reserve(row.size());
                     for (const auto &[j, c] : row) {
                         counts.emplace_back(c);
                     }
                     std::sort(counts.begin(), counts.end());
-                    it = vector_counts[in_sum + out_sum].find(counts);
+                    it = vector_counts[n].find(counts);
                 }
                 double r_base = it->second;
 
                 if (r_base == 0.0)
                     return 1.0;
 
-                int64_t n = in_sum + out_sum;
                 double r_in = r_base * num_labels_in;
                 double r_out = r_base * num_labels_out;
                 double r = r_in + r_out;
