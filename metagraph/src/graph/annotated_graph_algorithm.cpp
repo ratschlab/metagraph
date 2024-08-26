@@ -699,13 +699,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             } else {
                 return get_pval([&](int64_t s) {
                     if (s == 0)
-                        return -r_in * log(r_in) - (n + r_out) * log(n + r_out) + n * log(n);
+                        return n*log(n) - r_in*log(r_in) - (n + r_out)*log(n + r_out);
 
                     if (s == n)
-                        return -r_out * log(r_out) - (n + r_in) * log(n + r_out) + n * log(n);
+                        return n*log(n) - r_out*log(r_out) - (n + r_in)*log(n + r_in);
 
                     int64_t t = n - s;
-                    return log(s) * s - (r_in + s) * log(r_in + s) + log(t) * t - (t + r_out) * log(t + r_out);
+                    return log(s)*s - (r_in + s)*log(r_in + s) + log(t)*t - (t + r_out)*log(t + r_out);
                 });
             }
         };
