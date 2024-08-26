@@ -423,7 +423,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
         };
-    } else if (config.test_type == "nbinom_exact" || config.test_type == "zinb_exact" || config.test_type == "gnb_exact") {
+    } else if (config.test_type == "nbinom_exact" || config.test_type == "gnb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
         auto get_rp = [&](const auto &generate,
                           const auto &add_dl,
