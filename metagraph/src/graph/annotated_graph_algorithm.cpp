@@ -636,17 +636,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         int64_t total_sum = in_sum + out_sum;
 
         auto compute_min_pval_r = [](double r, double r_in, double r_out, double lscaling_base, int64_t n) {
-            double lscaling = lscaling_base - lgamma(r + n);
-            double argmin_d = r_in / r * n;
-
-            double dist0 = argmin_d;
-            double distn = static_cast<double>(n) - argmin_d;
+            double half_div0 = -r_in * log(r_in) - (n + r_out) * log(n + r_out);
+            double half_divn = -r_out * log(r_out) - (n + r_in) * log(n + r_in);
 
             double pval = 0.0;
-            if (dist0 >= distn)
+            double lscaling = lscaling_base - lgamma(r + n);
+            if (half_div0 >= half_divn)
                 pval += exp(lscaling + lgamma(r_out + n) - lgamma(r_out));
 
-            if (dist0 <= distn)
+            if (half_divn >= half_div0)
                 pval += exp(lscaling + lgamma(r_in + n) - lgamma(r_in));
 
             return std::min(1.0, pval);
