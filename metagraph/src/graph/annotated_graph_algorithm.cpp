@@ -621,20 +621,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
-        int64_t in_sum = 0;
-        int64_t out_sum = 0;
-        for (size_t j = 0; j < groups.size(); ++j) {
-            if (hists[j].size()) {
-                uint64_t k = count_maps[j].find(hists[j].back().first)->second.first;
-                if (groups[j]) {
-                    out_sum += k;
-                } else {
-                    in_sum += k;
-                }
-            }
-        }
-        int64_t total_sum = in_sum + out_sum;
-
         auto compute_min_pval_r = [](double r, double r_in, double r_out, double lscaling_base, int64_t n) {
             double half_div0 = -r_in * log(r_in) - (n + r_out) * log(n + r_out);
             double half_divn = -r_out * log(r_out) - (n + r_in) * log(n + r_in);
@@ -825,7 +811,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                   exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1),
                                   exp(-ln_mu - ln_var/2));
 
-            auto get_rp = [ln_mu,ln_var,real_sum=total_sum,total,sum=static_cast<double>(total_kmers),gs=groups.size()](const auto &counts) {
+            auto get_rp = [ln_mu,ln_var,gs=groups.size()](const auto &counts) {
                 double mu = 0;
                 double var = 0;
                 for (int64_t c : counts) {
