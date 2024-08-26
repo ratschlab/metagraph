@@ -1058,6 +1058,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t n = in_sum + out_sum;
             if (!in_kmer && !out_kmer) {
                 row.clear();
+                vals.clear();
                 n = 0;
             }
 
@@ -1073,12 +1074,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ++ms[bucket_idx][n].second;
             } else {
                 std::sort(vals.begin(), vals.end());
-                if (ms_vecs[bucket_idx].size() <= n)
+                if (n >= ms_vecs[bucket_idx].size())
                     ms_vecs[bucket_idx].resize(n + 1);
 
                 auto find = ms_vecs[bucket_idx][n].find(vals);
                 if (find == ms_vecs[bucket_idx][n].end()) {
-                    ms_vecs[bucket_idx][n][vals] = std::make_pair(compute_min_pval(n, row), 1);
+                    find = ms_vecs[bucket_idx][n].try_emplace(
+                        vals,
+                        std::make_pair(compute_min_pval(n, row), 1)
+                    ).first;
                 } else {
                     ++find.value().second;
                 }
@@ -1126,7 +1130,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         } else {
             std::vector<std::tuple<double, int64_t, size_t>> mn;
             for (size_t i = 0; i < ms_vecs.size(); ++i) {
-                for (size_t n = 1; n < ms_vecs[i].size(); ++n) {
+                for (size_t n = 0; n < ms_vecs[i].size(); ++n) {
                     for (const auto &[vec, v] : ms_vecs[i][n]) {
                         mn.emplace_back(v.first, n, v.second);
                     }
