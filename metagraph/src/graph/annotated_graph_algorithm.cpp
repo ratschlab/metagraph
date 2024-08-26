@@ -721,62 +721,64 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return row.size() ? compute_pval_r(r, r_in, r_out, lscaling_base, in_sum, out_sum, row) : 1.0;
             };
         } else {
-            std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
+            common::logger->trace("Enumerating row count distributions");
+            std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>> vector_counts;
+            {
+                std::vector<std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
 
-            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                bool in_kmer = false;
-                bool out_kmer = false;
-                std::vector<int64_t> vec;
-                if (kept[row_i]) {
-                    vec.reserve(raw_row.size());
-                    size_t count_in = 0;
-                    size_t count_out = 0;
-                    for (const auto &[j, raw_c] : raw_row) {
-                        uint64_t c = raw_c;
-                        if (count_maps.size())
-                            c = count_maps[j].find(c)->second.first;
+                generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
+                    int64_t in_sum = 0;
+                    int64_t out_sum = 0;
+                    bool in_kmer = false;
+                    bool out_kmer = false;
+                    std::vector<int64_t> vec;
+                    if (kept[row_i]) {
+                        vec.reserve(raw_row.size());
+                        size_t count_in = 0;
+                        size_t count_out = 0;
+                        for (const auto &[j, raw_c] : raw_row) {
+                            uint64_t c = raw_c;
+                            if (count_maps.size())
+                                c = count_maps[j].find(c)->second.first;
 
-                        if (groups[j]) {
-                            out_sum += c;
-                            ++count_out;
-                        } else {
-                            in_sum += c;
-                            ++count_in;
+                            if (groups[j]) {
+                                out_sum += c;
+                                ++count_out;
+                            } else {
+                                in_sum += c;
+                                ++count_in;
+                            }
+
+                            vec.emplace_back(c);
                         }
 
-                        vec.emplace_back(c);
+                        if (count_in + count_out >= config.min_recurrence) {
+                            double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
+                            in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
+                            out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
+                        }
+                    } else {
+                        return;
                     }
 
-                    if (count_in + count_out >= config.min_recurrence) {
-                        double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
-                        in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
-                        out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
-                    }
-                } else {
-                    return;
+                    if (!in_kmer && !out_kmer)
+                        return;
+
+                    size_t n = in_sum + out_sum;
+                    if (n >= vector_counts_ms[bucket_idx].size())
+                        vector_counts_ms[bucket_idx].resize(n + 1);
+
+                    std::sort(vec.begin(), vec.end());
+                    ++vector_counts_ms[bucket_idx][n][vec];
+                }, false);
+
+                vector_counts = std::move(vector_counts_ms[0]);
+                size_t max_size = vector_counts.size();
+                for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                    max_size = std::max(max_size, vector_counts_ms[j].size());
                 }
+                vector_counts.resize(max_size);
 
-                if (!in_kmer && !out_kmer)
-                    return;
-
-                size_t n = in_sum + out_sum;
-                if (n >= vector_counts_ms[bucket_idx].size())
-                    vector_counts_ms[bucket_idx].resize(n + 1);
-
-                std::sort(vec.begin(), vec.end());
-                ++vector_counts_ms[bucket_idx][n][vec];
-            }, false);
-
-            std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>> vector_counts = std::move(vector_counts_ms[0]);
-            size_t max_size = vector_counts.size();
-            for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
-                max_size = std::max(max_size, vector_counts_ms[j].size());
-            }
-            vector_counts.resize(max_size);
-
-            {
                 ProgressBar progress_bar(vector_counts.size() - 1, "Merging row", std::cerr, !common::get_verbose());
                 #pragma omp parallel for num_threads(num_threads)
                 for (size_t n = 1; n < vector_counts.size(); ++n) {
@@ -789,33 +791,29 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     }
                     ++progress_bar;
                 }
-
-                vector_counts_ms.resize(0);
             }
 
             common::logger->trace("Fitting LN prior distribution for dispersions");
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            {
-                ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
-                for (size_t n = 1; n < vector_counts.size(); ++n) {
-                    size_t total = 0;
-                    for (const auto &[v, c] : vector_counts[n]) {
-                        total += c;
-                    }
-
-                    double r = target_p / (1.0 - target_p) * n / groups.size();
-
-                    #pragma omp atomic
-                    ln_mu += -log(r) * total;
-
-                    #pragma omp atomic
-                    ln_var += log(r) * log(r) * total;
-
-                    ++progress_bar;
+            ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
+            #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
+            for (size_t n = 1; n < vector_counts.size(); ++n) {
+                size_t total = 0;
+                for (const auto &[v, c] : vector_counts[n]) {
+                    total += c;
                 }
+
+                double r = target_p / (1.0 - target_p) * n / groups.size();
+
+                #pragma omp atomic
+                ln_mu += -log(r) * total;
+
+                #pragma omp atomic
+                ln_var += log(r) * log(r) * total;
+
+                ++progress_bar;
             }
 
             size_t total = nelem * groups.size();
