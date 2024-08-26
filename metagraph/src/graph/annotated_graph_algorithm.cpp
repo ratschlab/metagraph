@@ -658,17 +658,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double lscaling = lscaling_base - lgamma(r + n);
 
-            if (r_in == r_out) {
-                double dist_insum = abs(argmin_d - in_sum);
+            auto get_pval = [&](const auto &get_stat) {
+                double base_stat = get_stat(in_sum);
                 double pval = 0.0;
                 int64_t s = 0;
                 int64_t t = n;
-                if (argmin_d >= dist_insum) {
+                if (get_stat(s) >= base_stat) {
                     double rs = r_in;
                     double rt = r_out + n;
                     double base = lscaling + lgamma(rt) - lgamma(r_out);
                     pval += exp(base);
-                    for (++s,--t; s <= n && abs(s - argmin_d) >= dist_insum; ++s,--t) {
+                    for (++s,--t; s <= n && get_stat(s) >= base_stat; ++s,--t) {
                         ++rs;
                         --rt;
                         base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
@@ -678,12 +678,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 int64_t sp = n;
                 t = 0;
-                if (abs(argmin_d - sp) >= dist_insum) {
+                if (get_stat(sp) >= base_stat) {
                     double rs = r_in + sp;
                     double rt = r_out;
                     double base = lscaling + lgamma(rs) - lgamma(r_in);
                     pval += exp(base);
-                    for (--sp,++t; sp >= s && abs(argmin_d - sp) >= dist_insum; --sp,++t) {
+                    for (--sp,++t; sp >= s && get_stat(sp) >= base_stat; --sp,++t) {
                         --rs;
                         ++rt;
                         base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
@@ -692,8 +692,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 return std::min(1.0, pval);
+            };
+
+            if (r_in == r_out) {
+                return get_pval([&](int64_t s) { return abs(argmin_d - s); });
             } else {
-                auto get_half_dev = [&](int64_t s) {
+                return get_pval([&](int64_t s) {
                     if (s == 0)
                         return -r_in * log(r_in) - (n + r_out) * log(n + r_out) + n * log(n);
 
@@ -702,41 +706,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     int64_t t = n - s;
                     return log(s) * s - (r_in + s) * log(r_in + s) + log(t) * t - (t + r_out) * log(t + r_out);
-                };
-
-                double dev_insum = get_half_dev(in_sum);
-                double pval = 0.0;
-                int64_t s = 0;
-                int64_t t = n;
-                if (get_half_dev(s) >= dev_insum) {
-                    double rs = r_in;
-                    double rt = r_out + n;
-                    double base = lscaling + lgamma(rt) - lgamma(r_out);
-                    pval += exp(base);
-                    for (++s,--t; s <= n && get_half_dev(s) >= dev_insum; ++s,--t) {
-                        ++rs;
-                        --rt;
-                        base += log(t) - log(s) + log(rs - 1) - (rt > 1 ? log(rt - 1) : lgamma(rt + 1) - lgamma(rt));
-                        pval += exp(base);
-                    }
-                }
-
-                int64_t sp = n;
-                t = 0;
-                if (get_half_dev(sp) >= dev_insum) {
-                    double rs = r_in + sp;
-                    double rt = r_out;
-                    double base = lscaling + lgamma(rs) - lgamma(r_in);
-                    pval += exp(base);
-                    for (--sp,++t; sp >= s && get_half_dev(sp) >= dev_insum; --sp,++t) {
-                        --rs;
-                        ++rt;
-                        base += log(sp) - log(t) - (rs > 1 ? log(rs - 1) : lgamma(rs + 1) - lgamma(rs)) + log(rt - 1);
-                        pval += exp(base);
-                    }
-                }
-
-                return std::min(1.0, pval);
+                });
             }
         };
 
