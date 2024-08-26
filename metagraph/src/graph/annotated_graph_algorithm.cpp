@@ -966,6 +966,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 double lscaling = lgamma(r) - lgamma(r + n);
                 double argmin_d = r_in / r * n;
+                if (in_sum == argmin_d)
+                    return 1.0;
 
                 double dist_insum = abs(argmin_d - in_sum);
 
