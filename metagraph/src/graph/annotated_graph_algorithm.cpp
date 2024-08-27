@@ -557,28 +557,26 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         count_maps.resize(groups.size());
 
         common::logger->trace("Computing quantile maps");
-        auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
-            double cdf = boost::math::cdf(old_dist, k);
-
-            if (cdf < 1.0)
-                return boost::math::quantile(new_dist, cdf);
-
-            double ccdf = boost::math::cdf(boost::math::complement(old_dist, k));
-
-            if (ccdf > 0.0)
-                return boost::math::quantile(boost::math::complement(new_dist, ccdf));
-
-            return ceil(scale * k);
-        };
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto &[r, p] = nb_params[j];
 
-            common::logger->trace("{}\tApproximating NB({}, {}) with NB({}, {})",
-                                  j, r, p, r_map, target_p);
-
             boost::math::negative_binomial nb_out(r_map, target_p);
             double scale = target_sum / sums[j];
+
+            auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
+                double cdf = boost::math::cdf(old_dist, k);
+
+                if (cdf < 1.0)
+                    return boost::math::quantile(new_dist, cdf);
+
+                double ccdf = boost::math::cdf(boost::math::complement(old_dist, k));
+
+                if (ccdf > 0.0)
+                    return boost::math::quantile(boost::math::complement(new_dist, ccdf));
+
+                return ceil(scale * k);
+            };
 
             auto compute_map = [&](const auto &nb) {
                 // ensure that 0 maps to 0
@@ -766,12 +764,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 vector_counts.resize(max_size);
 
                 ProgressBar progress_bar(vector_counts.size() - 1, "Merging row", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads)
-                for (size_t n = 1; n < vector_counts.size(); ++n) {
+                #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+                for (size_t n = vector_counts.size(); n > 0; --n) {
                     for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
-                        if (n < vector_counts_ms[j].size()) {
-                            for (const auto &[v, c] : vector_counts_ms[j][n]) {
-                                vector_counts[n][v] += c;
+                        if (n <= vector_counts_ms[j].size()) {
+                            for (const auto &[v, c] : vector_counts_ms[j][n - 1]) {
+                                vector_counts[n - 1][v] += c;
                             }
                         }
                     }
