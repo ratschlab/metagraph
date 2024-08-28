@@ -887,7 +887,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
 
                 ProgressBar progress_bar(its.size(), "Precomputing r's", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads)
+                #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
                 for (size_t i = 0; i < its.size(); ++i) {
                     if (i > 0 && i % 1000 == 0)
                         progress_bar += 1000;
