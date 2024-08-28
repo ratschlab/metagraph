@@ -644,42 +644,42 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             auto get_pval = [&](const auto &get_stat) {
                 double base_stat = get_stat(in_sum, out_sum,
-                                            r_in != r_out && in_sum > 0 ? log(in_sum) : 0.0,
-                                            r_in != r_out && out_sum > 0 ? log(out_sum) : 0.0);
+                                            r_in != r_out && in_sum > 0 ? log2(in_sum) : 0.0,
+                                            r_in != r_out && out_sum > 0 ? log2(out_sum) : 0.0);
                 double pval = 0.0;
                 int64_t s = 0;
                 int64_t t = n;
                 double ls = 0;
-                double lt = log(t);
+                double lt = log2(t);
                 if (get_stat(s, t, ls, lt) >= base_stat) {
-                    double base = lscaling + lgamma(n + r_out) - lgamma(r_out);
-                    pval += exp(base);
+                    double base = (lscaling + lgamma(n + r_out) - lgamma(r_out)) / log(2);
+                    pval += exp2(base);
                     for (++s,--t; s <= n; ++s,--t) {
-                        ls = log(s);
-                        lt = t > 0 ? log(t) : 0.0;
+                        ls = log2(s);
+                        lt = t > 0 ? log2(t) : 0.0;
                         if (get_stat(s, t, ls, lt) < base_stat)
                             break;
 
-                        base += log1p(t) + log(s - 1 + r_in) - ls - log(t + r_out);
-                        pval += exp(base);
+                        base += log2(t + 1) + log2(s - 1 + r_in) - ls - log2(t + r_out);
+                        pval += exp2(base);
                     }
                 }
 
                 int64_t sp = n;
                 t = 0;
-                ls = log(sp);
+                ls = log2(sp);
                 lt = 0;
                 if (get_stat(sp, t, ls, lt) >= base_stat) {
-                    double base = lscaling + lgamma(n + r_in) - lgamma(r_in);
-                    pval += exp(base);
+                    double base = (lscaling + lgamma(n + r_in) - lgamma(r_in)) / log(2);
+                    pval += exp2(base);
                     for (--sp,++t; sp >= s; --sp,++t) {
-                        ls = sp > 0 ? log(sp) : 0.0;
-                        lt = log(t);
+                        ls = sp > 0 ? log2(sp) : 0.0;
+                        lt = log2(t);
                         if (get_stat(sp, t, ls, lt) < base_stat)
                             break;
 
-                        base += log1p(sp) + log(t - 1 + r_out) - lt - log(sp + r_in);
-                        pval += exp(base);
+                        base += log2(sp + 1) + log2(t - 1 + r_out) - lt - log2(sp + r_in);
+                        pval += exp2(base);
                     }
                 }
 
@@ -690,7 +690,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return get_pval([&](int64_t s, int64_t, double, double) { return abs(argmin_d - s); });
             } else {
                 return get_pval([&](int64_t s, int64_t t, double ls, double lt) {
-                    return ls * s - (r_in + s)*log(r_in + s) + lt * t - (t + r_out)*log(t + r_out);
+                    return ls * s - (r_in + s)*log2(r_in + s) + lt * t - (t + r_out)*log2(t + r_out);
                 });
             }
         };
