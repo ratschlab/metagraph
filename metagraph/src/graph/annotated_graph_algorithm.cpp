@@ -781,8 +781,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            // ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
-            // #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
             for (size_t n = 1; n < vector_counts.size(); ++n) {
                 size_t total = 0;
                 for (const auto &[v, c] : vector_counts[n]) {
@@ -796,8 +794,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 #pragma omp atomic
                 ln_var += log(r) * log(r) * total;
-
-                // ++progress_bar;
             }
 
             size_t total = nelem * groups.size();
