@@ -620,16 +620,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
         auto compute_min_pval_r = [](double r, double r_in, double r_out, double lscaling_base, int64_t n) {
-            double half_div0 = -r_in * log(r_in) - (n + r_out) * log(n + r_out);
-            double half_divn = -r_out * log(r_out) - (n + r_in) * log(n + r_in);
+            double half_div0 = -r_in * log2(r_in) - (n + r_out) * log2(n + r_out);
+            double half_divn = -r_out * log2(r_out) - (n + r_in) * log2(n + r_in);
 
             double pval = 0.0;
-            double lscaling = lscaling_base - lgamma(r + n);
+            double lscaling = lscaling_base - lgamma(r + n) / log(2);
             if (half_div0 >= half_divn)
-                pval += exp(lscaling + lgamma(r_out + n) - lgamma(r_out));
+                pval += exp2(lscaling + (lgamma(r_out + n) - lgamma(r_out)) / log(2));
 
             if (half_divn >= half_div0)
-                pval += exp(lscaling + lgamma(r_in + n) - lgamma(r_in));
+                pval += exp2(lscaling + (lgamma(r_in + n) - lgamma(r_in)) / log(2));
 
             return std::min(1.0, pval);
         };
@@ -640,7 +640,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (in_sum == argmin_d)
                 return 1.0;
 
-            double lscaling = lscaling_base - lgamma(r + n);
+            double lscaling = lscaling_base - lgamma(r + n) / log(2);
 
             auto get_pval = [&](const auto &get_stat) {
                 double base_stat = get_stat(in_sum, out_sum,
@@ -652,7 +652,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double ls = 0;
                 double lt = log2(t);
                 if (get_stat(s, t, ls, lt) >= base_stat) {
-                    double base = (lscaling + lgamma(n + r_out) - lgamma(r_out)) / log(2);
+                    double base = lscaling + (lgamma(n + r_out) - lgamma(r_out)) / log(2);
                     pval += exp2(base);
                     for (++s,--t; s <= n; ++s,--t) {
                         ls = log2(s);
@@ -670,7 +670,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ls = log2(sp);
                 lt = 0;
                 if (get_stat(sp, t, ls, lt) >= base_stat) {
-                    double base = (lscaling + lgamma(n + r_in) - lgamma(r_in)) / log(2);
+                    double base = lscaling + (lgamma(n + r_in) - lgamma(r_in)) / log(2);
                     pval += exp2(base);
                     for (--sp,++t; sp >= s; --sp,++t) {
                         ls = sp > 0 ? log2(sp) : 0.0;
@@ -697,7 +697,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (config.test_type == "nbinom_exact") {
             double r = r_in + r_out;
-            double lscaling_base = lgamma(r);
+            double lscaling_base = lgamma(r) / log(2);
             compute_min_pval = [compute_min_pval_r,lscaling_base,r,r_in,r_out](int64_t n, const PairContainer&) {
                 return n > 0 ? compute_min_pval_r(r, r_in, r_out, lscaling_base, n) : 1.0;
             };
@@ -914,7 +914,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double r_in = r_base * num_labels_in;
                 double r_out = r_base * num_labels_out;
                 double r = r_in + r_out;
-                double lscaling_base = lgamma(r);
+                double lscaling_base = lgamma(r) / log(2);
 
                 return compute_min_pval_r(r, r_in, r_out, lscaling_base, n);
             };
@@ -935,7 +935,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double r_in = r_base * num_labels_in;
                 double r_out = r_base * num_labels_out;
                 double r = r_in + r_out;
-                double lscaling_base = lgamma(r);
+                double lscaling_base = lgamma(r) / log(2);
 
                 return compute_pval_r(r, r_in, r_out, lscaling_base, in_sum, out_sum, row);
             };
