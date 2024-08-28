@@ -643,14 +643,14 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double lscaling = lscaling_base - lgamma(r + n);
 
             auto get_pval = [&](const auto &get_stat) {
-                double base_stat = get_stat(in_sum);
+                double base_stat = get_stat(in_sum, out_sum);
                 double pval = 0.0;
                 int64_t s = 0;
                 int64_t t = n;
-                if (get_stat(s) >= base_stat) {
+                if (get_stat(s, t) >= base_stat) {
                     double base = lscaling + lgamma(n + r_out) - lgamma(r_out);
                     pval += exp(base);
-                    for (++s,--t; s <= n && get_stat(s) >= base_stat; ++s,--t) {
+                    for (++s,--t; s <= n && get_stat(s, t) >= base_stat; ++s,--t) {
                         base += log1p(t) + log(s - 1 + r_in) - log(s) - log(t + r_out);
                         pval += exp(base);
                     }
@@ -658,10 +658,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 int64_t sp = n;
                 t = 0;
-                if (get_stat(sp) >= base_stat) {
+                if (get_stat(sp, t) >= base_stat) {
                     double base = lscaling + lgamma(n + r_in) - lgamma(r_in);
                     pval += exp(base);
-                    for (--sp,++t; sp >= s && get_stat(sp) >= base_stat; --sp,++t) {
+                    for (--sp,++t; sp >= s && get_stat(sp, t) >= base_stat; --sp,++t) {
                         base += log1p(sp) + log(t - 1 + r_out) - log(t) - log(sp + r_in);
                         pval += exp(base);
                     }
@@ -671,17 +671,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             };
 
             if (r_in == r_out) {
-                return get_pval([&](int64_t s) { return abs(argmin_d - s); });
+                return get_pval([&](int64_t s, int64_t) { return abs(argmin_d - s); });
             } else {
-                return get_pval([&](int64_t s) {
-                    if (s == 0)
-                        return n*log(n) - r_in*log(r_in) - (n + r_out)*log(n + r_out);
-
-                    if (s == n)
-                        return n*log(n) - r_out*log(r_out) - (n + r_in)*log(n + r_in);
-
-                    int64_t t = n - s;
-                    return log(s)*s - (r_in + s)*log(r_in + s) + log(t)*t - (t + r_out)*log(t + r_out);
+                return get_pval([&](int64_t s, int64_t t) {
+                    double sls = s > 0 ? log(s) * s : 0;
+                    double tlt = t > 0 ? log(t) * t : 0;
+                    return sls - (r_in + s)*log(r_in + s) + tlt - (t + r_out)*log(t + r_out);
                 });
             }
         };
