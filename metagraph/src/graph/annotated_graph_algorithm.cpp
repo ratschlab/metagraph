@@ -781,8 +781,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             double ln_mu = 0.0;
             double ln_var = 0.0;
 
-            ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
-            #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
+            // ProgressBar progress_bar(vector_counts.size() - 1, "Fitting", std::cerr, !common::get_verbose());
+            // #pragma omp parallel for num_threads(num_threads) reduction(+:ln_mu,ln_var)
             for (size_t n = 1; n < vector_counts.size(); ++n) {
                 size_t total = 0;
                 for (const auto &[v, c] : vector_counts[n]) {
@@ -797,7 +797,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 #pragma omp atomic
                 ln_var += log(r) * log(r) * total;
 
-                ++progress_bar;
+                // ++progress_bar;
             }
 
             size_t total = nelem * groups.size();
@@ -878,44 +878,39 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return std::make_pair(r, p);
             };
 
-            {
-                std::vector<tsl::hopscotch_map<std::vector<int64_t>, double, utils::VectorHash>::iterator> its;
-                for (size_t n = 1; n < vector_counts.size(); ++n) {
-                    for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
-                        its.emplace_back(it);
-                    }
-                }
+            ProgressBar progress_bar(vector_counts.size() - 1, "Precomputing r's", std::cerr, !common::get_verbose());
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t n = 1; n < vector_counts.size(); ++n) {
+                if (n > 0 && n % 1000 == 0)
+                    progress_bar += 1000;
 
-                ProgressBar progress_bar(its.size(), "Precomputing r's", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-                for (size_t i = 0; i < its.size(); ++i) {
-                    if (i > 0 && i % 1000 == 0)
-                        progress_bar += 1000;
-
-                    its[i].value() = get_rp(its[i]->first).first;
+                for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
+                    it.value() = get_rp(it->first).first;
                 }
-                progress_bar += its.size() % 1000;
             }
+            progress_bar += (vector_counts.size() - 1) % 1000;
 
-            auto get_r = [vector_counts](int64_t n, const auto &row) {
-                auto it = vector_counts[n].begin();
-                if (vector_counts[n].size() > 1) {
-                    std::vector<int64_t> counts;
-                    counts.reserve(row.size());
-                    for (const auto &[j, c] : row) {
-                        counts.emplace_back(c);
+            auto get_r = std::make_shared<std::function<double(int64_t, const PairContainer&)>>(
+                [vc=std::move(vector_counts)](int64_t n, const auto &row) {
+                    auto it = vc[n].begin();
+                    if (vc[n].size() > 1) {
+                        std::vector<int64_t> counts;
+                        counts.reserve(row.size());
+                        for (const auto &[j, c] : row) {
+                            counts.emplace_back(c);
+                        }
+                        std::sort(counts.begin(), counts.end());
+                        it = vc[n].find(counts);
                     }
-                    std::sort(counts.begin(), counts.end());
-                    it = vector_counts[n].find(counts);
+                    return it->second;
                 }
-                return it->second;
-            };
+            );
 
             compute_min_pval = [compute_min_pval_r,get_r,num_labels_in,num_labels_out](int64_t n, const PairContainer &row) {
                 if (row.empty())
                     return 1.0;
 
-                double r_base = get_r(n, row);
+                double r_base = (*get_r)(n, row);
                 if (r_base == 0.0)
                     return 1.0;
 
@@ -935,7 +930,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return 1.0;
 
                 int64_t n = in_sum + out_sum;
-                double r_base = get_r(n, row);
+                double r_base = (*get_r)(n, row);
 
                 if (r_base == 0.0)
                     return 1.0;
