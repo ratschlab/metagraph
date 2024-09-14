@@ -157,7 +157,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         if (k == 0)
-            common::logger->warn("No significant p-values achievable");
+            common::logger->warn("No significant p-values achievable after correction");
 
         common::logger->trace("Kept {} / {}", acc, total);
         return std::make_pair(k, n_cutoff);
@@ -214,8 +214,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             in_kmers += sums[j];
         }
 
-        common::logger->trace("{}: sum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
-                              j, sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+        common::logger->trace("{}: n_unique: {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
+                              j, n_kmers[j], sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
     }
 
     int64_t total_kmers = in_kmers + out_kmers;
@@ -940,9 +940,112 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return compute_pval_r(r, r_in, r_out, lscaling_base, in_sum, out_sum, row);
             };
         }
+    } else if (config.test_type == "poisson_binom") {
+        // fit distribution
+        std::vector<double> p;
+        p.reserve(groups.size());
+        for (size_t i = 0; i < groups.size(); ++i) {
+            p.emplace_back(static_cast<double>(n_kmers[i]) / nelem);
+        }
+
+        common::logger->trace("Precomputing PMFs");
+        std::vector<double> pmf_in { 1.0 };
+        std::vector<double> pmf_out { 1.0 };
+        std::vector<double> pmf_null { 1.0 };
+
+        for (size_t i = 1; i <= groups.size(); ++i) {
+            if (groups[i]) {
+                std::vector<double> pmf_out_cur(pmf_out.size() + 1);
+                pmf_out_cur[0] = (1.0 - p[i - 1]) * pmf_out[0];
+                pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
+                for (size_t k = 1; k < pmf_out.size(); ++k) {
+                    pmf_out_cur[k] = p[i - 1] * pmf_out[k - 1] + (1.0 - p[i - 1]) * pmf_out[k];
+                }
+                std::swap(pmf_out_cur, pmf_out);
+            } else {
+                std::vector<double> pmf_in_cur(pmf_in.size() + 1);
+                pmf_in_cur[0] = (1.0 - p[i - 1]) * pmf_in[0];
+                pmf_in_cur[pmf_in.size()] = p[i - 1] * pmf_in.back();
+                for (size_t k = 1; k < pmf_in.size(); ++k) {
+                    pmf_in_cur[k] = p[i - 1] * pmf_in[k - 1] + (1.0 - p[i - 1]) * pmf_in[k];
+                }
+                std::swap(pmf_in_cur, pmf_in);
+            }
+            std::vector<double> pmf_null_cur(i + 1);
+            pmf_null_cur[0] = (1.0 - p[i - 1]) * pmf_null[0];
+            pmf_null_cur[pmf_null.size()] = p[i - 1] * pmf_null.back();
+            for (size_t k = 1; k < pmf_null.size(); ++k) {
+                pmf_null_cur[k] = p[i - 1] * pmf_null[k - 1] + (1.0 - p[i - 1]) * pmf_null[k];
+            }
+            std::swap(pmf_null_cur, pmf_null);
+        }
+
+        common::logger->trace("Precomputing p-values");
+        std::vector<std::vector<double>> pvals(groups.size() + 1);
+        pvals[0].emplace_back(1.0);
+
+        double min_pval = 1.0;
+
+        for (size_t n = 1; n < pvals.size(); ++n) {
+            std::vector<double> probs;
+            for (uint64_t s = 0; s < pmf_in.size(); ++s) {
+                if (s > n)
+                    break;
+                uint64_t t = n - s;
+                if (t < pmf_out.size()) {
+                    probs.emplace_back(pmf_in[s] * pmf_out[t] / pmf_null[n]);
+                } else {
+                    probs.emplace_back(0.0);
+                }
+            }
+
+            for (uint64_t s = 0; s < probs.size(); ++s) {
+                pvals[n].emplace_back(0.0);
+                bool found = false;
+                for (uint64_t sp = 0; sp < probs.size(); ++sp) {
+                    if (pmf_in[sp] <= pmf_in[s]) {
+                        found = true;
+                        pvals[n][s] += probs[sp];
+                    }
+                }
+
+                if (found)
+                    min_pval = std::min(min_pval, pvals[n][s]);
+            }
+        }
+
+        common::logger->trace("Min. p-value: {}", min_pval);
+        if (min_pval >= config.family_wise_error_rate) {
+            common::logger->warn("No significant p-values achievable");
+            auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
+                graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
+                is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+            );
+
+            auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
+                graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_out)), true,
+                is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+            );
+
+            return std::make_tuple(masked_graph_in, masked_graph_out, PValStorage{}, nullptr);
+        }
+
+        compute_min_pval = [pvals,num_labels_in](int64_t, const PairContainer &row) {
+            size_t front = row.size() - std::min(row.size(), num_labels_in);
+            return std::min(pvals[row.size()][front],
+                            pvals[row.size()].back());
+        };
+
+        compute_pval = [pvals,&groups](int64_t, int64_t, const auto &row) {
+            uint64_t s = std::count_if(row.begin(), row.end(),
+                                       [&](const auto &a) { return !groups[a.first]; });
+
+            return pvals[row.size()][s];
+        };
+
     } else if (config.test_type == "notest") {
-        compute_min_pval = [&](int64_t n, const PairContainer&) { return n > 0 ? 0.0 : 1.1; };
-        compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.1; };
+        compute_min_pval = [&](int64_t n, const PairContainer&) { return n > 0 ? 0.0 : 1.0; };
+        compute_pval = [&](int64_t, int64_t, const auto &row) { return row.size() ? 0.0 : 1.0; };
     } else {
         throw std::runtime_error("Test not implemented");
     }
@@ -992,7 +1095,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return;
             }
 
-            size_t n = in_sum + out_sum;
+            size_t n = config.test_type != "poisson_binom" ? in_sum + out_sum : row.size();
             if (!in_kmer && !out_kmer) {
                 row.clear();
                 vals.clear();
@@ -1245,7 +1348,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return;
             }
 
-            size_t n = in_sum + out_sum;
+            size_t n = config.test_type != "poisson_binom" ? in_sum + out_sum : row.size();
             if (!in_kmer && !out_kmer) {
                 row.clear();
                 n = 0;
