@@ -116,7 +116,9 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
     bitmap* release_mask() { return kmers_in_graph_.release(); }
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override;
 
     virtual node_index kmer_to_node(std::string_view kmer) const override {
         node_index node = graph_->kmer_to_node(kmer);

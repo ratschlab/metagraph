@@ -183,24 +183,30 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback,
+             const std::function<bool()> &stop_early) const {
     assert(max_index() + 1 == kmers_in_graph_->size());
 
     if (only_valid_nodes_in_mask_) {
         // iterate only through the nodes marked in the mask
-        kmers_in_graph_->call_ones([&](node_index index) {
-            if (index) {
-                assert(in_subgraph(index));
-                // TODO: make this more efficient
-                callback(index, get_node_sequence(index));
-            }
-        });
+        try {
+            kmers_in_graph_->call_ones([&](node_index index) {
+                if (stop_early())
+                    throw early_term();
+
+                if (index) {
+                    assert(in_subgraph(index));
+                    // TODO: make this more efficient
+                    callback(index, get_node_sequence(index));
+                }
+            });
+        } catch (const early_term&) {}
     } else {
         // call all nodes in the base graph and check the mask
         graph_->call_kmers([&](node_index index, const std::string &seq) {
             if (in_subgraph(index))
                 callback(index, seq);
-        });
+        }, stop_early);
     }
 }
 

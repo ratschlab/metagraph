@@ -73,7 +73,10 @@ class DBGWrapper : public DeBruijnGraph {
                             const std::function<bool()> &stop_early
                                 = [](){ return false; }) const override = 0;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
+    virtual void call_kmers(const std::function<void(node_index,
+                            const std::string&)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override = 0;
 
   protected:
     std::shared_ptr<const Graph> graph_;

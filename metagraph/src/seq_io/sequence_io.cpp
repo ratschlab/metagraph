@@ -1,5 +1,6 @@
 #include "sequence_io.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <thread>

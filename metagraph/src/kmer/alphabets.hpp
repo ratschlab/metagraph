@@ -87,7 +87,7 @@ static_assert(kBOSSSigmaDNA5 > 1llu << (kBOSSBitsPerCharDNA5 - 1));
 
 
 
-constexpr char kAlphabetProtein[] = "ABCDEFGHIJKLMNOPQRSTUVWYZX";
+inline constexpr char kAlphabetProtein[] = "ABCDEFGHIJKLMNOPQRSTUVWYZX";
 constexpr uint8_t kSigmaProtein = sizeof(kAlphabetProtein) - 1;
 constexpr uint8_t kBitsPerCharProtein = log2<kSigmaProtein - 1>::value + 1;
 constexpr uint8_t kCharToProtein[128] = {
@@ -106,7 +106,7 @@ static_assert(kSigmaProtein > 1llu << (kBitsPerCharProtein - 1));
 
 
 //for case-specific DNA and RNA (U <-> T) data
-constexpr char kAlphabetDNACaseSent[] = "ACGTNacgt";
+inline constexpr char kAlphabetDNACaseSent[] = "ACGTNacgt";
 constexpr uint8_t kSigmaDNACaseSent = sizeof(kAlphabetDNACaseSent) - 1;
 constexpr uint8_t kBitsPerCharDNACaseSent = log2<kSigmaDNACaseSent - 1>::value + 1;
 constexpr uint8_t kCharToDNACaseSent[128] = {
@@ -125,7 +125,7 @@ static_assert(kSigmaDNACaseSent > 1llu << (kBitsPerCharDNACaseSent - 1));
 
 
 //for DNA and RNA (U <-> T) alphabets
-constexpr char kAlphabetDNA[] = "ACGT";
+inline constexpr char kAlphabetDNA[] = "ACGT";
 constexpr uint8_t kSigmaDNA = sizeof(kAlphabetDNA) - 1;
 constexpr uint8_t kBitsPerCharDNA = log2<kSigmaDNA - 1>::value + 1;
 constexpr uint8_t kCharToDNA[128] = {
@@ -142,7 +142,7 @@ const std::vector<uint8_t> kComplementMapDNA = { 3, 2, 1, 0, 4 };
 static_assert(kSigmaDNA <= 1llu << kBitsPerCharDNA);
 static_assert(kSigmaDNA > 1llu << (kBitsPerCharDNA - 1));
 
-constexpr char kAlphabetDNA5[] = "ACGTN";
+inline constexpr char kAlphabetDNA5[] = "ACGTN";
 constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA5) - 1;
 constexpr uint8_t kBitsPerCharDNA5 = log2<kSigmaDNA5 - 1>::value + 1;
 static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
