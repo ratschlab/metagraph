@@ -993,7 +993,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     break;
                 uint64_t t = n - s;
                 if (t < pmf_out.size()) {
-                    probs.emplace_back(pmf_in[s] * pmf_out[t] / pmf_null[n]);
+                    probs.emplace_back(exp2(log2(pmf_in[s]) + log2(pmf_out[t]) - log2(pmf_null[n])));
                 } else {
                     probs.emplace_back(0.0);
                 }
