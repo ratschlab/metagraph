@@ -154,7 +154,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
     typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads : { 1, 4 }) {
         size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
-        for (size_t k = max_k-1; k < max_k; ++k) {
+        for (size_t k = 6; k < max_k; ++k) {
             const std::vector<std::string> sequences {
                 std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
                 std::string("T") + std::string(k - 1, 'A') + "C",
