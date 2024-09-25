@@ -91,59 +91,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             }
 
             if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
-                // std::vector<bool> groups = { true, false, false };
-                // const auto &annotation = static_cast<const Annotation&>(anno_graph->get_annotator());
-                // const auto &in_columns = annotation.get_matrix().data();
-                // std::vector<std::unique_ptr<const bit_vector>> columns;
-                // columns.reserve(in_columns.size());
-                // std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
-                //                [&](const auto &a) {
-                //                   return std::make_unique<const bit_vector_stat>(a->to_vector());
-                //                });
-
-
-                // columns.resize(groups.size());
-
-                // // (std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                // //          const std::vector<std::string> &files,
-                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                // //          const DifferentialAssemblyConfig &config,
-                // //          size_t num_threads = 1,
-                // //          std::filesystem::path = "",
-                // //          size_t num_parallel_files = std::numeric_li
-                // // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
-                // //     graph_ptr,
-
-                // // );
-
-                // using PairContainer = Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
-                // std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
-                // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
-                //     graph_ptr,
-                //     [&](const auto &callback, bool) {
-                //         utils::call_rows<std::unique_ptr<const bit_vector>,
-                //                         std::unique_ptr<const sdsl::int_vector<>>,
-                //                         PairContainer, true>(columns, column_values,
-                //                                             [&](uint64_t row_i, const auto &row, size_t) {
-                //             callback(row_i, row);
-                //         });
-                //     },
-                //     groups,
-                //     config, num_threads, test_dump_basename, num_threads,
-                //     [&]() {
-                //         columns.clear();
-                //         column_values.clear();
-                //     }
-                // );
-
-                // masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                //     auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                //     obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                //     obs_kmers.insert(kmer);
-                // });
-                // EXPECT_EQ(ref_labels, obs_labels) << k;
-                // EXPECT_EQ(ref_kmers, obs_kmers) << k;
+                // TODO
             }
         }
     }
@@ -203,62 +151,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
             }
 
             if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
-                // const auto &annotation = static_cast<const Annotation&>(anno_graph->get_annotator());
-                // std::vector<bool> groups(labels.size());
-                // for (const auto &label : labels) {
-                //     groups[annotation.get_label_encoder().encode(label)] = !labels_in.count(label);
-                // }
-                // const auto &in_columns = annotation.get_matrix().data();
-                // std::vector<std::unique_ptr<const bit_vector>> columns;
-                // columns.reserve(in_columns.size());
-                // std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
-                //                [&](const auto &a) {
-                //                   return std::make_unique<const bit_vector_stat>(a->to_vector());
-                //                });
-
-
-                // columns.resize(groups.size());
-
-                // // (std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                // //          const std::vector<std::string> &files,
-                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                // //          const DifferentialAssemblyConfig &config,
-                // //          size_t num_threads = 1,
-                // //          std::filesystem::path = "",
-                // //          size_t num_parallel_files = std::numeric_li
-                // // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
-                // //     graph_ptr,
-
-                // // );
-
-                // using PairContainer = Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
-                // std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
-                // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
-                //     graph_ptr,
-                //     [&](const auto &callback, bool) {
-                //         utils::call_rows<std::unique_ptr<const bit_vector>,
-                //                         std::unique_ptr<const sdsl::int_vector<>>,
-                //                         PairContainer, true>(columns, column_values,
-                //                                             [&](uint64_t row_i, const auto &row, size_t) {
-                //             callback(row_i, row);
-                //         });
-                //     },
-                //     groups,
-                //     config, num_threads, test_dump_basename, num_threads,
-                //     [&]() {
-                //         columns.clear();
-                //         column_values.clear();
-                //     }
-                // );
-
-                // masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                //     auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                //     obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                //     obs_kmers.insert(kmer);
-                // });
-                // EXPECT_EQ(ref_labels, obs_labels) << k;
-                // EXPECT_EQ(ref_kmers, obs_kmers) << k;
+                // TODO
             }
         }
     }
@@ -295,107 +188,42 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
 
             // ingroup: B, C
             // outgroup: A
-            std::vector<bool> groups { true, false, false };
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
 
             std::vector<std::string> test_types = {
                 "poisson_exact",
                 "nbinom_exact",
+                "gnb_exact",
                 "fisher",
             };
 
             auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels, DeBruijnGraph::BASIC, true);
             auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
 
+            for (const auto &test_type : test_types) {
+                DifferentialAssemblyConfig config {
+                    .test_type = test_type,
+                    .outfbase = "",
+                };
+
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                    *anno_graph,
+                    labels_in, labels_out,
+                    config, num_threads, test_dump_basename
+                );
+
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+                EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
+            }
+
             if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
-                using BinMatType = matrix::ColumnMajor;
-                using CoordMatType = matrix::TupleCSCMatrix<BinMatType>;
-                const auto &annotation = static_cast<const ColumnCoordAnnotator&>(anno_graph->get_annotator());
-                const auto &count_matrix = static_cast<const CoordMatType&>(annotation.get_matrix());
-                const auto &in_binary_columns = static_cast<const BinMatType&>(count_matrix.get_binary_matrix()).data();
-                std::vector<std::unique_ptr<const bit_vector>> columns;
-                columns.reserve(in_binary_columns.size());
-                std::transform(in_binary_columns.begin(), in_binary_columns.end(), std::back_inserter(columns),
-                               [&](const auto &a) {
-                                  return std::make_unique<const bit_vector_stat>(a->to_vector());
-                               });
-
-                ASSERT_LT(0u, columns.size());
-
-                std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
-                std::vector<sdsl::int_vector<>::iterator> pos;
-                column_values.reserve(columns.size());
-                for (const auto &bin_col : columns) {
-                    column_values.emplace_back(std::make_unique<const sdsl::int_vector<>>(bin_col->num_set_bits()));
-                    pos.emplace_back(const_cast<sdsl::int_vector<>&>(*column_values.back()).begin());
-                }
-
-                std::vector<uint64_t> row_indices(columns[0]->size());
-                std::iota(row_indices.begin(), row_indices.end(), 0);
-                auto row_values = count_matrix.get_row_values(row_indices);
-                for (size_t i = 0; i < row_indices.size(); ++i) {
-                    for (const auto &[j, c] : row_values[i]) {
-                        *pos[j] = c;
-                        ++pos[j];
-                    }
-                }
-
-                columns.resize(groups.size());
-
-                ASSERT_GE(column_values.size(), groups.size());
-                column_values.resize(groups.size());
-
-                for (const auto &test_type : test_types) {
-                    DifferentialAssemblyConfig config {
-                        .test_type = test_type,
-                        .outfbase = "",
-                    };
-
-                    // using PairContainer = Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
-                    // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
-                    //     graph_ptr,
-                    //     [&](const auto &callback, bool) {
-                    //         utils::call_rows<std::unique_ptr<const bit_vector>,
-                    //                         std::unique_ptr<const sdsl::int_vector<>>,
-                    //                         PairContainer, true>(columns, column_values,
-                    //                                             [&](uint64_t row_i, const auto &row, size_t) {
-                    //             callback(row_i, row);
-                    //         });
-                    //     },
-                    //     groups,
-                    //     config, num_threads, test_dump_basename, num_threads
-                    // );
-
-                    // masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                    //     auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                    //     obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                    //     obs_kmers.insert(kmer);
-                    // });
-                    // EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
-                    // EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
-                }
-            } else {
-                for (const auto &test_type : test_types) {
-                    DifferentialAssemblyConfig config {
-                        .test_type = test_type,
-                        .outfbase = "",
-                    };
-
-                    auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
-                        *anno_graph,
-                        labels_in, labels_out,
-                        config, num_threads, test_dump_basename
-                    );
-
-                    masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
-                        auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                        obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                        obs_kmers.insert(kmer);
-                    });
-                    EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
-                    EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
-                }
+                // TODO
             }
         }
     }
