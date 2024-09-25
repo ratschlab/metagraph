@@ -72,7 +72,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_parallel_files = std::numeric_limits<size_t>::max(),
                          const std::function<void()> &deallocate = []() {},
                          uint8_t max_width = 64) {
-    num_parallel_files = std::min(num_parallel_files, num_threads);
+    // num_parallel_files = std::min(num_parallel_files, num_threads);
+    num_parallel_files = get_num_threads();
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
 
@@ -755,7 +756,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     std::sort(vec.begin(), vec.end());
                     ++vector_counts_ms[bucket_idx][n][vec];
-                }, false);
+                });
 
                 vector_counts = std::move(vector_counts_ms[0]);
                 size_t max_size = vector_counts.size();
@@ -1147,7 +1148,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-        }, false);
+        });
 
         common::logger->trace("Merging min p-value tables");
         if (config.test_type != "gnb_exact") {
@@ -1398,7 +1399,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     set_bit((in_kmer ? indicator_in : indicator_out).data(), node, use_atomic, MO_RELAXED);
                 }
             }
-        }, false);
+        });
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -1530,6 +1531,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_threads,
                          std::filesystem::path tmp_dir,
                          size_t num_parallel_files) {
+    num_parallel_files = get_num_threads();
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
@@ -1570,22 +1572,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_width = std::max(max_width, col_vals->width());
         }
 
-        auto generate_rows = [&](const auto &callback, bool ordered) {
-            if (ordered) {
-                utils::call_rows<std::unique_ptr<const bit_vector>,
-                                 std::unique_ptr<const ValuesContainer>,
-                                 PairContainer, true>(columns_all, column_values_all,
-                                                      [&](uint64_t row_i, const auto &row, size_t thread_id) {
-                    callback(row_i, row, thread_id);
-                });
-            } else {
-                utils::call_rows<std::unique_ptr<const bit_vector>,
-                                 std::unique_ptr<const ValuesContainer>,
-                                 PairContainer, false>(columns_all, column_values_all,
-                                                       [&](uint64_t row_i, const auto &row, size_t thread_id) {
-                    callback(row_i, row, thread_id);
-                });
-            }
+        auto generate_rows = [&](const auto &callback) {
+            utils::call_rows<std::unique_ptr<const bit_vector>,
+                             std::unique_ptr<const ValuesContainer>,
+                             PairContainer, false>(columns_all, column_values_all, callback);
         };
 
         bool parallel = get_num_threads() > 1;
@@ -1594,11 +1584,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             graph_ptr,
             [&](const std::vector<size_t> &min_counts, sdsl::bit_vector *kept) -> std::vector<VectorMap<uint64_t, size_t>> {
                 common::logger->trace("Calculating count histograms");
-                std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-                utils::call_rows<std::unique_ptr<const bit_vector>,
-                                 std::unique_ptr<const ValuesContainer>,
-                                 PairContainer, false>(columns_all, column_values_all,
-                                                       [&](uint64_t row_i, const auto &row, size_t) {
+                std::vector<std::vector<VectorMap<uint64_t, size_t>>> hists_map_p(num_parallel_files);
+                for (auto &hists_map : hists_map_p) {
+                    hists_map.resize(groups.size());
+                }
+
+                generate_rows([&](uint64_t row_i, const auto &row, size_t thread_id) {
                     if (row.empty()) {
                         if (kept)
                             unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
@@ -1609,10 +1600,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     bool found = false;
                     Vector<uint64_t> counts(groups.size());
                     for (const auto &[j, raw_c] : row) {
-                        if (min_counts.empty() || raw_c >= min_counts[j]) {
-                            counts[j] = raw_c;
-                            found = true;
-                        }
+                        counts[j] = raw_c;
+                        found |= min_counts.empty() || raw_c >= min_counts[j];
                     }
 
                     if (!found) {
@@ -1622,15 +1611,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         return;
                     }
 
-                    #pragma omp critical
-                    {
-                        for (size_t j = 0; j < counts.size(); ++j) {
-                            ++hists_map[j][counts[j]];
-                        }
+                    for (size_t j = 0; j < counts.size(); ++j) {
+                        ++hists_map_p[thread_id][j][counts[j]];
                     }
                 });
 
-                return hists_map;
+                common::logger->trace("Merging histograms");
+                for (size_t thread_id = 1; thread_id < hists_map_p.size(); ++thread_id) {
+                    for (size_t j = 0; j < hists_map_p[thread_id].size(); ++j) {
+                        for (const auto &[k, c] : hists_map_p[thread_id][j]) {
+                            hists_map_p[0][j][k] += c;
+                        }
+                    }
+                }
+
+                return hists_map_p[0];
             },
             generate_rows,
             groups,
@@ -1695,14 +1690,14 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             [&](const std::vector<size_t> &min_counts, sdsl::bit_vector *unmark_discarded) {
                 return int_matrix->get_histograms(min_counts, unmark_discarded);
             },
-            [&](const auto &callback, bool ordered) {
-                int_matrix->call_row_values(callback, ordered);
+            [&](const auto &callback) {
+                int_matrix->call_row_values(callback, false /* ordered */);
             },
             groups,
             config, num_threads, tmp_dir, num_threads
         );
     } else {
-        auto generate_rows = [&](const auto &callback, bool) {
+        auto generate_rows = [&](const auto &callback) {
             size_t bucket_size = matrix.num_rows() / num_threads;
             ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
             #pragma omp parallel for num_threads(num_threads) ordered
