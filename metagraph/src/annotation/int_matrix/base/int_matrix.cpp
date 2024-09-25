@@ -17,18 +17,27 @@ using Column = BinaryMatrix::Column;
 void IntMatrix::call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
                                 bool ordered) const {
     size_t n = get_binary_matrix().num_rows();
+    size_t batch_size = (n + get_num_threads() - 1) / get_num_threads();
+    size_t rows_per_update = 10000;
     ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
-    #pragma omp parallel for num_threads(get_num_threads()) ordered
-    for (size_t row_i = 0; row_i < n; ++row_i) {
-        ++progress_bar;
-        std::vector<Row> row_ids { row_i };
-        auto row_vals = get_row_values(row_ids);
 
-        if (ordered) {
-            #pragma omp ordered
-            callback(row_i, row_vals[0], row_i);
-        } else {
-            callback(row_i, row_vals[0], row_i);
+    std::ignore = ordered;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t k = 0; k < n; k += batch_size) {
+        size_t begin = k;
+        size_t end = std::min(begin + batch_size, n);
+        size_t thread_id = k / batch_size;
+        std::vector<Row> row_ids;
+        for (size_t row_batch_i = begin; row_batch_i < end; row_batch_i += rows_per_update) {
+            size_t row_batch_end = std::min(row_batch_i + rows_per_update, end);
+            row_ids.resize(row_batch_end - row_batch_i);
+            std::iota(row_ids.begin(), row_ids.end(), row_batch_i);
+            auto row_vals = get_row_values(row_ids);
+            for (size_t i = 0; i < row_ids.size(); ++i) {
+                callback(i + row_batch_i, row_vals[i], thread_id);
+            }
+            progress_bar += row_ids.size();
         }
     }
 }

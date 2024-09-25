@@ -74,6 +74,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          uint8_t max_width = 64) {
     // num_parallel_files = std::min(num_parallel_files, num_threads);
     num_parallel_files = get_num_threads();
+    num_threads = get_num_threads();
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
 
@@ -1105,6 +1106,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             double pval_min = 0;
             if (config.test_type != "gnb_exact") {
+                assert(bucket_idx < ms.size());
                 if (n >= ms[bucket_idx].size())
                     ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
 
@@ -1147,7 +1149,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         pvals_min_buckets[bucket_idx].push_back(bit_cast<uint64_t>(pval_min));
                 }
             }
-
         });
 
         common::logger->trace("Merging min p-value tables");
@@ -1589,6 +1590,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     hists_map.resize(groups.size());
                 }
 
+                std::atomic_thread_fence(std::memory_order_release);
                 generate_rows([&](uint64_t row_i, const auto &row, size_t thread_id) {
                     if (row.empty()) {
                         if (kept)
@@ -1615,6 +1617,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         ++hists_map_p[thread_id][j][counts[j]];
                     }
                 });
+                std::atomic_thread_fence(std::memory_order_acquire);
 
                 common::logger->trace("Merging histograms");
                 for (size_t thread_id = 1; thread_id < hists_map_p.size(); ++thread_id) {
@@ -1731,6 +1734,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                 for (auto &hists_map : hists_map_p) {
                     hists_map.resize(groups.size());
                 }
+                std::atomic_thread_fence(std::memory_order_release);
                 generate_bit_rows([&](uint64_t row_i, const auto &set_bits, size_t thread_id) {
                     if (set_bits.empty()) {
                         if (kept)
@@ -1748,6 +1752,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                         ++hists_map_p[thread_id][j][container[j]];
                     }
                 });
+                std::atomic_thread_fence(std::memory_order_acquire);
 
                 common::logger->trace("Merging histograms");
                 for (size_t thread_id = 1; thread_id < hists_map_p.size(); ++thread_id) {
