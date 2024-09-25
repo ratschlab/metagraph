@@ -1668,6 +1668,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads,
                          std::filesystem::path tmp_dir) {
+    num_threads = get_num_threads();
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
@@ -1697,23 +1698,39 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             config, num_threads, tmp_dir, num_threads
         );
     } else {
-        auto generate_rows = [&](const auto &callback) {
-            size_t bucket_size = matrix.num_rows() / num_threads;
+        auto generate_bit_rows = [&](const auto &callback) {
+            size_t batch_size = (matrix.num_rows() + num_threads - 1) / num_threads;
+            size_t rows_per_update = 10000;
             ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
-            #pragma omp parallel for num_threads(num_threads) ordered
-            for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-                ++progress_bar;
-                std::vector<Row> row_ids(1, row_i);
-                auto set_bits = matrix.get_rows(row_ids);
-                Vector<std::pair<uint64_t, uint64_t>> container;
-                container.reserve(set_bits[0].size());
-                for (auto j : set_bits[0]) {
-                    container.emplace_back(j, 1);
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t k = 0; k < matrix.num_rows(); k += batch_size) {
+                size_t begin = k;
+                size_t end = std::min(begin + batch_size, matrix.num_rows());
+                size_t thread_id = k / batch_size;
+                std::vector<Row> row_ids;
+                for (size_t row_batch_i = begin; row_batch_i < end; row_batch_i += rows_per_update) {
+                    size_t row_batch_end = std::min(row_batch_i + rows_per_update, end);
+                    row_ids.resize(row_batch_end - row_batch_i);
+                    std::iota(row_ids.begin(), row_ids.end(), row_batch_i);
+                    auto set_bits = matrix.get_rows(row_ids);
+                    for (size_t i = 0; i < row_ids.size(); ++i) {
+                        callback(i + row_batch_i, set_bits[i], thread_id);
+                    }
+                    progress_bar += row_ids.size();
+                }
+            }
+        };
+
+        auto generate_rows = [&](const auto &callback) {
+            generate_bit_rows([&](uint64_t row_i, const auto &set_bits, size_t thread_id) {
+                Vector<std::pair<uint64_t, uint64_t>> row;
+                row.reserve(set_bits.size());
+                for (auto j : set_bits) {
+                    row.emplace_back(j, 1);
                 }
 
-                #pragma omp ordered
-                callback(row_i, container, row_i / bucket_size);
-            }
+                callback(row_i, row, thread_id);
+            });
         };
 
         bool parallel = get_num_threads() > 1;
@@ -1722,34 +1739,38 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
             [&](const std::vector<size_t> &, sdsl::bit_vector *kept) -> std::vector<VectorMap<uint64_t, size_t>> {
                 common::logger->trace("Calculating count histograms");
-                std::vector<VectorMap<uint64_t, size_t>> hists_map(groups.size());
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    hists_map[j][0] = 0;
-                    hists_map[j][1] = 0;
+                std::vector<std::vector<VectorMap<uint64_t, size_t>>> hists_map_p(num_threads);
+                for (auto &hists_map : hists_map_p) {
+                    hists_map.resize(groups.size());
                 }
-                ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
-                #pragma omp parallel for num_threads(num_threads)
-                for (size_t row_i = 0; row_i < matrix.num_rows(); ++row_i) {
-                    ++progress_bar;
-                    std::vector<Row> row_ids(1, row_i);
-                    auto set_bits = matrix.get_rows(row_ids);
+                generate_bit_rows([&](uint64_t row_i, const auto &set_bits, size_t thread_id) {
+                    if (set_bits.empty()) {
+                        if (kept)
+                            unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
+
+                        return;
+                    }
+
                     std::vector<bool> container(groups.size());
-                    for (auto j : set_bits[0]) {
+                    for (auto j : set_bits) {
                         container[j] = true;
                     }
 
-                    if (kept && set_bits.empty())
-                        unset_bit(kept->data(), row_i, parallel, std::memory_order_relaxed);
-
-                    #pragma omp critical
-                    {
                     for (size_t j = 0; j < container.size(); ++j) {
-                        ++hists_map[j][container[j]];
+                        ++hists_map_p[thread_id][j][container[j]];
                     }
+                });
+
+                common::logger->trace("Merging histograms");
+                for (size_t thread_id = 1; thread_id < hists_map_p.size(); ++thread_id) {
+                    for (size_t j = 0; j < hists_map_p[thread_id].size(); ++j) {
+                        for (const auto &[k, c] : hists_map_p[thread_id][j]) {
+                            hists_map_p[0][j][k] += c;
+                        }
                     }
                 }
 
-                return hists_map;
+                return hists_map_p[0];
             },
             generate_rows,
             groups,
