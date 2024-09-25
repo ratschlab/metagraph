@@ -1721,18 +1721,6 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
             }
         };
 
-        auto generate_rows = [&](const auto &callback) {
-            generate_bit_rows([&](uint64_t row_i, const auto &set_bits, size_t thread_id) {
-                Vector<std::pair<uint64_t, uint64_t>> row;
-                row.reserve(set_bits.size());
-                for (auto j : set_bits) {
-                    row.emplace_back(j, 1);
-                }
-
-                callback(row_i, row, thread_id);
-            });
-        };
-
         bool parallel = get_num_threads() > 1;
 
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
@@ -1772,7 +1760,17 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
 
                 return hists_map_p[0];
             },
-            generate_rows,
+            [&](const auto &callback) {
+                generate_bit_rows([&](uint64_t row_i, const auto &set_bits, size_t thread_id) {
+                    Vector<std::pair<uint64_t, uint64_t>> row;
+                    row.reserve(set_bits.size());
+                    for (auto j : set_bits) {
+                        row.emplace_back(j, 1);
+                    }
+
+                    callback(row_i, row, thread_id);
+                });
+            },
             groups,
             config, num_threads, tmp_dir, num_threads
         );
