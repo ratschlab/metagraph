@@ -950,13 +950,15 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             p.emplace_back(static_cast<double>(n_kmers[i]) / nelem);
         }
 
+        common::logger->trace("p: {}", fmt::join(p, ","));
+
         common::logger->trace("Precomputing PMFs");
         std::vector<double> pmf_in { 1.0 };
         std::vector<double> pmf_out { 1.0 };
         std::vector<double> pmf_null { 1.0 };
 
         for (size_t i = 1; i <= groups.size(); ++i) {
-            if (groups[i]) {
+            if (groups[i - 1]) {
                 std::vector<double> pmf_out_cur(pmf_out.size() + 1);
                 pmf_out_cur[0] = (1.0 - p[i - 1]) * pmf_out[0];
                 pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
@@ -1561,7 +1563,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         annot::ColumnCompressed<>::load_columns_and_values(
             files,
             [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
-                groups[offset] = labels_out.count(label);
+                groups[offset] = !labels_in.count(label);
                 columns_all[offset].reset(column.release());
                 column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
             },
@@ -1681,7 +1683,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
     std::vector<bool> groups;
     groups.reserve(total_labels);
     for (const auto &label : annotation.get_label_encoder().get_labels()) {
-        groups.emplace_back(labels_out.count(label));
+        groups.emplace_back(!labels_in.count(label));
     }
 
     const auto &matrix = annotation.get_matrix();

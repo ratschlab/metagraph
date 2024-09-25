@@ -53,8 +53,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
             auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
 
-            const auto &annotation = static_cast<const Annotation&>(anno_graph->get_annotator());
-
             std::unordered_set<std::string> obs_labels, obs_kmers;
             const std::unordered_set<std::string> ref_kmers {
                 std::string(k - 1, 'A') + "C"
@@ -72,21 +70,52 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
 
             // ingroup: B, C
             // outgroup: A
-            std::vector<bool> groups = { true, false, false };
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
 
+            {
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                    *anno_graph,
+                    labels_in, labels_out,
+                    config, num_threads, test_dump_basename
+                );
+
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+
+                EXPECT_EQ(ref_labels, obs_labels) << k;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k;
+            }
+
             if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
-                const auto &in_columns = annotation.get_matrix().data();
-                std::vector<std::unique_ptr<const bit_vector>> columns;
-                columns.reserve(in_columns.size());
-                std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
-                               [&](const auto &a) {
-                                  return std::make_unique<const bit_vector_stat>(a->to_vector());
-                               });
+                // std::vector<bool> groups = { true, false, false };
+                // const auto &annotation = static_cast<const Annotation&>(anno_graph->get_annotator());
+                // const auto &in_columns = annotation.get_matrix().data();
+                // std::vector<std::unique_ptr<const bit_vector>> columns;
+                // columns.reserve(in_columns.size());
+                // std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
+                //                [&](const auto &a) {
+                //                   return std::make_unique<const bit_vector_stat>(a->to_vector());
+                //                });
 
 
-                columns.resize(groups.size());
+                // columns.resize(groups.size());
+
+                // // (std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                // //          const std::vector<std::string> &files,
+                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                // //          const DifferentialAssemblyConfig &config,
+                // //          size_t num_threads = 1,
+                // //          std::filesystem::path = "",
+                // //          size_t num_parallel_files = std::numeric_li
+                // // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                // //     graph_ptr,
+
+                // // );
 
                 // using PairContainer = Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
                 // std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
@@ -113,7 +142,50 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                 //     obs_labels.insert(cur_labels.begin(), cur_labels.end());
                 //     obs_kmers.insert(kmer);
                 // });
-            } else {
+                // EXPECT_EQ(ref_labels, obs_labels) << k;
+                // EXPECT_EQ(ref_kmers, obs_kmers) << k;
+            }
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
+    typedef typename TypeParam::first_type Graph;
+    typedef typename TypeParam::second_type Annotation;
+    for (size_t num_threads : { 1, 4 }) {
+        size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
+        for (size_t k = max_k-1; k < max_k; ++k) {
+            const std::vector<std::string> sequences {
+                std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "A",
+                std::string("T") + std::string(k - 1, 'A') + "G"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
+
+            std::unordered_set<std::string> obs_labels, obs_kmers;
+            const std::unordered_set<std::string> ref_kmers {
+                std::string(k - 1, 'A') + "C"
+            };
+            const std::unordered_set<std::string> ref_labels {
+                "B", "C"
+            };
+
+            DifferentialAssemblyConfig config {
+                .test_type = "poisson_binom",
+                .outfbase = "",
+            };
+
+            // ingroup: B, C
+            // outgroup: A
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
+
+            {
                 auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
                     *anno_graph,
                     labels_in, labels_out,
@@ -125,10 +197,69 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                     obs_labels.insert(cur_labels.begin(), cur_labels.end());
                     obs_kmers.insert(kmer);
                 });
+
+                EXPECT_EQ(ref_labels, obs_labels) << k;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k;
             }
 
-            EXPECT_EQ(ref_labels, obs_labels) << k;
-            EXPECT_EQ(ref_kmers, obs_kmers) << k;
+            if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
+                // const auto &annotation = static_cast<const Annotation&>(anno_graph->get_annotator());
+                // std::vector<bool> groups(labels.size());
+                // for (const auto &label : labels) {
+                //     groups[annotation.get_label_encoder().encode(label)] = !labels_in.count(label);
+                // }
+                // const auto &in_columns = annotation.get_matrix().data();
+                // std::vector<std::unique_ptr<const bit_vector>> columns;
+                // columns.reserve(in_columns.size());
+                // std::transform(in_columns.begin(), in_columns.end(), std::back_inserter(columns),
+                //                [&](const auto &a) {
+                //                   return std::make_unique<const bit_vector_stat>(a->to_vector());
+                //                });
+
+
+                // columns.resize(groups.size());
+
+                // // (std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                // //          const std::vector<std::string> &files,
+                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                // //          const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                // //          const DifferentialAssemblyConfig &config,
+                // //          size_t num_threads = 1,
+                // //          std::filesystem::path = "",
+                // //          size_t num_parallel_files = std::numeric_li
+                // // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                // //     graph_ptr,
+
+                // // );
+
+                // using PairContainer = Vector<std::pair<uint64_t, typename sdsl::int_vector<>::value_type>>;
+                // std::vector<std::unique_ptr<const sdsl::int_vector<>>> column_values;
+                // auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<typename sdsl::int_vector<>::value_type, std::vector<uint64_t>>(
+                //     graph_ptr,
+                //     [&](const auto &callback, bool) {
+                //         utils::call_rows<std::unique_ptr<const bit_vector>,
+                //                         std::unique_ptr<const sdsl::int_vector<>>,
+                //                         PairContainer, true>(columns, column_values,
+                //                                             [&](uint64_t row_i, const auto &row, size_t) {
+                //             callback(row_i, row);
+                //         });
+                //     },
+                //     groups,
+                //     config, num_threads, test_dump_basename, num_threads,
+                //     [&]() {
+                //         columns.clear();
+                //         column_values.clear();
+                //     }
+                // );
+
+                // masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                //     auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                //     obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                //     obs_kmers.insert(kmer);
+                // });
+                // EXPECT_EQ(ref_labels, obs_labels) << k;
+                // EXPECT_EQ(ref_kmers, obs_kmers) << k;
+            }
         }
     }
 }
