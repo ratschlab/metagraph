@@ -22,6 +22,7 @@
 #include "common/hashers/hash.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/graph_cleaning.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 
@@ -72,6 +73,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          size_t num_parallel_files = std::numeric_limits<size_t>::max(),
                          const std::function<void()> &deallocate = []() {},
                          uint8_t max_width = 64) {
+    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph_ptr))
+        graph_ptr = canonical->get_graph_ptr();
+
     // num_parallel_files = std::min(num_parallel_files, num_threads);
     num_parallel_files = get_num_threads();
     num_threads = get_num_threads();
@@ -1686,13 +1690,15 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         groups.emplace_back(!labels_in.count(label));
     }
 
+    auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+
     const auto &matrix = annotation.get_matrix();
     using Row = annot::matrix::BinaryMatrix::Row;
 
     if (const auto *int_matrix = dynamic_cast<const annot::matrix::IntMatrix*>(&matrix)) {
         using value_type = annot::matrix::IntMatrix::Value;
         return mask_nodes_by_label_dual<value_type, PValStorage>(
-            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            graph_ptr,
             [&](const std::vector<size_t> &min_counts, sdsl::bit_vector *unmark_discarded) {
                 return int_matrix->get_histograms(min_counts, unmark_discarded);
             },
@@ -1729,7 +1735,7 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         bool parallel = get_num_threads() > 1;
 
         return mask_nodes_by_label_dual<uint64_t, PValStorage>(
-            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+            graph_ptr,
             [&](const std::vector<size_t> &, sdsl::bit_vector *kept) -> std::vector<VectorMap<uint64_t, size_t>> {
                 common::logger->trace("Calculating count histograms");
                 std::vector<std::vector<VectorMap<uint64_t, size_t>>> hists_map_p(num_threads);
