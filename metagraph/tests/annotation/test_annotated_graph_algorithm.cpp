@@ -164,7 +164,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
     for (size_t num_threads : { 1, 4 }) {
         size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
         for (size_t k = 3; k < max_k; ++k) {
-            std::string sig = std::string(k - 1, 'A') + "C$";
+            std::string sig = std::string(k - 1, 'A') + "C";
             for (size_t i = 0; i < 7; ++i) {
                 sig += sig;
             }
@@ -179,9 +179,10 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
 
             std::vector<std::string> labels { "A", "B", "C", "D", "E" };
             std::unordered_set<std::string> obs_labels, obs_kmers;
-            const std::unordered_set<std::string> ref_kmers {
-                std::string(k - 1, 'A') + "C"
-            };
+            std::unordered_set<std::string> ref_kmers;
+            for (size_t j = 0; j < k; ++j) {
+                ref_kmers.emplace(std::string(j, 'A') + "C" + std::string(k - 1 - j, 'A'));
+            }
             const std::unordered_set<std::string> ref_labels {
                 "B", "C"
             };
