@@ -488,7 +488,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             std::tie(r_min, r_max) = boost::math::tools::bisect(
-                get_dl, r_min, r_max, boost::math::tools::eps_tolerance<double>(1e-5)
+                get_dl, r_min, r_max, boost::math::tools::eps_tolerance<double>(5)
             );
 
             double r = r_max;
@@ -537,7 +537,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         common::logger->trace("Finding common p and r.");
 
-        auto [r_map, target_p] = get_rp([&](const auto &callback) {
+        double r_map;
+        double target_p;
+        std::tie(r_map, target_p) = get_rp([&](const auto &callback) {
             for (size_t j = 0; j < groups.size(); ++j) {
                 double f = target_sum / sums[j];
                 std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
@@ -870,7 +872,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (a_min < a_max) {
                     std::tie(a_min, a_max) = boost::math::tools::bisect(
                         get_dl,
-                        a_min, a_max, boost::math::tools::eps_tolerance<double>(1e-5)
+                        a_min, a_max, boost::math::tools::eps_tolerance<double>(5)
                     );
                 }
 
@@ -1709,13 +1711,14 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
         );
     } else {
         auto generate_bit_rows = [&](const auto &callback) {
-            size_t batch_size = (matrix.num_rows() + num_threads - 1) / num_threads;
+            size_t n = matrix.num_rows();
+            size_t batch_size = (n + num_threads - 1) / num_threads;
             size_t rows_per_update = 10000;
-            ProgressBar progress_bar(matrix.num_rows(), "Streaming rows", std::cerr, !common::get_verbose());
+            ProgressBar progress_bar(n, "Streaming rows", std::cerr, !common::get_verbose());
             #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-            for (size_t k = 0; k < matrix.num_rows(); k += batch_size) {
+            for (size_t k = 0; k < n; k += batch_size) {
                 size_t begin = k;
-                size_t end = std::min(begin + batch_size, matrix.num_rows());
+                size_t end = std::min(begin + batch_size, n);
                 size_t thread_id = k / batch_size;
                 std::vector<Row> row_ids;
                 for (size_t row_batch_i = begin; row_batch_i < end; row_batch_i += rows_per_update) {

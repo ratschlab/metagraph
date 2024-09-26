@@ -31,7 +31,7 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
     CSRMatrixFlat(BinMat&& binmat, Values&& values)
         : matrix_(std::move(binmat)), values_(std::move(values)) {}
 
-    std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows) const override;
 
     inline void call_row_values(const std::function<void(uint64_t, const RowValues&, size_t)> &callback,
                                 bool ordered = true) const override final {
@@ -172,17 +172,17 @@ class CSRMatrixFlat : public RowMajor, public IntMatrix {
     get_histograms(const std::vector<size_t> &min_counts = {},
                    sdsl::bit_vector *unmark_discarded = nullptr) const override final;
 
-    uint64_t num_columns() const { return num_columns_; }
-    uint64_t num_rows() const { return get_row_major_binary_matrix().num_rows(); }
-    uint64_t num_relations() const { return get_row_major_binary_matrix().num_relations(); }
-    SetBitPositions get_row(Row row) const { return get_row_major_binary_matrix().get_row(row); }
-    std::vector<Row> get_column(Column column) const { return get_row_major_binary_matrix().get_column(column); }
+    uint64_t num_columns() const override { return num_columns_; }
+    uint64_t num_rows() const override { return get_row_major_binary_matrix().num_rows(); }
+    uint64_t num_relations() const override { return get_row_major_binary_matrix().num_relations(); }
+    SetBitPositions get_row(Row row) const override { return get_row_major_binary_matrix().get_row(row); }
+    std::vector<Row> get_column(Column column) const override { return get_row_major_binary_matrix().get_column(column); }
 
-    const BinaryMatrix& get_binary_matrix() const { return get_row_major_binary_matrix(); }
+    const BinaryMatrix& get_binary_matrix() const override { return get_row_major_binary_matrix(); }
 
-    bool load(std::istream &in);
+    bool load(std::istream &in) override;
     bool load(const std::string &fname, std::streampos offset = 0);
-    void serialize(std::ostream &out) const;
+    void serialize(std::ostream &out) const override;
 
   private:
     size_t num_columns_ = 0;
