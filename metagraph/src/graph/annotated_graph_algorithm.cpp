@@ -190,6 +190,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             total_c += c;
         }
 
+        assert(total_c == nelem);
+
         if (total_c != nelem) {
             common::logger->error("FAIL {}: {} != {}", j, total_c, nelem);
             throw std::runtime_error("GGG");
@@ -1026,12 +1028,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (min_pval >= config.family_wise_error_rate) {
             common::logger->warn("No significant p-values achievable");
             auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
-                graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_in)), true,
+                graph_ptr, [](node_index) { return false; }, true,
                 is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
             );
 
             auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
-                graph_ptr, std::make_unique<bitmap_vector>(std::move(indicator_out)), true,
+                graph_ptr, [](node_index) { return false; }, true,
                 is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
             );
 
