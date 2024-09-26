@@ -325,9 +325,7 @@ TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
 TYPED_TEST(Kmer, InvertibleEndDol) {
 #if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGN");
-#elif _PROTEIN_GRAPH
-    test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGX");
-#elif _DNA_GRAPH
+#elif _DNA_GRAPH || _PROTEIN_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATG$"), "");
 #else
     static_assert(false,
@@ -339,9 +337,7 @@ TYPED_TEST(Kmer, InvertibleEndDol) {
 TYPED_TEST(Kmer, InvertibleStartDol) {
 #if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "NATGG");
-#elif _PROTEIN_GRAPH
-    test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "XATGG");
-#elif _DNA_GRAPH
+#elif _DNA_GRAPH || _PROTEIN_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATGG"), "");
 #else
     static_assert(false,
@@ -353,9 +349,7 @@ TYPED_TEST(Kmer, InvertibleStartDol) {
 TYPED_TEST(Kmer, InvertibleBothDol) {
 #if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "NATGN");
-#elif _PROTEIN_GRAPH
-    test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "XATGX");
-#elif _DNA_GRAPH
+#elif _DNA_GRAPH || _PROTEIN_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATG$"), "");
 #else
     static_assert(false,
