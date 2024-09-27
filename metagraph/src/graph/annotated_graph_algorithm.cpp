@@ -40,6 +40,13 @@ double CDF_CUTOFF = 0.95;
 double HIST_CUTOFF = 1.00;
 uint64_t N_BUCKETS_FOR_ESTIMATION = 3;
 
+enum Group {
+    IN,
+    OUT,
+    OTHER,
+    BOTH
+};
+
 
 template<class To, class From>
 std::enable_if_t<
@@ -65,7 +72,7 @@ std::tuple<std::shared_ptr<DeBruijnGraph>, std::shared_ptr<DeBruijnGraph>, PValS
 mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                          const HistGetter &get_hist_map,
                          const Generator &generate_rows,
-                         const std::vector<bool> &groups,
+                         const std::vector<Group> &groups,
                          const DifferentialAssemblyConfig &config,
                          size_t num_threads = 1,
                          std::filesystem::path tmp_dir = "",
@@ -81,8 +88,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
     bool parallel = num_parallel_files > 1;
 
-    size_t num_labels_out = std::count(groups.begin(), groups.end(), true);
-    size_t num_labels_in = groups.size() - num_labels_out;
+    size_t num_labels_both = std::count(groups.begin(), groups.end(), Group::BOTH);
+    size_t num_labels_out = std::count(groups.begin(), groups.end(), Group::OUT);
+    size_t num_labels_in = std::count(groups.begin(), groups.end(), Group::IN);
+    size_t total_labels = num_labels_in + num_labels_out;
+    num_labels_in += num_labels_both;
+    num_labels_out += num_labels_both;
 
     common::logger->trace("Graph mode: {}", is_primary ? "PRIMARY" : "other");
 
@@ -102,6 +113,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
+            if (groups[j] == Group::OTHER) {
+                min_counts[j] = std::numeric_limits<size_t>::max();
+                continue;
+            }
+
             // set cutoff for lower end of distribution
             auto [mean_est, nzeros_est] = estimate_ztp_mean(
                 [&](const auto &callback) {
@@ -178,8 +194,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
     for (size_t j = 0; j < hists.size(); ++j) {
         hists[j] = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(hists_map[j].values_container());
-        hists_map[j].clear();
         std::sort(hists[j].begin(), hists[j].end(), utils::LessFirst());
+        hists_map[j].clear();
     }
     hists_map.clear();
 
@@ -205,6 +221,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> sums(groups.size());
     std::vector<uint64_t> sums_of_squares(groups.size());
 
+    int64_t total_kmers = 0;
     for (size_t j = 0; j < groups.size(); ++j) {
         for (const auto &[k, c] : hists[j]) {
             sums[j] += k * c;
@@ -215,17 +232,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             max_obs_vals[j] = std::max(max_obs_vals[j], k);
         }
 
-        if (groups[j]) {
+        if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
             out_kmers += sums[j];
-        } else {
+
+        if (groups[j] == Group::IN || groups[j] == Group::BOTH)
             in_kmers += sums[j];
-        }
+
+        total_kmers += sums[j];
 
         common::logger->trace("{}: n_unique: {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
                               j, n_kmers[j], sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
     }
-
-    int64_t total_kmers = in_kmers + out_kmers;
 
     common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
                           nelem, total_kmers);
@@ -511,20 +528,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     total += it->second;
             }
             hist_its[j] = it;
-            nb_params[j] = get_rp([&](const auto &callback) {
-                std::for_each(hist.begin(), it, [&](const auto &a) {
-                    const auto &[k, c] = a;
-                    callback(k, c);
+            if (hist.size()) {
+                nb_params[j] = get_rp([&](const auto &callback) {
+                    std::for_each(hist.begin(), it, [&](const auto &a) {
+                        const auto &[k, c] = a;
+                        callback(k, c);
+                    });
                 });
-            });
-            const auto &[r, p] = nb_params[j];
-            common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
-                                  j, sums[j], (it - 1)->first, r * (1-p)/p, r*(1-p)/p/p, r, p);
+                const auto &[r, p] = nb_params[j];
+                common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
+                                    j, sums[j], (it - 1)->first, r * (1-p)/p, r*(1-p)/p/p, r, p);
 
-            total += (hist.size() && hist[0].first == 0 ? hist[0].second : 0);
+                total += hist[0].first == 0 ? hist[0].second : 0;
 
-            #pragma omp atomic
-            matrix_size += total;
+                #pragma omp atomic
+                matrix_size += total;
+            }
         }
 
         common::logger->trace("Scaling distributions");
@@ -533,7 +552,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         for (size_t j = 0; j < groups.size(); ++j) {
             target_sum += log(static_cast<double>(sums[j]));
         }
-        target_sum = exp(target_sum / groups.size());
+        target_sum = exp(target_sum / total_labels);
 
         common::logger->trace("Finding common p and r.");
 
@@ -566,6 +585,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Computing quantile maps");
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
+            if (hists[j].empty())
+                continue;
+
             const auto &[r, p] = nb_params[j];
 
             boost::math::negative_binomial nb_out(r_map, target_p);
@@ -610,19 +632,20 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
         in_kmers = 0;
         out_kmers = 0;
+        total_kmers = 0;
         for (size_t j = 0; j < groups.size(); ++j) {
             for (const auto &[k, m] : count_maps[j]) {
                 const auto &[v, c] = m;
 
-                if (groups[j]) {
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
                     out_kmers += v * c;
-                } else {
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH)
                     in_kmers += v * c;
-                }
+
+                total_kmers += v * c;
             }
         }
-
-        total_kmers = in_kmers + out_kmers;
 
         common::logger->trace("  Scaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
 
@@ -733,10 +756,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                             if (count_maps.size())
                                 c = count_maps[j].find(c)->second.first;
 
-                            if (groups[j]) {
+                            if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                                 out_sum += c;
                                 ++count_out;
-                            } else {
+                            }
+
+                            if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                                 in_sum += c;
                                 ++count_in;
                             }
@@ -795,7 +820,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     total += c;
                 }
 
-                double r = target_p / (1.0 - target_p) * n / groups.size();
+                double r = target_p / (1.0 - target_p) * n / total_labels;
 
                 #pragma omp atomic
                 ln_mu += -log(r) * total;
@@ -804,7 +829,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 ln_var += log(r) * log(r) * total;
             }
 
-            size_t total = nelem * groups.size();
+            size_t total = nelem * total_labels;
             ln_mu /= total;
             ln_var = ln_var / total - ln_mu * ln_mu;
 
@@ -813,7 +838,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                   exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1),
                                   exp(-ln_mu - ln_var/2));
 
-            auto get_rp = [ln_mu,ln_var,gs=groups.size()](const auto &counts) {
+            auto get_rp = [ln_mu,ln_var,gs=total_labels](const auto &counts) {
                 double mu = 0;
                 double var = 0;
                 for (int64_t c : counts) {
@@ -963,7 +988,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::vector<double> pmf_null { 1.0 };
 
         for (size_t i = 1; i <= groups.size(); ++i) {
-            if (groups[i - 1]) {
+            if (groups[i - 1] == Group::OUT || groups[i - 1] == Group::BOTH) {
                 std::vector<double> pmf_out_cur(pmf_out.size() + 1);
                 pmf_out_cur[0] = (1.0 - p[i - 1]) * pmf_out[0];
                 pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
@@ -971,7 +996,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     pmf_out_cur[k] = p[i - 1] * pmf_out[k - 1] + (1.0 - p[i - 1]) * pmf_out[k];
                 }
                 std::swap(pmf_out_cur, pmf_out);
-            } else {
+            }
+
+            if (groups[i - 1] == Group::IN || groups[i - 1] == Group::BOTH) {
                 std::vector<double> pmf_in_cur(pmf_in.size() + 1);
                 pmf_in_cur[0] = (1.0 - p[i - 1]) * pmf_in[0];
                 pmf_in_cur[pmf_in.size()] = p[i - 1] * pmf_in.back();
@@ -990,7 +1017,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         common::logger->trace("Precomputing p-values");
-        std::vector<std::vector<double>> pvals(groups.size() + 1);
+        std::vector<std::vector<double>> pvals(num_labels_in + num_labels_out + 1);
         pvals[0].emplace_back(1.0);
 
         double min_pval = 1.0;
@@ -1039,17 +1066,25 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(masked_graph_in, masked_graph_out, PValStorage{}, nullptr);
         }
 
-        compute_min_pval = [pvals,num_labels_in](int64_t, const PairContainer &row) {
-            size_t front = row.size() - std::min(row.size(), num_labels_in);
-            return std::min(pvals[row.size()][front],
-                            pvals[row.size()].back());
+        compute_min_pval = [pvals,num_labels_in,&groups](int64_t, const PairContainer &row) {
+            size_t n = 0;
+            for (const auto &[j, c] : row) {
+                n += static_cast<int64_t>(groups[j] != Group::OTHER) + (groups[j] == Group::BOTH);
+            }
+            size_t front = n - std::min(n, num_labels_in);
+            return std::min(pvals[n][front],
+                            pvals[n].back());
         };
 
         compute_pval = [pvals,&groups](int64_t, int64_t, const auto &row) {
-            uint64_t s = std::count_if(row.begin(), row.end(),
-                                       [&](const auto &a) { return !groups[a.first]; });
+            int64_t n = 0;
+            uint64_t s = 0;
+            for (const auto &[j, c] : row) {
+                n += static_cast<int64_t>(groups[j] != Group::OTHER) + (groups[j] == Group::BOTH);
+                s += (groups[j] == Group::IN);
+            }
 
-            return pvals[row.size()][s];
+            return pvals[n][s];
         };
 
     } else if (config.test_type == "notest") {
@@ -1083,10 +1118,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     row.emplace_back(j, c);
                     vals.emplace_back(c);
-                    if (groups[j]) {
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                         out_sum += c;
                         ++count_out;
-                    } else {
+                    }
+
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                         in_sum += c;
                         ++count_in;
                     }
@@ -1331,10 +1368,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         c = count_maps[j].find(c)->second.first;
 
                     row.emplace_back(j, c);
-                    if (groups[j]) {
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                         out_sum += c;
                         ++count_out;
-                    } else {
+                    }
+
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                         in_sum += c;
                         ++count_in;
                     }
@@ -1567,7 +1606,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         using PairContainer = Vector<std::pair<uint64_t, value_type>>;
 
         std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
-        std::vector<bool> groups(total_labels);
+        std::vector<Group> groups(total_labels);
         if (files.empty()) {
             throw std::runtime_error("No files provided");
         }
@@ -1577,7 +1616,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             annot::ColumnCompressed<>::load_columns_and_values(
                 files,
                 [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
-                    groups[offset] = !labels_in.count(label);
+                    bool is_in = labels_in.count(label);
+                    bool is_out = labels_out.count(label);
+                    if (is_in) {
+                        groups[offset] = !is_out ? Group::IN : Group::BOTH;
+                    } else {
+                        groups[offset] = is_out ? Group::OUT : Group::OTHER;
+                    }
                     columns_all[offset].reset(column.release());
                     column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
                 },
@@ -1587,7 +1632,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             annot::ColumnCompressed<>::merge_load(
                 files,
                 [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column) {
-                    groups[offset] = !labels_in.count(label);
+                    bool is_in = labels_in.count(label);
+                    bool is_out = labels_out.count(label);
+                    if (is_in) {
+                        groups[offset] = !is_out ? Group::IN : Group::BOTH;
+                    } else {
+                        groups[offset] = is_out ? Group::OUT : Group::OTHER;
+                    }
                     columns_all[offset].reset(column.release());
                 },
                 num_parallel_files
@@ -1704,10 +1755,16 @@ mask_nodes_by_label_dual(const AnnotatedDBG &anno_graph,
     size_t total_labels = labels_in.size() + labels_out.size();
     const auto &annotation = anno_graph.get_annotator();
 
-    std::vector<bool> groups;
+    std::vector<Group> groups;
     groups.reserve(total_labels);
     for (const auto &label : annotation.get_label_encoder().get_labels()) {
-        groups.emplace_back(!labels_in.count(label));
+        bool is_in = labels_in.count(label);
+        bool is_out = labels_out.count(label);
+        if (is_in) {
+            groups.emplace_back(!is_out ? Group::IN : Group::BOTH);
+        } else {
+            groups.emplace_back(is_out ? Group::OUT : Group::OTHER);
+        }
     }
 
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());

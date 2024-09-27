@@ -116,12 +116,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
             auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
 
             std::unordered_set<std::string> obs_labels, obs_kmers;
-            const std::unordered_set<std::string> ref_kmers {
-                std::string(k - 1, 'A') + "C"
-            };
-            const std::unordered_set<std::string> ref_labels {
-                "B", "C"
-            };
+            std::unordered_set<std::string> ref_kmers;
 
             DifferentialAssemblyConfig config {
                 .test_type = "poisson_binom",
@@ -133,7 +128,18 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
             tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
 
-            {
+            std::unordered_set<std::string> ref_labels;
+
+            std::for_each(labels.begin() + 2, labels.end(), [&](const auto &label) {
+                if (label != "C")
+                    labels_out.emplace(label);
+
+                if (k >= 8 || label == "E" || (k >= 7 && label == "D")) {
+                    ref_labels.emplace("B");
+                    ref_labels.emplace("C");
+                    ref_kmers.emplace(std::string(k - 1, 'A') + "C");
+                }
+
                 auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
                     *anno_graph,
                     labels_in, labels_out,
@@ -146,9 +152,9 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
                     obs_kmers.insert(kmer);
                 });
 
-                EXPECT_EQ(ref_labels, obs_labels) << k;
-                EXPECT_EQ(ref_kmers, obs_kmers) << k;
-            }
+                EXPECT_EQ(ref_labels, obs_labels) << k << " " << label;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << label;
+            });
 
             if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
                 // TODO
