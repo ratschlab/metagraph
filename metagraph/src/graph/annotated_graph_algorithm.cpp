@@ -751,6 +751,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         vec.reserve(raw_row.size());
                         size_t count_in = 0;
                         size_t count_out = 0;
+                        size_t total_count = 0;
                         for (const auto &[j, raw_c] : raw_row) {
                             uint64_t c = raw_c;
                             if (count_maps.size())
@@ -766,10 +767,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                 ++count_in;
                             }
 
+                            total_count += groups[j] != Group::OTHER;
+
                             vec.emplace_back(c);
                         }
 
-                        if (count_in + count_out >= config.min_recurrence) {
+                        if (total_count >= config.min_recurrence) {
                             double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
                             in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
                             out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
@@ -1111,6 +1114,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (kept[row_i]) {
                 size_t count_in = 0;
                 size_t count_out = 0;
+                size_t total_count = 0;
                 for (const auto &[j, raw_c] : raw_row) {
                     uint64_t c = raw_c;
                     if (count_maps.size())
@@ -1127,9 +1131,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         in_sum += c;
                         ++count_in;
                     }
+
+                    total_count += groups[j] != Group::OTHER;
                 }
 
-                if (count_in + count_out >= config.min_recurrence) {
+                if (total_count >= config.min_recurrence) {
                     double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
                     if (out_stat != 0)
                         out_stat_int = out_stat > 0 ? ceil(out_stat) : floor(out_stat);
@@ -1362,6 +1368,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (kept[row_i]) {
                 size_t count_in = 0;
                 size_t count_out = 0;
+                size_t total_count = 0;
                 for (const auto &[j, raw_c] : raw_row) {
                     uint64_t c = raw_c;
                     if (count_maps.size())
@@ -1377,9 +1384,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         in_sum += c;
                         ++count_in;
                     }
+
+                    total_count += groups[j] != Group::OTHER;
                 }
 
-                if (count_in + count_out >= config.min_recurrence) {
+                if (total_count >= config.min_recurrence) {
                     double out_stat = static_cast<double>(out_sum) / out_kmers * in_kmers;
                     in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence && in_sum > (out_kmers > 0 ? out_stat : 0.0);
                     out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence && in_sum < out_stat;
