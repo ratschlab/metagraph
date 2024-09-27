@@ -1543,7 +1543,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Labels in: {}", fmt::join(labels_in, ","));
     common::logger->trace("Labels out: {}", fmt::join(labels_out, ","));
 
-    size_t total_labels = labels_in.size() + labels_out.size();
+    size_t total_labels = 0;
+    for (const auto &file : files) {
+        total_labels += annot::ColumnCompressed<>::read_num_labels(file);
+    }
 
     using ColumnValuesMem = std::vector<std::unique_ptr<const sdsl::int_vector<>>>;
     using ColumnValuesDisk = std::vector<std::unique_ptr<const sdsl::int_vector_buffer<>>>;
@@ -1551,9 +1554,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::variant<ColumnValuesMem, ColumnValuesDisk> column_values_all;
 
     if (config.test_by_unitig) {
-        column_values_all = ColumnValuesMem(total_labels);
+        column_values_all = ColumnValuesMem();
     } else {
-        column_values_all = ColumnValuesDisk(total_labels);
+        column_values_all = ColumnValuesDisk();
     }
 
     return std::visit([&](auto&& column_values_all) {
@@ -1565,15 +1568,31 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         std::vector<std::unique_ptr<const bit_vector>> columns_all(total_labels);
         std::vector<bool> groups(total_labels);
-        annot::ColumnCompressed<>::load_columns_and_values(
-            files,
-            [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
-                groups[offset] = !labels_in.count(label);
-                columns_all[offset].reset(column.release());
-                column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
-            },
-            num_parallel_files
-        );
+        if (files.empty()) {
+            throw std::runtime_error("No files provided");
+        }
+
+        if (std::filesystem::exists(files[0] + ".counts")) {
+            column_values_all.resize(total_labels);
+            annot::ColumnCompressed<>::load_columns_and_values(
+                files,
+                [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column, ValuesContainer&& column_values) {
+                    groups[offset] = !labels_in.count(label);
+                    columns_all[offset].reset(column.release());
+                    column_values_all[offset] = std::make_unique<ValuesContainer>(std::move(column_values));
+                },
+                num_parallel_files
+            );
+        } else {
+            annot::ColumnCompressed<>::merge_load(
+                files,
+                [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector>&& column) {
+                    groups[offset] = !labels_in.count(label);
+                    columns_all[offset].reset(column.release());
+                },
+                num_parallel_files
+            );
+        }
 
         uint8_t max_width = 0;
         for (const auto &col_vals : column_values_all) {
