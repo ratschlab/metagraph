@@ -10,6 +10,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "row_diff_builder.hpp"
+#include "cli/load/load_graph.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
@@ -1539,12 +1540,13 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     if (out_dir.empty())
         out_dir = "./";
 
+    auto graph = cli::load_critical_dbg(graph_fname);
     if (construction_stage != RowDiffStage::COUNT_LABELS)
-        build_pred_succ(graph_fname, graph_fname, out_dir,
+        build_pred_succ(*graph, graph_fname, out_dir,
                         ".row_count", get_num_threads());
 
     if (construction_stage == RowDiffStage::CONVERT) {
-        assign_anchors(graph_fname, graph_fname, out_dir, max_path_length,
+        assign_anchors(*graph, graph_fname, out_dir, max_path_length,
                        ".row_reduction", get_num_threads());
 
         const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;

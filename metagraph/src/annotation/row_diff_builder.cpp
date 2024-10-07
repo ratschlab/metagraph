@@ -273,6 +273,15 @@ uint64_t from_graph_index(const graph::DeBruijnGraph &graph,
     }
 }
 
+graph::DeBruijnGraph::node_index to_graph_index(const graph::DeBruijnGraph &graph,
+                                                uint64_t idx) {
+    if (auto* g = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return g->boss_to_kmer_index(idx);
+    } else {
+        return idx;
+    }
+}
+
 rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
@@ -335,7 +344,7 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
     return rd_succ;
 }
 
-void build_pred_succ(const std::string &graph_fname,
+void build_pred_succ(const graph::DeBruijnGraph &graph,
                      const std::string &outfbase,
                      const std::string &count_vectors_dir,
                      const std::string &row_count_extension,
@@ -351,20 +360,15 @@ void build_pred_succ(const std::string &graph_fname,
     logger->trace("Building and writing successor and predecessor files to {}.*",
                   outfbase);
 
-    graph::DBGSuccinct graph(2);
-    logger->trace("Loading graph...");
-    if (!graph.load(graph_fname)) {
-        logger->error("Cannot load graph from {}", graph_fname);
-        std::exit(1);
+    std::optional<sdsl::bit_vector> dummy;
+    auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph);
+    if (succinct) {
+        dummy = succinct->get_boss().mark_all_dummy_edges(num_threads);
     }
 
     // assign row-diff successors at forks
     rd_succ_bv_type rd_succ = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
                                              count_vectors_dir, row_count_extension);
-
-    const BOSS &boss = graph.get_boss();
-
-    sdsl::bit_vector dummy = boss.mark_all_dummy_edges(num_threads);
 
     // create the succ/pred files, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -377,7 +381,7 @@ void build_pred_succ(const std::string &graph_fname,
                              !common::get_verbose());
 
     const uint64_t BS = 1'000'000;
-    // traverse BOSS table in parallel processing blocks of size |BS|
+    // traverse graph in parallel processing blocks of size |BS|
     // use static scheduling to make threads process ordered contiguous blocks
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (uint64_t start = 1; start <= graph.num_nodes(); start += BS) {
@@ -387,34 +391,49 @@ void build_pred_succ(const std::string &graph_fname,
         std::vector<bool> pred_boundary_buf;
 
         for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
-            BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
-            if (!dummy[boss_idx]) {
-                BOSS::edge_index next = boss.fwd(boss_idx);
-                assert(next);
-                if (!dummy[next]) {
-                    while (rd_succ.size() && !rd_succ[next]) {
-                        next--;
-                        assert(!boss.get_last(next));
-                    }
-                    succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
-                    succ_boundary_buf.push_back(0);
-                }
-                // compute predecessors only for row-diff successors
-                if (rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
-                    BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
-                    BOSS::edge_index back_idx = boss.bwd(boss_idx);
-                    boss.call_incoming_to_target(back_idx, d,
-                        [&](BOSS::edge_index pred) {
-                            // dummy predecessors are ignored
-                            if (!dummy[pred]) {
-                                uint64_t node_index = graph.boss_to_kmer_index(pred);
-                                pred_buf.push_back(to_row(node_index));
-                                pred_boundary_buf.push_back(0);
-                            }
+            if (succinct) { // Legacy code for DBGSuccinct
+                const BOSS &boss = succinct->get_boss();
+                BOSS::edge_index boss_idx = succinct->kmer_to_boss_index(i);
+                if (!(*dummy)[boss_idx]) {
+                    BOSS::edge_index next = boss.fwd(boss_idx);
+                    assert(next);
+                    if (!(*dummy)[next]) {
+                        while (rd_succ.size() && !rd_succ[next]) {
+                            next--;
+                            assert(!boss.get_last(next));
                         }
-                    );
+                        succ_buf.push_back(to_row(succinct->boss_to_kmer_index(next)));
+                        succ_boundary_buf.push_back(0);
+                    }
+                    // compute predecessors only for row-diff successors
+                    if (rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
+                        BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
+                        BOSS::edge_index back_idx = boss.bwd(boss_idx);
+                        boss.call_incoming_to_target(back_idx, d,
+                            [&](BOSS::edge_index pred) {
+                                // dummy predecessors are ignored
+                                if (!(*dummy)[pred]) {
+                                    uint64_t node_index = succinct->boss_to_kmer_index(pred);
+                                    pred_buf.push_back(to_row(node_index));
+                                    pred_boundary_buf.push_back(0);
+                                }
+                            }
+                        );
+                    }
+                }
+            } else {
+                auto j = graph.row_diff_successor(i, rd_succ);
+                succ_buf.push_back(to_row(j));
+                succ_boundary_buf.push_back(0);
+                
+                if(rd_succ[i]) {
+                    graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                        pred_buf.push_back(to_row(pred));
+                        pred_boundary_buf.push_back(0);
+                    });
                 }
             }
+
             succ_boundary_buf.push_back(1);
             pred_boundary_buf.push_back(1);
             ++progress_bar;
@@ -433,7 +452,7 @@ void build_pred_succ(const std::string &graph_fname,
     logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
 }
 
-void assign_anchors(const std::string &graph_fname,
+void assign_anchors(const graph::DeBruijnGraph &graph,
                     const std::string &outfbase,
                     const std::filesystem::path &count_vectors_dir,
                     uint32_t max_length,
@@ -445,13 +464,6 @@ void assign_anchors(const std::string &graph_fname,
         return;
     }
 
-    graph::DBGSuccinct graph(2);
-    logger->trace("Loading graph...");
-    if (!graph.load(graph_fname)) {
-        logger->error("Cannot load graph from {}", graph_fname);
-        std::exit(1);
-    }
-    const BOSS &boss = graph.get_boss();
     const uint64_t num_rows = graph.num_nodes();
 
     bool optimize_anchors = false;
@@ -460,7 +472,7 @@ void assign_anchors(const std::string &graph_fname,
             optimize_anchors = true;
     }
 
-    sdsl::bit_vector anchors_bv(boss.get_last().size(), false);
+    sdsl::bit_vector anchors_bv(graph.get_last()->size(), false);
 
     if (optimize_anchors) {
         logger->trace("Making every row with negative reduction an anchor...");
@@ -470,7 +482,7 @@ void assign_anchors(const std::string &graph_fname,
             [&](int32_t count) {
                 // check if the reduction is negative
                 if (count < 0)
-                    anchors_bv[graph.kmer_to_boss_index(to_node(i))] = true;
+                    anchors_bv[from_graph_index(graph, to_node(i))] = true;
                 i++;
             }
         );
@@ -501,11 +513,11 @@ void assign_anchors(const std::string &graph_fname,
 
         if (rd_succ.size()) {
             logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_fname);
-            boss.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
+            graph.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
         } else {
             logger->warn("Assigning anchors without chosen RowDiff successors."
                          " The last outgoing edges will be used for routing.");
-            boss.row_diff_traverse(num_threads, max_length, boss.get_last(), &anchors_bv);
+            graph.row_diff_traverse(num_threads, max_length, *graph.get_last(), &anchors_bv);
         }
     }
 
@@ -514,7 +526,7 @@ void assign_anchors(const std::string &graph_fname,
         sdsl::bit_vector anchors(num_rows, false);
         for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
             if (anchors_bv[i]) {
-                uint64_t graph_idx = graph.boss_to_kmer_index(i);
+                uint64_t graph_idx = to_graph_index(graph, i);
                 assert(to_row(graph_idx) < num_rows);
                 anchors[to_row(graph_idx)] = 1;
             }
