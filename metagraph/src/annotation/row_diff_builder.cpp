@@ -472,7 +472,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             optimize_anchors = true;
     }
 
-    sdsl::bit_vector anchors_bv(graph.get_last()->size(), false);
+    sdsl::bit_vector anchors_bv(graph.max_index() + 1, false);
 
     if (optimize_anchors) {
         logger->trace("Making every row with negative reduction an anchor...");

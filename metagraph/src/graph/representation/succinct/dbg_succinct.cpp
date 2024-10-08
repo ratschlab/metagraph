@@ -518,9 +518,7 @@ void DBGSuccinct
 
 std::shared_ptr<const bit_vector> DBGSuccinct
 ::get_last() const {
-    return std::shared_ptr<const bit_vector>(&get_boss().get_last(), [](const bit_vector*) {
-        // Do not destruct BOSS's last with shared_ptr
-    });
+    return std::shared_ptr<const bit_vector>(std::shared_ptr<const bit_vector>{}, &get_boss().get_last());
 }
 
 void DBGSuccinct
