@@ -272,13 +272,19 @@ uint64_t from_graph_index(const graph::DeBruijnGraph &graph,
         return idx;
     }
 }
-
 graph::DeBruijnGraph::node_index to_graph_index(const graph::DeBruijnGraph &graph,
                                                 uint64_t idx) {
     if (auto* g = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
         return g->boss_to_kmer_index(idx);
     } else {
         return idx;
+    }
+}
+size_t get_last_size(const graph::DeBruijnGraph &graph) {
+    if (dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return graph.get_last()->size();
+    } else {
+        return graph.max_index() + 1;
     }
 }
 
@@ -451,7 +457,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             optimize_anchors = true;
     }
 
-    sdsl::bit_vector anchors_bv(graph.get_last()->size(), false);
+    sdsl::bit_vector anchors_bv(get_last_size(graph), false);
 
     if (optimize_anchors) {
         logger->trace("Making every row with negative reduction an anchor...");
