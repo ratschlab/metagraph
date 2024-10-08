@@ -531,7 +531,7 @@ void DBGSuccinct
 
 node_index DBGSuccinct
 ::row_diff_successor(node_index node, const bit_vector &rd_succ) const {
-    return get_boss().row_diff_successor(node, rd_succ);
+    return boss_to_kmer_index(get_boss().row_diff_successor(kmer_to_boss_index(node), rd_succ));
 }
 
 

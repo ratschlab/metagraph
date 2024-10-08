@@ -391,47 +391,26 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
         std::vector<bool> pred_boundary_buf;
 
         for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
+            bool find_succ = true;
             if (succinct) { // Legacy code for DBGSuccinct
                 const BOSS &boss = succinct->get_boss();
                 BOSS::edge_index boss_idx = succinct->kmer_to_boss_index(i);
-                if (!(*dummy)[boss_idx]) {
-                    BOSS::edge_index next = boss.fwd(boss_idx);
-                    assert(next);
-                    if (!(*dummy)[next]) {
-                        while (rd_succ.size() && !rd_succ[next]) {
-                            next--;
-                            assert(!boss.get_last(next));
-                        }
-                        succ_buf.push_back(to_row(succinct->boss_to_kmer_index(next)));
-                        succ_boundary_buf.push_back(0);
-                    }
-                    // compute predecessors only for row-diff successors
-                    if (rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
-                        BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
-                        BOSS::edge_index back_idx = boss.bwd(boss_idx);
-                        boss.call_incoming_to_target(back_idx, d,
-                            [&](BOSS::edge_index pred) {
-                                // dummy predecessors are ignored
-                                if (!(*dummy)[pred]) {
-                                    uint64_t node_index = succinct->boss_to_kmer_index(pred);
-                                    pred_buf.push_back(to_row(node_index));
-                                    pred_boundary_buf.push_back(0);
-                                }
-                            }
-                        );
-                    }
+                BOSS::edge_index next = boss.fwd(boss_idx);
+                assert(next);
+                if ((*dummy)[next]) {
+                    find_succ = false;
                 }
-            } else {
+            }
+            if(find_succ) {
                 auto j = graph.row_diff_successor(i, rd_succ);
                 succ_buf.push_back(to_row(j));
                 succ_boundary_buf.push_back(0);
-                
-                if(rd_succ[i]) {
-                    graph.adjacent_incoming_nodes(i, [&](auto pred) {
-                        pred_buf.push_back(to_row(pred));
-                        pred_boundary_buf.push_back(0);
-                    });
-                }
+            }
+            if(rd_succ[from_graph_index(graph, i)]) {
+                graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                    pred_buf.push_back(to_row(pred));
+                    pred_boundary_buf.push_back(0);
+                });
             }
 
             succ_boundary_buf.push_back(1);
@@ -472,7 +451,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             optimize_anchors = true;
     }
 
-    sdsl::bit_vector anchors_bv(graph.max_index() + 1, false);
+    sdsl::bit_vector anchors_bv(graph.get_last()->size(), false);
 
     if (optimize_anchors) {
         logger->trace("Making every row with negative reduction an anchor...");
