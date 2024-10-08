@@ -27,7 +27,11 @@ typedef std::pair<Label, size_t> StringCountPair;
 void call_annotated_nodes_offsets(const SequenceGraph &graph,
                                   std::string_view sequence,
                                   const std::function<void(SequenceGraph::node_index, int64_t)> &callback) {
-    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
+    const auto *graph_ptr = &graph;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_ptr))
+        graph_ptr = &canonical->get_graph();
+
+    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(graph_ptr)) {
         if (sshash->is_monochromatic()) {
             sshash->map_to_contigs_with_rc(sequence, [&](SequenceGraph::node_index i, int64_t offset, bool) {
                 callback(i, offset);
