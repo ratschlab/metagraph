@@ -211,7 +211,7 @@ jobs:
               python-version: 3.8
 
         - name: fetch static binary
-          uses: actions/download-artifact@v2
+          uses: actions/download-artifact@v4
           with:
               path: artifacts
 
@@ -283,7 +283,7 @@ jobs:
         run: git submodule update --init --recursive
 
       - name: fetch static binary
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
