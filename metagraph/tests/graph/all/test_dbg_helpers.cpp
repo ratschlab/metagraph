@@ -1,10 +1,6 @@
 #include "test_dbg_helpers.hpp"
 
-#include "../../annotation/test_annotated_dbg_helpers.hpp"
-#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-
 #include "gtest/gtest.h"
-#include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -162,7 +158,7 @@ build_graph<DBGSSHash>(uint64_t k,
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    // use DBGHashString to get contigs for SSHash
+    // use DBGHashFast to get contigs for SSHash
     auto string_graph = build_graph<DBGHashFast>(k, sequences, mode);
 
     std::vector<std::string> contigs;
