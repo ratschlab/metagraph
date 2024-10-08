@@ -151,9 +151,9 @@ DBGSSHash::DBGSSHash(const std::string &input_filename,
 
         auto is_breakpoint = [this,canonical=std::move(canonical)](node_index node) {
             if (canonical) {
-                return !canonical->has_single_incoming(node) || canonical->has_multiple_outgoing(node);
+                return !canonical->has_single_incoming(node) || !canonical->has_single_incoming(reverse_complement(node));
             } else {
-                return !has_single_incoming(node) || has_multiple_outgoing(node);
+                return !has_single_incoming(node);
             }
         };
 
