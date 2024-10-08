@@ -198,11 +198,19 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
+    std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    std::vector<std::string> label_reserve;
+    label_reserve.reserve(alphabet.size());
+    for (char c : alphabet) {
+        label_reserve.emplace_back(1, c);
+    }
+
     std::vector<std::string> labels;
     labels.reserve(sequences.size());
-    char end_char = 'A' + sequences.size();
-    for (char c = 'A'; c < end_char; ++c) {
-        labels.emplace_back(1, c);
+    for (size_t i = 0; i < sequences.size(); ++i) {
+        label_reserve[i % alphabet.size()] += std::string(i / alphabet.size(),
+                                                          alphabet[i % alphabet.size()]);
+        labels.emplace_back(label_reserve[i % alphabet.size()]);
     }
 
     // use DBGHashString to get contigs for SSHash
