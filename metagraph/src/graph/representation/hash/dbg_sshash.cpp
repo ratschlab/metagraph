@@ -105,27 +105,26 @@ void DBGSSHash
                                 const std::function<void(sshash::lookup_result)>& callback,
                                 bool with_rc,
                                 const std::function<bool()>& terminate) const {
-    if (terminate() || sequence.size() < k_)
+    size_t n = sequence.size();
+    if (terminate() || n < k_)
         return;
 
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
 
-        std::vector<char> seq_encoded;
-        seq_encoded.reserve(sequence.size());
-        for (size_t i = 0; i < sequence.size(); ++i) {
-            seq_encoded.emplace_back(!kmer_t::is_valid(sequence[i]));
+        std::vector<bool> invalid_char(n);
+        for (size_t i = 0; i < n; ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
         }
-
-        auto invalid = utils::drag_and_mark_segments(seq_encoded, 1, k_);
+        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k_);
 
         kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
         uint_kmer.pad_char();
-        for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
+        for (size_t i = k_ - 1; i < n && !terminate(); ++i) {
             uint_kmer.drop_char();
             uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-            callback(!invalid[i] ? dict.lookup_advanced_uint(uint_kmer, with_rc)
-                                 : sshash::lookup_result());
+            callback(invalid_kmer[i] ? sshash::lookup_result()
+                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
         }
     }, dict_);
 }
