@@ -159,7 +159,7 @@ build_graph<DBGSSHash>(uint64_t k,
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    // use DBGHashString to get contigs for SSHash
+    // use DBGHashFast to get contigs for SSHash
     auto string_graph = build_graph<DBGHashFast>(k, sequences, mode);
 
     std::vector<std::string> contigs;
