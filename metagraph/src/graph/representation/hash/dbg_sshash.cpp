@@ -11,6 +11,7 @@
 #include "common/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "seq_io/sequence_io.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -135,10 +136,27 @@ DBGSSHash::DBGSSHash(const std::string &input_filename,
                                  "Marking unitig breakpoints",
                                  std::cerr, !common::get_verbose());
         std::atomic_thread_fence(std::memory_order_release);
+
+        std::unique_ptr<const CanonicalDBG> canonical;
+
+        if (mode_ == PRIMARY) {
+            canonical = std::make_unique<const CanonicalDBG>(std::shared_ptr<const DBGSSHash>(
+                std::shared_ptr<const DBGSSHash>{}, this
+            ));
+        }
+
+        auto is_breakpoint = [this,canonical=std::move(canonical)](node_index node) {
+            if (canonical) {
+                return !canonical->has_single_incoming(node) || !canonical->has_single_outgoing(node);
+            } else {
+                return !has_single_incoming(node) || !has_single_outgoing(node);
+            }
+        };
+
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t p = 0; p < num_nodes_; ++p) {
             node_index node = sshash_to_graph_index(p);
-            if (!has_single_incoming(node) || !has_single_outgoing(node))
+            if (is_breakpoint(node))
                 set_bit(id.data(), p, std::memory_order_relaxed);
 
             if (p && (p % update_batch) == 0)

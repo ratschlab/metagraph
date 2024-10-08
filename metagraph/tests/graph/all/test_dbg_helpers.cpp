@@ -1,6 +1,10 @@
 #include "test_dbg_helpers.hpp"
 
+#include "../../annotation/test_annotated_dbg_helpers.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+
 #include "gtest/gtest.h"
+#include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
