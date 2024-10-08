@@ -203,12 +203,12 @@ void map_to_nodes_with_rc_impl(size_t k,
 
     using kmer_t = get_kmer_t<Dict>;
 
-    std::vector<bool> seq_encoded(n);
+    std::vector<bool> invalid_char(n);
     for (size_t i = 0; i < n; ++i) {
-        seq_encoded[i] = !kmer_t::is_valid(sequence[i]);
+        invalid_char[i] = !kmer_t::is_valid(sequence[i]);
     }
 
-    auto invalid_kmer = utils::drag_and_mark_segments(seq_encoded, 1, k);
+    auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
     kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
     uint_kmer.pad_char();
