@@ -117,6 +117,12 @@ class DBGSSHash : public DeBruijnGraph {
     size_t num_nodes_;
     Mode mode_;
 
+    void map_to_nodes_with_rc_advanced(
+            std::string_view sequence,
+            const std::function<void(sshash::lookup_result)>& callback,
+            bool with_rc,
+            const std::function<bool()>& terminate = []() { return false; }) const;
+
     size_t dict_size() const;
 };
 

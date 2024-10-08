@@ -64,7 +64,7 @@ void CanonicalDBG
     path.reserve(sequence.size() - get_k() + 1);
 
     if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->map_to_nodes_with_rc<>(sequence, [&](node_index node, bool orientation) {
+        sshash->map_to_nodes_with_rc<true>(sequence, [&](node_index node, bool orientation) {
             callback(node && orientation ? reverse_complement(node) : node);
         }, terminate);
         return;

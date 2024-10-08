@@ -1,6 +1,10 @@
 #include "test_dbg_helpers.hpp"
 
+#include "../../annotation/test_annotated_dbg_helpers.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+
 #include "gtest/gtest.h"
+#include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -146,6 +150,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
 
     fastaFile.close();
 }
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSSHash>(uint64_t k,
@@ -155,7 +160,7 @@ build_graph<DBGSSHash>(uint64_t k,
         return std::make_shared<DBGSSHash>(k, mode);
 
     // use DBGHashString to get contigs for SSHash
-    auto string_graph = build_graph<DBGHashString>(k, sequences, mode);
+    auto string_graph = build_graph<DBGHashFast>(k, sequences, mode);
 
     std::vector<std::string> contigs;
     size_t num_kmers = 0;
