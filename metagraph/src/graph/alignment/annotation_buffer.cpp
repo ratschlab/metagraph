@@ -2,6 +2,7 @@
 
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
@@ -34,8 +35,6 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
 void AnnotationBuffer::fetch_queued_annotations() {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
-
-    std::vector<node_index> queued_nodes;
     std::vector<Row> queued_rows;
 
     const DeBruijnGraph *base_graph = &graph_;
@@ -45,15 +44,21 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    const DBGSSHash *sshash = dynamic_cast<const DBGSSHash*>(base_graph);
 
+    std::vector<std::tuple<node_index, node_index, int64_t>> to_update;
     for (const auto &path : queued_paths_) {
         std::vector<node_index> base_path;
         std::vector<int64_t> base_path_offsets;
-        if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
+        if (base_graph->get_mode() == DeBruijnGraph::CANONICAL || (sshash && sshash->is_monochromatic())) {
             // TODO: avoid this call of spell_path
             std::string query = spell_path(graph_, path);
-            base_path = map_to_nodes(*base_graph, query);
-
+            base_path.reserve(path.size());
+            call_annotated_nodes_offsets(graph_, query, [&](node_index i, int64_t o) {
+                assert(boss || i != DeBruijnGraph::npos);
+                base_path.emplace_back(i);
+                base_path_offsets.emplace_back(o);
+            });
         } else if (canonical_) {
             base_path.reserve(path.size());
             for (node_index node : path) {
@@ -67,124 +72,107 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 std::reverse(base_path.begin(), base_path.end());
         }
 
+        base_path_offsets.resize(base_path.size());
+
         assert(base_path.size() == path.size());
 
         for (size_t i = 0; i < path.size(); ++i) {
-            if (base_path[i] == DeBruijnGraph::npos) {
+            if (base_path[i] == DeBruijnGraph::npos
+                    || (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))) {
                 // this can happen when the base graph is CANONICAL and path[i] is a
                 // dummy node
+                if (node_to_cols_.try_emplace(base_path[i], 0).second && has_coordinates())
+                    label_coords_.emplace_back();
+
                 if (node_to_cols_.try_emplace(path[i], 0).second && has_coordinates())
                     label_coords_.emplace_back();
 
                 continue;
             }
 
-            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
-                // skip dummy nodes
-                if (node_to_cols_.try_emplace(base_path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
-
-                if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                        && base_path[i] != path[i]
-                        && node_to_cols_.emplace(path[i], 0).second && has_coordinates()) {
-                    label_coords_.emplace_back();
-                }
-
-                continue;
-            }
+            to_update.emplace_back(base_path[i], path[i], base_path_offsets[i]);
 
             Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
-            if (canonical_ || graph_.get_mode() == DeBruijnGraph::BASIC) {
-                if (node_to_cols_.try_emplace(base_path[i], nannot).second) {
-                    queued_rows.push_back(row);
-                    queued_nodes.push_back(base_path[i]);
-                }
-
-                continue;
-            }
-
-            assert(graph_.get_mode() == DeBruijnGraph::CANONICAL);
-
-            auto find_a = node_to_cols_.find(path[i]);
-            auto find_b = node_to_cols_.find(base_path[i]);
-
-            if (find_a == node_to_cols_.end() && find_b == node_to_cols_.end()) {
-                node_to_cols_.try_emplace(path[i], nannot);
+            if (node_to_cols_.try_emplace(base_path[i], nannot).second) {
                 queued_rows.push_back(row);
-                queued_nodes.push_back(path[i]);
-
-                if (path[i] != base_path[i]) {
-                    node_to_cols_.emplace(base_path[i], nannot);
-                    queued_rows.push_back(row);
-                    queued_nodes.push_back(base_path[i]);
-                }
-            } else if (find_a == node_to_cols_.end() && find_b != node_to_cols_.end()) {
-                node_to_cols_.try_emplace(path[i], find_b->second);
-                if (find_b->second == nannot) {
-                    queued_rows.push_back(row);
-                    queued_nodes.push_back(path[i]);
-                }
-            } else if (find_a != node_to_cols_.end() && find_b == node_to_cols_.end()) {
-                node_to_cols_.try_emplace(base_path[i], find_a->second);
-            } else {
-                size_t label_i = std::min(find_a->second, find_b->second);
-                if (label_i != nannot) {
-                    find_a.value() = label_i;
-                    find_b.value() = label_i;
-                }
+                if (has_coordinates())
+                    label_coords_.emplace_back();
             }
         }
     }
 
+    assert(!has_coordinates() || node_to_cols_.size() == label_coords_.size());
+
     queued_paths_.clear();
 
-    if (queued_nodes.empty())
-        return;
-
-    auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
-        assert(node_it != queued_nodes.end());
-        assert(node_to_cols_.count(*node_it));
-        assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
-
-        size_t label_i = cache_column_set(std::move(labels));
-        node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
-        if (graph_.get_mode() == DeBruijnGraph::BASIC) {
-            assert(base_node == *node_it);
-            node_to_cols_[*node_it] = label_i;
-        } else if (canonical_) {
-            node_to_cols_[base_node] = label_i;
-        } else {
-            node_to_cols_[*node_it] = label_i;
-            if (base_node != *node_it && node_to_cols_.try_emplace(base_node, label_i).second
-                    && has_coordinates()) {
-                label_coords_.emplace_back(label_coords_.back());
-            }
-        }
-    };
-
-    auto node_it = queued_nodes.begin();
     auto row_it = queued_rows.begin();
     if (has_coordinates()) {
         assert(multi_int_);
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
+            assert(row_it != queued_rows.end());
             std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
+
+            node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
+            auto find_base = node_to_cols_.find(base_node);
+            assert(find_base != node_to_cols_.end());
+            assert(find_base->second == nannot);
+
+            size_t coord_idx = find_base - node_to_cols_.begin();
+            assert(coord_idx < label_coords_.size());
+
             Columns labels;
             labels.reserve(row_tuples.size());
-            label_coords_.emplace_back();
-            label_coords_.back().reserve(row_tuples.size());
+            auto &label_coords = label_coords_[coord_idx];
+            label_coords.reserve(row_tuples.size());
             for (auto&& [label, coords] : row_tuples) {
                 labels.push_back(label);
-                label_coords_.back().emplace_back(coords.begin(), coords.end());
+                label_coords.emplace_back(coords.begin(), coords.end());
             }
-            push_node_labels(node_it++, row_it++, std::move(labels));
+
+            find_base.value() = cache_column_set(std::move(labels));
+
+            ++row_it;
         }
     } else {
         for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
+            assert(row_it != queued_rows.end());
+
             std::sort(labels.begin(), labels.end());
-            push_node_labels(node_it++, row_it++, std::move(labels));
+
+            node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
+            auto find_base = node_to_cols_.find(base_node);
+            assert(find_base != node_to_cols_.end());
+            assert(find_base->second == nannot);
+
+            find_base.value() = cache_column_set(std::move(labels));
+
+            ++row_it;
         }
     }
+
+    for (const auto &[base_node, node, offset] : to_update) {
+        auto find_base = node_to_cols_.find(base_node);
+        assert(find_base != node_to_cols_.end());
+        assert(find_base->second != nannot);
+
+        size_t coord_idx = find_base - node_to_cols_.begin();
+        size_t label_i = find_base->second;
+
+        assert(!node_to_cols_.count(node) || node_to_cols_.find(node)->second != nannot);
+
+        if (node_to_cols_.try_emplace(node, label_i).second && has_coordinates()) {
+            assert(coord_idx < label_coords_.size());
+            label_coords_.emplace_back(label_coords_[coord_idx]);
+            for (auto &coords : label_coords_.back()) {
+                for (auto &c : coords) {
+                    c += offset;
+                }
+            }
+        }
+    }
+
+    assert(!has_coordinates() || node_to_cols_.size() == label_coords_.size());
 
 #ifndef NDEBUG
     for (const auto &[node, val] : node_to_cols_) {
@@ -196,9 +184,6 @@ void AnnotationBuffer::fetch_queued_annotations() {
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
-
-    if (canonical_)
-        node = canonical_->get_base_node(node);
 
     auto it = node_to_cols_.find(node);
 
