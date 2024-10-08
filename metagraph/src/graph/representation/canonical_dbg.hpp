@@ -115,6 +115,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
+    virtual bool is_monochromatic() const override final { return graph_->is_monochromatic(); }
+
   private:
     const size_t cache_size_;
 

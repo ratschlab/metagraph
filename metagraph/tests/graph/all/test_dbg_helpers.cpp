@@ -47,6 +47,9 @@ template<> size_t max_test_k<DBGHashString>() {
 template<> size_t max_test_k<DBGSSHash>() {
     return 255 / DBGSSHash::kmer_t<uint64_t>::bits_per_char;
 }
+template<> size_t max_test_k<DBGSSHashMonochromatic>() {
+    return 255 / DBGSSHash::kmer_t<uint64_t>::bits_per_char;
+}
 
 template <class Graph>
 std::vector<std::string>
@@ -179,6 +182,70 @@ build_graph<DBGSSHash>(uint64_t k,
 
     std::shared_ptr<DBGSSHash> graph;
     graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
+
+    if (mode == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(
+                std::static_pointer_cast<DeBruijnGraph>(graph), 2 /* cache size */);
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSSHashMonochromatic>(uint64_t k,
+                                    std::vector<std::string> sequences,
+                                    DeBruijnGraph::Mode mode) {
+    if (sequences.empty())
+        return std::make_shared<DBGSSHash>(k, mode);
+
+    std::vector<std::string> labels;
+    labels.reserve(sequences.size());
+    char end_char = 'A' + sequences.size();
+    for (char c = 'A'; c < end_char; ++c) {
+        labels.emplace_back(1, c);
+    }
+
+    // use DBGHashString to get contigs for SSHash
+    auto string_anno_graph = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(k, sequences, labels, mode);
+    const auto &string_graph = string_anno_graph->get_graph();
+
+    std::vector<std::string> contigs;
+    size_t num_kmers = 0;
+    size_t num_chars = 0;
+    string_graph.call_sequences([&](const std::string &contig, const auto &path) {
+        num_kmers += path.size();
+        auto begin = contig.begin();
+        auto end = contig.begin() + k;
+
+        auto sigs = string_anno_graph->get_top_label_signatures(contig, labels.size());
+        for (size_t i = 1; i + k <= contig.size(); ++i) {
+            for (size_t j = 0; j < sigs.size(); ++j) {
+                if (sigs[j].second[i] != sigs[j].second[i - 1]) {
+                    // we're at a breakpoint
+                    contigs.emplace_back(begin, end);
+                    num_chars += end - begin;
+                    begin = end - k + 1;
+                    assert(begin == contig.begin() + i);
+                    break;
+                }
+            }
+            ++end;
+        }
+
+        assert(end == contig.end());
+
+        contigs.emplace_back(begin, end);
+        num_chars += end - begin;
+    }, 1, mode != DeBruijnGraph::BASIC);
+
+    if (contigs.empty())
+        return std::make_shared<DBGSSHash>(k, mode);
+
+    std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
+    writeFastaFile(contigs, dump_path);
+
+    std::shared_ptr<DBGSSHash> graph;
+    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars, true);
 
     if (mode == DeBruijnGraph::PRIMARY)
         return std::make_shared<CanonicalDBG>(
@@ -347,6 +414,10 @@ build_graph_batch<DBGHashString>(uint64_t, std::vector<std::string>, DeBruijnGra
 template
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSSHash>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSSHashMonochromatic>(uint64_t, std::vector<std::string>, DeBruijnGraph::Mode);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -554,6 +625,7 @@ template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mo
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashString>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSSHash>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSSHashMonochromatic>(const std::string &, DeBruijnGraph::Mode, bool);
 
 } // namespace test
 } // namespace mtg

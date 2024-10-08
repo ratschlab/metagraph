@@ -28,6 +28,7 @@ class Config {
     bool complete = false;
     bool dynamic = false;
     bool mark_dummy_kmers = false;
+    bool is_monochromatic = false;
     bool filename_anno = false;
     bool annotate_sequence_headers = false;
     bool to_adj_list = false;

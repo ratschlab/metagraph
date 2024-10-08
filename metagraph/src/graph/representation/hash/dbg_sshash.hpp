@@ -8,6 +8,7 @@
 #include <sdsl/uint256_t.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg::graph {
 
@@ -31,7 +32,7 @@ class DBGSSHash : public DeBruijnGraph {
                         sshash::dictionary<kmer_t<KmerInt256>>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
-    DBGSSHash(const std::string &input_filename, size_t k, Mode mode = BASIC, size_t num_chars = 0);
+    DBGSSHash(const std::string &input_filename, size_t k, Mode mode = BASIC, size_t num_chars = 0, bool is_monochromatic = false);
 
     // SequenceGraph overrides
     void add_sequence(
@@ -54,6 +55,12 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index, bool)>& callback,
             const std::function<bool()>& terminate = []() { return false; }) const;
 
+    template <bool with_rc = true>
+    void map_to_contigs_with_rc(
+            std::string_view sequence,
+            const std::function<void(node_index, int64_t, bool)>& callback,
+            const std::function<bool()>& terminate = []() { return false; }) const;
+
     uint64_t num_nodes() const override;
 
     bool load(std::istream& in);
@@ -71,6 +78,8 @@ class DBGSSHash : public DeBruijnGraph {
     size_t get_k() const override final { return k_; }
 
     Mode get_mode() const override final { return mode_; }
+
+    bool is_monochromatic() const override { return monotig_id_.size(); }
 
     node_index traverse(node_index node, char next_char) const override;
     node_index traverse_back(node_index node, char prev_char) const override;
@@ -116,6 +125,7 @@ class DBGSSHash : public DeBruijnGraph {
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+    bit_vector_rrr<> monotig_id_;
 
     void map_to_nodes_with_rc_advanced(
             std::string_view sequence,

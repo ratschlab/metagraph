@@ -48,6 +48,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     for (const auto &path : queued_paths_) {
         std::vector<node_index> base_path;
+        std::vector<int64_t> base_path_offsets;
         if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
             // TODO: avoid this call of spell_path
             std::string query = spell_path(graph_, path);

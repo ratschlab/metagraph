@@ -28,16 +28,16 @@ void check_labels(const AnnotatedDBG &anno_graph,
                   const std::vector<std::string> labels_present,
                   const std::vector<std::string> labels_not_present) {
     std::set<SequenceGraph::node_index> indices;
-    anno_graph.get_graph().map_to_nodes(
-        sequence,
-        [&](const auto &index) {
-            ASSERT_NE(SequenceGraph::npos, index);
-            indices.insert(index);
-            EXPECT_EQ(labels_present.size(), anno_graph.get_labels(index).size());
-            EXPECT_EQ(convert_to_set(labels_present),
-                      convert_to_set(anno_graph.get_labels(index)));
-        }
-    );
+    call_annotated_nodes_offsets(anno_graph.get_graph(), sequence, [&](auto index, int64_t) {
+        ASSERT_NE(SequenceGraph::npos, index);
+        indices.insert(index);
+        EXPECT_EQ(labels_present.size(), anno_graph.get_labels(index).size());
+        EXPECT_EQ(convert_to_set(labels_present),
+                  convert_to_set(anno_graph.get_labels(index)));
+    });
+
+    EXPECT_EQ(convert_to_set(labels_present),
+              convert_to_set(anno_graph.get_labels(sequence)));
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
@@ -985,6 +985,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGSSHash, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHashMonochromatic, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
@@ -1015,6 +1016,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSSHash, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHashMonochromatic, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,

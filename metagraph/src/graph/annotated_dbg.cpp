@@ -6,6 +6,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
@@ -22,6 +23,21 @@ using Column = mtg::annot::matrix::BinaryMatrix::Column;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
+
+void call_annotated_nodes_offsets(const SequenceGraph &graph,
+                                  std::string_view sequence,
+                                  const std::function<void(SequenceGraph::node_index, int64_t)> &callback) {
+    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
+        if (sshash->is_monochromatic()) {
+            sshash->map_to_contigs_with_rc(sequence, [&](SequenceGraph::node_index i, int64_t offset, bool) {
+                callback(i, offset);
+            });
+            return;
+        }
+    }
+
+    graph.map_to_nodes(sequence, [&](SequenceGraph::node_index i) { callback(i, 0); });
+}
 
 
 AnnotatedSequenceGraph
@@ -46,10 +62,9 @@ void AnnotatedSequenceGraph
 
     std::vector<row_index> indices;
     indices.reserve(sequence.size());
-
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t) {
         if (i > 0)
-            indices.push_back(graph_to_anno_index(i));
+            indices.emplace_back(graph_to_anno_index(i));
     });
 
     if (!indices.size())
@@ -80,9 +95,9 @@ void AnnotatedSequenceGraph
         if (!indices.capacity())
             indices.reserve(data[t].first.size());
 
-        graph_->map_to_nodes(data[t].first, [&](node_index i) {
+        call_annotated_nodes_offsets(*graph_, data[t].first, [&](node_index i, int64_t) {
             if (i > 0)
-                indices.push_back(graph_to_anno_index(i));
+                indices.emplace_back(graph_to_anno_index(i));
         });
     }
 
@@ -117,10 +132,10 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     indices.reserve(sequence.size() - dbg_.get_k() + 1);
     size_t end = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    call_annotated_nodes_offsets(dbg_, sequence, [&](node_index i, int64_t) {
         // only insert indexes for matched k-mers and shift counts accordingly
         if (i > 0) {
-            indices.push_back(graph_to_anno_index(i));
+            indices.emplace_back(graph_to_anno_index(i));
             kmer_counts[indices.size() - 1] = kmer_counts[end++];
         }
     });
@@ -139,15 +154,22 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return;
 
-    std::vector<row_index> indices = map_to_nodes(dbg_, sequence);
+    std::vector<row_index> indices;
+    std::vector<int64_t> offsets;
+    call_annotated_nodes_offsets(dbg_, sequence, [&](node_index i, int64_t offset) {
+        indices.emplace_back(i);
+        offsets.emplace_back(offset);
+    });
 
     std::lock_guard<std::mutex> lock(mutex_);
 
+    auto it = offsets.begin();
     for (node_index i : indices) {
         // only insert coordinates for matched k-mers and increment the coordinates
         if (i > 0)
-            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord - *it);
         coord++;
+        ++it;
     }
 }
 
@@ -156,10 +178,17 @@ void AnnotatedDBG::add_kmer_coords(
     assert(check_compatibility());
 
     std::vector<std::vector<row_index>> ids;
+    std::vector<std::vector<int64_t>> offsets;
     ids.reserve(data.size());
     for (const auto &[sequence, labels, _] : data) {
-        if (sequence.size() >= dbg_.get_k())
-            ids.push_back(map_to_nodes(dbg_, sequence));
+        if (sequence.size() >= dbg_.get_k()) {
+            auto &id = ids.emplace_back();
+            auto &offset = offsets.emplace_back();
+            call_annotated_nodes_offsets(dbg_, sequence, [&](node_index i, int64_t o) {
+                id.emplace_back(i);
+                offset.emplace_back(o);
+            });
+        }
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -168,11 +197,13 @@ void AnnotatedDBG::add_kmer_coords(
         const auto &labels = std::get<1>(data[t]);
         uint64_t coord = std::get<2>(data[t]);
 
+        auto it = offsets[t].begin();
         for (node_index i : ids[t]) {
             // only insert coordinates for matched k-mers and increment the coordinates
             if (i > 0)
-                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord - *it);
             coord++;
+            ++it;
         }
     }
 }
@@ -200,10 +231,10 @@ void AnnotatedDBG::annotate_kmer_coords(
             coords[last].reserve(sequence.size() - dbg_.get_k() + 1);
         }
 
-        graph_->map_to_nodes(sequence, [&](node_index i) {
+        call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t o) {
             if (i > 0) {
                 ids[last].push_back(graph_to_anno_index(i));
-                coords[last].emplace_back(graph_to_anno_index(i), coord);
+                coords[last].emplace_back(graph_to_anno_index(i), coord - o);
             }
             coord++;
         });
@@ -238,7 +269,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
     size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
@@ -312,7 +343,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     size_t num_present_kmers = 0;
 
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
@@ -342,7 +373,13 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction) const {
-    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
+    std::vector<node_index> nodes;
+    if (sequence.size() >= dbg_.get_k()) {
+        nodes.reserve(sequence.size() - dbg_.get_k() + 1);
+        call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t) {
+            nodes.emplace_back(i);
+        });
+    }
     return get_kmer_counts(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
@@ -454,19 +491,30 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction) const {
-    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
-    return get_kmer_coordinates(nodes, num_top_labels, discovery_fraction, presence_fraction);
+    std::vector<node_index> nodes;
+    std::vector<int64_t> offsets;
+    if (sequence.size() >= dbg_.get_k()) {
+        nodes.reserve(sequence.size() - dbg_.get_k() + 1);
+        offsets.reserve(sequence.size() - dbg_.get_k() + 1);
+        call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t o) {
+            nodes.emplace_back(i);
+            offsets.emplace_back(o);
+        });
+    }
+    return get_kmer_coordinates(nodes, num_top_labels, discovery_fraction, presence_fraction, offsets);
 }
 
 std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
 AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                                    size_t num_top_labels,
                                    double discovery_fraction,
-                                   double presence_fraction) const {
+                                   double presence_fraction,
+                                   const std::vector<int64_t> &offsets) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
+    assert(offsets.empty() || offsets.size() == nodes.size());
     assert(check_compatibility());
 
     if (!nodes.size())
@@ -528,8 +576,15 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
         // set the non-empty tuples
         for (auto &[j, tuple] : rows_tuples[i]) {
-            if (col_counts[j])
-                std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = std::move(tuple);
+            if (col_counts[j]) {
+                auto &coords = std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]];
+                coords = std::move(tuple);
+                if (offsets.size()) {
+                    for (auto &c : coords) {
+                        c += offsets[kmer_positions[i]];
+                    }
+                }
+            }
         }
     }
 
@@ -574,7 +629,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     kmer_positions.reserve(num_kmers);
 
     size_t j = 0;
-    graph_->map_to_nodes(sequence, [&](node_index i) {
+    call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t o) {
         if (i > 0) {
             kmer_positions.push_back(j);
             row_indices.push_back(graph_to_anno_index(i));
