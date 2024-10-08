@@ -100,33 +100,33 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-void DBGSSHash
-::map_to_nodes_with_rc_advanced(std::string_view sequence,
-                                const std::function<void(sshash::lookup_result)>& callback,
-                                bool with_rc,
-                                const std::function<bool()>& terminate) const {
+template <class Dict, bool with_rc>
+void map_to_nodes_with_rc_advanced(size_t k,
+                                   const Dict &dict,
+                                   std::string_view sequence,
+                                   const std::function<void(sshash::lookup_result)>& callback,
+                                   const std::function<bool()>& terminate) {
     size_t n = sequence.size();
-    if (terminate() || n < k_)
+    if (terminate() || n < k)
         return;
 
-    std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
+    using kmer_t = get_kmer_t<Dict>;
 
-        std::vector<bool> invalid_char(n);
-        for (size_t i = 0; i < n; ++i) {
-            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-        }
-        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k_);
+    std::vector<char> seq_encoded(n);
+    for (size_t i = 0; i < n; ++i) {
+        seq_encoded[i] = !kmer_t::is_valid(sequence[i]);
+    }
 
-        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
-        uint_kmer.pad_char();
-        for (size_t i = k_ - 1; i < n && !terminate(); ++i) {
-            uint_kmer.drop_char();
-            uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-            callback(invalid_kmer[i] ? sshash::lookup_result()
-                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
-        }
-    }, dict_);
+    auto invalid_kmer = utils::drag_and_mark_segments(seq_encoded, 1, k);
+
+    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
+    uint_kmer.pad_char();
+    for (size_t i = k - 1; i < n && !terminate(); ++i) {
+        uint_kmer.drop_char();
+        uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
+        callback(invalid_kmer[i] ? sshash::lookup_result()
+                                 : dict.lookup_advanced_uint(uint_kmer, with_rc));
+    }
 }
 
 template <bool with_rc>
@@ -143,9 +143,11 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
         return;
     }
 
-    map_to_nodes_with_rc_advanced(sequence, [&](sshash::lookup_result res) {
-        callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
-    }, with_rc, terminate);
+    std::visit([&](const auto &dict) {
+        map_to_nodes_with_rc_advanced<decltype(dict), with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
+            callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
+        }, terminate);
+    }, dict_);
 }
 
 template
