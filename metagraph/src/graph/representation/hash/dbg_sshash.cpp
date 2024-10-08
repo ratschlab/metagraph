@@ -100,7 +100,7 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <class Dict, bool with_rc>
+template <bool with_rc, class Dict>
 void map_to_nodes_with_rc_impl(size_t k,
                                const Dict &dict,
                                std::string_view sequence,
@@ -141,7 +141,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
     std::visit([&](const auto &dict) {
-        map_to_nodes_with_rc_impl<decltype(dict), with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
             callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
         }, terminate);
     }, dict_);
