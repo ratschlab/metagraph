@@ -103,11 +103,15 @@ DBGSSHash::DBGSSHash(const std::string &input_filename,
         common::logger->trace("Marking colour boundaries");
         sdsl::bit_vector id(num_nodes_);
         {
-            size_t pos = 0;
             ProgressBar progress_bar(num_nodes(),
                                      "Parsing sequences",
                                      std::cerr, !common::get_verbose());
             seq_io::read_fasta_file_critical(input_filename, [&](auto *read_stream) {
+                auto indices = mtg::graph::map_to_nodes_sequentially(*this, std::string(read_stream->seq.s, read_stream->seq.l));
+                assert(std::equal(indices.begin(), indices.end() - 1,
+                                  indices.begin() + 1, indices.end(),
+                                  [](node_index a, node_index b) { return a + 1 == b; }));
+                size_t pos = graph_index_to_sshash(indices[0]);
                 id[pos] = true;
                 auto split_string = utils::split_string(std::string(read_stream->comment.s, read_stream->comment.l), " ");
                 size_t old_pos = pos;
@@ -147,9 +151,9 @@ DBGSSHash::DBGSSHash(const std::string &input_filename,
 
         auto is_breakpoint = [this,canonical=std::move(canonical)](node_index node) {
             if (canonical) {
-                return !canonical->has_single_incoming(node) || !canonical->has_single_outgoing(node);
+                return !canonical->has_single_incoming(node) || canonical->has_multiple_outgoing(node);
             } else {
-                return !has_single_incoming(node) || !has_single_outgoing(node);
+                return !has_single_incoming(node) || has_multiple_outgoing(node);
             }
         };
 
