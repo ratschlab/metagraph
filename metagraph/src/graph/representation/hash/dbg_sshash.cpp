@@ -184,19 +184,26 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <class Dict, bool with_rc>
-void map_to_nodes_with_rc_advanced(size_t k,
-                                   const Dict &dict,
-                                   std::string_view sequence,
-                                   const std::function<void(sshash::lookup_result)>& callback,
-                                   const std::function<bool()>& terminate) {
+template <bool with_rc, class Dict>
+void map_to_nodes_with_rc_impl(size_t k,
+                               const Dict &dict,
+                               std::string_view sequence,
+                               const std::function<void(sshash::lookup_result)>& callback,
+                               const std::function<bool()>& terminate) {
     size_t n = sequence.size();
     if (terminate() || n < k)
         return;
 
+    if (!dict.size()) {
+        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
+            callback(sshash::lookup_result());
+        }
+        return;
+    }
+
     using kmer_t = get_kmer_t<Dict>;
 
-    std::vector<char> seq_encoded(n);
+    std::vector<bool> seq_encoded(n);
     for (size_t i = 0; i < n; ++i) {
         seq_encoded[i] = !kmer_t::is_valid(sequence[i]);
     }
@@ -217,18 +224,8 @@ template <bool with_rc>
 void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
-    if (terminate() || sequence.size() < k_)
-        return;
-
-    if (!num_nodes()) {
-        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
-            callback(npos, false);
-        }
-        return;
-    }
-
     std::visit([&](const auto &dict) {
-        map_to_nodes_with_rc_advanced<decltype(dict), with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
             callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
         }, terminate);
     }, dict_);
@@ -261,7 +258,7 @@ void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
     uint64_t coloured_kmer_id = std::numeric_limits<uint64_t>::max();
     uint64_t next_breakpoint = std::numeric_limits<uint64_t>::max();
     std::visit([&](const auto &dict) {
-        map_to_nodes_with_rc_advanced<decltype(dict), with_rc>(k_, dict, sequence,
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence,
             [&](sshash::lookup_result res) {
                 node_index node = sshash_to_graph_index(res.kmer_id);
                 if (node != npos) {
