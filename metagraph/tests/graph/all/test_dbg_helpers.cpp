@@ -249,6 +249,11 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
     if (contigs.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
+    for (const auto &contig : contigs) {
+        EXPECT_EQ(string_anno_graph->get_labels(contig, 0.0),
+                  string_anno_graph->get_labels(contig, 1.0));
+    }
+
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, dump_path);
 
