@@ -53,8 +53,7 @@ namespace utils {
                                                     size_t segment_length) {
         std::vector<bool> mask(array.size(), false);
         size_t last_occurrence
-            = std::find(array.data(), array.data() + array.size(), label)
-                - array.data();
+            = std::find(array.begin(), array.end(), label) - array.begin();
 
         for (size_t i = last_occurrence; i < array.size(); ++i) {
             if (array[i] == label)
