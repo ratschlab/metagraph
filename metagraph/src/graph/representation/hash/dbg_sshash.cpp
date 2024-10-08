@@ -259,7 +259,7 @@ void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
         node_index node = sshash_to_graph_index(res.kmer_id);
         if (node != npos) {
             if (is_monochromatic()) {
-                assert(monotig_id_.size() == num_nodes());
+                assert(monotig_id_.size() == dict_size());
                 assert(monotig_id_[res.kmer_id] || res.kmer_id_in_contig);
                 if (last_node != npos && node == last_node + 1) {
                     if (res.kmer_id == next_breakpoint) {
