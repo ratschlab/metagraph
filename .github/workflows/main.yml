@@ -217,6 +217,12 @@ jobs:
           with:
               path: artifacts
 
+        - name: Debug artifacts directory 1
+          run: ls -R artifacts
+
+        - name: Debug artifacts directory 2
+          run: ls -R $(pwd)/artifacts
+
         - name: setup metagraph binary
           run: |
             sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
