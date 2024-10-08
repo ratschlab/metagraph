@@ -339,6 +339,10 @@ Config::Config(int argc, char *argv[]) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--compacted")) {
             output_compacted = true;
+        } else if (!strcmp(argv[i], "--dump-pvals")) {
+            output_pvals = true;
+        } else if (!strcmp(argv[i], "--clean-ztp")) {
+            clean_ztp = true;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -580,7 +584,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fnames.size() != 1) {
+                    && (fnames.size() != 1 && assembly_config_file.empty())) {
         std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
         print_usage_and_exit = true;
     }
@@ -613,8 +617,8 @@ Config::Config(int argc, char *argv[]) {
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
-        } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+        } else if (!to_row_diff && !count_kmers && !unitigs && !dump_text_anno && infbase.size()) {
+            std::cerr << "Graph is only required for transform to row_diff types and dumping per-unitig counts" << std::endl;
             print_usage_and_exit = true;
         }
     }
@@ -735,6 +739,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_disk_coord";
         case IntBRWT:
             return "int_brwt";
+        case IntRowFlat:
+            return "int_row_flat";
         case IntRowDiffBRWT:
             return "row_diff_int_brwt";
         case ColumnCoord:
@@ -782,6 +788,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffDiskCoord;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
+    } else if (string == "int_row_flat") {
+        return AnnotationType::IntRowFlat;
     } else if (string == "row_diff_int_brwt") {
         return AnnotationType::IntRowDiffBRWT;
     } else if (string == "column_coord") {
@@ -892,7 +900,7 @@ QueryMode Config::string_to_querymode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt, int_row_flat,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
