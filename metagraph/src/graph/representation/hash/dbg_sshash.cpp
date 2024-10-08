@@ -114,8 +114,7 @@ void DBGSSHash
         std::vector<char> seq_encoded;
         seq_encoded.reserve(sequence.size());
         for (size_t i = 0; i < sequence.size(); ++i) {
-            char enc = kmer_t::canonicalize_basepair_forward_map[static_cast<uint8_t>(sequence[i])];
-            seq_encoded.emplace_back(enc == '\0');
+            seq_encoded.emplace_back(!kmer_t::is_valid(sequence[i]));
         }
 
         auto invalid = utils::drag_and_mark_segments(seq_encoded, 1, k_);
