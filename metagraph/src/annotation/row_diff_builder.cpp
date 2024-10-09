@@ -264,30 +264,6 @@ void sum_and_call_counts(const fs::path &dir,
     }
 }
 
-uint64_t from_graph_index(const graph::DeBruijnGraph &graph,
-                          graph::DeBruijnGraph::node_index idx) {
-    if (auto* g = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        return g->kmer_to_boss_index(idx);
-    } else {
-        return idx;
-    }
-}
-graph::DeBruijnGraph::node_index to_graph_index(const graph::DeBruijnGraph &graph,
-                                                uint64_t idx) {
-    if (auto* g = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        return g->boss_to_kmer_index(idx);
-    } else {
-        return idx;
-    }
-}
-size_t get_last_size(const graph::DeBruijnGraph &graph) {
-    if (dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        return graph.get_last()->size();
-    } else {
-        return graph.max_index() + 1;
-    }
-}
-
 rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
@@ -317,21 +293,21 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
             [&](int32_t count) {
                 // TODO: skip single outgoing
                 outgoing_counts.push_back(count);
-                if (last[from_graph_index(graph, graph_idx)]) {
+                if (last[graph_idx]) {
                     // pick the node with the largest count
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                       outgoing_counts.rend())
                                      - outgoing_counts.rbegin();
-                    rd_succ_bv[from_graph_index(graph, graph_idx - max_pos)] = true;
+                    rd_succ_bv[graph_idx - max_pos] = true;
                     outgoing_counts.resize(0);
                 }
                 graph_idx++;
             }
         );
 
-        if (graph_idx != graph.num_nodes() + 1) {
-            logger->error("Size the count vectors is incompatible with the"
-                          " graph: {} != {}", graph_idx - 1, graph.num_nodes());
+        if (graph_idx != graph.max_index() + 1) {
+            logger->error("Size of the count vectors is incompatible with the"
+                          " graph: {} != {}", graph_idx - 1, graph.max_index());
             exit(1);
         }
 
@@ -377,29 +353,29 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                                   count_vectors_dir, row_count_extension);
 
     // create the succ/pred files, indexed using annotation indices
-    uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
+    uint32_t width = sdsl::bits::hi(graph.max_index()) + 1;
     sdsl::int_vector_buffer<> succ(outfbase + ".succ", std::ios::out, BUFFER_SIZE, width);
     sdsl::int_vector_buffer<1> succ_boundary(outfbase + ".succ_boundary", std::ios::out, BUFFER_SIZE);
     sdsl::int_vector_buffer<> pred(outfbase + ".pred", std::ios::out, BUFFER_SIZE, width);
     sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BUFFER_SIZE);
 
-    ProgressBar progress_bar(graph.num_nodes(), "Compute succ/pred", std::cerr,
+    ProgressBar progress_bar(graph.max_index(), "Compute succ/pred", std::cerr,
                              !common::get_verbose());
 
     const uint64_t BS = 1'000'000;
     // traverse graph in parallel processing blocks of size |BS|
     // use static scheduling to make threads process ordered contiguous blocks
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-    for (uint64_t start = 1; start <= graph.num_nodes(); start += BS) {
+    for (uint64_t start = 1; start <= graph.max_index(); start += BS) {
         std::vector<uint64_t> succ_buf;
         std::vector<bool> succ_boundary_buf;
         std::vector<uint64_t> pred_buf;
         std::vector<bool> pred_boundary_buf;
 
-        for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
+        for (uint64_t i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
             bool skip_succ = false, skip_all = false;
             if (succinct) { // Legacy code for DBGSuccinct
-                BOSS::edge_index boss_idx = from_graph_index(graph, i);
+                BOSS::edge_index boss_idx = i;
                 if((*dummy)[boss_idx]) {
                     skip_all = true;
                 } else {
@@ -412,9 +388,9 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
-                if(rd_succ[from_graph_index(graph, i)]) {
+                    if(rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
-                        if (dummy && (*dummy)[from_graph_index(graph, pred)]) {
+                        if (dummy && (*dummy)[pred]) {
                             return;
                         }
                         pred_buf.push_back(to_row(pred));
@@ -429,7 +405,6 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                     with_rd_succ(*graph.get_last());
                 }
             }
-
             succ_boundary_buf.push_back(1);
             pred_boundary_buf.push_back(1);
             ++progress_bar;
@@ -460,7 +435,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
         return;
     }
 
-    const uint64_t num_rows = graph.num_nodes();
+    const uint64_t num_rows = graph.max_index();
 
     bool optimize_anchors = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
@@ -468,7 +443,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             optimize_anchors = true;
     }
 
-    sdsl::bit_vector anchors_bv(get_last_size(graph), false);
+    sdsl::bit_vector anchors_bv(graph.max_index() + 1, false);
 
     if (optimize_anchors) {
         logger->trace("Making every row with negative reduction an anchor...");
@@ -478,7 +453,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             [&](int32_t count) {
                 // check if the reduction is negative
                 if (count < 0)
-                    anchors_bv[from_graph_index(graph, to_node(i))] = true;
+                    anchors_bv[to_node(i)] = true;
                 i++;
             }
         );
@@ -522,7 +497,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
         sdsl::bit_vector anchors(num_rows, false);
         for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
             if (anchors_bv[i]) {
-                uint64_t graph_idx = to_graph_index(graph, i);
+                uint64_t graph_idx = i;
                 assert(to_row(graph_idx) < num_rows);
                 anchors[to_row(graph_idx)] = 1;
             }
@@ -946,7 +921,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         // reduction (zero diff)
                         __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                     }
-                } else {
+                } else if (succ) {
                     bool is_anchor = anchor[row_idx];
                     // add current bit if this node is an anchor
                     // or if the successor has zero diff

@@ -37,6 +37,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final;
 
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &terminate = [](){ return false; }) const;
+
     // Insert sequence to graph and invoke callback |on_insertion| for each new
     // node index augmenting the range [1,...,max_index], including those not
     // pointing to any real node in graph. That is, the callback is invoked for
@@ -110,6 +113,7 @@ class DBGSuccinct : public DeBruijnGraph {
      * edges in the BOSS graph (because an edge in the BOSS graph represents a k-mer).
      */
     virtual uint64_t num_nodes() const override final;
+    virtual uint64_t max_index() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
 
@@ -180,11 +184,6 @@ class DBGSuccinct : public DeBruijnGraph {
                                    size_t max_length,
                                    const bit_vector &rd_succ,
                                    sdsl::bit_vector *terminal) const override final;
-
-    virtual node_index row_diff_successor(node_index node, const bit_vector &rd_succ) const override final;
-
-    uint64_t kmer_to_boss_index(node_index kmer_index) const;
-    node_index boss_to_kmer_index(uint64_t boss_index) const;
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           uint32_t max_num_hash_functions = -1);

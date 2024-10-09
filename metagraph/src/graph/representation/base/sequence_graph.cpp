@@ -24,11 +24,11 @@ static_assert(!(kBlockSize & 0xFF));
 /*************** SequenceGraph ***************/
 
 void SequenceGraph::call_nodes(const std::function<void(node_index)> &callback,
-                               const std::function<bool()> &stop_early) const {
+                               const std::function<bool()> &terminate) const {
     assert(num_nodes() == max_index());
 
     const auto nnodes = num_nodes();
-    for (node_index i = 1; i <= nnodes && !stop_early(); ++i) {
+    for (node_index i = 1; i <= nnodes && !terminate(); ++i) {
         callback(i);
     }
 }

@@ -62,7 +62,7 @@ class SequenceGraph {
                                          const std::function<void(node_index)> &callback) const = 0;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const;
+                            const std::function<bool()> &terminate = [](){ return false; }) const;
 
     virtual uint64_t num_nodes() const = 0;
     virtual uint64_t max_index() const { return num_nodes(); };

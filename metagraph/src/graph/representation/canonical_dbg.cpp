@@ -115,7 +115,7 @@ void CanonicalDBG
                                                    sequence.substr(1));
         boss.map_to_edges(sequence.substr(1),
             [&](boss::BOSS::edge_index edge) {
-                path.push_back(dbg_succ->boss_to_kmer_index(edge));
+                path.push_back(edge);
                 ++it;
             },
             []() { return false; },
@@ -601,17 +601,14 @@ void CanonicalDBG
         //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
         const boss::BOSS &boss = dbg_succ_->get_boss();
 
-        boss::BOSS::edge_index rc_edge = get_cache().get_prefix_rc(
-            dbg_succ_->kmer_to_boss_index(node),
-            spelling_hint
-        );
+        boss::BOSS::edge_index rc_edge = get_cache().get_prefix_rc(node, spelling_hint);
 
         if (!rc_edge)
             return;
 
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
-            node_index prev = dbg_succ_->boss_to_kmer_index(adjacent_edge);
+            node_index prev = adjacent_edge;
             if (prev == DeBruijnGraph::npos)
                 return;
 
@@ -658,24 +655,21 @@ void CanonicalDBG
                               const std::function<void(node_index, char)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
-    if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
+    if (get_dbg_succ(*graph_)) {
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
 
         auto &cache = get_cache();
 
-        boss::BOSS::edge_index rc_edge = cache.get_suffix_rc(
-            dbg_succ_->kmer_to_boss_index(node),
-            spelling_hint
-        );
+        boss::BOSS::edge_index rc_edge = cache.get_suffix_rc(node, spelling_hint);
 
         if (!rc_edge)
             return;
 
         cache.call_incoming_edges(rc_edge,
             [&](edge_index prev_edge) {
-                node_index prev = dbg_succ_->boss_to_kmer_index(prev_edge);
+                node_index prev = prev_edge;
                 if (!prev)
                     return;
 

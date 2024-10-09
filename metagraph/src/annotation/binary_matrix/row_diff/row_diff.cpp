@@ -60,12 +60,11 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+        graph::boss::BOSS::edge_index boss_edge = 
+                graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(boss_edge);
 
             auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
             rd_paths_trunc[i].push_back(it.value());
