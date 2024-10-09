@@ -373,8 +373,8 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
     }
 
     // assign row-diff successors at forks
-    rd_succ_bv_type rd_succ = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
-                                             count_vectors_dir, row_count_extension);
+    auto rd_succ = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
+                                  count_vectors_dir, row_count_extension);
 
     // create the succ/pred files, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -401,22 +401,29 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
             if (succinct) { // Legacy code for DBGSuccinct
                 const BOSS &boss = succinct->get_boss();
                 BOSS::edge_index boss_idx = succinct->kmer_to_boss_index(i);
-                BOSS::edge_index next = boss.fwd(boss_idx);
-                assert(next);
+                    BOSS::edge_index next = boss.fwd(boss_idx);
+                    assert(next);
                 if ((*dummy)[next]) {
                     find_succ = false;
+                        }
+            }
+            auto with_rd_succ = [&](bit_vector const& rd_succ) {
+                if(find_succ) {
+                    auto j = graph.row_diff_successor(i, rd_succ);
+                    succ_buf.push_back(to_row(j));
+                    succ_boundary_buf.push_back(0);
                 }
-            }
-            if(find_succ) {
-                auto j = graph.row_diff_successor(i, rd_succ);
-                succ_buf.push_back(to_row(j));
-                succ_boundary_buf.push_back(0);
-            }
-            if(rd_succ[from_graph_index(graph, i)]) {
-                graph.adjacent_incoming_nodes(i, [&](auto pred) {
-                    pred_buf.push_back(to_row(pred));
-                    pred_boundary_buf.push_back(0);
-                });
+                if(rd_succ[from_graph_index(graph, i)]) {
+                    graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                        pred_buf.push_back(to_row(pred));
+                        pred_boundary_buf.push_back(0);
+                    });
+                }
+            };
+            if (rd_succ.size()) {
+                with_rd_succ(rd_succ);
+            } else {
+                with_rd_succ(*graph.get_last());
             }
 
             succ_boundary_buf.push_back(1);
