@@ -178,6 +178,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
+    bool is_valid(node_index node) const;
     node_index select_node(uint64_t boss_index) const;
     uint64_t rank_node(node_index kmer_index) const;
 

@@ -285,7 +285,6 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
     SmallVector<node_index> parents(alphabet.size(), npos);
     // "- has_sentinel_" because there can't be a dummy sink with another non-dummy edge
     size_t max_num_edges_left = parents.size() - has_sentinel_;
-
     auto incoming_kmer_callback = [&](node_index prev, char c) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
@@ -609,7 +608,7 @@ void CanonicalDBG
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
             node_index prev = adjacent_edge;
-            if (prev == DeBruijnGraph::npos)
+            if (!dbg_succ_->is_valid(prev))
                 return;
 
             char c = boss.decode(boss.get_W(adjacent_edge) % boss.alph_size);
@@ -655,7 +654,7 @@ void CanonicalDBG
                               const std::function<void(node_index, char)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
-    if (get_dbg_succ(*graph_)) {
+    if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
@@ -670,7 +669,7 @@ void CanonicalDBG
         cache.call_incoming_edges(rc_edge,
             [&](edge_index prev_edge) {
                 node_index prev = prev_edge;
-                if (!prev)
+                if (!dbg_succ_->is_valid(prev))
                     return;
 
                 char c = cache.get_first_char(prev_edge, rc_edge);
