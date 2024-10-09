@@ -189,9 +189,9 @@ TEST(RowDiff, succ) {
      */
 
     const std::vector<uint64_t> expected_succ = { 3, 0, 4, 2 };
-    const std::vector<bool> expected_succ_boundary = { 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<bool> expected_succ_boundary = { 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1 };
     const std::vector<uint64_t> expected_pred = { 2, 4, 1, 3 };
-    const std::vector<bool> expected_pred_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<bool> expected_pred_boundary = { 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
@@ -210,8 +210,8 @@ TEST(RowDiff, succ) {
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
         ASSERT_EQ(expected_succ.size(), succ.size());
-        for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;
+        for (uint32_t i = 0; i < expected_succ.size(); ++i) {
+            EXPECT_EQ(expected_succ[i] + 1, graph->rank_node(succ[i] + 1)) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
@@ -223,7 +223,7 @@ TEST(RowDiff, succ) {
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
         EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
-            EXPECT_EQ(expected_pred[i], pred[i]) << max_depth << " " << i;
+            EXPECT_EQ(expected_pred[i] + 1, graph->rank_node(pred[i] + 1)) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);

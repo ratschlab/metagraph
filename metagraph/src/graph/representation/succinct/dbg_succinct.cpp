@@ -906,6 +906,28 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(!(*valid_edges_)[0]);
 }
 
+node_index DBGSuccinct::select_node(uint64_t rank) const {
+    assert(rank <= num_nodes());
+
+    if (!valid_edges_.get() || !rank)
+        return rank;
+
+    return valid_edges_->select1(rank);
+}
+
+uint64_t DBGSuccinct::rank_node(node_index node) const {
+    assert(node <= boss_graph_->num_edges());
+    assert(!valid_edges_.get() || node < valid_edges_->size());
+
+    if (!valid_edges_.get() || !node)
+        return node;
+
+    if (!(*valid_edges_)[node])
+        return npos;
+
+    return valid_edges_->rank1(node);
+}
+
 void DBGSuccinct
 ::initialize_bloom_filter_from_fpr(double false_positive_rate,
                                    uint32_t max_num_hash_functions) {

@@ -38,7 +38,7 @@ class DBGSuccinct : public DeBruijnGraph {
                                          const std::function<void(node_index)> &callback) const override final;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate = [](){ return false; }) const;
+                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
     // Insert sequence to graph and invoke callback |on_insertion| for each new
     // node index augmenting the range [1,...,max_index], including those not
@@ -177,6 +177,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void print(std::ostream &out) const override final;
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
+
+    node_index select_node(uint64_t boss_index) const;
+    uint64_t rank_node(node_index kmer_index) const;
 
     virtual std::shared_ptr<const bit_vector> get_last() const override final;
 
