@@ -139,7 +139,9 @@ build_graph<DBGBitmap>(uint64_t k,
     return graph;
 }
 
-void writeFastaFile(const std::vector<std::string>& sequences, const std::string& outputFilename) {
+void writeFastaFile(const std::vector<std::string>& sequences,
+                    const std::vector<std::string>& headers,
+                    const std::string& outputFilename) {
     std::ofstream fastaFile(outputFilename);
 
     if (!fastaFile.is_open()) {
@@ -148,7 +150,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
     }
 
     for (size_t i = 0; i < sequences.size(); ++i) {
-        fastaFile << ">" << "\n" << sequences[i] << "\n";
+        fastaFile << ">" << headers[i] << "\n" << sequences[i] << "\n";
     }
 
     fastaFile.close();
@@ -178,7 +180,7 @@ build_graph<DBGSSHash>(uint64_t k,
         return std::make_shared<DBGSSHash>(k, mode);
 
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
-    writeFastaFile(contigs, dump_path);
+    writeFastaFile(contigs, std::vector<std::string>(contigs.size(), ""), dump_path);
 
     std::shared_ptr<DBGSSHash> graph;
     graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
@@ -218,20 +220,24 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
     const auto &string_graph = string_anno_graph->get_graph();
 
     std::vector<std::string> contigs;
+    std::vector<std::string> headers;
     size_t num_kmers = 0;
     size_t num_chars = 0;
     string_graph.call_sequences([&](const std::string &contig, const auto &path) {
         num_kmers += path.size();
+        num_chars += contig.size();
+        contigs.emplace_back(contig);
         auto begin = contig.begin();
         auto end = contig.begin() + k;
+
+        auto &header = headers.emplace_back(std::to_string(contigs.size()));
 
         auto sigs = string_anno_graph->get_top_label_signatures(contig, labels.size());
         for (size_t i = 1; i + k <= contig.size(); ++i) {
             for (size_t j = 0; j < sigs.size(); ++j) {
                 if (sigs[j].second[i] != sigs[j].second[i - 1]) {
                     // we're at a breakpoint
-                    contigs.emplace_back(begin, end);
-                    num_chars += end - begin;
+                    header += " C:i:" + std::to_string(end - begin - k + 1);
                     begin = end - k + 1;
                     assert(begin == contig.begin() + i);
                     break;
@@ -241,21 +247,14 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
         }
 
         assert(end == contig.end());
-
-        contigs.emplace_back(begin, end);
-        num_chars += end - begin;
+        header += " C:i:" + std::to_string(end - begin - k + 1);
     }, 1, mode != DeBruijnGraph::BASIC);
 
     if (contigs.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    for (const auto &contig : contigs) {
-        EXPECT_EQ(string_anno_graph->get_labels(contig, 0.0),
-                  string_anno_graph->get_labels(contig, 1.0));
-    }
-
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
-    writeFastaFile(contigs, dump_path);
+    writeFastaFile(contigs, headers, dump_path);
 
     std::shared_ptr<DBGSSHash> graph;
     graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars, true);

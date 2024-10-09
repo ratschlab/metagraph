@@ -262,6 +262,7 @@ void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
                     if (is_monochromatic()) {
                         assert(monotig_id_.size() == dict_size());
                         assert(monotig_id_[res.kmer_id] || res.kmer_id_in_contig);
+                        assert(monotig_id_.prev1(res.kmer_id) >= res.kmer_id - res.kmer_id_in_contig);
                         res.kmer_id_in_contig = res.kmer_id - monotig_id_.prev1(res.kmer_id);
                     }
 
