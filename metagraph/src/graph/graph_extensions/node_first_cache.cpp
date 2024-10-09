@@ -36,7 +36,7 @@ void NodeFirstCache::call_incoming_edges(edge_index edge,
 
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
-    assert(node > 0 && node <= dbg_succ_.num_nodes());
+    assert(node > 0 && node <= dbg_succ_.max_index());
 
     edge_index edge = node;
 
