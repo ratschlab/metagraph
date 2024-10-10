@@ -183,16 +183,6 @@ class DBGSuccinct : public DeBruijnGraph {
     node_index select_node(uint64_t boss_index) const;
     uint64_t rank_node(node_index kmer_index) const;
 
-    virtual std::shared_ptr<const bit_vector> get_last() const override final;
-
-    virtual void row_diff_traverse(size_t num_threads,
-                                   size_t max_length,
-                                   const bit_vector &rd_succ,
-                                   sdsl::bit_vector *terminal) const override final;
-    
-    virtual node_index row_diff_successor(node_index node,
-                                          const bit_vector &rd_succ) const override final;
-
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           uint32_t max_num_hash_functions = -1);
 

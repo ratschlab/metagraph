@@ -246,15 +246,6 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
-
-    virtual std::shared_ptr<const bit_vector> get_last() const;
-
-    virtual void row_diff_traverse(size_t num_threads,
-                                   size_t max_length,
-                                   const bit_vector &rd_succ,
-                                   sdsl::bit_vector *terminal) const;
-
-    virtual node_index row_diff_successor(node_index node, const bit_vector &rd_succ) const;
 };
 
 

@@ -525,25 +525,6 @@ void DBGSuccinct
     });
 }
 
-std::shared_ptr<const bit_vector> DBGSuccinct
-::get_last() const {
-    return std::shared_ptr<const bit_vector>(std::shared_ptr<const bit_vector>{}, &get_boss().get_last());
-}
-
-void DBGSuccinct
-::row_diff_traverse(size_t num_threads,
-                    size_t max_length,
-                    const bit_vector &rd_succ,
-                    sdsl::bit_vector *terminal) const {
-    return get_boss().row_diff_traverse(num_threads, max_length, rd_succ, terminal);
-}
-
-node_index DBGSuccinct
-::row_diff_successor(node_index node, const bit_vector &rd_succ) const {
-    return get_boss().row_diff_successor(node, rd_succ);
-}
-
-
 size_t DBGSuccinct::outdegree(node_index node) const {
     assert(is_valid(node));
 

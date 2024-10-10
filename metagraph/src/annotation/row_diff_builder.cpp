@@ -11,6 +11,7 @@
 #include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/annotated_dbg.hpp"
 
 const uint64_t BLOCK_SIZE = 1 << 25;
@@ -26,6 +27,7 @@ namespace annot {
 using namespace mtg::annot::matrix;
 using mtg::common::logger;
 using mtg::graph::boss::BOSS;
+using node_index = graph::DeBruijnGraph::node_index;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
@@ -264,6 +266,23 @@ void sum_and_call_counts(const fs::path &dir,
     }
 }
 
+std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
+    if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return std::shared_ptr<const bit_vector>(
+            std::shared_ptr<const bit_vector>{}, &dbg_succ->get_boss().get_last());
+    } else {
+        bit_vector_dyn last_bv(graph.max_index() + 1);
+        graph.call_nodes([&](node_index v) {
+            std::pair<char, node_index> last;
+            graph.call_outgoing_kmers(v, [&](node_index u, char c) {
+                last = std::max(last, std::pair{c, u});
+            });
+            last_bv.set(last.second, true);
+        });
+        return std::make_shared<bit_vector_dyn>(std::move(last_bv));
+    }
+}
+
 rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
@@ -282,7 +301,7 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
         logger->trace("RowDiff successors will be set to the adjacent nodes with"
                       " the largest number of labels");
 
-        const bit_vector &last = *graph.get_last();
+        const bit_vector &last = *get_last(graph);
         graph::DeBruijnGraph::node_index graph_idx = to_node(0);
 
         std::vector<uint32_t> outgoing_counts;
@@ -326,6 +345,71 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
     return rd_succ;
 }
 
+node_index row_diff_successor(const graph::DeBruijnGraph &graph,
+                              node_index node,
+                              const bit_vector &rd_succ) {
+    if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return dbg_succ->get_boss().row_diff_successor(node, rd_succ);
+    } else {
+        node_index succ = graph::DeBruijnGraph::npos;
+        graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
+            if(rd_succ[adjacent_node]) {
+                succ = adjacent_node;
+            }
+        });
+        assert(succ != graph::DeBruijnGraph::npos && "a row diff successor must exist");
+        return succ;
+    }
+}
+
+void row_diff_traverse(const graph::DeBruijnGraph &graph,
+                       size_t num_threads,
+                       size_t max_length,
+                       const bit_vector &rd_succ,
+                       sdsl::bit_vector *terminal) {
+    if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return dbg_succ->get_boss().row_diff_traverse(
+            num_threads, max_length, rd_succ, terminal);
+    } else {
+        sdsl::bit_vector visited(graph.max_index() + 1);
+        auto finalised = visited;
+        std::vector<size_t> distance(graph.max_index() + 1);
+        assert(terminal->size() == visited.size());
+        assert(rd_succ.size() == visited.size());
+        auto set_terminal = [&](int v) {
+            distance[v] = 0;
+            (*terminal)[v] = true;
+        };
+        graph.call_nodes([&](node_index v) {
+            static std::stack<node_index> path;
+            while (!visited[v]) {
+                path.push(v);
+                visited[v] = true;
+                if (!graph.has_no_outgoing(v)) {
+                    v = row_diff_successor(graph, v, rd_succ);
+                }
+            }
+            // Either a sink, or a cyclic dependency
+            if (!finalised[v]) {
+                set_terminal(v);
+                finalised[v] = true;
+            }
+            node_index succ;
+            while (!empty(path)) {
+                succ = std::exchange(v, path.top());
+                if (!finalised[v]) {
+                    distance[v] = distance[succ] + 1;
+                    if (distance[v] == max_length) {
+                        set_terminal(v);
+                    }
+                    finalised[v] = true;
+                }
+                path.pop();
+            }
+        });
+    }
+}
+
 void build_pred_succ(const graph::DeBruijnGraph &graph,
                      const std::string &outfbase,
                      const std::string &count_vectors_dir,
@@ -366,13 +450,13 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
     // traverse graph in parallel processing blocks of size |BS|
     // use static scheduling to make threads process ordered contiguous blocks
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-    for (uint64_t start = 1; start <= graph.max_index(); start += BS) {
-        std::vector<uint64_t> succ_buf;
+    for (node_index start = 1; start <= graph.max_index(); start += BS) {
+        std::vector<node_index> succ_buf;
         std::vector<bool> succ_boundary_buf;
-        std::vector<uint64_t> pred_buf;
+        std::vector<node_index> pred_buf;
         std::vector<bool> pred_boundary_buf;
 
-        for (uint64_t i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
+        for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
             bool skip_succ = false, skip_all = false;
             if (succinct) { // Legacy code for DBGSuccinct
                 BOSS::edge_index boss_idx = i;
@@ -384,7 +468,7 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
             }
             auto with_rd_succ = [&](bit_vector const& rd_succ) {
                 if(!skip_succ) {
-                    auto j = graph.row_diff_successor(i, rd_succ);
+                    auto j = row_diff_successor(graph, i, rd_succ);
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
@@ -402,7 +486,7 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                 if (rd_succ.size()) {
                     with_rd_succ(rd_succ);
                 } else {
-                    with_rd_succ(*graph.get_last());
+                    with_rd_succ(*get_last(graph));
                 }
             }
             succ_boundary_buf.push_back(1);
@@ -484,11 +568,11 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
 
         if (rd_succ.size()) {
             logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_fname);
-            graph.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
+            row_diff_traverse(graph, num_threads, max_length, rd_succ, &anchors_bv);
         } else {
             logger->warn("Assigning anchors without chosen RowDiff successors."
                          " The last outgoing edges will be used for routing.");
-            graph.row_diff_traverse(num_threads, max_length, *graph.get_last(), &anchors_bv);
+            row_diff_traverse(graph, num_threads, max_length, *get_last(graph), &anchors_bv);
         }
     }
 

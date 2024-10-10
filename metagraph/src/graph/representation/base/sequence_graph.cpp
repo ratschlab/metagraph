@@ -5,7 +5,6 @@
 #include <sdsl/int_vector.hpp>
 
 #include "common/logger.hpp"
-#include "common/vectors/bit_vector_dyn.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -419,71 +418,6 @@ void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
     ::mtg::graph::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
-}
-
-std::shared_ptr<const bit_vector> DeBruijnGraph::get_last() const {
-    bit_vector_dyn last_bv(max_index() + 1);
-    call_nodes([&](node_index v) {
-        std::pair<char, node_index> last;
-        call_outgoing_kmers(v, [&](node_index u, char c) {
-            last = std::max(last, std::pair{c, u});
-        });
-        last_bv.set(last.second, true);
-    });
-    return std::make_shared<bit_vector_dyn>(std::move(last_bv));
-}
-
-void DeBruijnGraph::row_diff_traverse(size_t num_threads,
-                                      size_t max_length,
-                                      const bit_vector &rd_succ,
-                                      sdsl::bit_vector *terminal) const {
-    sdsl::bit_vector visited(max_index() + 1);
-    auto finalised = visited;
-    std::vector<size_t> distance(max_index() + 1);
-    assert(terminal->size() == visited.size());
-    assert(rd_succ.size() == visited.size());
-    auto set_terminal = [&](int v) {
-        distance[v] = 0;
-        (*terminal)[v] = true;
-    };
-    call_nodes([&](node_index v) {
-        static std::stack<node_index> path;
-        while (!visited[v]) {
-            path.push(v);
-            visited[v] = true;
-            if (!has_no_outgoing(v)) {
-                v = row_diff_successor(v, rd_succ);
-            }
-        }
-        // Either a sink, or a cyclic dependency
-        if (!finalised[v]) {
-            set_terminal(v);
-            finalised[v] = true;
-        }
-        node_index succ;
-        while (!empty(path)) {
-            succ = std::exchange(v, path.top());
-            if (!finalised[v]) {
-                distance[v] = distance[succ] + 1;
-                if (distance[v] == max_length) {
-                    set_terminal(v);
-                }
-                finalised[v] = true;
-            }
-            path.pop();
-        }
-    });
-}
-
-node_index DeBruijnGraph::row_diff_successor(node_index node, const bit_vector &rd_succ) const {
-    node_index succ = npos;
-    adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
-        if(rd_succ[adjacent_node]) {
-            succ = adjacent_node;
-        }
-    });
-    assert(succ != npos && "a row diff successor must exist");
-    return succ;
 }
 
 /**
