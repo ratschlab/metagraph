@@ -261,7 +261,7 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
 
     boss_graph_->map_to_edges(
         sequence,
-        [&](BOSS::edge_index i) { callback(is_valid(i) ? i : npos); },
+        [&](BOSS::edge_index i) { callback(validate_edge(i)); },
         terminate,
         [&]() {
             if (!is_missing())
@@ -447,13 +447,13 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
         for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
             // the definition of a canonical k-mer is redefined:
             //      use k-mer with smaller index in the BOSS table.
-            callback(is_valid(boss_edges[i]) ? boss_edges[i] : npos);
+            callback(validate_edge(boss_edges[i]));
         }
 
     } else {
         boss_graph_->map_to_edges(
             sequence,
-            [&](BOSS::edge_index i) { callback(is_valid(i) ? i : npos); },
+            [&](BOSS::edge_index i) { callback(validate_edge(i)); },
             terminate,
             [&]() {
                 if (!is_missing())
@@ -472,6 +472,9 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
     assert(boss_graph_.get());
     boss_graph_->call_sequences(
         [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {	
+                node = validate_edge(node);
+            }
             callback(std::move(seq), std::move(path));
         },
         num_threads,
@@ -486,6 +489,9 @@ void DBGSuccinct::call_unitigs(const CallPath &callback,
     assert(boss_graph_.get());
     boss_graph_->call_unitigs(
         [&](std::string&& seq, auto&& path) {
+            for (auto &node : path) {	
+                node = validate_edge(node);
+            }
             callback(std::move(seq), std::move(path));
         },
         num_threads,
@@ -522,12 +528,16 @@ std::shared_ptr<const bit_vector> DBGSuccinct
 
 void DBGSuccinct
 ::row_diff_traverse(size_t num_threads,
-                       size_t max_length,
-                       const bit_vector &rd_succ,
-                       sdsl::bit_vector *terminal) const {
+                    size_t max_length,
+                    const bit_vector &rd_succ,
+                    sdsl::bit_vector *terminal) const {
     return get_boss().row_diff_traverse(num_threads, max_length, rd_succ, terminal);
 }
 
+node_index DBGSuccinct
+::row_diff_successor(node_index node, const bit_vector &rd_succ) const {
+    return get_boss().row_diff_successor(node, rd_succ);
+}
 
 
 size_t DBGSuccinct::outdegree(node_index node) const {
@@ -908,6 +918,9 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
 bool DBGSuccinct::is_valid(node_index node) const {
     return 0 < node && node <= max_index() && (!valid_edges_ || (*valid_edges_)[node]);
+}
+node_index DBGSuccinct::validate_edge(node_index node) const {
+    return is_valid(node) ? node : npos;
 }
 node_index DBGSuccinct::select_node(uint64_t rank) const {
     assert(rank <= num_nodes());

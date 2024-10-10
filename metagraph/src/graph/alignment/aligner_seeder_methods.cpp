@@ -104,7 +104,7 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         const auto &[first, last, seed_length] = final_range;
         assert(seed_length == boss.get_k());
         for (boss::BOSS::edge_index i = first; i <= last; ++i) {
-            DBGSuccinct::node_index node = i;
+            DBGSuccinct::node_index node = dbg_succ.validate_edge(i);
             if (node)
                 callback(node);
         }

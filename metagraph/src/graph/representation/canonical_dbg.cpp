@@ -668,8 +668,8 @@ void CanonicalDBG
 
         cache.call_incoming_edges(rc_edge,
             [&](edge_index prev_edge) {
-                node_index prev = prev_edge;
-                if (!dbg_succ_->is_valid(prev))
+                node_index prev = dbg_succ_->validate_edge(prev_edge);
+                if (!prev)
                     return;
 
                 char c = cache.get_first_char(prev_edge, rc_edge);

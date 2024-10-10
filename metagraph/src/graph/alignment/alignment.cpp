@@ -565,7 +565,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
                     return;
                 }
 
-                nodes_[0] = edge;
+                nodes_[0] = dbg_succ.validate_edge(edge);
                 assert(nodes_[0]);
                 sequence_.push_back(boss.decode(edge_label));
                 assert(graph.get_node_sequence(nodes_[0])

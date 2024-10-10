@@ -179,6 +179,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
     bool is_valid(node_index node) const;
+    node_index validate_edge(node_index node) const;
     node_index select_node(uint64_t boss_index) const;
     uint64_t rank_node(node_index kmer_index) const;
 
@@ -188,6 +189,9 @@ class DBGSuccinct : public DeBruijnGraph {
                                    size_t max_length,
                                    const bit_vector &rd_succ,
                                    sdsl::bit_vector *terminal) const override final;
+    
+    virtual node_index row_diff_successor(node_index node,
+                                          const bit_vector &rd_succ) const override final;
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           uint32_t max_num_hash_functions = -1);
