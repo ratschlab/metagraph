@@ -296,23 +296,24 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
         if (utils::ends_with(p.path(), row_count_extension))
             optimize_forks = true;
     }
-
+    // Other graphs may not support consecutive access
+    optimize_forks &= (bool)dynamic_cast<graph::DBGSuccinct const*>(&graph);
     if (optimize_forks) {
         logger->trace("RowDiff successors will be set to the adjacent nodes with"
                       " the largest number of labels");
 
-        const bit_vector &last = *get_last(graph);
+        auto last = get_last(graph);
         graph::DeBruijnGraph::node_index graph_idx = to_node(0);
 
         std::vector<uint32_t> outgoing_counts;
 
-        sdsl::bit_vector rd_succ_bv(last.size(), false);
+        sdsl::bit_vector rd_succ_bv(last->size(), false);
 
         sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
             [&](int32_t count) {
                 // TODO: skip single outgoing
                 outgoing_counts.push_back(count);
-                if (last[graph_idx]) {
+                if ((*last)[graph_idx]) {
                     // pick the node with the largest count
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                       outgoing_counts.rend())
@@ -486,7 +487,8 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                 if (rd_succ.size()) {
                     with_rd_succ(rd_succ);
                 } else {
-                    with_rd_succ(*get_last(graph));
+                    auto last = get_last(graph);
+                    with_rd_succ(*last);
                 }
             }
             succ_boundary_buf.push_back(1);
@@ -572,7 +574,8 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
         } else {
             logger->warn("Assigning anchors without chosen RowDiff successors."
                          " The last outgoing edges will be used for routing.");
-            row_diff_traverse(graph, num_threads, max_length, *get_last(graph), &anchors_bv);
+            auto last = get_last(graph);
+            row_diff_traverse(graph, num_threads, max_length, *last, &anchors_bv);
         }
     }
 
