@@ -177,16 +177,13 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     auto it = offsets.begin();
     uint64_t last_coord = std::numeric_limits<uint64_t>::max();
     int64_t last_offset = std::numeric_limits<int64_t>::max();
-    node_index last_i = DeBruijnGraph::npos;
     for (node_index i : indices) {
         // only insert coordinates for matched k-mers and increment the coordinates
         if (i > 0) {
             if (last_coord == std::numeric_limits<uint64_t>::max() || coord - *it != last_coord - last_offset) {
-                assert(last_i != i);
                 annotator_->add_label_coord(graph_to_anno_index(i), labels, coord - *it);
                 last_coord = coord;
                 last_offset = *it;
-                last_i = i;
             }
         }
 
@@ -221,17 +218,14 @@ void AnnotatedDBG::add_kmer_coords(
 
         uint64_t last_coord = std::numeric_limits<uint64_t>::max();
         int64_t last_offset = std::numeric_limits<int64_t>::max();
-        node_index last_i = DeBruijnGraph::npos;
         auto it = offsets[t].begin();
         for (node_index i : ids[t]) {
             // only insert coordinates for matched k-mers and increment the coordinates
             if (i > 0) {
                 if (last_coord == std::numeric_limits<uint64_t>::max() || coord - *it != last_coord - last_offset) {
-                    assert(last_i != i);
                     annotator_->add_label_coord(graph_to_anno_index(i), labels, coord - *it);
                     last_coord = coord;
                     last_offset = *it;
-                    last_i = i;
                 }
             }
             coord++;
@@ -265,16 +259,13 @@ void AnnotatedDBG::annotate_kmer_coords(
 
         uint64_t last_coord = std::numeric_limits<uint64_t>::max();
         int64_t last_offset = std::numeric_limits<int64_t>::max();
-        node_index last_i = DeBruijnGraph::npos;
         call_annotated_nodes_offsets(*graph_, sequence, [&](node_index i, int64_t o) {
             if (i > 0) {
                 if (last_coord == std::numeric_limits<uint64_t>::max() || coord - o != last_coord - last_offset) {
-                    assert(last_i != i);
                     ids[last].push_back(graph_to_anno_index(i));
                     coords[last].emplace_back(graph_to_anno_index(i), coord - o);
                     last_coord = coord;
                     last_offset = o;
-                    last_i = i;
                 }
             }
             coord++;
