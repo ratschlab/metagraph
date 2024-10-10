@@ -261,7 +261,7 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
 
     boss_graph_->map_to_edges(
         sequence,
-        [&](BOSS::edge_index i) { callback(i); },
+        [&](BOSS::edge_index i) { callback(is_valid(i) ? i : npos); },
         terminate,
         [&]() {
             if (!is_missing())
@@ -385,7 +385,7 @@ void DBGSuccinct::traverse(node_index start,
         edge = boss_graph_->pick_edge(edge, boss_graph_->encode(*begin));
 
         start = edge;
-        if (start == npos)
+        if (!is_valid(start))
             return;
 
         callback(start);
@@ -447,13 +447,13 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
         for (size_t i = 0; i < boss_edges.size() && !terminate(); ++i) {
             // the definition of a canonical k-mer is redefined:
             //      use k-mer with smaller index in the BOSS table.
-            callback(boss_edges[i]);
+            callback(is_valid(boss_edges[i]) ? boss_edges[i] : npos);
         }
 
     } else {
         boss_graph_->map_to_edges(
             sequence,
-            [&](BOSS::edge_index i) { callback(i); },
+            [&](BOSS::edge_index i) { callback(is_valid(i) ? i : npos); },
             terminate,
             [&]() {
                 if (!is_missing())
