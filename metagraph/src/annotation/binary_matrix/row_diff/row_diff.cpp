@@ -64,22 +64,22 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
                 graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->validate_edge(boss_edge)
-            );
+            if (graph_->is_valid(boss_edge)) {
+                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(boss_edge);
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.value());
+                auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
+                rd_paths_trunc[i].push_back(it.value());
 
-            // If a node had been reached before, we interrupt the diff path.
-            // The annotation for that node will have been reconstructed earlier
-            // than for other nodes in this path as well. Thus, we will start
-            // reconstruction from that node and don't need its successors.
-            if (!is_new)
-                break;
+                // If a node had been reached before, we interrupt the diff path.
+                // The annotation for that node will have been reconstructed earlier
+                // than for other nodes in this path as well. Thus, we will start
+                // reconstruction from that node and don't need its successors.
+                if (!is_new)
+                    break;
 
-            if (anchor_[row])
-                break;
+                if (anchor_[row])
+                    break;
+            }
 
             boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
         }
