@@ -388,7 +388,7 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
-                    if(rd_succ[i]) {
+                if(rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
                         if (dummy && (*dummy)[pred]) {
                             return;
@@ -921,7 +921,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         // reduction (zero diff)
                         __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                     }
-                } else if (succ) {
+                } else if (succ || anchor[row_idx]) {
                     bool is_anchor = anchor[row_idx];
                     // add current bit if this node is an anchor
                     // or if the successor has zero diff
