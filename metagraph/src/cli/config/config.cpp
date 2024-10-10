@@ -151,6 +151,8 @@ Config::Config(int argc, char *argv[]) {
             dynamic = true;
         } else if (!strcmp(argv[i], "--mask-dummy")) {
             mark_dummy_kmers = true;
+        } else if (!strcmp(argv[i], "--is-monochromatic")) {
+            is_monochromatic = true;
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
@@ -972,6 +974,7 @@ if (advanced) {
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
+            fprintf(stderr, "\t   --is-monochromatic \t\tindicate that the input sequences are monochromatic (i.e., their colouring is constant) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB [1]\n");
 if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");

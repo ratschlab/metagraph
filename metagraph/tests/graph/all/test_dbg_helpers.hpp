@@ -53,6 +53,13 @@ class DBGSuccinctCached : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
+class DBGSSHashMonochromatic : public DBGSSHash {
+  public:
+    template <typename... Args>
+    DBGSSHashMonochromatic(Args&&... args)
+          : DBGSSHash(std::forward<Args>(args)...) {}
+};
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -93,6 +100,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGHashFast,
                          DBGSSHash,
+                         DBGSSHashMonochromatic,
                          DBGSuccinct,
                          DBGSuccinctIndexed<1>,
                          DBGSuccinctIndexed<2>,
