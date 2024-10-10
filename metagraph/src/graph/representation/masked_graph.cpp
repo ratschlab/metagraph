@@ -112,6 +112,9 @@ void MaskedDeBruijnGraph::call_sequences(const CallPath &callback,
                                              only_valid_nodes_in_mask_);
 
         dbg_succ->get_boss().call_sequences([&](std::string&& sequence, auto&& path) {
+            for (auto &node : path) {
+                node = dbg_succ->validate_edge(node);
+            }
             callback(sequence, path);
 
         }, num_threads, kmers_in_single_form, &mask);
@@ -130,6 +133,9 @@ void MaskedDeBruijnGraph::call_unitigs(const CallPath &callback,
                                              only_valid_nodes_in_mask_);
 
         dbg_succ->get_boss().call_unitigs([&](std::string&& sequence, auto&& path) {
+            for (auto &node : path) {
+                node = dbg_succ->validate_edge(node);
+            }
             callback(sequence, path);
 
         }, num_threads, min_tip_size, kmers_in_single_form, &mask);

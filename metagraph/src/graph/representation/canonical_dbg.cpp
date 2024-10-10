@@ -115,7 +115,7 @@ void CanonicalDBG
                                                    sequence.substr(1));
         boss.map_to_edges(sequence.substr(1),
             [&](boss::BOSS::edge_index edge) {
-                path.push_back(edge);
+                path.push_back(dbg_succ->validate_edge(edge));
                 ++it;
             },
             []() { return false; },

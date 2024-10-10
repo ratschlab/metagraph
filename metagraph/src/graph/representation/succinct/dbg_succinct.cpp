@@ -91,7 +91,9 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
     // dbg node is a boss edge
     BOSS::edge_index boss_edge = node;
     boss_edge = boss_graph_->fwd(boss_edge);
-    return boss_graph_->pick_edge(boss_edge, boss_graph_->encode(next_char));
+    return validate_edge(
+        boss_graph_->pick_edge(boss_edge, boss_graph_->encode(next_char))
+    );
 }
 
 // Traverse the incoming edge
@@ -100,7 +102,9 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
 
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->bwd(node);
-    return boss_graph_->pick_incoming_edge(edge, boss_graph_->encode(prev_char));
+    return validate_edge(
+        boss_graph_->pick_incoming_edge(edge, boss_graph_->encode(prev_char))
+    );
 }
 
 template <class Callback>
@@ -228,7 +232,7 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
 
         // Call all new nodes inserted including the dummy ones, unless they
         // are masked out.
-        on_insertion(new_boss_edge);
+        on_insertion(validate_edge(new_boss_edge));
     }
 
     assert(!valid_edges_.get() || !(*valid_edges_)[0]);
@@ -472,7 +476,7 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
     assert(boss_graph_.get());
     boss_graph_->call_sequences(
         [&](std::string&& seq, auto&& path) {
-            for (auto &node : path) {	
+            for (auto &node : path) {
                 node = validate_edge(node);
             }
             callback(std::move(seq), std::move(path));
@@ -489,7 +493,7 @@ void DBGSuccinct::call_unitigs(const CallPath &callback,
     assert(boss_graph_.get());
     boss_graph_->call_unitigs(
         [&](std::string&& seq, auto&& path) {
-            for (auto &node : path) {	
+            for (auto &node : path) {
                 node = validate_edge(node);
             }
             callback(std::move(seq), std::move(path));
