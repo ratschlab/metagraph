@@ -476,6 +476,12 @@ void DeBruijnGraph
     }, stop_early);
 }
 
+void DeBruijnGraph::map_to_contigs(std::string_view sequence,
+                                   const std::function<void(node_index, int64_t)> &callback,
+                                   const std::function<bool()> &terminate) const {
+    map_to_nodes(sequence, [&](node_index node) { callback(node, 0); }, terminate);
+}
+
 void DeBruijnGraph::print(std::ostream &out) const {
     std::string vertex_header("Vertex");
     vertex_header.resize(get_k(), ' ');

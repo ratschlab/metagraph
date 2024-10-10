@@ -165,6 +165,14 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
+    // If a graph has defined contigs, then map each k-mer in sequence to a
+    // representative node of the contig to which it maps and offset (traversal distance)
+    // to that representative node.
+    // If no contigs are defined, this functions identically to map_to_nodes
+    virtual void map_to_contigs(std::string_view sequence,
+                                const std::function<void(node_index, int64_t)> &callback,
+                                const std::function<bool()> &terminate = [](){ return false; }) const;
+
     // Given a starting node and a sequence of edge labels, traverse the graph
     // forward. The traversal is terminated once terminate() returns true or
     // when the sequence is exhausted.

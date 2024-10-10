@@ -27,22 +27,9 @@ typedef std::pair<Label, size_t> StringCountPair;
 void call_annotated_nodes_offsets(const SequenceGraph &graph,
                                   std::string_view sequence,
                                   const std::function<void(SequenceGraph::node_index, int64_t)> &callback) {
-    const auto *graph_ptr = &graph;
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_ptr);
-    if (canonical)
-        graph_ptr = &canonical->get_graph();
-
-    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(graph_ptr)) {
-        if (sshash->is_monochromatic()) {
-            if (canonical || sshash->get_mode() == DeBruijnGraph::CANONICAL) {
-                sshash->map_to_contigs_with_rc<true>(sequence, [&](SequenceGraph::node_index i, int64_t offset, bool) {
-                    callback(i, offset);
-                });
-            } else {
-                sshash->map_to_contigs_with_rc<false>(sequence, [&](SequenceGraph::node_index i, int64_t offset, bool) {
-                    callback(i, offset);
-                });
-            }
+    if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
+        if (dbg->is_monochromatic()) {
+            dbg->map_to_contigs(sequence, callback);
             return;
         }
     }

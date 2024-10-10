@@ -49,6 +49,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
+    virtual void map_to_contigs(std::string_view sequence,
+                                const std::function<void(node_index, int64_t)> &callback,
+                                const std::function<bool()> &terminate = [](){ return false; }) const override final;
+
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence

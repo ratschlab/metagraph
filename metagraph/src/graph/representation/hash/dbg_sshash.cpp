@@ -240,6 +240,25 @@ void DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
                                             const std::function<void(node_index, bool)>&,
                                             const std::function<bool()>&) const;
 
+void DBGSSHash::map_to_contigs(std::string_view sequence,
+                               const std::function<void(node_index, int64_t)>& callback,
+                               const std::function<bool()>& terminate) const {
+    if (!is_monochromatic()) {
+        DeBruijnGraph::map_to_contigs(sequence, callback, terminate);
+        return;
+    }
+
+    if (mode_ != CANONICAL) {
+        map_to_contigs_with_rc<false>(sequence, [&](node_index node, int64_t offset, bool) {
+            callback(node, offset);
+        });
+    } else {
+        map_to_contigs_with_rc<true>(sequence, [&](node_index node, int64_t offset, bool) {
+            callback(node, offset);
+        });
+    }
+}
+
 template <bool with_rc>
 void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
                                        const std::function<void(node_index, int64_t, bool)>& callback,
