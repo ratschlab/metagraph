@@ -334,7 +334,7 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
 }
 
 std::vector<Label>
-AnnotatedSequenceGraph::get_labels(node_index index) const {
+AnnotatedSequenceGraph::get_stored_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 

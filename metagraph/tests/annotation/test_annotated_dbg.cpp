@@ -32,7 +32,7 @@ void check_labels(const AnnotatedDBG &anno_graph,
     call_annotated_nodes_offsets(graph, sequence, [&](auto index, int64_t) {
         ASSERT_NE(SequenceGraph::npos, index);
         indices.insert(index);
-        auto cur_labels = anno_graph.get_labels(index);
+        auto cur_labels = anno_graph.get_stored_labels(index);
         EXPECT_EQ(labels_present.size(), cur_labels.size());
         EXPECT_EQ(convert_to_set(labels_present), convert_to_set(cur_labels));
 
@@ -46,7 +46,7 @@ void check_labels(const AnnotatedDBG &anno_graph,
                       convert_to_set(cur_labels));
 
             for (DeBruijnGraph::node_index node = contig_id + 1; node <= last_node; ++node) {
-                EXPECT_TRUE(anno_graph.get_labels(node).empty());
+                EXPECT_TRUE(anno_graph.get_stored_labels(node).empty());
             }
         }
     });
