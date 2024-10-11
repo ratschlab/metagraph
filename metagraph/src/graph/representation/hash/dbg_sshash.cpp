@@ -259,6 +259,43 @@ void DBGSSHash::map_to_contigs(std::string_view sequence,
     }
 }
 
+DBGSSHash::node_index DBGSSHash::get_contig_id(node_index node) const {
+    assert(node != npos);
+    if (is_monochromatic()) {
+        assert(monotig_id_.size() && monotig_id_[0]);
+        node_index contig_id = sshash_to_graph_index(monotig_id_.prev1(graph_index_to_sshash(node)));
+        assert(contig_id != npos);
+        assert(contig_id <= max_index());
+        return contig_id;
+    }
+
+    return DeBruijnGraph::get_contig_id(node);
+}
+
+DBGSSHash::node_index DBGSSHash::get_last_node_in_contig(node_index contig_id) const {
+    assert(contig_id != npos);
+    if (is_monochromatic()) {
+        assert(monotig_id_.size());
+        uint64_t contig_sshash_id = graph_index_to_sshash(contig_id);
+        assert(monotig_id_[contig_sshash_id]);
+
+        if (contig_sshash_id + 1 == monotig_id_.size())
+            return contig_id;
+
+        uint64_t next_contig = monotig_id_.next1(contig_sshash_id + 1);
+
+        if (next_contig == contig_sshash_id + 1)
+            return contig_id;
+
+        node_index last_node = sshash_to_graph_index(next_contig - 1);
+        assert(last_node != npos);
+        assert(last_node <= max_index());
+        return last_node;
+    }
+
+    return DeBruijnGraph::get_last_node_in_contig(contig_id);
+}
+
 template <bool with_rc>
 void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
                                        const std::function<void(node_index, int64_t, bool)>& callback,
@@ -277,20 +314,19 @@ void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
         map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence,
             [&](sshash::lookup_result res) {
                 node_index node = sshash_to_graph_index(res.kmer_id);
-                if (node != npos) {
-                    if (is_monochromatic()) {
-                        assert(monotig_id_.size() == dict_size());
-                        assert(monotig_id_[res.kmer_id] || res.kmer_id_in_contig);
-                        assert(monotig_id_.prev1(res.kmer_id) >= res.kmer_id - res.kmer_id_in_contig);
-                        res.kmer_id_in_contig = res.kmer_id - monotig_id_.prev1(res.kmer_id);
-                    }
-
-                    node -= res.kmer_id_in_contig;
-                } else {
+                if (node == npos) {
                     res.kmer_id_in_contig = 0;
+                } else if (is_monochromatic()) {
+                    assert(monotig_id_.size() == dict_size());
+                    assert(monotig_id_[res.kmer_id] || res.kmer_id_in_contig);
+                    assert(monotig_id_[res.kmer_id - res.kmer_id_in_contig]);
+                    assert(monotig_id_.prev1(res.kmer_id) >= res.kmer_id - res.kmer_id_in_contig);
+                    res.kmer_id_in_contig = res.kmer_id - monotig_id_.prev1(res.kmer_id);
                 }
 
-                callback(node, res.kmer_id_in_contig, res.kmer_orientation);
+                callback(node - res.kmer_id_in_contig,
+                         res.kmer_id_in_contig,
+                         res.kmer_orientation);
             },
             terminate
         );

@@ -173,6 +173,9 @@ class DeBruijnGraph : public SequenceGraph {
                                 const std::function<void(node_index, int64_t)> &callback,
                                 const std::function<bool()> &terminate = [](){ return false; }) const;
 
+    virtual node_index get_contig_id(node_index node) const;
+    virtual node_index get_last_node_in_contig(node_index contig_id) const;
+
     // Given a starting node and a sequence of edge labels, traverse the graph
     // forward. The traversal is terminated once terminate() returns true or
     // when the sequence is exhausted.

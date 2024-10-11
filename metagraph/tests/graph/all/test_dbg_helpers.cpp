@@ -221,8 +221,10 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
 
     std::vector<std::string> contigs;
     std::vector<std::string> headers;
+    std::vector<std::string> monotigs;
     size_t num_kmers = 0;
     size_t num_chars = 0;
+    size_t num_kmers_monotigs = 0;
     string_graph.call_sequences([&](const std::string &contig, const auto &path) {
         num_kmers += path.size();
         num_chars += contig.size();
@@ -237,7 +239,9 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
             for (size_t j = 0; j < sigs.size(); ++j) {
                 if (sigs[j].second[i] != sigs[j].second[i - 1]) {
                     // we're at a breakpoint
-                    header += " C:i:" + std::to_string(end - begin - k + 1);
+                    header += " C:i:" + std::to_string(end - begin + 1 - k);
+                    num_kmers_monotigs += end - begin - k + 1;
+                    monotigs.emplace_back(begin, end);
                     begin = end - k + 1;
                     assert(begin == contig.begin() + i);
                     break;
@@ -247,11 +251,22 @@ build_graph<DBGSSHashMonochromatic>(uint64_t k,
         }
 
         assert(end == contig.end());
-        header += " C:i:" + std::to_string(end - begin - k + 1);
+        if (end - begin + 1 - k > 0) {
+            header += " C:i:" + std::to_string(end - begin - k + 1);
+            num_kmers_monotigs += end - begin - k + 1;
+            monotigs.emplace_back(begin, end);
+        }
     }, 1, mode != DeBruijnGraph::BASIC);
+
+    EXPECT_EQ(num_kmers, num_kmers_monotigs);
 
     if (contigs.empty())
         return std::make_shared<DBGSSHash>(k, mode);
+
+    for (const auto &contig : monotigs) {
+        EXPECT_EQ(string_anno_graph->get_labels(contig),
+                  string_anno_graph->get_labels(contig, 1.0));
+    }
 
     std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
     writeFastaFile(contigs, headers, dump_path);

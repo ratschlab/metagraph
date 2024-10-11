@@ -482,6 +482,9 @@ void DeBruijnGraph::map_to_contigs(std::string_view sequence,
     map_to_nodes(sequence, [&](node_index node) { callback(node, 0); }, terminate);
 }
 
+node_index DeBruijnGraph::get_contig_id(node_index node) const { return node; }
+node_index DeBruijnGraph::get_last_node_in_contig(node_index contig_id) const { return contig_id; }
+
 void DeBruijnGraph::print(std::ostream &out) const {
     std::string vertex_header("Vertex");
     vertex_header.resize(get_k(), ' ');
