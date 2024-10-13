@@ -107,22 +107,6 @@ void global_align(const DeBruijnGraph &graph,
     size_t gap_opn = score_to_cost(config.gap_opening_penalty);
     size_t gap_ext = score_to_cost(config.gap_extension_penalty);
 
-    size_t query_dist = 0;
-    auto node = aln.get_path()[0];
-    size_t best_dist = 0;
-    for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
-        if (best_dist == dist || !graph.has_single_incoming(node))
-            break;
-
-        if (auto prev = graph.traverse_back(node, *it)) {
-            ++best_dist;
-            ++query_dist;
-            node = prev;
-        } else {
-            break;
-        }
-    }
-
     // S(cost, query_dist, node) = best_dist
     using NodeToBestDists = VectorMap<DeBruijnGraph::node_index, size_t>; // S(cost, query_dist)
     using WaveFront = std::vector<NodeToBestDists>; // S(cost)
@@ -133,6 +117,21 @@ void global_align(const DeBruijnGraph &graph,
     ScoreTable F; // best cost (last operation is deletion)
 
     auto fill_table = [&]() -> size_t {
+        size_t query_dist = 0;
+        auto node = aln.get_path()[0];
+        size_t best_dist = 0;
+        for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
+            if (best_dist == dist || !graph.has_single_incoming(node))
+                break;
+
+            if (auto prev = graph.traverse_back(node, *it)) {
+                ++best_dist;
+                ++query_dist;
+                node = prev;
+            } else {
+                break;
+            }
+        }
         auto &wf = S.emplace_back();
         wf.resize(query_dist + 1);
         wf[query_dist][node] = best_dist;
@@ -279,11 +278,85 @@ void global_align(const DeBruijnGraph &graph,
     };
 
     size_t cost = fill_table();
-    if (cost < std::numeric_limits<size_t>::max()) {
-        common::logger->trace("FOUND ALIGNMENT AT COST {}", cost);
-    } else {
+    if (cost == std::numeric_limits<size_t>::max())
         throw std::runtime_error("No alignment found");
-    }
+
+    common::logger->trace("FOUND ALIGNMENT AT COST {}", cost);
+
+    // backtrack
+    DeBruijnGraph::node_index node = target.get_path().back();
+    size_t query_dist = query_window.size();
+
+    assert(cost < S.size() && query_dist < S[cost].size());
+    auto bt = S[cost][query_dist].find(node);
+    assert(bt != S[cost][query_dist].end());
+    assert(bt->second == dist);
+
+//     while (bt != S[cost][query_dist].end()) {
+//         assert(bt->second == dist);
+//         if (cost < E.size() && query_dist < E[cost].size()) {
+//             // check insertion
+//             auto et = E[cost][query_dist].find(node);
+//             if (et != E[cost][query_dist].end() && et->second == dist) {
+//                 // S == E, so we have an insertion. check if it's an extension or an insertion
+
+//                 // backtrack through all
+//                 bool found = true;
+//                 while (found) {
+//                     found = false;
+//                     size_t prev_cost = cost - gap_ext;
+//                     if (query_dist - 1 < E[prev_cost].size()) {
+//                         auto prev_et = E[prev_cost][query_dist - 1].find(node);
+//                         if (prev_et != E[prev_cost][query_dist - 1].end() && prev_et->second == dist) {
+//                             cost = prev_cost;
+//                             --query_dist;
+//                             et = prev_et;
+//                             found = true;
+//                         }
+//                     }
+//                 }
+
+//                 size_t prev_cost = cost - gap_opn;
+//                 if (query_dist - 1 < E[prev_cost].size()) {
+
+//                 } else {
+
+//                 }
+//             }
+//         }
+
+//         if (cost < F.size() && query_dist < F[cost].size()) {
+//             // check deletion
+//             auto ft = F[cost][query_dist].find(node);
+//             if (ft != F[cost][query_dist].end() && ft->second == dist) {
+//                 // S == F, so we may have a deletion
+//                 // TODO
+//             }
+//         }
+
+//         if (query_dist > 0 && dist > 0) {
+//             // check match
+//             DeBruijnGraph::node_index found_prev = DeBruijnGraph::npos;
+//             size_t cur_query_dist = query_dist;
+//             for (auto it = S[cost].rbegin(); it != S[cost].rend(); ++it, --cur_query_dist) {
+//                 for (const auto &[prev_node, prev_dist] : *it) {
+//                     if (query_dist > cur_query_dist && dist > prev_dist && dist - prev_dist == query_dist - cur_query_dist) {
+//                         assert(found_prev == DeBruijnGraph::npos);
+//                         found_prev = prev_node;
+// #ifdef NDEBUG
+//                         break;
+// #endif
+//                     }
+//                 }
+// #ifdef NDEBUG
+//                 if (found_prev != DeBruijnGraph::npos)
+//                     break;
+// #endif
+//             }
+
+//             if (found_prev)
+//         }
+//     }
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
