@@ -509,8 +509,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -537,7 +537,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         );
 
         anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
+        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -556,8 +556,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
@@ -627,8 +627,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -661,7 +661,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         );
 
         anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
+        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -685,8 +685,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
@@ -767,8 +767,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -783,7 +783,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         );
 
         anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
+        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -802,8 +802,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
@@ -890,8 +890,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -906,7 +906,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         );
 
         anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
+        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -930,8 +930,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
-                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+        EXPECT_EQ(anno_graph.get_annotator().num_objects(),
+                  dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
