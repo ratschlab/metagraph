@@ -66,6 +66,7 @@ class SequenceGraph {
 
     virtual uint64_t num_nodes() const = 0;
     virtual uint64_t max_index() const { return num_nodes(); };
+    virtual bool in_graph(node_index node) const { return node > 0 && node <= max_index(); }
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;

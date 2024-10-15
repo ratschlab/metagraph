@@ -608,7 +608,7 @@ void CanonicalDBG
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
             node_index prev = adjacent_edge;
-            if (!dbg_succ_->is_valid(prev))
+            if (!dbg_succ_->in_graph(prev))
                 return;
 
             char c = boss.decode(boss.get_W(adjacent_edge) % boss.alph_size);
@@ -669,7 +669,7 @@ void CanonicalDBG
         cache.call_incoming_edges(rc_edge,
             [&](edge_index prev_edge) {
                 node_index prev = prev_edge;
-                if (!dbg_succ_->is_valid(prev))
+                if (!dbg_succ_->in_graph(prev))
                     return;
 
                 char c = cache.get_first_char(prev_edge, rc_edge);

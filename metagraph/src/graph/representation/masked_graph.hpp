@@ -101,8 +101,8 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
-    virtual inline bool in_subgraph(node_index node) const {
-        assert(node > 0 && node <= max_index());
+    virtual inline bool in_graph(node_index node) const override final {
+        assert(DBGWrapper<DeBruijnGraph>::in_graph(node));
         assert(kmers_in_graph_.get());
 
         return (*kmers_in_graph_)[node];
