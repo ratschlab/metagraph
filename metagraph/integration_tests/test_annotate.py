@@ -67,8 +67,9 @@ class TestAnnotate(TestingBase):
             self.assertEqual(res.returncode, 0)
             out = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  100', out[0])
-            self.assertEqual('objects: 46960', out[1])
-            self.assertEqual('density: 0.0185072', out[2])
+            self.assertIn((out[1], out[2]), [
+                ('objects: 47633', 'density: 0.0182458'), # DBGSuccinct with dummy nodes
+                ('objects: 46960', 'density: 0.0185072')])
             self.assertEqual('representation: ' + anno_repr, out[3])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
@@ -150,8 +151,9 @@ class TestAnnotate(TestingBase):
             self.assertEqual(res.returncode, 0)
             out = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', out[0])
-            self.assertEqual('objects: 469983', out[1])
-            self.assertEqual('density: 1', out[2])
+            self.assertIn((out[1], out[2]), [
+                ('objects: 471169', 'density: 0.997483'), # DBGSuccinct with dummy nodes
+                ('objects: 469983', 'density: 1')])
             self.assertEqual('representation: ' + anno_repr, out[3])
 
     @parameterized.expand(GRAPH_TYPES)
@@ -190,8 +192,9 @@ class TestAnnotate(TestingBase):
             self.assertEqual(res.returncode, 0)
             out = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', out[0])
-            self.assertEqual('objects: 802920', out[1])
-            self.assertEqual('density: 0.585342', out[2])
+            self.assertIn((out[1], out[2]), [
+                ('objects: 804179', 'density: 0.584426'), # DBGSuccinct with dummy nodes
+                ('objects: 802920', 'density: 0.585342')])
             self.assertEqual('representation: ' + anno_repr, out[3])
 
             # both strands
@@ -208,8 +211,9 @@ class TestAnnotate(TestingBase):
             self.assertEqual(res.returncode, 0)
             out = res.stdout.decode().split('\n')[2:]
             self.assertEqual('labels:  1', out[0])
-            self.assertEqual('objects: 802920', out[1])
-            self.assertEqual('density: 1', out[2])
+            self.assertIn((out[1], out[2]), [
+                ('objects: 804179', 'density: 0.998434'), # DBGSuccinct with dummy nodes
+                ('objects: 802920', 'density: 1')])
             self.assertEqual('representation: ' + anno_repr, out[3])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
@@ -310,8 +314,9 @@ class TestAnnotate(TestingBase):
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('labels:  100', out[0])
-        self.assertEqual('objects: 46960', out[1])
-        self.assertEqual('density: 0.0185072', out[2])
+        self.assertIn((out[1], out[2]), [
+            ('objects: 47633', 'density: 0.0182458'), # DBGSuccinct with dummy nodes
+            ('objects: 46960', 'density: 0.0185072')])
         self.assertEqual('representation: ' + anno_repr, out[3])
 
     @parameterized.expand(GRAPH_TYPES)

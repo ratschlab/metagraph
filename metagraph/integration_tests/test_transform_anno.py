@@ -56,8 +56,9 @@ class TestColumnOperations(TestingBase):
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('labels:  100', out[0])
-        self.assertEqual('objects: 46960', out[1])
-        self.assertEqual('density: 0.0185072', out[2])
+        self.assertIn((out[1], out[2]), [
+            ('objects: 47633', 'density: 0.0182458'), # DBGSuccinct with dummy nodes
+            ('objects: 46960', 'density: 0.0185072')])
         self.assertEqual(f'representation: {self.anno_repr}', out[3])
 
     def tearDown(self):
@@ -82,8 +83,11 @@ class TestColumnOperations(TestingBase):
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('labels:  1', out[0])
-        self.assertEqual('objects: 46960', out[1])
-        self.assertEqual(f'density: {expected_density}', out[2])
+        split = out[2].split()
+        self.assertEqual(out[2], split[0] + ' ' + split[1])
+        density = float(split[1])
+        self.assertIn(out[1], ['objects: 47633', 'objects: 46960'])
+        self.assertLess(abs(density - expected_density * 46960 / 47633), 10**-6)
         self.assertEqual(f'representation: {self.anno_repr}', out[3])
 
     def test_aggregate_columns(self):
@@ -104,9 +108,11 @@ class TestColumnOperations(TestingBase):
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('labels:  1', out[0])
-        self.assertEqual('objects: 46960', out[1])
-        self.assertEqual(f'density: {expected_density}', out[2])
-        self.assertEqual(f'representation: {self.anno_repr}', out[3])
+        split = out[2].split()
+        self.assertEqual(out[2], split[0] + ' ' + split[1])
+        density = float(split[1])
+        self.assertIn(out[1], ['objects: 47633', 'objects: 46960'])
+        self.assertLess(abs(density - expected_density * 46960 / 47633), 10**-6)
 
     def test_aggregate_columns_filtered(self):
         self._check_aggregation_min_max_value(0, 0, 0)

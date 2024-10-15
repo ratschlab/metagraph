@@ -127,7 +127,7 @@ class TestQuery(TestingBase):
         out = res.stdout.decode().split('\n')[2:]
         assert('labels:  100' == out[0])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 46960' == out[1])
+            assert(out[1] in ['objects: 47633', 'objects: 46960'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
@@ -601,7 +601,7 @@ class TestQueryTinyLinear(TestingBase):
         assert(res.returncode == 0)
         out = res.stdout.decode().split('\n')[2:]
         assert('labels:  3' == out[0])
-        assert('objects: 12' == out[1])
+        assert(out[1] in ['objects: 18', 'objects: 12'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
@@ -697,7 +697,7 @@ class TestQuery1Column(TestingBase):
         out = res.stdout.decode().split('\n')[2:]
         assert('labels:  1' == out[0])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 46960' == out[1])
+            assert(out[1] in ['objects: 47633', 'objects: 46960'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
