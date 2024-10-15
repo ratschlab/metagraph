@@ -10,6 +10,27 @@
 
 namespace mtg {
 namespace annot {
+
+using node_index = graph::DeBruijnGraph::node_index;
+
+node_index row_diff_successor(const graph::DeBruijnGraph &graph,
+                              node_index node,
+                              const bit_vector &rd_succ) {
+    if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        return dbg_succ->get_boss().row_diff_successor(node, rd_succ);
+    } else {
+        node_index succ = graph::DeBruijnGraph::npos;
+        graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
+            if (rd_succ[adjacent_node]) {
+                succ = adjacent_node;
+            }
+        });
+        assert(succ != graph::DeBruijnGraph::npos && "a row diff successor must exist");
+        return succ;
+    }
+}
+
+
 namespace matrix {
 
 void IRowDiff::load_anchor(const std::string &filename) {
@@ -41,7 +62,7 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
 std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     using Row = BinaryMatrix::Row;
 
@@ -54,18 +75,14 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
-        graph::boss::BOSS::edge_index boss_edge = 
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+        node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         while (true) {
-            if (graph_->is_valid(boss_edge)) {
-                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(boss_edge);
+            if (graph_->in_graph(node)) {
+                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
                 auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
                 rd_paths_trunc[i].push_back(it.value());
@@ -80,8 +97,14 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
                 if (anchor_[row])
                     break;
             }
-
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            if (fork_succ_.size()) {
+                node = row_diff_successor(*graph_, node, fork_succ_);
+            } else { // Only happens in DBGSuccinct
+                auto *dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(graph_);
+                assert(dbg_succ);
+                node = row_diff_successor(*graph_, node, dbg_succ->get_boss().get_last());
+            }
+            
         }
     }
 

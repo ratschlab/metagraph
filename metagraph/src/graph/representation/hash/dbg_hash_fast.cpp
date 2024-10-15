@@ -158,15 +158,15 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
-  private:
-    bool in_graph(node_index node) const {
-        assert(node > 0 && node <= max_index());
+    virtual bool in_graph(node_index node) const override final {
+        assert(DBGHashFast::DBGHashFastInterface::in_graph(node));
 
         Flags flags = bits_[node_to_bucket(node)];
 
         return (flags >> ((node - 1) % kAlphabetSize)) & static_cast<Flags>(1);
     }
 
+  private:
     Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
@@ -234,8 +234,8 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
 
         for (const auto &kmer_pair : sequence_to_kmers(sequence)) {
             // putting the structured binding in the for statement above crashes gcc 8.2.0
-            const auto &[kmer, is_valid] = kmer_pair;
-            if (!is_valid) {
+            const auto &[kmer, in_graph] = kmer_pair;
+            if (!in_graph) {
                 previous_valid = false;
                 continue;
             }
@@ -290,7 +290,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                                 std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -298,7 +298,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                || get_node_index(kmer) == npos
                || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(kmer) : npos);
+        callback(in_graph ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
@@ -309,13 +309,13 @@ template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
         assert(!get_node_index(kmer) || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(kmer) : npos);
+        callback(in_graph ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
