@@ -84,7 +84,9 @@ std::string spell_path(const DeBruijnGraph &graph,
     return seq;
 }
 
-void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
+void Anchor::append(const Anchor &other,
+                    const DBGAlignerConfig &config,
+                    const DeBruijnGraph *graph) {
     assert(query_.data() == other.query_.data());
     assert(query_.data() + query_.size() == other.query_.data() + other.query_.size());
     assert(label_class_ == other.label_class_);
@@ -116,6 +118,7 @@ void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
     path_.erase(next, path_.end());
     path_.insert(path_.end(), other.path_.begin(), other.path_.end());
     suffix_ = other.suffix_;
+    score_ = config.score_cigar(seed_, query_, generate_cigar());
 
     assert(!graph || is_spelling_valid(*graph));
 }

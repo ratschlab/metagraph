@@ -21,6 +21,8 @@ class Match {
 
     static constexpr score_t ninf = DBGAlignerConfig::ninf;
 
+    Match() : orientation_(false), score_(0) {}
+
     virtual ~Match() {}
 
     std::string_view get_query() const { return query_; }
@@ -33,6 +35,8 @@ class Match {
     virtual std::string_view get_spelling() const = 0;
     virtual std::string get_path_spelling() const = 0;
     virtual std::string_view get_trim_spelling() const = 0;
+
+    virtual Cigar generate_cigar() const = 0;
 
     score_t get_score() const { return score_; }
     bool get_orientation() const { return orientation_; }
@@ -73,7 +77,8 @@ inline std::ostream& operator<<(std::ostream &out, const Match &a) {
         << a.get_seed() << ","
         << a.get_spelling() << ","
         << a.get_end_clipping() << ","
-        << a.get_score();
+        << a.get_score() << ","
+        << a.generate_cigar().to_string();
     return out;
 }
 
@@ -87,6 +92,8 @@ class Anchor : public Match {
     Anchor(const Anchor&) = default;
     Anchor& operator=(const Anchor&) = default;
     Anchor& operator=(Anchor&&) = default;
+
+    Anchor() : Match(), label_class_(nlabel), coord_(ncoord) {}
 
     Anchor(std::string_view query,
            size_t begin,
@@ -107,7 +114,7 @@ class Anchor : public Match {
     std::string get_path_spelling() const override final { return std::string(seed_) + suffix_; }
     std::string_view get_trim_spelling() const override final { return suffix_; }
 
-    Cigar generate_cigar() const {
+    Cigar generate_cigar() const override final {
         Cigar cigar;
         cigar.append(Cigar::CLIPPED, get_clipping());
         cigar.append(Cigar::MATCH, seed_.size());
@@ -117,7 +124,9 @@ class Anchor : public Match {
 
     size_t get_end_trim() const override final { return suffix_.size(); }
 
-    void append(const Anchor &other, const DeBruijnGraph *graph = nullptr);
+    void append(const Anchor &other,
+                const DBGAlignerConfig &config,
+                const DeBruijnGraph *graph = nullptr);
 
     label_class_t get_label_class() const { return label_class_; }
 
@@ -133,6 +142,8 @@ class Alignment : public Match {
     Alignment(Alignment&&) = default;
     Alignment& operator=(const Alignment&) = default;
     Alignment& operator=(Alignment&&) = default;
+
+    Alignment() : Alignment(Anchor()) {}
 
     Alignment(const DeBruijnGraph &graph,
               std::string_view query,
@@ -169,6 +180,7 @@ class Alignment : public Match {
     }
 
     const Cigar& get_cigar() const { return cigar_; }
+    Cigar generate_cigar() const override final { return cigar_; }
 
     size_t get_end_trim() const override final { return end_trim_; }
 
@@ -188,10 +200,5 @@ class Alignment : public Match {
     Cigar cigar_;
     std::vector<Anchor::label_class_t> label_classes_;
 };
-
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
-    out << static_cast<const Match&>(a) << "," << a.get_cigar().to_string();
-    return out;
-}
 
 } // namespace mtg::graph::align

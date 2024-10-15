@@ -53,8 +53,15 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
                   const AnchorExtender<AnchorIt> &anchor_extender,
                   const AlignmentCallback &callback,
                   const std::function<bool()> &terminate = []() { return false; }) {
-    std::vector<Alignment> alns;
     assert(chain.size());
+    if (chain.size() == 1) {
+        if (!terminate())
+            callback(Alignment(*chain.back().first));
+
+        return;
+    }
+
+    std::vector<Alignment> alns;
     alns.emplace_back(*chain.back().first);
 
     for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
@@ -81,17 +88,17 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
 }
 
 template <typename AnchorIt>
-void chain_anchors(const Query &query,
-                   const DBGAlignerConfig &config,
-                   AnchorIt begin,
-                   AnchorIt end,
-                   const AnchorConnector<AnchorIt> &anchor_connector,
-                   const ExtensionStarter<AnchorIt> &extension_starter,
-                   const AnchorExtender<AnchorIt> &anchor_extender,
-                   const AlignmentCallback &callback = [](Alignment&&) {},
-                   const std::function<bool()> &terminate = []() { return false; }) {
+AnchorIt chain_anchors(const Query &query,
+                       const DBGAlignerConfig &config,
+                       AnchorIt begin,
+                       AnchorIt end,
+                       const AnchorConnector<AnchorIt> &anchor_connector,
+                       const ExtensionStarter<AnchorIt> &extension_starter,
+                       const AnchorExtender<AnchorIt> &anchor_extender,
+                       const AlignmentCallback &callback = [](Alignment&&) {},
+                       const std::function<bool()> &terminate = []() { return false; }) {
     if (terminate() || begin == end)
-        return;
+        return end;
 
     ssize_t query_size = query.get_query().size();
 
@@ -99,6 +106,36 @@ void chain_anchors(const Query &query,
         return std::make_tuple(a.get_orientation(), a.get_label_class(), b.get_end_clipping())
              < std::make_tuple(b.get_orientation(), b.get_label_class(), a.get_end_clipping());
     });
+
+    if (config.max_seed_length > config.min_seed_length) {
+        std::cerr << "FOOOO\n";
+        auto rbegin = std::make_reverse_iterator(end);
+        auto rend = std::make_reverse_iterator(begin);
+        for (auto it = rbegin; it + 1 != rend; ++it) {
+            auto &a_j = *it;
+            auto &a_i = *(it + 1);
+            if (a_i.empty() || a_j.empty() || a_i.get_orientation() != a_j.get_orientation()
+                    || a_i.get_label_class() != a_j.get_label_class() || a_i.get_end_trim())
+                continue;
+
+            std::string_view a_i_s = a_i.get_spelling();
+            std::string_view a_j_s = a_j.get_spelling();
+            size_t overlap = query.get_graph().get_k() - 1;
+            if (a_i_s.size() >= overlap
+                    && a_j_s.size() >= overlap
+                    && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
+                    && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config.max_seed_length
+                    && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
+                // merge them
+                a_i.append(a_j, config, &query.get_graph());
+                a_j = std::decay_t<decltype(a_j)>();
+            }
+        }
+        end = std::remove_if(begin, end, [&](auto &a) { return a.empty(); });
+
+        if (begin == end)
+            return end;
+    }
 
     ChainScores<AnchorIt> chain_scores;
     chain_scores.reserve(end - begin);
@@ -122,7 +159,7 @@ void chain_anchors(const Query &query,
             return [&,i](DBGAlignerConfig::score_t score, const AnchorIt last, size_t dist) {
                 assert(last != i);
                 auto &[max_score, best_last, best_dist] = *(chain_scores + (i - begin));
-                if (score > max_score) {
+                if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
                     max_score = score;
                     best_last = last;
                     best_dist = dist;
@@ -206,7 +243,7 @@ void chain_anchors(const Query &query,
     sdsl::bit_vector used(chain_scores.size());
     for (auto [nscore, orientation, i] : best_chains) {
         if (terminate())
-            return;
+            return end;
 
         if (used[i])
             continue;
@@ -244,6 +281,8 @@ void chain_anchors(const Query &query,
             extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate);
         }
     }
+
+    return end;
 }
 
 } // namespace mtg::graph::align
