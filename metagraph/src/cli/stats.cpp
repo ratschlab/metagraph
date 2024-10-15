@@ -76,6 +76,7 @@ void print_stats(const graph::DeBruijnGraph &graph, bool print_counts_hist) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+    std::cout << "max index (k): " << graph.max_index() << std::endl;
     std::cout << "mode: " << Config::graphmode_to_string(graph.get_mode()) << std::endl;
 
     if (auto weights = graph.get_extension<graph::NodeWeights>()) {
@@ -143,7 +144,6 @@ void print_stats(const graph::DeBruijnGraph &graph, bool print_counts_hist) {
             std::cout << std::endl;
         }
     }
-
     std::cout << "========================================================" << std::endl;
 }
 

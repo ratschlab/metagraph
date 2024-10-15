@@ -30,12 +30,14 @@ class TestColumnOperations(TestingBase):
                          cls.tempdir.name + '/graph',
                          20, cls.graph_repr, 'basic', '--mask-dummy')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 20' == out[0])
-        assert('nodes (k): 46960' == out[1])
-        assert('mode: basic' == out[2])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '20')
+        assert(stats_graph['nodes (k)'] == '46960')
+        assert(stats_graph['mode'] == 'basic')
+
+        cls.num_nodes = stats_graph['nodes (k)']
+        cls.max_index = stats_graph['max index (k)']
 
         cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
@@ -52,14 +54,15 @@ class TestColumnOperations(TestingBase):
         self.annotation = f'annotation{anno_file_extension[self.anno_repr]}';
 
         # check annotation
-        res = self._get_stats(f'-a {self.annotation}')
-        self.assertEqual(res.returncode, 0)
-        out = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('labels:  100', out[0])
-        self.assertIn((out[1], out[2]), [
-            ('objects: 47633', 'density: 0.0182458'), # DBGSuccinct with dummy nodes
-            ('objects: 46960', 'density: 0.0185072')])
-        self.assertEqual(f'representation: {self.anno_repr}', out[3])
+        stats_annotation = self._get_stats(f'-a {self.annotation}')
+        self.assertEqual(stats_annotation['returncode'], 0)
+        self.assertEqual(stats_annotation['labels'], '100')
+        self.assertEqual(stats_annotation['objects'], self.max_index)
+        self.assertAlmostEqual(
+            float(stats_annotation['density']),
+            0.0185072 * int(self.num_nodes) / int(self.max_index),
+            places=6)
+        self.assertEqual(stats_annotation['representation'], self.anno_repr)
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -79,16 +82,15 @@ class TestColumnOperations(TestingBase):
         res = subprocess.run(command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
-        self.assertEqual(res.returncode, 0)
-        out = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('labels:  1', out[0])
-        split = out[2].split()
-        self.assertEqual(out[2], split[0] + ' ' + split[1])
-        density = float(split[1])
-        self.assertIn(out[1], ['objects: 47633', 'objects: 46960'])
-        self.assertLess(abs(density - expected_density * 46960 / 47633), 10**-6)
-        self.assertEqual(f'representation: {self.anno_repr}', out[3])
+        stats_annotation = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
+        self.assertEqual(stats_annotation['returncode'], 0)
+        self.assertEqual(stats_annotation['labels'], '1')
+        self.assertEqual(stats_annotation['objects'], self.max_index)
+        self.assertAlmostEqual(
+            float(stats_annotation['density']),
+            float(expected_density) * int(self.num_nodes) / int(self.max_index),
+            places=5)
+        self.assertEqual(stats_annotation['representation'], self.anno_repr)
 
     def test_aggregate_columns(self):
         self._check_aggregation_min(0, 1)
@@ -104,15 +106,15 @@ class TestColumnOperations(TestingBase):
         res = subprocess.run(command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
-        self.assertEqual(res.returncode, 0)
-        out = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('labels:  1', out[0])
-        split = out[2].split()
-        self.assertEqual(out[2], split[0] + ' ' + split[1])
-        density = float(split[1])
-        self.assertIn(out[1], ['objects: 47633', 'objects: 46960'])
-        self.assertLess(abs(density - expected_density * 46960 / 47633), 10**-6)
+        stats_annotation = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
+        self.assertEqual(stats_annotation['returncode'], 0)
+        self.assertEqual(stats_annotation['labels'], '1')
+        self.assertEqual(stats_annotation['objects'], self.max_index)
+        self.assertAlmostEqual(
+            float(stats_annotation['density']),
+            float(expected_density) * int(self.num_nodes) / int(self.max_index),
+            places=5)
+        self.assertEqual(stats_annotation['representation'], self.anno_repr)
 
     def test_aggregate_columns_filtered(self):
         self._check_aggregation_min_max_value(0, 0, 0)
