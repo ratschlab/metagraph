@@ -5,7 +5,7 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 class Query {
   public:

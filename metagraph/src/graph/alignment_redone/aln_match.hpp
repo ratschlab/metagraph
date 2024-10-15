@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string_view>
+#include <ostream>
 
 #include "aln_cigar.hpp"
 #include "aligner_config.hpp"
@@ -8,7 +9,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 std::string spell_path(const DeBruijnGraph &graph,
                        const std::vector<DeBruijnGraph::node_index> &path);
@@ -24,6 +25,8 @@ class Match {
 
     std::string_view get_query() const { return query_; }
     std::string_view get_seed() const { return seed_; }
+
+    size_t size() const { return path_.size(); }
 
     const std::vector<node_index>& get_path() const { return path_; }
 
@@ -55,9 +58,7 @@ class Match {
           std::vector<node_index>&& path,
           score_t score)
           : query_(query), orientation_(orientation), seed_(query_.substr(begin, end - begin)),
-            path_(std::move(path)), score_(score) {
-        assert(is_spelling_valid());
-    }
+            path_(std::move(path)), score_(score) {}
 
     std::string_view query_;
     bool orientation_;
@@ -65,6 +66,16 @@ class Match {
     std::vector<node_index> path_;
     score_t score_;
 };
+
+inline std::ostream& operator<<(std::ostream &out, const Match &a) {
+    out << a.get_orientation() << ","
+        << a.get_clipping() << ","
+        << a.get_seed() << ","
+        << a.get_spelling() << ","
+        << a.get_end_clipping() << ","
+        << a.get_score();
+    return out;
+}
 
 class Anchor : public Match {
   public:
@@ -87,12 +98,22 @@ class Anchor : public Match {
            label_class_t label_class = nlabel,
            int64_t coord = ncoord)
           : Match(query, begin, end, orientation,
-                  std::move(path), config.match_score(query)),
-            label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {}
+                  std::move(path), 0),
+            label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {
+        score_ = config.score_cigar(seed_, query_, generate_cigar());
+    }
 
     std::string_view get_spelling() const override final { return seed_; }
     std::string get_path_spelling() const override final { return std::string(seed_) + suffix_; }
     std::string_view get_trim_spelling() const override final { return suffix_; }
+
+    Cigar generate_cigar() const {
+        Cigar cigar;
+        cigar.append(Cigar::CLIPPED, get_clipping());
+        cigar.append(Cigar::MATCH, seed_.size());
+        cigar.append(Cigar::CLIPPED, get_end_clipping());
+        return cigar;
+    }
 
     size_t get_end_trim() const override final { return suffix_.size(); }
 
@@ -113,19 +134,38 @@ class Alignment : public Match {
     Alignment& operator=(const Alignment&) = default;
     Alignment& operator=(Alignment&&) = default;
 
+    Alignment(const DeBruijnGraph &graph,
+              std::string_view query,
+              bool orientation,
+              std::vector<node_index>&& path,
+              const DBGAlignerConfig &config,
+              Cigar&& cigar,
+              size_t end_trim = 0,
+              Anchor::label_class_t label_class = Anchor::nlabel)
+          : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
+                  orientation, std::move(path), 0),
+            end_trim_(end_trim),
+            path_spelling_(spell_path(graph, path_)),
+            cigar_(std::move(cigar)),
+            label_classes_(path_.size(), label_class) {
+        assert(path_spelling_.size() - graph.get_k() + 1 == path_.size());
+        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        assert(cigar_.get_end_clipping() == get_end_clipping());
+        score_ = config.score_cigar(get_spelling(), query_, cigar_);
+    }
+
     Alignment(const Anchor &anchor)
-          : Match(anchor.get_query(), anchor.get_seed().data() - anchor.get_query().data(),
-                  anchor.get_query().data() + anchor.get_query().size() - (anchor.get_seed().data() + anchor.get_seed().size()),
+          : Match(anchor.get_query(),
+                  anchor.get_clipping(),
+                  anchor.get_clipping() + anchor.get_seed().size(),
                   anchor.get_orientation(),
                   std::vector<node_index>(anchor.get_path()),
                   anchor.get_score()),
             end_trim_(anchor.get_end_trim()),
             path_spelling_(anchor.get_path_spelling()),
-            cigar_(std::string(get_clipping(), 'S')
-                      + std::string(seed_.size(), '=')
-                      + std::string(get_end_clipping(), 'S')),
+            cigar_(anchor.generate_cigar()),
             label_classes_(path_.size(), anchor.get_label_class()) {
-        assert(path_spelling_.size() == query_.size() + end_trim_);
+        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
     }
 
     const Cigar& get_cigar() const { return cigar_; }
@@ -146,7 +186,12 @@ class Alignment : public Match {
     size_t end_trim_;
     std::string path_spelling_;
     Cigar cigar_;
-    std::vector<size_t> label_classes_;
+    std::vector<Anchor::label_class_t> label_classes_;
 };
+
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
+    out << static_cast<const Match&>(a) << "," << a.get_cigar().to_string();
+    return out;
+}
 
 } // namespace mtg::graph::align

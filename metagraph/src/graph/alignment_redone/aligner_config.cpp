@@ -5,7 +5,7 @@
 #include "common/logger.hpp"
 
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 using mtg::common::logger;
 
@@ -78,15 +78,16 @@ DBGAlignerConfig::score_t DBGAlignerConfig
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
     auto it = cigar.data().begin();
-    if (it->first == Cigar::CLIPPED)
+    if (it->first == Cigar::CLIPPED) {
+        alt_it += it->second;
         ++it;
+    }
 
     for ( ; it != cigar.data().end(); ++it) {
         const auto &op = *it;
         switch (op.first) {
             case Cigar::CLIPPED: {
-                if (it + 1 != cigar.data().end())
-                    alt_it += op.second;
+                alt_it += op.second;
             } break;
             case Cigar::MATCH: {
                 score += match_score(std::string_view(ref_it, op.second));

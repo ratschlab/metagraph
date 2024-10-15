@@ -4,7 +4,7 @@
 #include "aln_query.hpp"
 #include "aligner_config.hpp"
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 class Seeder {
   public:
@@ -25,6 +25,9 @@ class Seeder {
 
 class ExactSeeder : public Seeder {
   public:
+    template <typename... Args>
+    ExactSeeder(Args&&... args) : Seeder(std::forward<Args>(args)...) {}
+
     std::vector<Anchor> get_anchors() const override;
     std::vector<Alignment> get_inexact_anchors() const override;
 };

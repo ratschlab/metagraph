@@ -8,7 +8,7 @@
 
 namespace mtg {
 namespace graph {
-namespace align {
+namespace align_redone {
 
 using mtg::common::logger;
 

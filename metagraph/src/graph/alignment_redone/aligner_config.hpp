@@ -8,7 +8,7 @@
 #include <string_view>
 
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 class Cigar;
 

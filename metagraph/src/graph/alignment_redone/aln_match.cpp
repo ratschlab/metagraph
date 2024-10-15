@@ -2,7 +2,7 @@
 
 #include "common/logger.hpp"
 
-namespace mtg::graph::align {
+namespace mtg::graph::align_redone {
 
 using mtg::common::logger;
 
@@ -87,7 +87,7 @@ std::string spell_path(const DeBruijnGraph &graph,
 void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
     assert(query_.data() == other.query_.data());
     assert(query_.data() + query_.size() == other.query_.data() + other.query_.size());
-    assert(label_id_ == other.label_id_);
+    assert(label_class_ == other.label_class_);
 
     if (empty()) {
         *this = other;
@@ -117,7 +117,7 @@ void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
     path_.insert(path_.end(), other.path_.begin(), other.path_.end());
     suffix_ = other.suffix_;
 
-    assert(is_valid());
+    assert(!graph || is_spelling_valid(*graph));
 }
 
 } // namespace mtg::graph::align

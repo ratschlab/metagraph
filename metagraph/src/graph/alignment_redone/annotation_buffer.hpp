@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aln_match.hpp"
+
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vector_set.hpp"
@@ -11,7 +12,7 @@ namespace mtg::graph {
 
 class CanonicalDBG;
 
-namespace align {
+namespace align_redone {
 
 // caches queried annotations to speed up next queries (labels with or w/o coordinates)
 class AnnotationBuffer {

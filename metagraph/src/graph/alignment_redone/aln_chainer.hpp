@@ -1,10 +1,14 @@
 #pragma once
 
+#include <iostream>
+
 #include "aligner_config.hpp"
 #include "aln_query.hpp"
 #include "aln_match.hpp"
 
-namespace mtg::graph::align {
+#include "common/logger.hpp"
+
+namespace mtg::graph::align_redone {
 
 template <typename AnchorIt>
 using ChainScores = std::vector<std::tuple<DBGAlignerConfig::score_t, AnchorIt, size_t>>;
@@ -50,37 +54,23 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
                   const AlignmentCallback &callback,
                   const std::function<bool()> &terminate = []() { return false; }) {
     std::vector<Alignment> alns;
+    assert(chain.size());
     alns.emplace_back(*chain.back().first);
 
-    for (auto it = chain.rbegin() + 1; it != chain.rend(); ++it) {
+    for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
         std::vector<Alignment> next_alns;
         for (auto&& aln : alns) {
-            size_t dist = (it - 1)->second;
-            anchor_extender((it - 1)->first, it->first, std::move(aln), dist, 0,
+            std::cerr << aln << " begins with " << *it->first << std::endl;
+            assert(it->first->get_clipping() == aln.get_clipping());
+
+            size_t dist = it->second;
+            anchor_extender(it->first, (it + 1)->first, std::move(aln), dist, 0,
                 [&](Alignment&& next_aln) { next_alns.emplace_back(std::move(next_aln)); }
             );
         }
+
         std::swap(next_alns, alns);
     }
-    // auto jt = score_traceback.begin();
-    // std::vector<Alignment> alns;
-    // alns.emplace_back(*chain[0].first);
-    // ++jt;
-
-    // for (auto it = chain.begin() + 1; it != chain.end(); ++it, ++jt) {
-    //     assert(jt != score_traceback.end());
-    //     std::vector<Alignment> next_alns;
-    //     for (auto&& aln : alns) {
-    //         anchor_extender(it->first, (it - 1)->first, std::move(aln), it->second, *jt,
-    //             [&](Alignment&& next_aln) {
-    //                 next_alns.emplace_back(std::move(next_aln));
-    //             }
-    //         );
-    //     }
-    //     std::swap(next_alns, alns);
-    // }
-
-    assert(jt == score_traceback.end());
 
     for (auto&& aln : alns) {
         if (terminate())
@@ -203,11 +193,15 @@ void chain_anchors(const Query &query,
     for (size_t i = 0; i < chain_scores.size(); ++i) {
         const auto &[score, last, dist] = chain_scores[i];
 
-        if (score > 0)
+        if (score > 0) {
+            assert(last <= end);
+            assert(last >= begin);
             best_chains.emplace_back(-score, (begin + i)->get_orientation(), i);
+        }
     }
 
     std::sort(best_chains.begin(), best_chains.end());
+    common::logger->info("Best chain score: {}", -std::get<0>(best_chains[0]));
 
     sdsl::bit_vector used(chain_scores.size());
     for (auto [nscore, orientation, i] : best_chains) {
@@ -227,6 +221,7 @@ void chain_anchors(const Query &query,
         while (last != end) {
             last_anchor = last;
             std::tie(score, last, dist) = chain_scores[last - begin];
+            assert(last_anchor != end);
             chain.emplace_back(last_anchor, dist);
             scores.emplace_back(score);
             if (used[last_anchor - begin]) {
@@ -243,6 +238,8 @@ void chain_anchors(const Query &query,
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - begin] = true;
             }
+
+            common::logger->info("Found chain with score {}", scores.back());
 
             extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate);
         }
