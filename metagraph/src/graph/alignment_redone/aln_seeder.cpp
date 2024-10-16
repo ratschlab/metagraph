@@ -629,6 +629,33 @@ void align_bwd(const DeBruijnGraph &graph,
     );
 }
 
+void align_fwd(const DeBruijnGraph &graph,
+               const DBGAlignerConfig &config,
+               const DeBruijnGraph::node_index start_node,
+               std::string_view query_window,
+               size_t max_dist,
+               const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
+    std::string query_window_rev(query_window.rbegin(), query_window.rend());
+    align_impl(
+        [&graph](DeBruijnGraph::node_index node) { return graph.has_single_outgoing(node); },
+        [&graph](DeBruijnGraph::node_index node, char c) { return graph.traverse(node, c); },
+        [&graph](DeBruijnGraph::node_index node, const auto &callback) {
+            graph.call_outgoing_kmers(node, callback);
+        },
+        config,
+        start_node,
+        query_window_rev,
+        max_dist,
+        callback,
+        start_backtrack,
+        terminate_branch,
+        terminate
+    );
+}
+
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     std::vector<Anchor> anchors = get_anchors();
     std::vector<Alignment> alignments;
