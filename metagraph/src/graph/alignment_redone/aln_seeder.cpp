@@ -148,16 +148,12 @@ void align(const DeBruijnGraph &graph,
            const DBGAlignerConfig &config,
            const DeBruijnGraph::node_index start_node,
            std::string_view query_window,
-           const Anchor &target,
-           size_t dist,
+           size_t max_dist,
            const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
+           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
            const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
            const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
-    assert(dist > 0);
-
     using node_index = DeBruijnGraph::node_index;
-
-    node_index target_node = target.get_path().back();
 
     if (query_window.empty())
         return;
@@ -240,13 +236,15 @@ void align(const DeBruijnGraph &graph,
         return std::get<0>(bucket);
     };
 
-    auto fill_table = [&]() -> size_t {
+    std::vector<std::tuple<size_t, size_t, size_t, DeBruijnGraph::node_index>> backtrack_starts;
+
+    auto fill_table = [&]() {
         size_t query_dist = 0;
         auto node = start_node;
         size_t best_dist = 0;
 
         for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
-            if (best_dist == dist || !graph.has_single_incoming(node))
+            if (best_dist == max_dist || terminate_branch(0, best_dist, query_dist, node) || !graph.has_single_incoming(node))
                 break;
 
             if (auto prev = graph.traverse_back(node, *it)) {
@@ -270,13 +268,13 @@ void align(const DeBruijnGraph &graph,
             best_dist > 0 ? query_window.back() : '\0'
         );
 
-        if (terminate(0, best_dist, query_dist, node)) {
-            common::logger->info("Early stop");
-            return 0;
-        }
+        if (start_backtrack(0, best_dist, query_dist, node))
+            backtrack_starts.emplace_back(0, best_dist, query_dist, node);
 
-        if (terminate_branch(0, best_dist, query_dist, node))
-            return std::numeric_limits<size_t>::max();
+        if (terminate(0, best_dist, query_dist, node) || terminate_branch(0, best_dist, query_dist, node)) {
+            common::logger->info("Early stop");
+            return;
+        }
 
         for (size_t cost = 0; cost < S.size(); ++cost) {
             if (S[cost].empty())
@@ -292,13 +290,16 @@ void align(const DeBruijnGraph &graph,
                     node_index node = it->first;
                     auto [best_dist, last_ext, last_node, last_op, mismatch_char] = it->second;
 
-                    common::logger->info("Check: c:{}\tn:{} vs. {}\tcd:{} vs. {}\td:{} vs. {}",
-                                         cost,
-                                         node, target_node,
-                                         best_dist, dist,
-                                         query_dist, query_window.size());
+                    // common::logger->info("Check: c:{}\tn:{} vs. {}\tcd:{} vs. {}\td:{} vs. {}",
+                    //                      cost,
+                    //                      node, target_node,
+                    //                      best_dist, dist,
+                    //                      query_dist, query_window.size());
+                    if (start_backtrack(cost, best_dist, query_dist, node))
+                        backtrack_starts.emplace_back(cost, best_dist, query_dist, node);
+
                     if (terminate(cost, best_dist, query_dist, node))
-                        return cost;
+                        return;
 
                     if (terminate_branch(cost, best_dist, query_dist, node))
                         continue;
@@ -324,7 +325,7 @@ void align(const DeBruijnGraph &graph,
                         it = S[cost][query_dist].begin() + it_dist;
                     }
 
-                    if (best_dist < dist) {
+                    if (best_dist < max_dist) {
                         // deletion
                         std::vector<std::pair<node_index, char>> prevs;
                         graph.call_incoming_kmers(node, [&](auto prev, char c) {
@@ -371,7 +372,7 @@ void align(const DeBruijnGraph &graph,
                                 }
 
                                 for (auto jt = local_query_window.rbegin() + 1; jt != local_query_window.rend(); ++jt) {
-                                    if (cur_best == dist || !graph.has_single_incoming(prev))
+                                    if (cur_best == max_dist || !graph.has_single_incoming(prev))
                                         break;
 
                                     if (auto pprev = graph.traverse_back(prev, *jt)) {
@@ -405,15 +406,11 @@ void align(const DeBruijnGraph &graph,
                 }
             }
         }
-
-        return std::numeric_limits<size_t>::max();
     };
 
-    size_t cost = fill_table();
-    if (cost == std::numeric_limits<size_t>::max())
+    fill_table();
+    if (backtrack_starts.empty())
         throw std::runtime_error("No alignment found");
-
-    common::logger->info("FOUND ALIGNMENT AT COST {}", cost);
 
 #ifndef NDEBUG
     for (const auto &wf : S) {
@@ -433,174 +430,175 @@ void align(const DeBruijnGraph &graph,
 
     // backtrack
     common::logger->info("Backtracking");
-    node_index node = target_node;
-    size_t query_dist = query_window.size();
+    for (auto [cost, dist, query_dist, node] : backtrack_starts) {
+        common::logger->info("FOUND ALIGNMENT AT COST {}", cost);
+        assert(dist > 0);
+        assert(cost < S.size() && query_dist < S[cost].size());
+        auto bt = S[cost][query_dist].find(node);
+        assert(bt != S[cost][query_dist].end());
 
-    assert(cost < S.size() && query_dist < S[cost].size());
-    auto bt = S[cost][query_dist].find(node);
-    assert(bt != S[cost][query_dist].end());
+        std::vector<node_index> path;
+        Cigar cigar;
 
-    std::vector<node_index> path;
-    Cigar cigar;
+        do {
+            assert(std::get<0>(bt->second) == dist);
+            auto last_bt = bt;
 
-    do {
-        assert(std::get<0>(bt->second) == dist);
-        auto last_bt = bt;
+            // check insertion
+            if (std::get<3>(bt->second) == Cigar::INSERTION) {
+                assert(cost > 0 && cost < E.size() && query_dist < E[cost].size() && query_dist > 0);
+                assert(std::get<1>(bt->second) == 0);
+                auto et = E[cost][query_dist].find(node);
+                assert(et != E[cost][query_dist].end());
+                assert(std::get<0>(et->second) == dist);
 
-        // check insertion
-        if (std::get<3>(bt->second) == Cigar::INSERTION) {
-            assert(cost > 0 && cost < E.size() && query_dist < E[cost].size() && query_dist > 0);
-            assert(std::get<1>(bt->second) == 0);
-            auto et = E[cost][query_dist].find(node);
-            assert(et != E[cost][query_dist].end());
-            assert(std::get<0>(et->second) == dist);
+                auto [ins_dist, num_ins] = et->second;
+                assert(query_dist >= num_ins);
 
-            auto [ins_dist, num_ins] = et->second;
-            assert(query_dist >= num_ins);
+                size_t prev_cost = cost - gap_opn - (num_ins - 1) * gap_ext;
+                size_t prev_query_dist = query_dist - num_ins;
+                assert(prev_query_dist < S[prev_cost].size());
 
-            size_t prev_cost = cost - gap_opn - (num_ins - 1) * gap_ext;
-            size_t prev_query_dist = query_dist - num_ins;
-            assert(prev_query_dist < S[prev_cost].size());
+                auto check_bt = S[prev_cost][prev_query_dist].find(node);
+                assert(check_bt != S[prev_cost][prev_query_dist].end());
+                assert(std::get<0>(check_bt->second) == dist);
 
-            auto check_bt = S[prev_cost][prev_query_dist].find(node);
-            assert(check_bt != S[prev_cost][prev_query_dist].end());
-            assert(std::get<0>(check_bt->second) == dist);
+                query_dist = prev_query_dist;
+                cost = prev_cost;
+                bt = check_bt;
+                cigar.append(Cigar::INSERTION, num_ins);
+            }
 
-            query_dist = prev_query_dist;
-            cost = prev_cost;
-            bt = check_bt;
-            cigar.append(Cigar::INSERTION, num_ins);
-        }
+            // check deletion
+            if (std::get<3>(bt->second) == Cigar::DELETION) {
+                assert(cost > 0 && cost < F.size() && query_dist < F[cost].size() && dist > 0);
+                assert(std::get<1>(bt->second) == 0);
+                auto ft = F[cost][query_dist].find(node);
+                assert(ft != F[cost][query_dist].end());
 
-        // check deletion
-        if (std::get<3>(bt->second) == Cigar::DELETION) {
-            assert(cost > 0 && cost < F.size() && query_dist < F[cost].size() && dist > 0);
-            assert(std::get<1>(bt->second) == 0);
-            auto ft = F[cost][query_dist].find(node);
-            assert(ft != F[cost][query_dist].end());
+                auto [del_dist, num_del, prev_node] = ft->second;
+                common::logger->info("D: {}\t{}\t{}", del_dist, num_del, prev_node);
+                assert(del_dist == dist);
+                assert(dist >= num_del);
 
-            auto [del_dist, num_del, prev_node] = ft->second;
-            common::logger->info("D: {}\t{}\t{}", del_dist, num_del, prev_node);
-            assert(del_dist == dist);
-            assert(dist >= num_del);
+                cigar.append(Cigar::DELETION, num_del);
 
-            cigar.append(Cigar::DELETION, num_del);
+                size_t prev_cost = cost;
+                size_t prev_dist = dist;
+                while (num_del > 1) {
+                    path.emplace_back(node);
 
-            size_t prev_cost = cost;
-            size_t prev_dist = dist;
-            while (num_del > 1) {
+                    prev_cost -= gap_ext;
+                    --prev_dist;
+                    node = prev_node;
+                    --num_del;
+
+                    assert(query_dist < F[prev_cost].size());
+                    auto prev_ft = F[prev_cost][query_dist].find(node);
+                    assert(prev_ft != F[prev_cost][query_dist].end());
+                    assert(std::get<0>(prev_ft->second) == prev_dist);
+                    assert(std::get<1>(prev_ft->second) == num_del);
+                    ft = prev_ft;
+                    prev_node = std::get<2>(ft->second);
+                }
+
                 path.emplace_back(node);
 
-                prev_cost -= gap_ext;
+                prev_cost -= gap_opn;
                 --prev_dist;
-                node = prev_node;
-                --num_del;
+                assert(query_dist < S[prev_cost].size());
 
-                assert(query_dist < F[prev_cost].size());
-                auto prev_ft = F[prev_cost][query_dist].find(node);
-                assert(prev_ft != F[prev_cost][query_dist].end());
-                assert(std::get<0>(prev_ft->second) == prev_dist);
-                assert(std::get<1>(prev_ft->second) == num_del);
-                ft = prev_ft;
-                prev_node = std::get<2>(ft->second);
-            }
-
-            path.emplace_back(node);
-
-            prev_cost -= gap_opn;
-            --prev_dist;
-            assert(query_dist < S[prev_cost].size());
-
-            auto check_bt = S[prev_cost][query_dist].find(prev_node);
-            assert(check_bt != S[prev_cost][query_dist].end());
-            assert(std::get<0>(check_bt->second) == prev_dist);
-
-            dist = prev_dist;
-            cost = prev_cost;
-            node = prev_node;
-            bt = check_bt;
-        }
-
-        // check match
-        if (std::get<3>(bt->second) == Cigar::MATCH || std::get<3>(bt->second) == Cigar::MISMATCH) {
-            auto [cur_dist, num_match, last_node, last_op, mismatch_char] = bt->second;
-            common::logger->info("M: {}\t{}\t{}\t{}\t{}", cur_dist, num_match, last_node, Cigar::opt_to_char(last_op), mismatch_char);
-
-            if (!num_match) {
-                assert(last_op == Cigar::MATCH);
-                bt = S[cost][query_dist].end();
-                continue;
-            }
-
-            assert(query_dist >= num_match);
-            assert(dist >= num_match);
-
-            node_index traverse_node = last_node;
-
-            cigar.append(Cigar::MATCH, num_match - 1);
-            cigar.append(last_op);
-            size_t prev_dist = dist - num_match;
-            size_t prev_query = query_dist - num_match;
-
-            // reconstruct the backwards traversal from last_node to node
-            auto it = query_window.rbegin() + prev_query;
-            assert(it != query_window.rend());
-            size_t cur_path_size = path.size();
-            if (std::get<3>(bt->second) == Cigar::MISMATCH) {
-                assert(mismatch_char != *it);
-                traverse_node = graph.traverse_back(traverse_node, mismatch_char);
-                assert(traverse_node != DeBruijnGraph::npos);
-                std::cerr << "\t" << traverse_node;
-                path.emplace_back(traverse_node);
-                ++it;
-                --num_match;
-            } else {
-                assert(mismatch_char == *it);
-            }
-
-            while (num_match) {
-                assert(it != query_window.rend());
-                traverse_node = graph.traverse_back(traverse_node, *it);
-                std::cerr << "\t" << traverse_node;
-                assert(traverse_node != DeBruijnGraph::npos);
-                path.emplace_back(traverse_node);
-                ++it;
-                --num_match;
-            }
-            std::cerr << std::endl;
-            assert(traverse_node == node);
-
-            std::reverse(path.begin() + cur_path_size, path.end());
-
-            size_t prev_cost = cost - (last_op == Cigar::MATCH ? 0 : mismatch_cost);
-            assert(prev_query < S[prev_cost].size());
-
-            auto check_bt = S[prev_cost][prev_query].end();
-            if (prev_cost || prev_query || prev_dist) {
-                check_bt = S[prev_cost][prev_query].find(last_node);
-                assert(check_bt != S[prev_cost][prev_query].end());
+                auto check_bt = S[prev_cost][query_dist].find(prev_node);
+                assert(check_bt != S[prev_cost][query_dist].end());
                 assert(std::get<0>(check_bt->second) == prev_dist);
-            } else {
-                assert(last_node == start_node);
+
+                dist = prev_dist;
+                cost = prev_cost;
+                node = prev_node;
+                bt = check_bt;
             }
 
-            dist = prev_dist;
-            cost = prev_cost;
-            query_dist = prev_query;
-            node = last_node;
-            bt = check_bt;
-        }
+            // check match
+            if (std::get<3>(bt->second) == Cigar::MATCH || std::get<3>(bt->second) == Cigar::MISMATCH) {
+                auto [cur_dist, num_match, last_node, last_op, mismatch_char] = bt->second;
+                common::logger->info("M: {}\t{}\t{}\t{}\t{}", cur_dist, num_match, last_node, Cigar::opt_to_char(last_op), mismatch_char);
 
-        if (bt == last_bt)
-            throw std::runtime_error("Inf. loop");
+                if (!num_match) {
+                    assert(last_op == Cigar::MATCH);
+                    bt = S[cost][query_dist].end();
+                    continue;
+                }
 
-    } while (bt != S[cost][query_dist].end());
+                assert(query_dist >= num_match);
+                assert(dist >= num_match);
 
-    assert(dist == 0);
-    assert(cost == 0);
-    assert(query_dist == 0);
-    assert(path.size());
-    callback(std::move(path), std::move(cigar));
+                node_index traverse_node = last_node;
+
+                cigar.append(Cigar::MATCH, num_match - 1);
+                cigar.append(last_op);
+                size_t prev_dist = dist - num_match;
+                size_t prev_query = query_dist - num_match;
+
+                // reconstruct the backwards traversal from last_node to node
+                auto it = query_window.rbegin() + prev_query;
+                assert(it != query_window.rend());
+                size_t cur_path_size = path.size();
+                if (std::get<3>(bt->second) == Cigar::MISMATCH) {
+                    assert(mismatch_char != *it);
+                    traverse_node = graph.traverse_back(traverse_node, mismatch_char);
+                    assert(traverse_node != DeBruijnGraph::npos);
+                    std::cerr << "\t" << traverse_node;
+                    path.emplace_back(traverse_node);
+                    ++it;
+                    --num_match;
+                } else {
+                    assert(mismatch_char == *it);
+                }
+
+                while (num_match) {
+                    assert(it != query_window.rend());
+                    traverse_node = graph.traverse_back(traverse_node, *it);
+                    std::cerr << "\t" << traverse_node;
+                    assert(traverse_node != DeBruijnGraph::npos);
+                    path.emplace_back(traverse_node);
+                    ++it;
+                    --num_match;
+                }
+                std::cerr << std::endl;
+                assert(traverse_node == node);
+
+                std::reverse(path.begin() + cur_path_size, path.end());
+
+                size_t prev_cost = cost - (last_op == Cigar::MATCH ? 0 : mismatch_cost);
+                assert(prev_query < S[prev_cost].size());
+
+                auto check_bt = S[prev_cost][prev_query].end();
+                if (prev_cost || prev_query || prev_dist) {
+                    check_bt = S[prev_cost][prev_query].find(last_node);
+                    assert(check_bt != S[prev_cost][prev_query].end());
+                    assert(std::get<0>(check_bt->second) == prev_dist);
+                } else {
+                    assert(last_node == start_node);
+                }
+
+                dist = prev_dist;
+                cost = prev_cost;
+                query_dist = prev_query;
+                node = last_node;
+                bt = check_bt;
+            }
+
+            if (bt == last_bt)
+                throw std::runtime_error("Inf. loop");
+
+        } while (bt != S[cost][query_dist].end());
+
+        assert(dist == 0);
+        assert(cost == 0);
+        assert(query_dist == 0);
+        assert(path.size());
+        callback(std::move(path), std::move(cigar));
+    }
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
@@ -731,7 +729,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             std::string_view query_window = aln.get_query();
             query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
             query_window.remove_prefix(next->get_clipping() + next->get_path().size() - 1);
-            align(query_.get_graph(), config_, aln.get_path()[0], query_window, *next, next_to_last_dist,
+
+            auto end_branch = [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index) {
+                return dist == next_to_last_dist && query_dist == query_window.size();
+            };
+
+            auto reached_end = [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                return end_branch(cost, dist, query_dist, node) && node == next->get_path().back();
+            };
+
+            align(query_.get_graph(), config_, aln.get_path()[0], query_window, next_to_last_dist,
                 [&](auto&& bt_path, auto&& bt_cigar) {
                     std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().end() - 1);
                     path.insert(path.end(), bt_path.begin(), bt_path.end());
@@ -756,12 +763,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                     std::move(cigar),
                                     aln.get_end_trim()));
                 },
-                [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index) {
-                    return dist == next_to_last_dist && query_dist == query_window.size();
-                },
-                [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    return dist == next_to_last_dist && query_dist == query_window.size() && node == next->get_path().back();
-                });
+                reached_end,
+                end_branch,
+                reached_end);
         },
         [&alignments](Alignment&& alignment) {
             std::cerr << "Final ALN\t" << alignment << "\n";
