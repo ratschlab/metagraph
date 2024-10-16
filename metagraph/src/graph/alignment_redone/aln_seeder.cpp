@@ -328,9 +328,9 @@ void global_align(const DeBruijnGraph &graph,
 
                     if (best_dist < dist) {
                         // deletion
-                        std::vector<node_index> prevs;
-                        graph.adjacent_incoming_nodes(node, [&](auto prev) {
-                            prevs.emplace_back(prev);
+                        std::vector<std::pair<node_index, char>> prevs;
+                        graph.call_incoming_kmers(node, [&](auto prev, char c) {
+                            prevs.emplace_back(prev, c);
                         });
                         if (prevs.size()) {
                             if (cost < F.size() && query_dist < F[cost].size()) {
@@ -340,7 +340,7 @@ void global_align(const DeBruijnGraph &graph,
                                     auto [last_dist, last_num_ops, last_node] = find->second;
                                     assert(last_dist >= last_num_ops);
                                     ssize_t next_ext_cost = cost + gap_ext;
-                                    for (auto prev : prevs) {
+                                    for (const auto &[prev, c] : prevs) {
                                         size_t stored_value = set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION);
                                         set_value(S, next_ext_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
                                         it = S[cost][query_dist].begin() + it_dist;
@@ -349,7 +349,7 @@ void global_align(const DeBruijnGraph &graph,
                             }
 
                             ssize_t next_opn_cost = cost + gap_opn;
-                            for (auto prev : prevs) {
+                            for (const auto &[prev, c] : prevs) {
                                 size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
                                 set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
                                 it = S[cost][query_dist].begin() + it_dist;
@@ -361,7 +361,7 @@ void global_align(const DeBruijnGraph &graph,
                             std::string_view local_query_window = query_window;
                             local_query_window.remove_suffix(query_dist);
 
-                            graph.call_incoming_kmers(node, [&](node_index prev, char c) {
+                            for (auto [prev, c] : prevs) {
                                 std::cerr << prev;
                                 size_t cur_best = best_dist + 1;
                                 size_t cur_query_dist = query_dist + 1;
@@ -401,7 +401,7 @@ void global_align(const DeBruijnGraph &graph,
                                     c
                                 );
                                 it = S[cost][query_dist].begin() + it_dist;
-                            });
+                            }
                         }
                     }
                 }
