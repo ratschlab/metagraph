@@ -74,10 +74,10 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
                                    const std::function<bool()> &terminate) const override final;
 
     void call_outgoing_kmers(node_index node,
-                                     const OutgoingEdgeCallback &callback) const override final;
+                             const OutgoingEdgeCallback &callback) const override final;
 
     void call_incoming_kmers(node_index node,
-                                     const IncomingEdgeCallback &callback) const override final;
+                             const IncomingEdgeCallback &callback) const override final;
 
     void call_nodes(const std::function<void(node_index)> &callback,
                     const std::function<bool()> &stop_early) const override final;
