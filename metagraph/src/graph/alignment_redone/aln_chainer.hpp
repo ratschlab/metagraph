@@ -120,11 +120,16 @@ AnchorIt chain_anchors(const Query &query,
 
             std::string_view a_i_s = a_i.get_spelling();
             std::string_view a_j_s = a_j.get_spelling();
-            size_t overlap = query.get_graph().get_k() - 1;
+            const DeBruijnGraph &graph = query.get_graph();
+            size_t overlap = graph.get_k() - 1;
             if (a_i_s.size() >= overlap
                     && a_j_s.size() >= overlap
                     && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
                     && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config.max_seed_length
+                    && graph.indegree(a_j.get_path()[0]) < 2
+                    && !graph.has_multiple_outgoing(a_j.get_path()[0])
+                    && graph.indegree(a_i.get_path().back()) < 2
+                    && !graph.has_multiple_outgoing(a_i.get_path().back())
                     && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
                 // merge them
                 a_i.append(a_j, config, &query.get_graph());

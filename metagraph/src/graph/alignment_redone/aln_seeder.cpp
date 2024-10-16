@@ -86,14 +86,17 @@ void global_align(const DeBruijnGraph &graph,
                   size_t dist,
                   const AlignmentCallback &callback) {
     assert(dist > 0);
+    dist -= target.get_path().size() - 1;
 
     using node_index = DeBruijnGraph::node_index;
 
     std::string_view query_window = aln.get_query();
     query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
-    query_window.remove_prefix(target.get_clipping());
+    query_window.remove_prefix(target.get_clipping() + target.get_path().size() - 1);
     if (query_window.empty())
         return;
+
+    common::logger->info("Query window: {}", query_window);
 
     // derived from 2.4.1 in https://doi.org/10.1101/2022.01.12.476087 (v1)
     DBGAlignerConfig::score_t match_score = config.match_score("A");
@@ -141,6 +144,7 @@ void global_align(const DeBruijnGraph &graph,
             best_dist > 0 ? query_window.back() : '\0'
         );
         if (best_dist == dist && query_dist == query_window.size()) {
+            common::logger->info("Early stop");
             if (node == target.get_path().back())
                 return 0;
 
@@ -354,8 +358,9 @@ void global_align(const DeBruijnGraph &graph,
     auto bt = S[cost][query_dist].find(node);
     assert(bt != S[cost][query_dist].end());
 
-    std::vector<node_index> path;
+    std::vector<node_index> path(target.get_path().begin(), target.get_path().end() - 1);
     Cigar cigar(Cigar::CLIPPED, target.get_clipping());
+    cigar.append(Cigar::MATCH, path.size());
 
     do {
         assert(std::get<0>(bt->second) == dist);
@@ -636,8 +641,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                size_t last_to_next_dist,
                DBGAlignerConfig::score_t score_up_to_now,
                const AlignmentCallback &callback) {
-            std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
             size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size();
+            std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
+            std::cerr << "\ti.e., " << Alignment(*next) << " <- " << aln << "\t" << next_to_last_dist << "\n";
             global_align(query_.get_graph(), config_, aln, *next, next_to_last_dist, callback);
         },
         [&alignments](Alignment&& alignment) {
