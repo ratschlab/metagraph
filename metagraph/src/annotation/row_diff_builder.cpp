@@ -513,7 +513,6 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
             [&](int32_t count) {
                 // check if the reduction is negative
                 if (count < 0) {
-                    logger->error("anchoring {}", to_node(i));
                     anchors_bv[to_node(i)] = true;
                 }
                 i++;
