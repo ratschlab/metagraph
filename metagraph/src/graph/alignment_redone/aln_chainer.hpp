@@ -11,7 +11,7 @@
 namespace mtg::graph::align_redone {
 
 template <typename AnchorIt>
-using ChainScores = std::vector<std::tuple<DBGAlignerConfig::score_t, AnchorIt, size_t>>;
+using ChainScores = std::vector<std::tuple<DBGAlignerConfig::score_t, AnchorIt, size_t, size_t, size_t>>;
 
 template <typename AnchorIt>
 using ScoreUpdater = std::function<bool(DBGAlignerConfig::score_t,       // connect score
@@ -145,7 +145,7 @@ AnchorIt chain_anchors(const Query &query,
     ChainScores<AnchorIt> chain_scores;
     chain_scores.reserve(end - begin);
     std::transform(begin, end, std::back_inserter(chain_scores), [&](const Anchor &a) {
-        return std::make_tuple(a.get_score(), end, 0);
+        return std::make_tuple(a.get_score(), end, 0, a.get_spelling().size(), a.get_seed().size());
     });
 
     // forward pass
@@ -164,8 +164,14 @@ AnchorIt chain_anchors(const Query &query,
         auto make_anchor_connector = [&](const AnchorIt i) {
             return [&,i](DBGAlignerConfig::score_t score, const AnchorIt last, size_t dist) {
                 assert(last != i);
-                auto &[max_score, best_last, best_dist] = *(chain_scores + (i - begin));
+                auto &[max_score, best_last, best_dist, dist_traversed, queried] = *(chain_scores + (i - begin));
                 if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
+                    if (last != end) {
+                        dist_traversed = std::get<3>(*(chain_scores + (last - begin))) + dist;
+                        assert(i->get_seed().end() >= last->get_seed().end());
+                        queried = std::get<4>(*(chain_scores + (last - begin))) + (i->get_seed().end() - last->get_seed().end());
+                    }
+
                     max_score = score;
                     best_last = last;
                     best_dist = dist;
@@ -182,6 +188,8 @@ AnchorIt chain_anchors(const Query &query,
             ssize_t b = max_gap_between_anchors;
             ssize_t b_last;
             DBGAlignerConfig::score_t best_score = std::get<0>(chain_scores[0]);
+            size_t traversed = std::get<3>(chain_scores[0]);
+            size_t queried = begin->get_seed().size();
             ssize_t best_cost = std::numeric_limits<ssize_t>::max();
             DBGAlignerConfig::score_t match_score = config.match_score("A");
             do {
@@ -194,7 +202,12 @@ AnchorIt chain_anchors(const Query &query,
                     // align anchors [j, i) to i
                     anchor_connector(*i, b, j, i, chain_scores + (j - begin),
                                      make_anchor_connector(i));
-                    best_score = std::max(best_score, std::get<0>(chain_scores[i - begin]));
+
+                    if (std::get<0>(chain_scores[i - begin]) > best_score) {
+                        best_score = std::get<0>(chain_scores[i - begin]);
+                        traversed = std::get<3>(chain_scores[i - begin]);
+                        queried = std::get<4>(chain_scores[i - begin]);
+                    }
                 }
                 b_last = b;
                 b *= config.gap_shrinking_factor;
@@ -203,8 +216,7 @@ AnchorIt chain_anchors(const Query &query,
                 // => 2*best_score/match_score - query_size - match_spelling_size = -best_cost
                 // => best_cost = match_spelling_size + query_size - 2*best_score/match_score
 
-                // if we assume that match_spelling_size == query_size
-                best_cost = 2*(query_size - best_score/match_score);
+                best_cost = traversed + queried - 2 * best_score / match_score;
             } while (best_cost > b_last);
         } else {
             common::logger->info("Use alt");
@@ -235,7 +247,7 @@ AnchorIt chain_anchors(const Query &query,
     std::vector<std::tuple<DBGAlignerConfig::score_t, size_t, bool, size_t>> best_chains;
     best_chains.reserve(chain_scores.size());
     for (size_t i = 0; i < chain_scores.size(); ++i) {
-        const auto &[score, last, dist] = chain_scores[i];
+        const auto &[score, last, dist, traversed, queried] = chain_scores[i];
 
         if (score > 0) {
             assert(last <= end);
@@ -263,13 +275,13 @@ AnchorIt chain_anchors(const Query &query,
         AnchorChain<AnchorIt> chain;
         std::vector<DBGAlignerConfig::score_t> scores;
         AnchorIt last_anchor = begin + i;
-        auto [score, last, dist] = chain_scores[i];
+        auto [score, last, dist, traversed, queried] = chain_scores[i];
         chain.emplace_back(last_anchor, dist);
         assert(score == -nscore);
         scores.emplace_back(score);
         while (last != end) {
             last_anchor = last;
-            std::tie(score, last, dist) = chain_scores[last - begin];
+            std::tie(score, last, dist, traversed, queried) = chain_scores[last - begin];
             assert(last_anchor != end);
             chain.emplace_back(last_anchor, dist);
             scores.emplace_back(score);
