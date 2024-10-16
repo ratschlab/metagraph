@@ -8,14 +8,11 @@ import glob
 import os
 import numpy as np
 from helpers import get_test_class_name
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 import hashlib
 
 
 """Test graph construction"""
-
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 anno_file_extension = {'column': '.column.annodbg',
                        'column_coord': '.column_coord.annodbg',

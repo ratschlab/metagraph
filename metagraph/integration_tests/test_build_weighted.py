@@ -7,12 +7,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 
 """Test graph construction"""
-
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
