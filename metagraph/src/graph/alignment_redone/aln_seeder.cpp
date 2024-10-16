@@ -144,12 +144,13 @@ using WaveFront = OffsetVector<Map>; // S(cost)
 template <typename Map>
 using ScoreTable = std::vector<WaveFront<Map>>;
 
-void global_align(const DeBruijnGraph &graph,
-                  const DBGAlignerConfig &config,
-                  const Alignment &aln,
-                  const Anchor &target,
-                  size_t dist,
-                  const AlignmentCallback &callback) {
+void align(const DeBruijnGraph &graph,
+           const DBGAlignerConfig &config,
+           const DeBruijnGraph::node_index start_node,
+           const Alignment &aln,
+           const Anchor &target,
+           size_t dist,
+           const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback) {
     assert(dist > 0);
     dist -= target.get_path().size() - 1;
 
@@ -241,7 +242,7 @@ void global_align(const DeBruijnGraph &graph,
 
     auto fill_table = [&]() -> size_t {
         size_t query_dist = 0;
-        auto node = aln.get_path()[0];
+        auto node = start_node;
         size_t best_dist = 0;
 
         for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
@@ -263,7 +264,7 @@ void global_align(const DeBruijnGraph &graph,
             query_dist,
             node,
             best_dist,
-            aln.get_path()[0],
+            start_node,
             best_dist,
             Cigar::MATCH,
             best_dist > 0 ? query_window.back() : '\0'
@@ -584,7 +585,7 @@ void global_align(const DeBruijnGraph &graph,
                 assert(check_bt != S[prev_cost][prev_query].end());
                 assert(std::get<0>(check_bt->second) == prev_dist);
             } else {
-                assert(last_node == aln.get_path()[0]);
+                assert(last_node == start_node);
             }
 
             dist = prev_dist;
@@ -603,22 +604,7 @@ void global_align(const DeBruijnGraph &graph,
     assert(cost == 0);
     assert(query_dist == 0);
     assert(path.size());
-    path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
-
-    Cigar aln_cigar = aln.get_cigar();
-    aln_cigar.trim_clipping();
-    cigar.append(std::move(aln_cigar));
-
-    common::logger->info("Old path: {}", fmt::join(aln.get_path(), ","));
-    common::logger->info("Cigar: {}\tPath: {}", cigar.to_string(), fmt::join(path, ","));
-
-    callback(Alignment(graph,
-                       aln.get_query(),
-                       aln.get_orientation(),
-                       std::move(path),
-                       config,
-                       std::move(cigar),
-                       aln.get_end_trim()));
+    callback(std::move(path), std::move(cigar));
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
@@ -746,7 +732,24 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size();
             std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
             std::cerr << "\ti.e., " << Alignment(*next) << " <- " << aln << "\t" << next_to_last_dist << "\n";
-            global_align(query_.get_graph(), config_, aln, *next, next_to_last_dist, callback);
+            align(query_.get_graph(), config_, aln.get_path()[0], aln, *next, next_to_last_dist, [&](auto&& path, auto&& cigar) {
+                path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+
+                Cigar aln_cigar = aln.get_cigar();
+                aln_cigar.trim_clipping();
+                cigar.append(std::move(aln_cigar));
+
+                common::logger->info("Old path: {}", fmt::join(aln.get_path(), ","));
+                common::logger->info("Cigar: {}\tPath: {}", cigar.to_string(), fmt::join(path, ","));
+
+                callback(Alignment(query_.get_graph(),
+                                   aln.get_query(),
+                                   aln.get_orientation(),
+                                   std::move(path),
+                                   config_,
+                                   std::move(cigar),
+                                   aln.get_end_trim()));
+            });
         },
         [&alignments](Alignment&& alignment) {
             std::cerr << "Final ALN\t" << alignment << "\n";
