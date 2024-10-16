@@ -31,25 +31,48 @@ class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};
 
 TYPED_TEST_SUITE(DBGAlignerRedoneTest, FewGraphTypes);
 
+void run_alignment(const DeBruijnGraph &graph,
+                   DBGAlignerConfig config,
+                   std::string_view query,
+                   const std::vector<std::string> &reference,
+                   const std::vector<std::string> &cigar_str,
+                   size_t end_trim = 0) {
+    size_t k = graph.get_k();
+    ASSERT_EQ(reference.size(), cigar_str.size());
+    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
+        config.min_seed_length = k;
+        config.max_seed_length = mx;
+
+        Query aln_query(graph, query);
+        ExactSeeder seeder(aln_query, config);
+        auto paths = seeder.get_inexact_anchors();
+
+        ASSERT_LE(reference.size(), paths.size()) << mx;
+        paths.resize(reference.size());
+
+        for (size_t i = 0; i < reference.size(); ++i) {
+            Cigar cigar(cigar_str[i]);
+            auto path = paths[i];
+            EXPECT_EQ(reference[i].size() - k + 1 + end_trim, path.get_path().size());
+            EXPECT_EQ(reference[i], path.get_spelling()) << mx;
+            EXPECT_EQ(cigar_str[i], path.get_cigar().to_string()) << mx;
+            EXPECT_EQ(config.score_cigar(reference[i], query, cigar), path.get_score()) << mx;
+            EXPECT_EQ(cigar.get_clipping(), path.get_clipping());
+            EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping());
+            EXPECT_EQ(end_trim, path.get_end_trim()) << mx;
+        }
+    }
+}
+
 TYPED_TEST(DBGAlignerRedoneTest, align_empty) {
     size_t k = 4;
     std::string reference = "CATTT";
     std::string query;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        EXPECT_EQ(0ull, paths.size()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, {}, {});
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_sequence_much_too_short) {
@@ -58,19 +81,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_sequence_much_too_short) {
     std::string query =     "CA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        EXPECT_EQ(0ull, paths.size()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, {}, {});
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_sequence_too_short) {
@@ -79,19 +92,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_sequence_too_short) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        EXPECT_EQ(0ull, paths.size()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, {}, {});
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_big_self_loop) {
@@ -100,29 +103,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_big_self_loop) {
     std::string query =     "AAAAAAAAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(7ull, path.size()) << mx;
-        EXPECT_EQ(query, path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("9=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(9u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "9=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_single_node) {
@@ -131,29 +114,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_single_node) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(1ull, path.size()) << mx;
-        EXPECT_EQ("CAT", path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("3=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(3u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "3=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_straight) {
@@ -162,29 +125,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight) {
     std::string query = reference;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size()) << mx;
-        EXPECT_EQ(query, path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("14=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(14u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "14=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_straight_with_N) {
@@ -194,29 +137,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight_with_N) {
     //                           X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(reference.size() - k + 1, path.size()) << mx;
-        EXPECT_EQ(reference, path.get_spelling()) << mx;
-        EXPECT_EQ(config.score_sequences(reference, query), path.get_score()) << mx;
-        EXPECT_EQ("4=1X9=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(13u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "4=1X9=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_ending_branch) {
@@ -228,29 +151,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_ending_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size()) << mx;
-        EXPECT_EQ(query, path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("9=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(9u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "9=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_branch) {
@@ -262,29 +165,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size()) << mx;
-        EXPECT_EQ(query, path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("17=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(17u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "17=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_branch_with_cycle) {
@@ -296,29 +179,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_branch_with_cycle) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size()) << mx;
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size()) << mx;
-        EXPECT_EQ(query, path.get_spelling()) << mx;
-        EXPECT_EQ(config.match_score(query), path.get_score()) << mx;
-        EXPECT_EQ("17=", path.get_cigar().to_string()) << mx;
-        EXPECT_EQ(17u, path.get_cigar().get_num_matches()) << mx;
-        EXPECT_EQ(0u, path.get_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_clipping()) << mx;
-        EXPECT_EQ(0u, path.get_end_trim()) << mx;
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "17=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, repetitive_sequence_alignment) {
@@ -327,28 +190,9 @@ TYPED_TEST(DBGAlignerRedoneTest, repetitive_sequence_alignment) {
     std::string query =     "AGGGGG";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(query, path.get_spelling());
-        EXPECT_EQ(config.match_score(query), path.get_score());
-        EXPECT_EQ("6=", path.get_cigar().to_string());
-        EXPECT_EQ(6u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { query }, { "6=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, variation) {
@@ -358,29 +202,9 @@ TYPED_TEST(DBGAlignerRedoneTest, variation) {
     //                            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-        EXPECT_EQ("5=1X6=", path.get_cigar().to_string());
-        EXPECT_EQ(11u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "5=1X6=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, variation_in_branching_point) {
@@ -429,29 +253,9 @@ TYPED_TEST(DBGAlignerRedoneTest, multiple_variations) {
     //                             X      X X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-        EXPECT_EQ("6=1X6=1X1=1X4=", path.get_cigar().to_string());
-        EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "6=1X6=1X1=1X4=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
@@ -536,29 +340,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_multiple_misalignment) {
     //                           X         X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-        EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
-        EXPECT_EQ(19u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "4=1X9=1X6=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_insert_non_existent) {
@@ -568,31 +352,11 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_non_existent) {
     //                            I
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-        config.gap_opening_penalty = -3;
-        config.gap_extension_penalty = -3;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(reference.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty, path.get_score());
-        EXPECT_EQ("5=1I5=", path.get_cigar().to_string());
-        EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -3;
+    run_alignment(*graph, config, query, { reference }, { "5=1I5=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_insert_multi) {
@@ -602,32 +366,11 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_multi) {
     //                            II
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-        config.gap_opening_penalty = -3;
-        config.gap_extension_penalty = -3;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(reference.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.match_score(reference)
-            + config.gap_opening_penalty + config.gap_extension_penalty, path.get_score());
-        EXPECT_EQ("5=2I5=", path.get_cigar().to_string());
-        EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -3;
+    run_alignment(*graph, config, query, { reference }, { "5=2I5=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_insert_long) {
@@ -637,32 +380,11 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long) {
     //                            IIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-        config.gap_opening_penalty = -1;
-        config.gap_extension_penalty = -1;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(reference.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty
-            + 8 * config.gap_extension_penalty, path.get_score());
-        EXPECT_EQ("5=9I5=", path.get_cigar().to_string());
-        EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -1;
+    run_alignment(*graph, config, query, { reference }, { "5=9I5=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_insert_long_offset) {
