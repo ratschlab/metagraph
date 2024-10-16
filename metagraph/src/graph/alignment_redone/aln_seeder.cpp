@@ -102,6 +102,8 @@ void global_align(const DeBruijnGraph &graph,
     // derived from 2.4.1 in https://doi.org/10.1101/2022.01.12.476087 (v1)
     DBGAlignerConfig::score_t match_score = config.match_score("A");
     DBGAlignerConfig::score_t mismatch_score = config.score_sequences("A", "T");
+    assert(config.gap_opening_penalty <= config.gap_extension_penalty);
+    assert(mismatch_score < match_score);
 
     ssize_t mismatch_cost = (match_score - mismatch_score) * 2;
     ssize_t gap_ext = config.gap_extension_penalty * -2 + match_score;
