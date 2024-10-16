@@ -900,7 +900,7 @@ std::unique_ptr<bit_vector> DBGSuccinct::generate_dummy_kmers(size_t num_threads
         case BOSS::State::SMALL:
             return std::make_unique<bit_vector_small>(std::move(vector_mask));
         default:
-            assert(false && "Invalid state");
+            throw std::runtime_error("Invalid state");
     }
 }
 
