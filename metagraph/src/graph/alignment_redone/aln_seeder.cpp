@@ -147,18 +147,17 @@ using ScoreTable = std::vector<WaveFront<Map>>;
 void align(const DeBruijnGraph &graph,
            const DBGAlignerConfig &config,
            const DeBruijnGraph::node_index start_node,
+           std::string_view query_window,
            const Alignment &aln,
            const Anchor &target,
            size_t dist,
-           const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback) {
+           const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
+           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
+           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
     assert(dist > 0);
-    dist -= target.get_path().size() - 1;
 
     using node_index = DeBruijnGraph::node_index;
 
-    std::string_view query_window = aln.get_query();
-    query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
-    query_window.remove_prefix(target.get_clipping() + target.get_path().size() - 1);
     if (query_window.empty())
         return;
 
@@ -270,13 +269,13 @@ void align(const DeBruijnGraph &graph,
             best_dist > 0 ? query_window.back() : '\0'
         );
 
-        if (best_dist == dist && query_dist == query_window.size()) {
+        if (terminate(0, best_dist, query_dist, node)) {
             common::logger->info("Early stop");
-            if (node == target.get_path().back())
-                return 0;
-
-            return std::numeric_limits<size_t>::max();
+            return 0;
         }
+
+        if (terminate_branch(0, best_dist, query_dist, node))
+            return std::numeric_limits<size_t>::max();
 
         for (size_t cost = 0; cost < S.size(); ++cost) {
             if (S[cost].empty())
@@ -297,14 +296,11 @@ void align(const DeBruijnGraph &graph,
                                          node, target.get_path().back(),
                                          best_dist, dist,
                                          query_dist, query_window.size());
-                    if (best_dist == dist && query_dist == query_window.size()) {
-                        if (node == target.get_path().back())
-                            return cost;
+                    if (terminate(cost, best_dist, query_dist, node))
+                        return cost;
 
-                        common::logger->info("\t\twrong node, skipping");
-
+                    if (terminate_branch(cost, best_dist, query_dist, node))
                         continue;
-                    }
 
                     // forward creation of insertions
                     if (query_dist < query_window.size()) {
@@ -729,27 +725,37 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                size_t last_to_next_dist,
                DBGAlignerConfig::score_t score_up_to_now,
                const AlignmentCallback &callback) {
-            size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size();
+            size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size() - next->get_path().size() + 1;
             std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
             std::cerr << "\ti.e., " << Alignment(*next) << " <- " << aln << "\t" << next_to_last_dist << "\n";
-            align(query_.get_graph(), config_, aln.get_path()[0], aln, *next, next_to_last_dist, [&](auto&& path, auto&& cigar) {
-                path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+            std::string_view query_window = aln.get_query();
+            query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
+            query_window.remove_prefix(next->get_clipping() + next->get_path().size() - 1);
+            align(query_.get_graph(), config_, aln.get_path()[0], query_window, aln, *next, next_to_last_dist,
+                [&](auto&& path, auto&& cigar) {
+                    path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
 
-                Cigar aln_cigar = aln.get_cigar();
-                aln_cigar.trim_clipping();
-                cigar.append(std::move(aln_cigar));
+                    Cigar aln_cigar = aln.get_cigar();
+                    aln_cigar.trim_clipping();
+                    cigar.append(std::move(aln_cigar));
 
-                common::logger->info("Old path: {}", fmt::join(aln.get_path(), ","));
-                common::logger->info("Cigar: {}\tPath: {}", cigar.to_string(), fmt::join(path, ","));
+                    common::logger->info("Old path: {}", fmt::join(aln.get_path(), ","));
+                    common::logger->info("Cigar: {}\tPath: {}", cigar.to_string(), fmt::join(path, ","));
 
-                callback(Alignment(query_.get_graph(),
-                                   aln.get_query(),
-                                   aln.get_orientation(),
-                                   std::move(path),
-                                   config_,
-                                   std::move(cigar),
-                                   aln.get_end_trim()));
-            });
+                    callback(Alignment(query_.get_graph(),
+                                    aln.get_query(),
+                                    aln.get_orientation(),
+                                    std::move(path),
+                                    config_,
+                                    std::move(cigar),
+                                    aln.get_end_trim()));
+                },
+                [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index) {
+                    return dist == next_to_last_dist && query_dist == query_window.size();
+                },
+                [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                    return dist == next_to_last_dist && query_dist == query_window.size() && node == next->get_path().back();
+                });
         },
         [&alignments](Alignment&& alignment) {
             std::cerr << "Final ALN\t" << alignment << "\n";
