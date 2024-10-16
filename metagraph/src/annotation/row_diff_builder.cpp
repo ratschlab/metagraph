@@ -288,9 +288,9 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
                                                  const std::string &count_vectors_dir,
                                                  const std::string &row_count_extension) {
     logger->trace("Assigning row-diff successors at forks...");
-    
+
     std::shared_ptr<const bit_vector> rd_succ;
-    
+
     bool optimize_forks = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
         if (utils::ends_with(p.path(), row_count_extension))

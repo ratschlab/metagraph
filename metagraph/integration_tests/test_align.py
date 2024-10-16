@@ -338,7 +338,7 @@ class TestDNAAlign(TestingBase):
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
-        self.assertEqual('16461', params['nodes (k)'])
+        self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
@@ -363,7 +363,7 @@ class TestDNAAlign(TestingBase):
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
-        self.assertEqual('16461', params['nodes (k)'])
+        self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
