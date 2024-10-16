@@ -297,11 +297,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     node_index node = it->first;
                     auto [best_dist, last_ext, last_node, last_op, mismatch_char] = it->second;
 
-                    // common::logger->info("Check: c:{}\tn:{} vs. {}\tcd:{} vs. {}\td:{} vs. {}",
-                    //                      cost,
-                    //                      node, target_node,
-                    //                      best_dist, dist,
-                    //                      query_dist, query_window.size());
+                    common::logger->info("Check: c:{}\tn:{}\tcd:{}\td:{} vs. {}",
+                                         cost,
+                                         node,
+                                         best_dist,
+                                         query_dist, query_size);
                     if (start_backtrack(cost, best_dist, query_dist, node))
                         backtrack_starts.emplace_back(cost, best_dist, query_dist, node);
 
@@ -420,8 +420,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     };
 
     fill_table();
-    if (backtrack_starts.empty())
-        throw std::runtime_error("No alignment found");
 
 #ifndef NDEBUG
     for (const auto &wf : S) {
@@ -443,7 +441,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     common::logger->info("Backtracking");
     for (auto [cost, dist, query_dist, node] : backtrack_starts) {
         common::logger->info("FOUND ALIGNMENT AT COST {}", cost);
-        assert(dist > 0);
+        assert(dist > 0 || query_dist > 0);
         assert(cost < S.size() && query_dist < S[cost].size());
         auto bt = S[cost][query_dist].find(node);
         assert(bt != S[cost][query_dist].end());
@@ -657,11 +655,167 @@ void align_fwd(const DeBruijnGraph &graph,
         start_node,
         query_window.rbegin(), query_window.rend(),
         max_dist,
-        callback,
+        [&](auto&& path, auto&& cigar) {
+            std::reverse(path.begin(), path.end());
+            std::reverse(cigar.data().begin(), cigar.data().end());
+            callback(std::move(path), std::move(cigar));
+        },
         start_backtrack,
         terminate_branch,
         terminate
     );
+}
+
+DBGAlignerConfig::score_t cost_to_score(size_t cost,
+                                        size_t query_size,
+                                        size_t match_size,
+                                        DBGAlignerConfig::score_t match_score) {
+    // best_score = 1/2(match_score(query_size + match_spelling_size - best_cost))
+    return match_score * (query_size + match_size - cost) / 2;
+}
+
+void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback) const {
+    DBGAlignerConfig::score_t match_score = config_.match_score("A");
+
+    std::cerr << "\n\nExtending " << aln << std::endl;
+    std::vector<Alignment> fwd_exts;
+    if (!aln.get_end_clipping()) {
+        fwd_exts.emplace_back(Alignment(aln));
+    } else {
+        std::string_view query_window = aln.get_query();
+        query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
+
+        DBGAlignerConfig::score_t best_score = aln.get_score();
+
+        auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+            return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                    + (query_dist == query_window.size() ? config_.right_end_bonus : 0);
+        };
+
+        align_fwd(
+            query_.get_graph(), config_, aln.get_path().back(),
+            query_window, std::numeric_limits<size_t>::max(),
+            [&](auto&& path, auto&& cigar) {
+                auto ext_path = aln.get_path();
+                ext_path.insert(ext_path.end(), path.begin(), path.end());
+                Cigar ext_cigar = aln.get_cigar();
+                ext_cigar.trim_end_clipping();
+                ext_cigar.append(std::move(cigar));
+
+                std::vector<std::string> spellings;
+                for (auto node : ext_path) {
+                    spellings.emplace_back(query_.get_graph().get_node_sequence(node));
+                }
+                common::logger->info("{}\t{}", ext_cigar.to_string(), fmt::join(spellings,","));
+
+                fwd_exts.emplace_back(
+                    query_.get_graph(),
+                    aln.get_query(),
+                    aln.get_orientation(),
+                    std::move(ext_path),
+                    config_,
+                    std::move(ext_cigar)
+                );
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // start backtrack
+                if (dist == 0 && query_dist == 0)
+                    return false;
+
+                if (query_dist == query_window.size())
+                    return true;
+
+                auto score = get_score(cost, dist, query_dist);
+                if (score > aln.get_score() && score >= best_score) {
+                    best_score = score;
+                    return true;
+                }
+
+                return false;
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // terminate branch
+                return query_dist == query_window.size() || get_score(cost, dist, query_dist) < best_score;
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // terminate
+                return false;
+            }
+        );
+    }
+
+    std::vector<Alignment> alns;
+    for (auto &fwd_ext : fwd_exts) {
+        std::cerr << "bwd extending " << fwd_ext << std::endl;
+        if (!fwd_ext.get_clipping()) {
+            alns.emplace_back(std::move(fwd_ext));
+        } else {
+            std::string_view query_window = aln.get_query();
+            query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
+
+            DBGAlignerConfig::score_t best_score = aln.get_score();
+
+            auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                        + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
+            };
+
+            align_bwd(
+                query_.get_graph(), config_, aln.get_path().back(),
+                query_window, std::numeric_limits<size_t>::max(),
+                [&](auto&& path, auto&& cigar) {
+                    path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+                    size_t query_dist = cigar.get_num_query();
+                    assert(query_dist <= query_window.size());
+                    Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - query_dist);
+                    ext_cigar.append(std::move(cigar));
+
+                    Cigar aln_cigar = aln.get_cigar();
+                    aln_cigar.trim_clipping();
+                    ext_cigar.append(std::move(aln_cigar));
+
+                    alns.emplace_back(
+                        query_.get_graph(),
+                        aln.get_query(),
+                        aln.get_orientation(),
+                        std::move(path),
+                        config_,
+                        std::move(ext_cigar)
+                    );
+                },
+                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // start backtrack
+                    if (dist == 0 && query_dist == 0)
+                        return false;
+
+                    auto score = get_score(cost, dist, query_dist);
+                    if (score > aln.get_score() && score >= best_score) {
+                        best_score = score;
+                        return true;
+                    }
+
+                    return false;
+                },
+                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // terminate branch
+                    return get_score(cost, dist, query_dist) < best_score;
+                },
+                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // terminate
+                    return false;
+                }
+            );
+        }
+    }
+
+    std::sort(alns.begin(), alns.end(), [](const auto &a, const auto &b) {
+        return std::make_tuple(a.get_score(), a.get_seed().size())
+             > std::make_tuple(b.get_score(), b.get_seed().size());
+    });
+
+    for (auto &a : alns) {
+        callback(std::move(a));
+    }
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {

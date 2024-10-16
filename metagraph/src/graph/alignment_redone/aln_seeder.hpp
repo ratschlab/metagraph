@@ -32,4 +32,16 @@ class ExactSeeder : public Seeder {
     std::vector<Alignment> get_inexact_anchors() const override;
 };
 
+class Extender {
+  public:
+    Extender(const Query &query, const DBGAlignerConfig &config)
+          : query_(query), config_(config) {}
+
+    void extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback) const;
+
+  protected:
+    const Query &query_;
+    const DBGAlignerConfig &config_;
+};
+
 } // namespace mtg::graph::align

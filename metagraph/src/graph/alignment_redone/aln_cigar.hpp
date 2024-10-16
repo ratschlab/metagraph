@@ -91,6 +91,20 @@ class Cigar {
         });
     }
 
+    size_t get_num_query() const {
+        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+                               [&](size_t old, const value_type &op) {
+            return old + (op.first == MATCH || op.first == MISMATCH || op.first == INSERTION || op.first == CLIPPED) * op.second;
+        });
+    }
+
+    size_t get_num_ref() const {
+        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+                               [&](size_t old, const value_type &op) {
+            return old + (op.first == MATCH || op.first == MISMATCH || op.first == DELETION) * op.second;
+        });
+    }
+
     // Return true if the cigar is valid
     bool is_valid(std::string_view reference, std::string_view query) const;
 

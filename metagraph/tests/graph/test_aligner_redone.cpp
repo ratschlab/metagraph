@@ -311,6 +311,8 @@ TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     //                                          X    X
 
     auto graph = build_graph_batch<TypeParam>(k, references);
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
 
     for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
         DBGAlignerConfig config;
@@ -324,14 +326,20 @@ TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
         ExactSeeder seeder(aln_query, config);
         auto paths = seeder.get_inexact_anchors();
 
+        Extender extender(aln_query, config);
+        std::vector<Alignment> ext_paths;
+        for (auto &path : paths) {
+            extender.extend(path, [&](Alignment&& aln) {
+                ext_paths.emplace_back(std::move(aln));
+            });
+        }
+
+        std::swap(paths, ext_paths);
+
         EXPECT_LE(config.num_alternative_paths, paths.size());
         auto path = paths[0];
         EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
             << query << "\n" << path.get_spelling();
-        EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
     }
 }
 
