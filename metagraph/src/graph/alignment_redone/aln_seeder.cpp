@@ -420,35 +420,36 @@ void global_align(const DeBruijnGraph &graph,
             assert(std::get<1>(bt->second) == 0);
             auto ft = F[cost][query_dist].find(node);
             assert(ft != F[cost][query_dist].end());
-            assert(std::get<0>(ft->second) == dist);
 
             auto [del_dist, num_del, prev_node] = ft->second;
+            common::logger->info("D: {}\t{}\t{}", del_dist, num_del, prev_node);
+            assert(del_dist == dist);
             assert(dist >= num_del);
+
+            cigar.append(Cigar::DELETION, num_del);
 
             size_t prev_cost = cost;
             size_t prev_dist = dist;
             while (num_del > 1) {
+                path.emplace_back(node);
+
                 prev_cost -= gap_ext;
                 --prev_dist;
-
-                path.emplace_back(node);
-                cigar.append(Cigar::DELETION);
                 node = prev_node;
                 --num_del;
 
                 assert(query_dist < F[prev_cost].size());
                 auto prev_ft = F[prev_cost][query_dist].find(node);
-                assert(ft != F[cost][query_dist].end());
-                assert(std::get<0>(ft->second) == prev_dist);
-                assert(std::get<1>(ft->second) == num_del);
+                assert(prev_ft != F[prev_cost][query_dist].end());
+                assert(std::get<0>(prev_ft->second) == prev_dist);
+                assert(std::get<1>(prev_ft->second) == num_del);
                 ft = prev_ft;
                 prev_node = std::get<2>(ft->second);
             }
 
-            prev_cost -= gap_opn;
-            cigar.append(Cigar::DELETION);
             path.emplace_back(node);
 
+            prev_cost -= gap_opn;
             --prev_dist;
             assert(query_dist < S[prev_cost].size());
 
