@@ -418,8 +418,7 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                   outfbase);
 
     std::optional<sdsl::bit_vector> dummy;
-    auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph);
-    if (succinct) {
+    if (auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
         dummy = succinct->get_boss().mark_all_dummy_edges(num_threads);
     }
 
@@ -449,16 +448,20 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
         std::vector<bool> pred_boundary_buf;
 
         for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
-            if (graph.in_graph(i)) {
+            if (graph.in_graph(i) && !(dummy && (*dummy)[i])) { // Legacy check for DBGSuccinct
                 if(!graph.has_no_outgoing(i)) {
                     auto j = row_diff_successor(graph, i, rd_succ);
-                    succ_buf.push_back(to_row(j));
-                    succ_boundary_buf.push_back(0);
+                    if(!dummy || !(*dummy)[j]) { // Legacy check for DBGSuccinct
+                        succ_buf.push_back(to_row(j));
+                        succ_boundary_buf.push_back(0);
+                    }
                 }
                 if(rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
-                        pred_buf.push_back(to_row(pred));
-                        pred_boundary_buf.push_back(0);
+                        if(!dummy || !(*dummy)[pred]) { // Legacy check for DBGSuccinct
+                            pred_buf.push_back(to_row(pred));
+                            pred_boundary_buf.push_back(0);
+                        }
                     });
                 }
             }
@@ -509,8 +512,10 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
         sum_and_call_counts(count_vectors_dir, row_reduction_extension, "row reduction",
             [&](int32_t count) {
                 // check if the reduction is negative
-                if (count < 0)
+                if (count < 0) {
+                    logger->error("anchoring {}", to_node(i));
                     anchors_bv[to_node(i)] = true;
+                }
                 i++;
             }
         );
