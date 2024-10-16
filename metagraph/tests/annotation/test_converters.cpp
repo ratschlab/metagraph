@@ -312,9 +312,9 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
                       annotator.num_relations());
 
-            for (uint32 i = 0; i < annotator.num_objects(); ++i) {
-                ASSERT_THAT(annotator.get_labels(i), ContainerEq(labels));
-            }
+            graph->call_nodes([&](uint32_t node_idx) {
+                ASSERT_THAT(annotator.get_labels(node_idx - 1), ContainerEq(labels));
+            });
         }
     }
     std::filesystem::remove_all(dst_dir);
@@ -366,9 +366,9 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 ASSERT_EQ(graph->max_index(), annotator.num_objects());
                 EXPECT_EQ(expected_relations[max_depth - 1], annotator.num_relations());
 
-                for (uint32 idx = 0; idx < annotator.num_objects(); ++idx) {
-                    ASSERT_THAT(annotator.get_labels(idx), ElementsAre(labels[i]));
-                }
+                graph->call_nodes([&](uint32_t node_idx) {
+                    ASSERT_THAT(annotator.get_labels(node_idx - 1), ElementsAre(labels[i]));
+                });
             }
         }
     }

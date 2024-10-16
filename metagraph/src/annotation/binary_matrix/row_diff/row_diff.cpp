@@ -25,7 +25,7 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
                 succ = adjacent_node;
             }
         });
-        assert(succ != graph::DeBruijnGraph::npos && "a row diff successor must exist");
+        assert(graph.in_graph(succ) && "a row diff successor must exist");
         return succ;
     }
 }
@@ -81,22 +81,22 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
         node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         while (true) {
-            if (graph_->in_graph(node)) {
-                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+            assert(graph_->in_graph(node));
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-                auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-                rd_paths_trunc[i].push_back(it.value());
+            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
+            rd_paths_trunc[i].push_back(it.value());
 
-                // If a node had been reached before, we interrupt the diff path.
-                // The annotation for that node will have been reconstructed earlier
-                // than for other nodes in this path as well. Thus, we will start
-                // reconstruction from that node and don't need its successors.
-                if (!is_new)
-                    break;
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
+            if (!is_new)
+                break;
 
-                if (anchor_[row])
-                    break;
-            }
+            if (anchor_[row])
+                break;
+
             if (fork_succ_.size()) {
                 node = row_diff_successor(*graph_, node, fork_succ_);
             } else { // Only happens in DBGSuccinct
