@@ -214,12 +214,13 @@ void global_align(const DeBruijnGraph &graph,
                             std::get<0>(bucket) = dist;
                             std::get<1>(bucket) = num_ops;
 
-                            if constexpr(std::is_same_v<table_t, FMap>) {
+                            if constexpr(std::is_same_v<table_t, FMap>
+                                            || std::is_same_v<table_t, SMap>) {
+                                assert(dist >= num_ops);
                                 std::get<2>(bucket) = last_node;
                             }
 
                             if constexpr(std::is_same_v<table_t, SMap>) {
-                                std::get<2>(bucket) = last_node;
                                 std::get<3>(bucket) = last_op;
                                 std::get<4>(bucket) = c;
                             }
@@ -231,7 +232,7 @@ void global_align(const DeBruijnGraph &graph,
                     // // forward creation of insertions
                     // if (query_dist + 1 <= query_window.size()) {
                     //     // extend a previous insertion
-                    //     if (cost < E.size() && E[cost].size() && query_dist < E[cost].size()) {
+                    //     if (cost < E.size() && query_dist < E[cost].size()) {
                     //         auto find = E[cost][query_dist].find(node);
                     //         if (find != E[cost][query_dist].end()) {
                     //             auto [last_dist, last_num_ops] = find->second;
@@ -295,31 +296,32 @@ void global_align(const DeBruijnGraph &graph,
                             });
 
                         } else {
-                            // // deletion
-                            // std::vector<node_index> prevs;
-                            // graph.adjacent_incoming_nodes(node, [&](auto prev) {
-                            //     prevs.emplace_back(prev);
-                            // });
-                            // if (prevs.size()) {
-                            //     if (cost < F.size() && F[cost].size() && query_dist < F[cost].size()) {
-                            //         // extension
-                            //         auto find = F[cost][query_dist].find(node);
-                            //         if (find != F[cost][query_dist].end()) {
-                            //             auto [last_dist, last_num_ops, last_node] = find->second;
-                            //             ssize_t next_ext_cost = cost + gap_ext;
-                            //             for (auto prev : prevs) {
-                            //                 size_t stored_value = set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION);
-                            //                 set_value(S, next_ext_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
-                            //             }
-                            //         }
-                            //     }
+                            // deletion
+                            std::vector<node_index> prevs;
+                            graph.adjacent_incoming_nodes(node, [&](auto prev) {
+                                prevs.emplace_back(prev);
+                            });
+                            if (prevs.size()) {
+                                if (cost < F.size() && query_dist < F[cost].size()) {
+                                    // extension
+                                    auto find = F[cost][query_dist].find(node);
+                                    if (find != F[cost][query_dist].end()) {
+                                        auto [last_dist, last_num_ops, last_node] = find->second;
+                                        assert(last_dist >= last_num_ops);
+                                        ssize_t next_ext_cost = cost + gap_ext;
+                                        for (auto prev : prevs) {
+                                            size_t stored_value = set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION);
+                                            set_value(S, next_ext_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
+                                        }
+                                    }
+                                }
 
-                            //     ssize_t next_opn_cost = cost + gap_opn;
-                            //     for (auto prev : prevs) {
-                            //         size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
-                            //         set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
-                            //     }
-                            // }
+                                ssize_t next_opn_cost = cost + gap_opn;
+                                for (auto prev : prevs) {
+                                    size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
+                                    set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
+                                }
+                            }
                         }
                     }
                 }
@@ -391,51 +393,53 @@ void global_align(const DeBruijnGraph &graph,
         //     cigar.append(Cigar::INSERTION, num_ins);
         // }
 
-        // // check deletion
-        // if (std::get<3>(bt->second) == Cigar::DELETION) {
-        //     assert(cost > 0 && cost < F.size() && query_dist < F[cost].size() && dist > 0);
-        //     assert(std::get<1>(bt->second) == 0);
-        //     auto ft = F[cost][query_dist].find(node);
-        //     assert(ft != F[cost][query_dist].end());
-        //     assert(std::get<0>(ft->second) == dist);
+        // check deletion
+        if (std::get<3>(bt->second) == Cigar::DELETION) {
+            assert(cost > 0 && cost < F.size() && query_dist < F[cost].size() && dist > 0);
+            assert(std::get<1>(bt->second) == 0);
+            auto ft = F[cost][query_dist].find(node);
+            assert(ft != F[cost][query_dist].end());
+            assert(std::get<0>(ft->second) == dist);
 
-        //     auto [del_dist, num_del, prev_node] = ft->second;
-        //     assert(num_del >= dist);
+            auto [del_dist, num_del, prev_node] = ft->second;
+            assert(dist >= num_del);
 
-        //     size_t prev_cost = cost;
-        //     size_t prev_dist = dist;
-        //     while (num_del > 1) {
-        //         prev_cost -= gap_ext;
-        //         --prev_dist;
+            size_t prev_cost = cost;
+            size_t prev_dist = dist;
+            while (num_del > 1) {
+                prev_cost -= gap_ext;
+                --prev_dist;
 
-        //         path.emplace_back(node);
-        //         cigar.append(Cigar::DELETION);
-        //         node = prev_node;
-        //         --num_del;
+                path.emplace_back(node);
+                cigar.append(Cigar::DELETION);
+                node = prev_node;
+                --num_del;
 
-        //         assert(query_dist < F[prev_cost].size());
-        //         auto prev_ft = F[prev_cost][query_dist].find(node);
-        //         assert(ft != F[cost][query_dist].end());
-        //         assert(std::get<0>(ft->second) == prev_dist);
-        //         assert(std::get<1>(ft->second) == num_del);
-        //         ft = prev_ft;
-        //         prev_node = std::get<2>(ft->second);
-        //     }
+                assert(query_dist < F[prev_cost].size());
+                auto prev_ft = F[prev_cost][query_dist].find(node);
+                assert(ft != F[cost][query_dist].end());
+                assert(std::get<0>(ft->second) == prev_dist);
+                assert(std::get<1>(ft->second) == num_del);
+                ft = prev_ft;
+                prev_node = std::get<2>(ft->second);
+            }
 
-        //     prev_cost -= gap_opn;
-        //     cigar.append(Cigar::DELETION);
+            prev_cost -= gap_opn;
+            cigar.append(Cigar::DELETION);
+            path.emplace_back(node);
 
-        //     --prev_dist;
-        //     assert(query_dist < S[prev_cost].size());
+            --prev_dist;
+            assert(query_dist < S[prev_cost].size());
 
-        //     auto check_bt = S[prev_cost][query_dist].find(prev_node);
-        //     assert(check_bt != S[prev_cost][query_dist].end());
-        //     assert(std::get<0>(check_bt->second) == prev_dist);
+            auto check_bt = S[prev_cost][query_dist].find(prev_node);
+            assert(check_bt != S[prev_cost][query_dist].end());
+            assert(std::get<0>(check_bt->second) == prev_dist);
 
-        //     dist = prev_dist;
-        //     cost = prev_cost;
-        //     bt = check_bt;
-        // }
+            dist = prev_dist;
+            cost = prev_cost;
+            node = prev_node;
+            bt = check_bt;
+        }
 
         // check match
         if (std::get<3>(bt->second) == Cigar::MATCH || std::get<3>(bt->second) == Cigar::MISMATCH) {
@@ -560,7 +564,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 DBGAlignerConfig::score_t dist = query_j.end() - query_i.end();
 
+                std::cerr << "Trying to connect "
+                          << a_i << " -> " << a_j;
+
                 if (dist <= 0 || query_i.begin() >= query_j.begin()) {
+                    std::cerr << "\tbadorder\n";
                     ++chain_scores;
                     return;
                 }
@@ -579,6 +587,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 }
 
                 if (base_score <= score_j) {
+                    std::cerr << "\t" << base_score << " <= " << score_j << "\n";
                     ++chain_scores;
                     return;
                 }
@@ -609,6 +618,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 );
 
                 if (min_diff == std::numeric_limits<ssize_t>::max()) {
+                    std::cerr << "\tnopath\n";
                     ++chain_scores;
                     return;
                 }
@@ -619,9 +629,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                             + (diff - 1) * config_.gap_extension_penalty;
                 }
 
-                std::cerr << "Trying to connect "
-                          << a_i << " -> " << a_j
-                          << "\td: " << dist << "," << "cd:" << coord_dist
+                std::cerr << "\td: " << dist << "," << "cd:" << coord_dist
                           << "\tscore: " << std::get<0>(*chain_scores) << "->" << base_score << " -> " << score << " vs. " << score_j << std::endl;
                 update_score(score, it, coord_dist);
 
@@ -653,7 +661,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     );
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
-        return a.get_score() > b.get_score();
+        return std::make_tuple(a.get_score(), a.get_seed().size())
+             > std::make_tuple(b.get_score(), b.get_seed().size());
     });
     return alignments;
 }

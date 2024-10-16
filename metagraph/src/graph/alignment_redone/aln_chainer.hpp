@@ -160,6 +160,7 @@ AnchorIt chain_anchors(const Query &query,
         if (begin == end)
             return;
 
+        common::logger->info("Forward pass");
         auto make_anchor_connector = [&](const AnchorIt i) {
             return [&,i](DBGAlignerConfig::score_t score, const AnchorIt last, size_t dist) {
                 assert(last != i);
@@ -187,7 +188,7 @@ AnchorIt chain_anchors(const Query &query,
                 AnchorIt j = begin;
                 for (AnchorIt i = begin; i != end; ++i) {
                     j = std::find_if(j, end, [&](const Anchor &a) {
-                        return a.get_end_clipping() <= b + i->get_end_clipping();
+                        return i->get_seed().end() - a.get_seed().end() <= b;
                     });
 
                     // align anchors [j, i) to i
@@ -206,6 +207,7 @@ AnchorIt chain_anchors(const Query &query,
                 best_cost = 2*(query_size - best_score/match_score);
             } while (best_cost > b_last);
         } else {
+            common::logger->info("Use alt");
             // otherwise, use this algorithm
             for (AnchorIt i = begin + 1; i != end; ++i) {
                 AnchorIt j = i - std::min(static_cast<size_t>(i - begin), config.chaining_bandwidth);
@@ -230,7 +232,7 @@ AnchorIt chain_anchors(const Query &query,
     forward_pass(cur_begin, end, jt);
 
     // backtracking
-    std::vector<std::tuple<DBGAlignerConfig::score_t, bool, size_t>> best_chains;
+    std::vector<std::tuple<DBGAlignerConfig::score_t, size_t, bool, size_t>> best_chains;
     best_chains.reserve(chain_scores.size());
     for (size_t i = 0; i < chain_scores.size(); ++i) {
         const auto &[score, last, dist] = chain_scores[i];
@@ -238,7 +240,12 @@ AnchorIt chain_anchors(const Query &query,
         if (score > 0) {
             assert(last <= end);
             assert(last >= begin);
-            best_chains.emplace_back(-score, (begin + i)->get_orientation(), i);
+            best_chains.emplace_back(
+                -score,
+                (begin + i)->get_end_clipping(),
+                (begin + i)->get_orientation(),
+                i
+            );
         }
     }
 
@@ -246,7 +253,7 @@ AnchorIt chain_anchors(const Query &query,
     common::logger->info("Best chain score: {}", -std::get<0>(best_chains[0]));
 
     sdsl::bit_vector used(chain_scores.size());
-    for (auto [nscore, orientation, i] : best_chains) {
+    for (auto [nscore, end_clipping, orientation, i] : best_chains) {
         if (terminate())
             return end;
 
