@@ -649,66 +649,29 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight_long_xdrop) {
 //     EXPECT_TRUE(path.is_valid(*graph, &config));
 // }
 
-// TYPED_TEST(DBGAlignerTest, align_clipping1) {
-//     size_t k = 4;
-//     std::string reference = "GGCCTGTTTG";
-//     std::string query =     "ACCCTGTTTG";
-//     //                       SS
+TYPED_TEST(DBGAlignerRedoneTest, align_clipping1) {
+    size_t k = 4;
+    std::string reference = "GGCCTGTTTG";
+    std::string query =     "ACCCTGTTTG";
+    //                       SS
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference.substr(2) }, { "2S8=" });
+}
 
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
+TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
+    size_t k = 4;
+    std::string reference = "AAAAGCTTCGAGGCCAA";
+    std::string query =      "TTAGCTTCGAGGCCAA";
+    //                        SS
 
-//     EXPECT_EQ(5ull, path.size());
-//     EXPECT_EQ(reference.substr(2), path.get_sequence());
-//     EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
-//     EXPECT_EQ("2S8=", path.get_cigar().to_string())
-//         << reference.substr(2) << " " << path.get_sequence();
-//     EXPECT_EQ(8u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(2u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
-
-// TYPED_TEST(DBGAlignerTest, align_clipping2) {
-//     size_t k = 4;
-//     std::string reference = "AAAAGCTTCGAGGCCAA";
-//     std::string query =      "TTAGCTTCGAGGCCAA";
-//     //                        SS
-
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_EQ(11u, path.size());
-//     EXPECT_EQ(reference.substr(3), path.get_sequence());
-//     EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
-//     EXPECT_EQ("2S14=", path.get_cigar().to_string());
-//     EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(2u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference.substr(3) }, { "2S14=" });
+}
 
 // TYPED_TEST(DBGAlignerTest, align_long_clipping) {
 //     size_t k = 4;
