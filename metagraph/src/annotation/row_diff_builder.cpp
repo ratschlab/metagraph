@@ -314,7 +314,7 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
         sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
             [&](int32_t count) {
                 // TODO: skip single outgoing
-                outgoing_counts.push_back(graph.in_graph(graph_idx) ? count : 0);
+                outgoing_counts.push_back((count + 1) * graph.in_graph(graph_idx));
                 if ((*last)[graph_idx]) {
                     // pick the node with the largest count
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
