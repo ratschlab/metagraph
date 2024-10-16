@@ -144,12 +144,14 @@ using WaveFront = OffsetVector<Map>; // S(cost)
 template <typename Map>
 using ScoreTable = std::vector<WaveFront<Map>>;
 
+template <typename StrItr>
 void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_single_incoming,
                 const std::function<DeBruijnGraph::node_index(DeBruijnGraph::node_index, char)> &traverse_back,
                 const std::function<void(DeBruijnGraph::node_index, const std::function<void(DeBruijnGraph::node_index, char)>&)> &call_incoming_kmers,
                 const DBGAlignerConfig &config,
                 const DeBruijnGraph::node_index start_node,
-                std::string_view query_window,
+                const StrItr query_window_begin,
+                const StrItr query_window_end,
                 size_t max_dist,
                 const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
                 const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
@@ -157,10 +159,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
     using node_index = DeBruijnGraph::node_index;
 
-    if (query_window.empty())
+    if (query_window_begin == query_window_end)
         return;
 
-    common::logger->info("Query window: {}", query_window);
+    size_t query_size = query_window_end - query_window_begin;
+
+    const auto query_window_rbegin = std::make_reverse_iterator(query_window_end);
+    const auto query_window_rend = std::make_reverse_iterator(query_window_begin);
 
     // derived from 2.4.1 in https://doi.org/10.1101/2022.01.12.476087 (v1)
     DBGAlignerConfig::score_t match_score = config.match_score("A");
@@ -245,7 +250,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
         auto node = start_node;
         size_t best_dist = 0;
 
-        for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
+        for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
             if (best_dist == max_dist || terminate_branch(0, best_dist, query_dist, node) || !has_single_incoming(node))
                 break;
 
@@ -267,7 +272,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             start_node,
             best_dist,
             Cigar::MATCH,
-            best_dist > 0 ? query_window.back() : '\0'
+            best_dist > 0 ? *query_window_rbegin : '\0'
         );
 
         if (start_backtrack(0, best_dist, query_dist, node))
@@ -283,7 +288,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 continue;
 
             for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
-                assert(query_dist <= query_window.size());
+                assert(query_dist <= query_size);
                 if (S[cost][query_dist].empty())
                     continue;
 
@@ -307,7 +312,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         continue;
 
                     // forward creation of insertions
-                    if (query_dist < query_window.size()) {
+                    if (query_dist < query_size) {
                         // extend a previous insertion
                         if (cost < E.size() && query_dist < E[cost].size()) {
                             auto find = E[cost][query_dist].find(node);
@@ -357,10 +362,14 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                             }
                         }
 
-                        if (query_dist < query_window.size()) {
+                        if (query_dist < query_size) {
                             // match
-                            std::string_view local_query_window = query_window;
-                            local_query_window.remove_suffix(query_dist);
+                            auto local_query_window_begin = query_window_begin;
+                            auto local_query_window_end = query_window_end;
+                            local_query_window_end -= query_dist;
+
+                            auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
+                            auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
 
                             for (auto [prev, c] : prevs) {
                                 std::cerr << prev;
@@ -368,12 +377,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 size_t cur_query_dist = query_dist + 1;
                                 size_t cur_cost = cost;
                                 Cigar::Operator op = Cigar::MATCH;
-                                if (c != local_query_window.back()) {
+                                if (c != *local_query_window_rbegin) {
                                     cur_cost += mismatch_cost;
                                     op = Cigar::MISMATCH;
                                 }
 
-                                for (auto jt = local_query_window.rbegin() + 1; jt != local_query_window.rend(); ++jt) {
+                                for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
                                     if (cur_best == max_dist || !has_single_incoming(prev))
                                         break;
 
@@ -542,8 +551,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 size_t prev_query = query_dist - num_match;
 
                 // reconstruct the backwards traversal from last_node to node
-                auto it = query_window.rbegin() + prev_query;
-                assert(it != query_window.rend());
+                auto it = query_window_rbegin + prev_query;
+                assert(it != query_window_rend);
                 size_t cur_path_size = path.size();
                 if (std::get<3>(bt->second) == Cigar::MISMATCH) {
                     assert(mismatch_char != *it);
@@ -558,7 +567,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 }
 
                 while (num_match) {
-                    assert(it != query_window.rend());
+                    assert(it != query_window_rend);
                     traverse_node = traverse_back(traverse_node, *it);
                     std::cerr << "\t" << traverse_node;
                     assert(traverse_node != DeBruijnGraph::npos);
@@ -620,7 +629,7 @@ void align_bwd(const DeBruijnGraph &graph,
         },
         config,
         start_node,
-        query_window,
+        query_window.begin(), query_window.end(),
         max_dist,
         callback,
         start_backtrack,
@@ -638,7 +647,6 @@ void align_fwd(const DeBruijnGraph &graph,
                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
-    std::string query_window_rev(query_window.rbegin(), query_window.rend());
     align_impl(
         [&graph](DeBruijnGraph::node_index node) { return graph.has_single_outgoing(node); },
         [&graph](DeBruijnGraph::node_index node, char c) { return graph.traverse(node, c); },
@@ -647,7 +655,7 @@ void align_fwd(const DeBruijnGraph &graph,
         },
         config,
         start_node,
-        query_window_rev,
+        query_window.rbegin(), query_window.rend(),
         max_dist,
         callback,
         start_backtrack,
