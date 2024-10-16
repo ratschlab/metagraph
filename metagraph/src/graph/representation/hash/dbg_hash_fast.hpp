@@ -92,6 +92,8 @@ class DBGHashFast : public DeBruijnGraph {
     uint64_t num_nodes() const { return hash_dbg_->num_nodes(); }
     uint64_t max_index() const { return hash_dbg_->max_index(); }
 
+    bool in_graph(node_index node) const { return hash_dbg_->in_graph(node); }
+
     void serialize(std::ostream &out) const { hash_dbg_->serialize(out); }
     void serialize(const std::string &filename) const { hash_dbg_->serialize(filename); }
 

@@ -178,7 +178,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
-    bool is_valid(node_index node) const;
+    virtual bool in_graph(node_index node) const override final;
     node_index validate_edge(node_index node) const;
     node_index select_node(uint64_t boss_index) const;
     uint64_t rank_node(node_index kmer_index) const;
@@ -203,6 +203,8 @@ class DBGSuccinct : public DeBruijnGraph {
     Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
+
+    std::unique_ptr<bit_vector> generate_dummy_kmers(size_t num_threads, bool with_pruning) const;
 };
 
 } // namespace graph

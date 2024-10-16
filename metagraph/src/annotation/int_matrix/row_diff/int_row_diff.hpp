@@ -47,7 +47,7 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
     static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
 
     template <typename... Args>
-    IntRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+    IntRowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     std::vector<Row> get_column(Column j) const override;
@@ -80,15 +80,14 @@ std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) cons
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
     for (Row i = 0; i < num_rows(); ++i) {
-        auto edge = graph::AnnotatedSequenceGraph::anno_to_graph_index(i);
+        auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(i);
 
-        if (!boss.get_W(edge))
+        if (!graph_->in_graph(node))
             continue;
 
         SetBitPositions set_bits = get_rows({ i })[0];
@@ -118,7 +117,7 @@ std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);

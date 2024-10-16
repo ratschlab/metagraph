@@ -82,7 +82,7 @@ bool DBGSuccinct::find(std::string_view sequence,
 
 // Traverse the outgoing edge
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     // return npos if the character is invalid
     if (boss_graph_->encode(next_char) == boss_graph_->alph_size)
@@ -98,7 +98,7 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
 
 // Traverse the incoming edge
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     // dbg node is a boss edge
     BOSS::edge_index edge = boss_graph_->bwd(node);
@@ -128,11 +128,11 @@ inline void call_outgoing(const BOSS &boss,
 
 void DBGSuccinct::call_outgoing_kmers(node_index node,
                                       const OutgoingEdgeCallback &callback) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
-        if (is_valid(next))
+        if (in_graph(next))
             callback(next, boss_graph_->decode(boss_graph_->get_W(i)
                                 % boss_graph_->alph_size));
     });
@@ -140,7 +140,7 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
 void DBGSuccinct::call_incoming_kmers(node_index node,
                                       const IncomingEdgeCallback &callback) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto edge = node;
 
@@ -151,7 +151,7 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
                     == boss_graph_->get_node_last_value(edge));
 
             auto prev = incoming_boss_edge;
-            if (is_valid(prev)) {
+            if (in_graph(prev)) {
                 callback(prev,
                     boss_graph_->decode(
                         boss_graph_->get_minus_k_value(incoming_boss_edge, get_k() - 2).first
@@ -164,18 +164,18 @@ void DBGSuccinct::call_incoming_kmers(node_index node,
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
                                           const std::function<void(node_index)> &callback) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     call_outgoing(*boss_graph_, node, [&](auto i) {
         auto next = i;
-        if (is_valid(next))
+        if (in_graph(next))
             callback(next);
     });
 }
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
                                           const std::function<void(node_index)> &callback) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto edge = node;
 
@@ -186,7 +186,7 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
                     == boss_graph_->get_node_last_value(edge));
 
             auto prev = incoming_boss_edge;
-            if (is_valid(prev))
+            if (in_graph(prev))
                 callback(prev);
         }
     );
@@ -195,7 +195,7 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
     for (node_index i = 1; i <= max_index() && !terminate(); ++i) {
-        if (is_valid(i)) {
+        if (in_graph(i)) {
             callback(i);
         }
     }
@@ -243,7 +243,7 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
 }
 
 std::string DBGSuccinct::get_node_sequence(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -307,7 +307,7 @@ void DBGSuccinct
         auto edge = boss_graph_->pick_edge(last, encoded.back());
         if (edge) {
             auto kmer_index = edge;
-            if (is_valid(kmer_index)) {
+            if (in_graph(kmer_index)) {
                 assert(str.size() == get_k());
                 assert(get_node_sequence(kmer_index) == str);
                 callback(kmer_index, get_k());
@@ -332,7 +332,7 @@ void DBGSuccinct
                 boss_graph_->get_node_last_value(e),
                 [&](BOSS::edge_index incoming_edge_idx) {
                     auto kmer_index = incoming_edge_idx;
-                    if (is_valid(kmer_index)) {
+                    if (in_graph(kmer_index)) {
                         assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
                             == str.substr(0, match_size));
                         nodes.emplace_back(kmer_index);
@@ -354,7 +354,7 @@ void DBGSuccinct
                 boss_graph_->get_node_last_value(e),
                 [&](BOSS::edge_index incoming_edge_idx) {
                     auto kmer_index = incoming_edge_idx;
-                    if (is_valid(kmer_index)) {
+                    if (in_graph(kmer_index)) {
                         assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
                             == str.substr(0, match_size));
                         callback(kmer_index, match_size);
@@ -370,7 +370,7 @@ void DBGSuccinct::traverse(node_index start,
                            const char *end,
                            const std::function<void(node_index)> &callback,
                            const std::function<bool()> &terminate) const {
-    assert(is_valid(start));
+    assert(in_graph(start));
     assert(end >= begin);
 
     if (terminate())
@@ -389,7 +389,7 @@ void DBGSuccinct::traverse(node_index start,
         edge = boss_graph_->pick_edge(edge, boss_graph_->encode(*begin));
 
         start = edge;
-        if (!is_valid(start))
+        if (!in_graph(start))
             return;
 
         callback(start);
@@ -510,7 +510,7 @@ void DBGSuccinct
     assert(boss_graph_.get());
     boss_graph_->call_kmers([&](auto index, const std::string &seq) {
         auto node = index;
-        assert(is_valid(node));
+        assert(in_graph(node));
         callback(node, seq);
     }, stop_early);
 }
@@ -519,14 +519,14 @@ void DBGSuccinct
 ::call_source_nodes(const std::function<void(node_index)> &callback) const {
     boss_graph_->call_start_edges([&](auto boss_edge) {
         auto node = boss_edge;
-        assert(is_valid(node));
+        assert(in_graph(node));
         assert(!indegree(node));
         callback(node);
     });
 }
 
 size_t DBGSuccinct::outdegree(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -552,7 +552,7 @@ size_t DBGSuccinct::outdegree(node_index node) const {
 }
 
 bool DBGSuccinct::has_single_outgoing(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -578,7 +578,7 @@ bool DBGSuccinct::has_single_outgoing(node_index node) const {
 }
 
 bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -595,7 +595,7 @@ bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
 }
 
 size_t DBGSuccinct::indegree(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -611,7 +611,7 @@ size_t DBGSuccinct::indegree(node_index node) const {
 }
 
 bool DBGSuccinct::has_no_incoming(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -627,7 +627,7 @@ bool DBGSuccinct::has_no_incoming(node_index node) const {
 }
 
 bool DBGSuccinct::has_single_incoming(node_index node) const {
-    assert(is_valid(node));
+    assert(in_graph(node));
 
     auto boss_edge = node;
 
@@ -770,24 +770,29 @@ void DBGSuccinct::serialize(const std::string &filename) const {
             throw std::ios_base::failure("Can't write to file " + out_filename);
     }
 
-    if (!valid_edges_.get())
-        return;
+    auto serialize_valid_edges = [&](auto &&valid_edges) {
+        assert((boss_graph_->get_state() == BOSS::State::STAT
+                    && dynamic_cast<const bit_vector_small*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::FAST
+                    && dynamic_cast<const bit_vector_stat*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::DYN
+                    && dynamic_cast<const bit_vector_dyn*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::SMALL
+                    && dynamic_cast<const bit_vector_small*>(valid_edges.get())));
 
-    assert((boss_graph_->get_state() == BOSS::State::STAT
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::FAST
-                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::DYN
-                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::SMALL
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
+        const auto out_filename = prefix + kDummyMaskExtension;
+        std::ofstream out = utils::open_new_ofstream(out_filename);
+        if (!out.good())
+            throw std::ios_base::failure("Can't write to file " + out_filename);
 
-    const auto out_filename = prefix + kDummyMaskExtension;
-    std::ofstream out = utils::open_new_ofstream(out_filename);
-    if (!out.good())
-        throw std::ios_base::failure("Can't write to file " + out_filename);
+        valid_edges->serialize(out);
+    };
 
-    valid_edges_->serialize(out);
+    if (valid_edges_) {
+        serialize_valid_edges(valid_edges_);
+    } else {
+        serialize_valid_edges(generate_dummy_kmers(1, false));
+    }
 
     if (bloom_filter_) {
         std::ofstream bloom_out = utils::open_new_ofstream(prefix + kBloomFilterExtension);
@@ -868,9 +873,7 @@ BOSS::State DBGSuccinct::get_state() const {
     return boss_graph_->get_state();
 }
 
-void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
-    valid_edges_.reset();
-
+std::unique_ptr<bit_vector> DBGSuccinct::generate_dummy_kmers(size_t num_threads, bool with_pruning) const {
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
@@ -878,34 +881,34 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     vector_mask.flip();
 
     switch (get_state()) {
-        case BOSS::State::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::FAST: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::DYN: {
-            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
-            break;
-        }
+        case BOSS::State::STAT:
+            return std::make_unique<bit_vector_small>(std::move(vector_mask));
+        case BOSS::State::FAST:
+            return std::make_unique<bit_vector_stat>(std::move(vector_mask));
+        case BOSS::State::DYN:
+            return std::make_unique<bit_vector_dyn>(std::move(vector_mask));
+        case BOSS::State::SMALL:
+            return std::make_unique<bit_vector_small>(std::move(vector_mask));
+        default:
+            throw std::runtime_error("Invalid state");
     }
+}
+
+void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
+    valid_edges_.reset();
+
+    valid_edges_ = generate_dummy_kmers(num_threads, with_pruning);
 
     assert(valid_edges_.get());
     assert(valid_edges_->size() == boss_graph_->num_edges() + 1);
     assert(!(*valid_edges_)[0]);
 }
 
-bool DBGSuccinct::is_valid(node_index node) const {
-    return 0 < node && node <= max_index() && (!valid_edges_ || (*valid_edges_)[node]);
+bool DBGSuccinct::in_graph(node_index node) const {
+    return DeBruijnGraph::in_graph(node) && (!valid_edges_ || (*valid_edges_)[node]);
 }
 node_index DBGSuccinct::validate_edge(node_index node) const {
-    return is_valid(node) ? node : npos;
+    return in_graph(node) ? node : npos;
 }
 node_index DBGSuccinct::select_node(uint64_t rank) const {
     assert(rank <= num_nodes());
