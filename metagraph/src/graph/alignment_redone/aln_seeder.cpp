@@ -817,6 +817,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
     using AnchorIt = std::vector<Anchor>::iterator;
 
+    DBGAlignerConfig::score_t match_score = config_.match_score("A");
+
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
         [this](const Anchor &a_j,
                ssize_t max_dist,
@@ -927,13 +929,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             std::cerr << std::endl;
             return true;
         },
-        [this](AnchorIt last,
-               AnchorIt next,
-               Alignment&& aln,
-               size_t last_to_next_dist,
-               DBGAlignerConfig::score_t score_up_to_now,
-               const AlignmentCallback &callback) {
-            size_t min_cost = std::numeric_limits<size_t>::max();
+        [this,match_score](AnchorIt last,
+                           AnchorIt next,
+                           Alignment&& aln,
+                           size_t last_to_next_dist,
+                           DBGAlignerConfig::score_t score_up_to_now,
+                           const AlignmentCallback &callback) {
+            DBGAlignerConfig::score_t best_score = aln.get_score();
             size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size() - next->get_path().size() + 1;
             std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
             std::cerr << "\ti.e., " << Alignment(*next) << " <- " << aln << "\t" << next_to_last_dist << "\n";
@@ -949,9 +951,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 return end_branch(cost, dist, query_dist, node) && node == next->get_path().back();
             };
 
+            auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                        + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
+            };
+
             auto start_backtrack = [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                if (cost <= min_cost && reached_end(cost, dist, query_dist, node)) {
-                    min_cost = cost;
+                DBGAlignerConfig::score_t score = get_score(cost, dist, query_dist);
+                if (score > aln.get_score() && score >= best_score && reached_end(cost, dist, query_dist, node)) {
+                    best_score = score;
                     return true;
                 } else {
                     return false;
