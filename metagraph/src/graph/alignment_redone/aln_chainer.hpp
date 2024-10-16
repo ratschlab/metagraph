@@ -204,9 +204,10 @@ AnchorIt chain_anchors(const Query &query,
                                      make_anchor_connector(i));
 
                     if (std::get<0>(chain_scores[i - begin]) > best_score) {
-                        best_score = std::get<0>(chain_scores[i - begin]);
-                        traversed = std::get<3>(chain_scores[i - begin]);
-                        queried = std::get<4>(chain_scores[i - begin]);
+                        AnchorIt last;
+                        size_t added_dist;
+                        std::tie(best_score, last, added_dist, traversed, queried)
+                            = chain_scores[i - begin];
                     }
                 }
                 b_last = b;
