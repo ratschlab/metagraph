@@ -743,34 +743,34 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         if (!fwd_ext.get_clipping()) {
             alns.emplace_back(std::move(fwd_ext));
         } else {
-            std::string_view query_window = aln.get_query();
-            query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
+            std::string_view query_window = fwd_ext.get_query();
+            query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
 
-            DBGAlignerConfig::score_t best_score = aln.get_score();
+            DBGAlignerConfig::score_t best_score = fwd_ext.get_score();
 
             auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                return fwd_ext.get_score() + cost_to_score(cost, query_dist, dist, match_score)
                         + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
             };
 
             align_bwd(
-                query_.get_graph(), config_, aln.get_path().back(),
+                query_.get_graph(), config_, fwd_ext.get_path()[0],
                 query_window, std::numeric_limits<size_t>::max(),
                 [&](auto&& path, auto&& cigar) {
-                    path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+                    path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
                     size_t query_dist = cigar.get_num_query();
                     assert(query_dist <= query_window.size());
                     Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - query_dist);
                     ext_cigar.append(std::move(cigar));
 
-                    Cigar aln_cigar = aln.get_cigar();
+                    Cigar aln_cigar = fwd_ext.get_cigar();
                     aln_cigar.trim_clipping();
                     ext_cigar.append(std::move(aln_cigar));
 
                     alns.emplace_back(
                         query_.get_graph(),
-                        aln.get_query(),
-                        aln.get_orientation(),
+                        fwd_ext.get_query(),
+                        fwd_ext.get_orientation(),
                         std::move(path),
                         config_,
                         std::move(ext_cigar)
@@ -782,7 +782,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                         return false;
 
                     auto score = get_score(cost, dist, query_dist);
-                    if (score > aln.get_score() && score >= best_score) {
+                    if (score > fwd_ext.get_score() && score >= best_score) {
                         best_score = score;
                         return true;
                     }
