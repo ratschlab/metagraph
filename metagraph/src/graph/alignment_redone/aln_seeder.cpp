@@ -3,6 +3,7 @@
 #include "aln_chainer.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -644,6 +645,17 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 if (diff != 0) {
                     score += config_.gap_opening_penalty
                             + (diff - 1) * config_.gap_extension_penalty;
+                }
+
+                if (query_i.end() < query_j.begin()) {
+                    ssize_t mismatched = query_j.begin() - query_i.end();
+                    if (dist > coord_dist)
+                        mismatched -= dist - coord_dist;
+
+                    if (mismatched > 0) {
+                        std::string_view ext(query_i.data() + query_i.size(), mismatched);
+                        score += config_.score_sequences(ext, std::string(mismatched, boss::BOSS::kSentinel));
+                    }
                 }
 
                 std::cerr << "\td: " << dist << "," << "cd:" << coord_dist
