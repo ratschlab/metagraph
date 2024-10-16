@@ -148,7 +148,6 @@ void align(const DeBruijnGraph &graph,
            const DBGAlignerConfig &config,
            const DeBruijnGraph::node_index start_node,
            std::string_view query_window,
-           const Alignment &aln,
            const Anchor &target,
            size_t dist,
            const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
@@ -157,6 +156,8 @@ void align(const DeBruijnGraph &graph,
     assert(dist > 0);
 
     using node_index = DeBruijnGraph::node_index;
+
+    node_index target_node = target.get_path().back();
 
     if (query_window.empty())
         return;
@@ -293,7 +294,7 @@ void align(const DeBruijnGraph &graph,
 
                     common::logger->info("Check: c:{}\tn:{} vs. {}\tcd:{} vs. {}\td:{} vs. {}",
                                          cost,
-                                         node, target.get_path().back(),
+                                         node, target_node,
                                          best_dist, dist,
                                          query_dist, query_window.size());
                     if (terminate(cost, best_dist, query_dist, node))
@@ -432,16 +433,15 @@ void align(const DeBruijnGraph &graph,
 
     // backtrack
     common::logger->info("Backtracking");
-    node_index node = target.get_path().back();
+    node_index node = target_node;
     size_t query_dist = query_window.size();
 
     assert(cost < S.size() && query_dist < S[cost].size());
     auto bt = S[cost][query_dist].find(node);
     assert(bt != S[cost][query_dist].end());
 
-    std::vector<node_index> path(target.get_path().begin(), target.get_path().end() - 1);
-    Cigar cigar(Cigar::CLIPPED, target.get_clipping());
-    cigar.append(Cigar::MATCH, path.size());
+    std::vector<node_index> path;
+    Cigar cigar;
 
     do {
         assert(std::get<0>(bt->second) == dist);
@@ -731,9 +731,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             std::string_view query_window = aln.get_query();
             query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
             query_window.remove_prefix(next->get_clipping() + next->get_path().size() - 1);
-            align(query_.get_graph(), config_, aln.get_path()[0], query_window, aln, *next, next_to_last_dist,
-                [&](auto&& path, auto&& cigar) {
+            align(query_.get_graph(), config_, aln.get_path()[0], query_window, *next, next_to_last_dist,
+                [&](auto&& bt_path, auto&& bt_cigar) {
+                    std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().end() - 1);
+                    path.insert(path.end(), bt_path.begin(), bt_path.end());
                     path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+
+                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+                    cigar.append(Cigar::MATCH, next->get_path().size() - 1);
+                    cigar.append(std::move(bt_cigar));
 
                     Cigar aln_cigar = aln.get_cigar();
                     aln_cigar.trim_clipping();
