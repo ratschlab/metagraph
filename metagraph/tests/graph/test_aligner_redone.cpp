@@ -38,7 +38,6 @@ void run_alignment(const DeBruijnGraph &graph,
                    const std::vector<std::string> &cigar_str,
                    size_t end_trim = 0) {
     size_t k = graph.get_k();
-    ASSERT_EQ(reference.size(), cigar_str.size());
     for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
         config.min_seed_length = k;
         config.max_seed_length = mx;
@@ -51,15 +50,18 @@ void run_alignment(const DeBruijnGraph &graph,
         paths.resize(reference.size());
 
         for (size_t i = 0; i < reference.size(); ++i) {
-            Cigar cigar(cigar_str[i]);
             auto path = paths[i];
             EXPECT_EQ(reference[i].size() - k + 1 + end_trim, path.get_path().size());
             EXPECT_EQ(reference[i], path.get_spelling()) << mx;
-            EXPECT_EQ(cigar_str[i], path.get_cigar().to_string()) << mx;
-            EXPECT_EQ(config.score_cigar(reference[i], query, cigar), path.get_score()) << mx;
-            EXPECT_EQ(cigar.get_clipping(), path.get_clipping());
-            EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping());
             EXPECT_EQ(end_trim, path.get_end_trim()) << mx;
+
+            if (i < cigar_str.size()) {
+                Cigar cigar(cigar_str[i]);
+                EXPECT_EQ(cigar_str[i], path.get_cigar().to_string()) << mx;
+                EXPECT_EQ(config.score_cigar(reference[i], query, cigar), path.get_score()) << mx;
+                EXPECT_EQ(cigar.get_clipping(), path.get_clipping());
+                EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping());
+            }
         }
     }
 }
@@ -830,7 +832,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
 //     }
 // }
 
-// TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
+// TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
 //     size_t k = 6;
 //     std::vector<std::string> seqs;
 //     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
@@ -856,39 +858,11 @@ TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
 
 //     EXPECT_TRUE(graph->find(match, 1.0));
 
-//     for (double nodes_per_seq_char : { 10.0, 50.0 }) {
-//         for (size_t xdrop : { 27, 30 }) {
-//             for (double discovery_fraction : { 0.0, 1.0 }) {
-//                 DBGAlignerConfig config;
-//                 config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//                 config.gap_opening_penalty = -5;
-//                 config.gap_extension_penalty = -2;
-//                 config.xdrop = xdrop;
-//                 config.min_exact_match = discovery_fraction;
-//                 config.max_nodes_per_seq_char = nodes_per_seq_char;
-//                 config.num_alternative_paths = 2;
-//                 config.min_path_score = 0;
-//                 config.min_cell_score = 0;
-//                 config.min_seed_length = k;
-
-//                 DBGAligner<> aligner(*graph, config);
-//                 auto paths = aligner.align(query);
-
-//                 if (discovery_fraction == 0.0) {
-//                     ASSERT_EQ(2ull, paths.size());
-//                     EXPECT_NE(paths[0], paths[1]);
-//                     EXPECT_GE(paths[0].get_score(), paths[1].get_score());
-//                 } else {
-//                     EXPECT_EQ(0ull, paths.size());
-//                 }
-
-//                 paths = aligner.align(match);
-//                 ASSERT_LE(1ull, paths.size());
-//                 EXPECT_EQ(match, paths[0].get_sequence());
-//                 EXPECT_TRUE(is_exact_match(paths[0]));
-//             }
-//         }
-//     }
+//     DBGAlignerConfig config;
+//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+//     config.gap_opening_penalty = -5;
+//     config.gap_extension_penalty = -2;
+//     run_alignment(*graph, config, query, { match }, {});
 // }
 
 // TYPED_TEST(DBGAlignerTest, align_low_similarity5) {

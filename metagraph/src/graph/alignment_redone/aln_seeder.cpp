@@ -74,8 +74,72 @@ void call_distances(const DeBruijnGraph &graph,
     }
 }
 
+template <typename T>
+class OffsetVector {
+  public:
+    OffsetVector() : offset_(0) {}
+
+    template <typename... Args>
+    OffsetVector(size_t offset, Args&&... args) : offset_(offset), null_(T()), data_(std::forward<Args>(args)...) {}
+
+    size_t size() const { return offset_ + data_.size(); }
+    bool empty() const { return offset_ == 0 && data_.empty(); }
+
+    void resize(size_t new_size, const T &val = T()) {
+        if (new_size >= offset_) {
+            data_.resize(new_size - offset_, val);
+            return;
+        }
+
+        new_size -= data_.size();
+        data_.clear();
+        assert(new_size <= offset_);
+        offset_ -= new_size;
+    }
+
+    size_t offset() const { return offset_; }
+
+    template <typename... Args>
+    T& set(size_t i, Args&&... args) {
+        get(i) = T(std::forward<Args>(args)...);
+        return data_[i - offset_];
+    }
+
+    T& get(size_t i) {
+        if (i < offset_) {
+            data_.insert(data_.begin(), offset_ - i, null_);
+            offset_ = i;
+        }
+
+        if (i - offset_ >= data_.size())
+            data_.resize(i - offset_ + 1);
+
+        return data_[i - offset_];
+    }
+
+    T& operator[](size_t i) {
+        assert(i >= offset_);
+        return data_[i - offset_];
+    }
+
+    const T& operator[](size_t i) const {
+        return i >= offset_ ? data_[i - offset_] : null_;
+    }
+
+    using const_iterator = typename std::vector<T>::const_iterator;
+    const_iterator begin() const { return data_.begin(); }
+    const_iterator end() const { return data_.end(); }
+    const_iterator cbegin() const { return data_.cbegin(); }
+    const_iterator cend() const { return data_.cend(); }
+
+  private:
+    size_t offset_;
+    const T null_;
+    std::vector<T> data_;
+};
+
 template <typename Map>
-using WaveFront = std::vector<Map>; // S(cost)
+using WaveFront = OffsetVector<Map>; // S(cost)
 
 template <typename Map>
 using ScoreTable = std::vector<WaveFront<Map>>;
@@ -143,10 +207,7 @@ void global_align(const DeBruijnGraph &graph,
         if (cost >= table.size())
             table.resize(cost + 1);
 
-        if (query_dist >= table[cost].size())
-            table[cost].resize(query_dist + 1);
-
-        auto &table_slot = table[cost][query_dist];
+        auto &table_slot = table[cost].get(query_dist);
         using table_t = std::decay_t<decltype(table_slot)>;
 
         bool inserted = !table_slot.count(node);
@@ -220,7 +281,7 @@ void global_align(const DeBruijnGraph &graph,
             if (S[cost].empty())
                 continue;
 
-            for (size_t query_dist = 0; query_dist < S[cost].size(); ++query_dist) {
+            for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
                 assert(query_dist <= query_window.size());
                 if (S[cost][query_dist].empty())
                     continue;
