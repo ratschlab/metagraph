@@ -398,7 +398,7 @@ void global_align(const DeBruijnGraph &graph,
             assert(std::get<0>(et->second) == dist);
 
             auto [ins_dist, num_ins] = et->second;
-            assert(num_ins >= query_dist);
+            assert(query_dist >= num_ins);
 
             size_t prev_cost = cost - gap_opn - (num_ins - 1) * gap_ext;
             size_t prev_query_dist = query_dist - num_ins;
