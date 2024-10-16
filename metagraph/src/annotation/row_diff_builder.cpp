@@ -314,13 +314,15 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
         sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
             [&](int32_t count) {
                 // TODO: skip single outgoing
-                outgoing_counts.push_back(count);
+                outgoing_counts.push_back(graph.in_graph(graph_idx) ? count : 0);
                 if ((*last)[graph_idx]) {
                     // pick the node with the largest count
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                       outgoing_counts.rend())
                                      - outgoing_counts.rbegin();
-                    rd_succ_bv[graph_idx - max_pos] = true;
+                    if (outgoing_counts[max_pos]) { // Don't mark fake vertices as succ
+                        rd_succ_bv[graph_idx - max_pos] = true;
+                    }
                     outgoing_counts.resize(0);
                 }
                 graph_idx++;
@@ -417,10 +419,6 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
     logger->trace("Building and writing successor and predecessor files to {}.*",
                   outfbase);
 
-    std::optional<sdsl::bit_vector> dummy;
-    if (auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        dummy = succinct->get_boss().mark_all_dummy_edges(num_threads);
-    }
 
     // assign row-diff successors at forks
     auto rd_succ_ptr = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
@@ -448,20 +446,16 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
         std::vector<bool> pred_boundary_buf;
 
         for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
-            if (graph.in_graph(i) && !(dummy && (*dummy)[i])) { // Legacy check for DBGSuccinct
+            if (graph.in_graph(i)) {
                 if(!graph.has_no_outgoing(i)) {
                     auto j = row_diff_successor(graph, i, rd_succ);
-                    if(!dummy || !(*dummy)[j]) { // Legacy check for DBGSuccinct
-                        succ_buf.push_back(to_row(j));
-                        succ_boundary_buf.push_back(0);
-                    }
+                    succ_buf.push_back(to_row(j));
+                    succ_boundary_buf.push_back(0);
                 }
                 if(rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
-                        if(!dummy || !(*dummy)[pred]) { // Legacy check for DBGSuccinct
-                            pred_buf.push_back(to_row(pred));
-                            pred_boundary_buf.push_back(0);
-                        }
+                        pred_buf.push_back(to_row(pred));
+                        pred_boundary_buf.push_back(0);
                     });
                 }
             }

@@ -203,6 +203,8 @@ class DBGSuccinct : public DeBruijnGraph {
     Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
+
+    std::unique_ptr<bit_vector> generate_dummy_kmers(size_t num_threads, bool with_pruning) const;
 };
 
 } // namespace graph
