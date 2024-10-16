@@ -111,6 +111,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(
     -Wno-exit-time-destructors
     -Wno-deprecated-declarations
+    -Wno-vla-cxx-extension
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
