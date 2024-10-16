@@ -144,15 +144,17 @@ using WaveFront = OffsetVector<Map>; // S(cost)
 template <typename Map>
 using ScoreTable = std::vector<WaveFront<Map>>;
 
-void align(const DeBruijnGraph &graph,
-           const DBGAlignerConfig &config,
-           const DeBruijnGraph::node_index start_node,
-           std::string_view query_window,
-           size_t max_dist,
-           const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
-           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
-           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
-           const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
+void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_single_incoming,
+                const std::function<DeBruijnGraph::node_index(DeBruijnGraph::node_index, char)> &traverse_back,
+                const std::function<void(DeBruijnGraph::node_index, const std::function<void(DeBruijnGraph::node_index, char)>&)> &call_incoming_kmers,
+                const DBGAlignerConfig &config,
+                const DeBruijnGraph::node_index start_node,
+                std::string_view query_window,
+                size_t max_dist,
+                const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
+                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
+                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
+                const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
     using node_index = DeBruijnGraph::node_index;
 
     if (query_window.empty())
@@ -244,10 +246,10 @@ void align(const DeBruijnGraph &graph,
         size_t best_dist = 0;
 
         for (auto it = query_window.rbegin(); it != query_window.rend(); ++it) {
-            if (best_dist == max_dist || terminate_branch(0, best_dist, query_dist, node) || !graph.has_single_incoming(node))
+            if (best_dist == max_dist || terminate_branch(0, best_dist, query_dist, node) || !has_single_incoming(node))
                 break;
 
-            if (auto prev = graph.traverse_back(node, *it)) {
+            if (auto prev = traverse_back(node, *it)) {
                 ++best_dist;
                 ++query_dist;
                 node = prev;
@@ -328,7 +330,7 @@ void align(const DeBruijnGraph &graph,
                     if (best_dist < max_dist) {
                         // deletion
                         std::vector<std::pair<node_index, char>> prevs;
-                        graph.call_incoming_kmers(node, [&](auto prev, char c) {
+                        call_incoming_kmers(node, [&](auto prev, char c) {
                             prevs.emplace_back(prev, c);
                         });
                         if (prevs.size()) {
@@ -372,10 +374,10 @@ void align(const DeBruijnGraph &graph,
                                 }
 
                                 for (auto jt = local_query_window.rbegin() + 1; jt != local_query_window.rend(); ++jt) {
-                                    if (cur_best == max_dist || !graph.has_single_incoming(prev))
+                                    if (cur_best == max_dist || !has_single_incoming(prev))
                                         break;
 
-                                    if (auto pprev = graph.traverse_back(prev, *jt)) {
+                                    if (auto pprev = traverse_back(prev, *jt)) {
                                         std::cerr << "\t" << pprev;
                                         ++cur_best;
                                         ++cur_query_dist;
@@ -545,7 +547,7 @@ void align(const DeBruijnGraph &graph,
                 size_t cur_path_size = path.size();
                 if (std::get<3>(bt->second) == Cigar::MISMATCH) {
                     assert(mismatch_char != *it);
-                    traverse_node = graph.traverse_back(traverse_node, mismatch_char);
+                    traverse_node = traverse_back(traverse_node, mismatch_char);
                     assert(traverse_node != DeBruijnGraph::npos);
                     std::cerr << "\t" << traverse_node;
                     path.emplace_back(traverse_node);
@@ -557,7 +559,7 @@ void align(const DeBruijnGraph &graph,
 
                 while (num_match) {
                     assert(it != query_window.rend());
-                    traverse_node = graph.traverse_back(traverse_node, *it);
+                    traverse_node = traverse_back(traverse_node, *it);
                     std::cerr << "\t" << traverse_node;
                     assert(traverse_node != DeBruijnGraph::npos);
                     path.emplace_back(traverse_node);
@@ -599,6 +601,32 @@ void align(const DeBruijnGraph &graph,
         assert(path.size());
         callback(std::move(path), std::move(cigar));
     }
+}
+
+void align_bwd(const DeBruijnGraph &graph,
+               const DBGAlignerConfig &config,
+               const DeBruijnGraph::node_index start_node,
+               std::string_view query_window,
+               size_t max_dist,
+               const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &start_backtrack,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate_branch,
+               const std::function<bool(size_t, size_t, size_t, DeBruijnGraph::node_index)> &terminate) {
+    align_impl(
+        [&graph](DeBruijnGraph::node_index node) { return graph.has_single_incoming(node); },
+        [&graph](DeBruijnGraph::node_index node, char c) { return graph.traverse_back(node, c); },
+        [&graph](DeBruijnGraph::node_index node, const auto &callback) {
+            graph.call_incoming_kmers(node, callback);
+        },
+        config,
+        start_node,
+        query_window,
+        max_dist,
+        callback,
+        start_backtrack,
+        terminate_branch,
+        terminate
+    );
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
@@ -738,7 +766,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 return end_branch(cost, dist, query_dist, node) && node == next->get_path().back();
             };
 
-            align(query_.get_graph(), config_, aln.get_path()[0], query_window, next_to_last_dist,
+            align_bwd(query_.get_graph(), config_, aln.get_path()[0], query_window, next_to_last_dist,
                 [&](auto&& bt_path, auto&& bt_cigar) {
                     std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().end() - 1);
                     path.insert(path.end(), bt_path.begin(), bt_path.end());
