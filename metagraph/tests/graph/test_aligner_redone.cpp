@@ -645,29 +645,29 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight_long_xdrop) {
 //     EXPECT_TRUE(path.is_valid(*graph, &config));
 // }
 
-// TYPED_TEST(DBGAlignerRedoneTest, align_clipping1) {
-//     size_t k = 4;
-//     std::string reference = "GGCCTGTTTG";
-//     std::string query =     "ACCCTGTTTG";
-//     //                       SS
+TYPED_TEST(DBGAlignerRedoneTest, align_clipping1) {
+    size_t k = 4;
+    std::string reference = "GGCCTGTTTG";
+    std::string query =     "ACCCTGTTTG";
+    //                       SS
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     run_alignment(*graph, config, query, { reference.substr(2) }, { "2S8=" });
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference.substr(2) }, { "2S8=" });
+}
 
-// TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
-//     size_t k = 4;
-//     std::string reference = "AAAAGCTTCGAGGCCAA";
-//     std::string query =      "TTAGCTTCGAGGCCAA";
-//     //                        SS
+TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
+    size_t k = 4;
+    std::string reference = "AAAAGCTTCGAGGCCAA";
+    std::string query =      "TTAGCTTCGAGGCCAA";
+    //                        SS
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     run_alignment(*graph, config, query, { reference.substr(3) }, { "2S14=" });
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference.substr(3) }, { "2S14=" });
+}
 
 // TYPED_TEST(DBGAlignerTest, align_long_clipping) {
 //     size_t k = 4;

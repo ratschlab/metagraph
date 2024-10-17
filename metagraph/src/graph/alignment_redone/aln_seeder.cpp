@@ -704,6 +704,11 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](auto&& path, auto&& cigar) {
                 auto ext_path = aln.get_path();
                 ext_path.insert(ext_path.end(), path.begin(), path.end());
+
+                size_t query_dist = cigar.get_num_query();
+                assert(query_dist <= query_window.size());
+                cigar.append(Cigar::CLIPPED, query_window.size() - query_dist);
+
                 Cigar ext_cigar = aln.get_cigar();
                 ext_cigar.trim_end_clipping();
                 ext_cigar.append(std::move(cigar));
