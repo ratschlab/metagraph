@@ -144,6 +144,14 @@ using WaveFront = OffsetVector<Map>; // S(cost)
 template <typename Map>
 using ScoreTable = std::vector<WaveFront<Map>>;
 
+DBGAlignerConfig::score_t cost_to_score(size_t cost,
+                                        size_t query_size,
+                                        size_t match_size,
+                                        DBGAlignerConfig::score_t match_score) {
+    // best_score = 1/2(match_score(query_size + match_spelling_size - best_cost))
+    return match_score * (query_size + match_size - cost) / 2;
+}
+
 template <typename StrItr>
 void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_single_incoming,
                 const std::function<DeBruijnGraph::node_index(DeBruijnGraph::node_index, char)> &traverse_back,
@@ -286,8 +294,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                          node,
                                          best_dist,
                                          query_dist, query_size);
-                    if (terminate(cost, best_dist, query_dist, node))
+                    if (terminate(cost, best_dist, query_dist, node)) {
+                        common::logger->info("FOUND!");
                         return;
+                    }
 
                     if (terminate_branch(cost, best_dist, query_dist, node))
                         continue;
@@ -307,10 +317,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         }
 
                         // open an insertion
-                        ssize_t next_opn_cost = cost + gap_opn;
-                        size_t stored_dist = set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION);
-                        set_value(S, next_opn_cost, query_dist + 1, node, stored_dist, node, 0, Cigar::INSERTION);
-                        it = S[cost][query_dist].begin() + it_dist;
+                        if (last_op != Cigar::DELETION) {
+                            ssize_t next_opn_cost = cost + gap_opn;
+                            size_t stored_dist = set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION);
+                            set_value(S, next_opn_cost, query_dist + 1, node, stored_dist, node, 0, Cigar::INSERTION);
+                            it = S[cost][query_dist].begin() + it_dist;
+                        }
                     }
 
                     if (best_dist < max_dist) {
@@ -335,11 +347,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
                             }
 
-                            ssize_t next_opn_cost = cost + gap_opn;
-                            for (const auto &[prev, c] : prevs) {
-                                size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
-                                set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
-                                it = S[cost][query_dist].begin() + it_dist;
+                            if (last_op != Cigar::INSERTION) {
+                                ssize_t next_opn_cost = cost + gap_opn;
+                                for (const auto &[prev, c] : prevs) {
+                                    size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
+                                    set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
+                                    it = S[cost][query_dist].begin() + it_dist;
+                                }
                             }
                         }
 
@@ -364,7 +378,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
 
                                 for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                    if (cur_best == max_dist || !has_single_incoming(prev))
+                                    if (cur_best == max_dist || terminate_branch(cur_cost, cur_best, cur_query_dist, node) || !has_single_incoming(prev))
                                         break;
 
                                     if (auto pprev = traverse_back(prev, *jt)) {
@@ -423,21 +437,23 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     for (size_t start_cost = 0; start_cost < S.size(); ++start_cost) {
         for (size_t start_query_dist = S[start_cost].offset(); start_query_dist < S[start_cost].size(); ++start_query_dist) {
             assert(start_query_dist <= query_size);
-            std::vector<std::pair<size_t, DeBruijnGraph::node_index>> starts;
+            std::vector<std::tuple<size_t, size_t, DeBruijnGraph::node_index>> starts;
             for (auto it = S[start_cost][start_query_dist].begin(); it != S[start_cost][start_query_dist].end(); ++it) {
                 DeBruijnGraph::node_index node = it->first;
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char] = it->second;
                 if (start_backtrack(start_cost, dist, start_query_dist, node))
-                    starts.emplace_back(dist, node);
+                    starts.emplace_back(dist, std::abs(static_cast<ssize_t>(dist - start_query_dist)), node);
             }
+            if (starts.size())
+                common::logger->info("FOUND {} ALIGNMENTS AT COST {}", starts.size(), start_cost);
+
             std::sort(starts.begin(), starts.end(), [&](const auto &a, const auto &b) {
-                return std::abs(static_cast<ssize_t>(a.first - start_query_dist))
-                     < std::abs(static_cast<ssize_t>(b.first - start_query_dist));
+                return std::make_pair(std::get<0>(b), std::get<1>(a))
+                     < std::make_pair(std::get<0>(a), std::get<1>(b));
             });
-            for (auto [dist, node] : starts) {
+            for (auto [dist, diag, node] : starts) {
                 size_t cost = start_cost;
                 size_t query_dist = start_query_dist;
-                common::logger->info("FOUND ALIGNMENT AT COST {}", cost);
                 assert(dist > 0 || query_dist > 0);
                 assert(cost < S.size() && query_dist < S[cost].size());
                 auto bt = S[cost][query_dist].find(node);
@@ -602,7 +618,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 assert(dist == 0);
                 assert(cost == 0);
                 assert(query_dist == 0);
-                assert(path.size());
                 callback(std::move(path), std::move(cigar));
             }
         }
@@ -665,29 +680,21 @@ void align_fwd(const DeBruijnGraph &graph,
     );
 }
 
-DBGAlignerConfig::score_t cost_to_score(size_t cost,
-                                        size_t query_size,
-                                        size_t match_size,
-                                        DBGAlignerConfig::score_t match_score) {
-    // best_score = 1/2(match_score(query_size + match_spelling_size - best_cost))
-    return match_score * (query_size + match_size - cost) / 2;
-}
-
 void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback) const {
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     std::cerr << "\n\nExtending " << aln << std::endl;
     std::vector<Alignment> fwd_exts;
     if (!aln.get_end_clipping()) {
-        fwd_exts.emplace_back(Alignment(aln));
+        fwd_exts.emplace_back(aln);
     } else {
         std::string_view query_window = aln.get_query();
         query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
 
-        DBGAlignerConfig::score_t best_score = aln.get_score();
+        DBGAlignerConfig::score_t best_score = 0;
 
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+            return cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.right_end_bonus : 0);
         };
 
@@ -719,7 +726,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     return true;
 
                 auto score = get_score(cost, dist, query_dist);
-                if (score > aln.get_score() && score >= best_score) {
+                if (score > 0 && score >= best_score) {
                     best_score = score;
                     return true;
                 }
@@ -728,77 +735,95 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             },
             [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                return query_dist == query_window.size() || get_score(cost, dist, query_dist) < best_score;
+                if (query_dist == query_window.size())
+                    return true;
+
+                auto score = get_score(cost, dist, query_dist);
+                if (score + match_score * (query_window.size() - query_dist) <= 0)
+                    return true;
+
+                return aln.get_score() + score < 0;
             },
             [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 return false;
             }
         );
+
+        if (fwd_exts.empty())
+            fwd_exts.emplace_back(aln);
     }
 
     std::vector<Alignment> alns;
     for (auto &fwd_ext : fwd_exts) {
         std::cerr << "bwd extending " << fwd_ext << std::endl;
-        if (!fwd_ext.get_clipping()) {
-            alns.emplace_back(std::move(fwd_ext));
-        } else {
-            std::string_view query_window = fwd_ext.get_query();
-            query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
+        alns.emplace_back(fwd_ext);
 
-            DBGAlignerConfig::score_t best_score = fwd_ext.get_score();
+        if (!fwd_ext.get_clipping())
+            continue;
 
-            auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-                return fwd_ext.get_score() + cost_to_score(cost, query_dist, dist, match_score)
-                        + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
-            };
+        std::string_view query_window = fwd_ext.get_query();
+        query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
 
-            align_bwd(
-                query_.get_graph(), config_, fwd_ext.get_path()[0],
-                query_window, std::numeric_limits<size_t>::max(),
-                [&](auto&& path, auto&& cigar) {
-                    path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
-                    size_t query_dist = cigar.get_num_query();
-                    assert(query_dist <= query_window.size());
-                    Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - query_dist);
-                    ext_cigar.append(std::move(cigar));
+        DBGAlignerConfig::score_t best_score = 0;
 
-                    Cigar aln_cigar = fwd_ext.get_cigar();
-                    aln_cigar.trim_clipping();
-                    ext_cigar.append(std::move(aln_cigar));
+        auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+            return cost_to_score(cost, query_dist, dist, match_score)
+                    + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
+        };
 
-                    alns.emplace_back(
-                        query_.get_graph(),
-                        fwd_ext.get_query(),
-                        fwd_ext.get_orientation(),
-                        std::move(path),
-                        config_,
-                        std::move(ext_cigar)
-                    );
-                },
-                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    // start backtrack
-                    if (dist == 0 && query_dist == 0)
-                        return false;
+        align_bwd(
+            query_.get_graph(), config_, fwd_ext.get_path()[0],
+            query_window, std::numeric_limits<size_t>::max(),
+            [&](auto&& path, auto&& cigar) {
+                path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
+                size_t query_dist = cigar.get_num_query();
+                assert(query_dist <= query_window.size());
+                Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - query_dist);
+                ext_cigar.append(std::move(cigar));
 
-                    auto score = get_score(cost, dist, query_dist);
-                    if (score > fwd_ext.get_score() && score >= best_score) {
-                        best_score = score;
-                        return true;
-                    }
+                Cigar aln_cigar = fwd_ext.get_cigar();
+                aln_cigar.trim_clipping();
+                ext_cigar.append(std::move(aln_cigar));
 
+                alns.emplace_back(
+                    query_.get_graph(),
+                    fwd_ext.get_query(),
+                    fwd_ext.get_orientation(),
+                    std::move(path),
+                    config_,
+                    std::move(ext_cigar)
+                );
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // start backtrack
+                if (dist == 0 && query_dist == 0)
                     return false;
-                },
-                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    // terminate branch
-                    return get_score(cost, dist, query_dist) < best_score;
-                },
-                [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    // terminate
-                    return false;
+
+                auto score = get_score(cost, dist, query_dist);
+                if (score > 0 && score >= best_score) {
+                    best_score = score;
+                    return true;
                 }
-            );
-        }
+
+                return false;
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // terminate branch
+                if (query_dist == query_window.size())
+                    return true;
+
+                auto score = get_score(cost, dist, query_dist);
+                if (score + match_score * (query_window.size() - query_dist) <= 0)
+                    return true;
+
+                return fwd_ext.get_score() + score < 0;
+            },
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                // terminate
+                return false;
+            }
+        );
     }
 
     std::sort(alns.begin(), alns.end(), [](const auto &a, const auto &b) {
@@ -935,7 +960,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                            size_t last_to_next_dist,
                            DBGAlignerConfig::score_t score_up_to_now,
                            const AlignmentCallback &callback) {
-            DBGAlignerConfig::score_t best_score = aln.get_score();
+            DBGAlignerConfig::score_t best_score = std::numeric_limits<DBGAlignerConfig::score_t>::min();
             size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size() - next->get_path().size() + 1;
             std::cerr << "Connecting " << Alignment(*next) << " -> " << aln << "\t" << last_to_next_dist << "\n";
             std::cerr << "\ti.e., " << Alignment(*next) << " <- " << aln << "\t" << next_to_last_dist << "\n";
@@ -952,13 +977,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             };
 
             auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                return cost_to_score(cost, query_dist, dist, match_score)
                         + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
             };
 
             auto start_backtrack = [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                if (!reached_end(cost, dist, query_dist, node))
+                    return false;
+
                 DBGAlignerConfig::score_t score = get_score(cost, dist, query_dist);
-                if (score > aln.get_score() && score >= best_score && reached_end(cost, dist, query_dist, node)) {
+                if (score >= best_score) {
                     best_score = score;
                     return true;
                 } else {
