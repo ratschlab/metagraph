@@ -1,5 +1,7 @@
 #include "aln_seeder.hpp"
 
+#include <tsl/hopscotch_set.h>
+
 #include "aln_chainer.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
@@ -1069,6 +1071,67 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
              > std::make_tuple(b.get_score(), b.get_seed().size());
     });
     return alignments;
+}
+
+std::vector<Alignment> ExactSeeder::get_alignments() const {
+    std::vector<Anchor> anchors = get_anchors();
+    std::sort(anchors.begin(), anchors.end(), [&](const auto &a, const auto &b) {
+        return a.get_clipping() < b.get_clipping();
+    });
+
+    tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_set<size_t>> node_to_anchors;
+    for (size_t i = 0; i < anchors.size(); ++i) {
+        node_to_anchors[anchors[i].get_path().back()].emplace(i);
+    }
+
+    sdsl::bit_vector used(anchors.size());
+    size_t earliest_unused = 0;
+    for (size_t i = 0; i < anchors.size(); ++i) {
+        if (earliest_unused > i)
+            continue;
+
+        used[i] = true;
+        earliest_unused = std::max(earliest_unused, i + 1);
+        DeBruijnGraph::node_index start_node = anchors[i].get_path().back();
+        std::string_view query_window = anchors[i].get_query();
+        query_window.remove_prefix(anchors[i].get_clipping() + anchors[i].get_seed().size());
+        align_fwd(
+            query_.get_graph(),
+            config_,
+            start_node,
+            query_window,
+            std::numeric_limits<size_t>::max(),
+            [&](auto&& path, auto&& cigar) {},
+            [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                if (dist == 0 || query_dist == 0)
+                    return false;
+
+                // backtrack if we've connected to another anchor
+                auto it = node_to_anchors.find(node);
+                if (it == node_to_anchors.end())
+                    return false;
+
+                const auto &anchor_idxs = it->second;
+                bool unused = false;
+                for (size_t i : anchor_idxs) {
+                    if (!used[i]) {
+                        if (i == earliest_unused)
+                            ++earliest_unused;
+
+                        unused = true;
+                        used[i] = true;
+                    }
+                }
+                return unused;
+            },
+            [&](size_t, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+                return dist && query_dist && node_to_anchors.count(node);
+            },
+            [&](size_t, size_t, size_t, DeBruijnGraph::node_index) {
+                return false;
+            }
+        );
+    }
 }
 
 } // namespace mtg::graph::align
