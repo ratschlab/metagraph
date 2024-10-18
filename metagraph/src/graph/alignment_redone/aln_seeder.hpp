@@ -14,8 +14,8 @@ class Seeder {
     virtual ~Seeder() {}
 
     virtual std::vector<Anchor> get_anchors() const = 0;
-    virtual std::vector<Alignment> get_inexact_anchors() const;
-    virtual std::vector<Alignment> get_alignments() const;
+    virtual std::vector<Alignment> get_inexact_anchors() const = 0;
+    virtual std::vector<Alignment> get_alignments() const = 0;
 
     const Query& get_query() const { return query_; }
 
