@@ -291,7 +291,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
         size_t best_dist = 0;
 
         for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
-            if (best_dist == max_dist || terminate_branch(0, best_dist, query_dist, node) || !has_single_incoming(node))
+            if (terminate_branch(0, best_dist, query_dist, node) || best_dist == max_dist || !has_single_incoming(node))
                 break;
 
             if (auto prev = traverse_back(node, *it)) {
@@ -315,6 +315,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             best_dist > 0 ? *query_window_rbegin : '\0'
         );
 
+        common::logger->info("d: {}\tqd: {} vs. {}", best_dist, query_dist, query_size);
+
         for (size_t cost = 0; cost < S.size(); ++cost) {
             for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
                 assert(query_dist <= query_size);
@@ -333,7 +335,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     //                      best_dist,
                     //                      query_dist, query_size);
                     if (terminate(cost, best_dist, query_dist, node)) {
-                        // common::logger->info("FOUND!");
+                        common::logger->info("FOUND!");
                         return;
                     }
 
@@ -414,7 +416,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
 
                                 for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                    if (cur_best == max_dist || terminate_branch(cur_cost, cur_best, cur_query_dist, node) || !has_single_incoming(prev))
+                                    if (terminate_branch(cur_cost, cur_best, cur_query_dist, node) || cur_best == max_dist || !has_single_incoming(prev))
                                         break;
 
                                     if (auto pprev = traverse_back(prev, *jt)) {
@@ -1096,7 +1098,8 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     auto chain = [&](auto begin, auto end) {
-        sdsl::bit_vector skipped(end - begin);
+        std::vector<DBGAlignerConfig::score_t> skipped_score(end - begin, DBGAlignerConfig::ninf);
+        skipped_score[end - begin - 1] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
         size_t smallest_clipping = std::numeric_limits<size_t>::max();
         tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_set<size_t>> node_to_anchors;
         for (auto it = begin; it != end; ++it) {
@@ -1104,14 +1107,14 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
             node_to_anchors[it->get_path().back()].emplace(it - begin);
         }
 
-        for (auto it = begin; it + 1 != end; ++it) {
-            std::cerr << "Anchor " << it - begin << " / " << end - begin + 1 << "\t" << *it << std::endl;
-            if (!it->get_clipping() || skipped[it - begin]) {
+        for (auto it = begin; it != end; ++it) {
+            std::cerr << "Anchor " << it - begin << " / " << end - begin - 1 << "\t" << *it << std::endl;
+            if (!it->get_clipping() || skipped_score[it - begin] == std::numeric_limits<DBGAlignerConfig::score_t>::max()) {
                 std::cerr << "\tskipped" << std::endl;
                 continue;
             }
 
-            skipped[it - begin] = true;
+            skipped_score[it - begin] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
 
             size_t next_clipping = std::numeric_limits<size_t>::max();
             if (it->get_clipping() > (it + 1)->get_clipping())
@@ -1134,13 +1137,14 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (jt == node_to_anchors.end())
                     return false;
 
-                size_t max_j = *std::max_element(jt->second.begin(), jt->second.end());
-                size_t min_unskipped = std::find(skipped.begin(), skipped.end(), false) - skipped.begin();
-
-                // if there is no possible way to reach this anchor
-                if (min_unskipped >= max_j) {
+                auto earliest_anchor = begin + *std::max_element(jt->second.begin(), jt->second.end());
+                auto latest_unskipped = begin + (std::find_if(skipped_score.begin(), skipped_score.end(), [&](auto s) {
+                    return s != std::numeric_limits<DBGAlignerConfig::score_t>::max();
+                }) - skipped_score.begin());
+                std::cerr << "FOOFOF\t" << (latest_unskipped - begin) << " vs. " << (earliest_anchor - begin) << "\n";
+                if (earliest_anchor == latest_unskipped) {
                     for (size_t j : jt->second) {
-                        skipped[j] = true;
+                        skipped_score[j] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
                     }
                     return false;
                 }
@@ -1169,12 +1173,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                                     std::move(path),
                                     config_,
                                     std::move(ext_cigar));
-                    // std::cerr << "\t" << alns.back() << std::endl;
+                    std::cerr << "\t" << alns.back() << std::endl;
                 },
                 terminate_branch,
                 [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    return cost_to_score(cost, query_dist, dist, match_score) + it->get_score() <= 0
-                        || terminate_branch(cost, dist, query_dist, node);
+                    return terminate_branch(cost, dist, query_dist, node)
+                            || cost_to_score(cost, query_dist, dist, match_score) + it->get_score() <= 0;
                 },
                 [&](size_t, size_t, size_t query_dist, DeBruijnGraph::node_index) {
                     // fully terminate
