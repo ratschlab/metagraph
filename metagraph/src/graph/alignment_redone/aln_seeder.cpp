@@ -1144,7 +1144,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
             std::numeric_limits<size_t>::max(),
             [&](auto&& path, auto&& cigar) {
                 size_t num_matches = cigar.get_num_query();
-                Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - num_matches);
+                Cigar ext_cigar(Cigar::CLIPPED, query_window.size() - num_matches + smallest_clipping);
                 ext_cigar.append(std::move(cigar));
                 ext_cigar.append(Cigar::MATCH, anchors[i].get_seed().size());
                 ext_cigar.append(Cigar::CLIPPED, anchors[i].get_end_clipping());
