@@ -141,7 +141,7 @@ class OffsetVector {
 };
 
 template <typename Tuple>
-using WaveFront = VectorMap<DeBruijnGraph::node_index, OffsetVector<Tuple>>; // S(cost)
+using WaveFront = OffsetVector<VectorMap<DeBruijnGraph::node_index, Tuple>>; // S(cost)
 
 template <typename Tuple>
 using ScoreTable = std::vector<WaveFront<Tuple>>;
@@ -153,6 +153,25 @@ DBGAlignerConfig::score_t cost_to_score(size_t cost,
     // best_score = 1/2(match_score(query_size + match_spelling_size - best_cost))
     return match_score * (query_size + match_size - cost) / 2;
 }
+
+template <typename Tuple>
+const Tuple* get_bucket(const ScoreTable<Tuple> &table,
+                        size_t cost,
+                        size_t query_dist,
+                        DeBruijnGraph::node_index node) {
+    if (cost >= table.size())
+        return nullptr;
+
+    if (query_dist >= table[cost].size() || query_dist < table[cost].offset())
+        return nullptr;
+
+    const auto &table_slot = table[cost][query_dist];
+    auto it = table_slot.find(node);
+    if (it == table_slot.end())
+        return nullptr;
+
+    return &it->second;
+};
 
 template <typename StrItr>
 void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_single_incoming,
@@ -221,8 +240,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
         if (cost >= table.size())
             table.resize(cost + 1);
 
-        auto &table_node = table[cost][node];
-        auto &bucket = table_node.get(query_dist);
+        if (query_dist >= table[cost].size())
+            table[cost].resize(query_dist + 1);
+
+        auto &bucket = table[cost].get(query_dist)[node];
         using table_t = std::decay_t<decltype(bucket)>;
         static_assert(std::is_same_v<table_t, FMap>
                         || std::is_same_v<table_t, EMap>
@@ -296,13 +317,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
         );
 
         for (size_t cost = 0; cost < S.size(); ++cost) {
-            size_t it_dist = 0;
-            for (auto it = S[cost].begin(); it != S[cost].end(); ++it, ++it_dist) {
-                node_index node = it->first;
-                for (size_t query_dist = it->second.offset(); query_dist < it->second.size(); ++query_dist) {
-                    assert(query_dist <= query_size);
-                    size_t best_dist = std::get<0>(it->second[query_dist]);
-                    Cigar::Operator last_op = std::get<3>(it->second[query_dist]);
+            for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
+                assert(query_dist <= query_size);
+                size_t it_dist = 0;
+                for (auto it = S[cost][query_dist].begin(); it != S[cost][query_dist].end(); ++it, ++it_dist) {
+                    node_index node = it->first;
+                    size_t best_dist = std::get<0>(it->second);
+                    Cigar::Operator last_op = std::get<3>(it->second);
 
                     if (last_op == Cigar::CLIPPED)
                         continue;
@@ -323,15 +344,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     // forward creation of insertions
                     if (query_dist < query_size) {
                         // extend a previous insertion
-                        if (cost < E.size()) {
-                            auto find = E[cost].find(node);
-                            if (find != E[cost].end() && query_dist >= find->second.offset() && query_dist < find->second.size()) {
-                                auto [last_dist, last_num_ops] = find->second[query_dist];
-                                if (last_num_ops > 0) {
-                                    ssize_t next_ext_cost = cost + gap_ext;
-                                    size_t stored_dist = set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION);
-                                    set_value(S, next_ext_cost, query_dist + 1, node, stored_dist, node, 0, Cigar::INSERTION);
-                                }
+                        if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
+                            auto [last_dist, last_num_ops] = *ins_ext_bucket;
+                            if (last_num_ops > 0) {
+                                ssize_t next_ext_cost = cost + gap_ext;
+                                size_t stored_dist = set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION);
+                                set_value(S, next_ext_cost, query_dist + 1, node, stored_dist, node, 0, Cigar::INSERTION);
+                                it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
 
@@ -340,6 +359,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                             ssize_t next_opn_cost = cost + gap_opn;
                             size_t stored_dist = set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION);
                             set_value(S, next_opn_cost, query_dist + 1, node, stored_dist, node, 0, Cigar::INSERTION);
+                            it = S[cost][query_dist].begin() + it_dist;
                         }
                     }
 
@@ -350,18 +370,16 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                             prevs.emplace_back(prev, c);
                         });
                         if (prevs.size()) {
-                            if (cost < F.size()) {
+                            if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
                                 // extension
-                                auto find = F[cost].find(node);
-                                if (find != F[cost].end() && query_dist >= find->second.offset() && query_dist < find->second.size()) {
-                                    auto [last_dist, last_num_ops, last_node] = find->second[query_dist];
-                                    if (last_node != DeBruijnGraph::npos) {
-                                        assert(last_dist >= last_num_ops);
-                                        ssize_t next_ext_cost = cost + gap_ext;
-                                        for (const auto &[prev, c] : prevs) {
-                                            size_t stored_value = set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION);
-                                            set_value(S, next_ext_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
-                                        }
+                                auto [last_dist, last_num_ops, last_node] = *del_ext_bucket;
+                                if (last_node != DeBruijnGraph::npos) {
+                                    assert(last_dist >= last_num_ops);
+                                    ssize_t next_ext_cost = cost + gap_ext;
+                                    for (const auto &[prev, c] : prevs) {
+                                        size_t stored_value = set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION);
+                                        set_value(S, next_ext_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
+                                        it = S[cost][query_dist].begin() + it_dist;
                                     }
                                 }
                             }
@@ -371,6 +389,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 for (const auto &[prev, c] : prevs) {
                                     size_t stored_value = set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION);
                                     set_value(S, next_opn_cost, query_dist, prev, stored_value, node, 0, Cigar::DELETION);
+                                    it = S[cost][query_dist].begin() + it_dist;
                                 }
                             }
                         }
@@ -423,7 +442,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                     op,
                                     c
                                 );
-                                it = S[cost].begin() + it_dist;
+                                it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
@@ -438,11 +457,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     // common::logger->info("Backtracking");
     for (size_t start_cost = 0; start_cost < S.size(); ++start_cost) {
         std::vector<std::tuple<size_t, size_t, size_t, DeBruijnGraph::node_index>> starts;
-        for (auto it = S[start_cost].begin(); it != S[start_cost].end(); ++it) {
-            DeBruijnGraph::node_index node = it->first;
-            for (size_t start_query_dist = it->second.offset(); start_query_dist < it->second.size(); ++start_query_dist) {
-                assert(start_query_dist <= query_size);
-                const auto &[dist, last_ext, last_node, last_op, mismatch_char] = it->second[start_query_dist];
+        for (size_t start_query_dist = S[start_cost].offset(); start_query_dist < S[start_cost].size(); ++start_query_dist) {
+            assert(start_query_dist <= query_size);
+            for (auto it = S[start_cost][start_query_dist].begin(); it != S[start_cost][start_query_dist].end(); ++it) {
+                DeBruijnGraph::node_index node = it->first;
+                const auto &[dist, last_ext, last_node, last_op, mismatch_char] = it->second;
                 if (last_op != Cigar::CLIPPED && start_backtrack(start_cost, dist, start_query_dist, node))
                     starts.emplace_back(dist, std::abs(static_cast<ssize_t>(dist - start_query_dist)), start_query_dist, node);
             }
@@ -461,57 +480,48 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
 
             // common::logger->info("start: d: {}\tq: {}\tc: {}", dist, query_dist, cost);
 
-            assert(dist > 0 || query_dist > 0);
-            assert(cost < S.size());
-            auto bt = S[cost].find(node);
-            assert(bt != S[cost].end());
-            assert(query_dist >= bt->second.offset());
-            assert(query_dist < bt->second.size());
+            const auto *bt = get_bucket(S, cost, query_dist, node);
+            assert(bt);
 
             std::vector<node_index> path;
             Cigar cigar;
 
             do {
                 // common::logger->info("FOO\tq: {}", query_dist);
-                assert(std::get<0>(bt->second[query_dist]) == dist);
+                assert(std::get<0>(*bt) == dist);
 
-                if (std::get<3>(bt->second[query_dist]) == Cigar::INSERTION) {
-                    assert(std::get<1>(bt->second[query_dist]) == 0);
-                    assert(cost > 0 && cost < E.size() && query_dist > 0);
-                    auto et = E[cost].find(node);
-                    assert(et != E[cost].end());
-                    assert(query_dist >= et->second.offset());
-                    assert(std::get<0>(et->second[query_dist]) == dist);
+                if (std::get<3>(*bt) == Cigar::INSERTION) {
+                    assert(std::get<1>(*bt) == 0);
+                    assert(cost > 0);
+                    const auto *et = get_bucket(E, cost, query_dist, node);
+                    assert(et);
 
-                    auto [ins_dist, num_ins] = et->second[query_dist];
+                    auto [ins_dist, num_ins] = *et;
+                    assert(ins_dist == dist);
                     // common::logger->info("I: {}\t{}", ins_dist, num_ins);
                     assert(query_dist >= num_ins);
                     assert(num_ins > 0);
-                    assert(ins_dist == dist);
 
                     size_t prev_cost = cost - gap_opn - (num_ins - 1) * gap_ext;
                     assert(prev_cost < cost);
                     size_t prev_query_dist = query_dist - num_ins;
 
-                    auto check_bt = S[prev_cost].find(node);
-                    assert(check_bt != S[prev_cost].end());
-                    assert(prev_query_dist >= check_bt->second.offset());
-                    assert(prev_query_dist < check_bt->second.size());
-                    assert(std::get<0>(check_bt->second[prev_query_dist]) == dist);
-                    assert(std::get<3>(check_bt->second[prev_query_dist]) != Cigar::CLIPPED);
+                    const auto *check_bt = get_bucket(S, prev_cost, prev_query_dist, node);
+                    assert(check_bt);
+                    assert(std::get<0>(*check_bt) == dist);
+                    assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
 
                     query_dist = prev_query_dist;
                     cost = prev_cost;
                     bt = check_bt;
                     cigar.append(Cigar::INSERTION, num_ins);
-                } else if (std::get<3>(bt->second[query_dist]) == Cigar::DELETION) {
-                    assert(std::get<1>(bt->second[query_dist]) == 0);
-                    assert(cost > 0 && cost < F.size() && dist > 0);
-                    auto ft = F[cost].find(node);
-                    assert(ft != F[cost].end());
-                    assert(query_dist >= ft->second.offset());
+                } else if (std::get<3>(*bt) == Cigar::DELETION) {
+                    assert(std::get<1>(*bt) == 0);
+                    assert(cost > 0);
+                    const auto *ft = get_bucket(F, cost, query_dist, node);
+                    assert(ft);
 
-                    auto [del_dist, num_del, prev_node] = ft->second[query_dist];
+                    auto [del_dist, num_del, prev_node] = *ft;
                     // common::logger->info("D: {}\t{}\t{}", del_dist, num_del, prev_node);
                     assert(del_dist == dist);
                     assert(dist >= num_del);
@@ -530,14 +540,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         node = prev_node;
                         --num_del;
 
-                        auto prev_ft = F[prev_cost].find(node);
-                        assert(prev_ft != F[prev_cost].end());
-                        assert(query_dist >= prev_ft->second.offset());
-                        assert(query_dist < prev_ft->second.size());
-                        assert(std::get<0>(prev_ft->second[query_dist]) == prev_dist);
-                        assert(std::get<1>(prev_ft->second[query_dist]) == num_del);
+                        const auto *prev_ft = get_bucket(F, prev_cost, query_dist, node);
+                        assert(prev_ft);
+                        assert(std::get<0>(*prev_ft) == prev_dist);
+                        assert(std::get<1>(*prev_ft) == num_del);
                         ft = prev_ft;
-                        prev_node = std::get<2>(ft->second[query_dist]);
+                        prev_node = std::get<2>(*ft);
                     }
 
                     path.emplace_back(node);
@@ -547,24 +555,22 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
 
                     assert(prev_cost < cost);
 
-                    auto check_bt = S[prev_cost].find(prev_node);
-                    assert(check_bt != S[prev_cost].end());
-                    assert(query_dist >= check_bt->second.offset());
-                    assert(query_dist < check_bt->second.size());
-                    assert(std::get<0>(check_bt->second[query_dist]) == prev_dist);
-                    assert(std::get<3>(check_bt->second[query_dist]) != Cigar::CLIPPED);
+                    const auto *check_bt = get_bucket(S, prev_cost, query_dist, prev_node);
+                    assert(check_bt);
+                    assert(std::get<0>(*check_bt) == prev_dist);
+                    assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
 
                     dist = prev_dist;
                     cost = prev_cost;
                     node = prev_node;
                     bt = check_bt;
-                } else if (std::get<3>(bt->second[query_dist]) == Cigar::MATCH || std::get<3>(bt->second[query_dist]) == Cigar::MISMATCH) {
-                    auto [cur_dist, num_match, last_node, last_op, mismatch_char] = bt->second[query_dist];
+                } else if (std::get<3>(*bt) == Cigar::MATCH || std::get<3>(*bt) == Cigar::MISMATCH) {
+                    auto [cur_dist, num_match, last_node, last_op, mismatch_char] = *bt;
                     // common::logger->info("M: {}\t{}\t{}\t{}\t{}", cur_dist, num_match, last_node, Cigar::opt_to_char(last_op), mismatch_char);
 
                     if (!num_match) {
                         assert(last_op == Cigar::MATCH);
-                        bt = S[cost].end();
+                        bt = nullptr;
                         break;
                     }
 
@@ -585,7 +591,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     auto it = query_window_rbegin + prev_query;
                     assert(it != query_window_rend);
                     size_t cur_path_size = path.size();
-                    if (std::get<3>(bt->second[query_dist]) == Cigar::MISMATCH) {
+                    if (std::get<3>(*bt) == Cigar::MISMATCH) {
                         assert(mismatch_char != *it);
                         traverse_node = traverse_back(traverse_node, mismatch_char);
                         assert(traverse_node != DeBruijnGraph::npos);
@@ -615,15 +621,14 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
 
                     // std::cerr << "\td: " << prev_dist << "\tq: " << prev_query << "\tc: " << prev_cost << std::endl;
 
-                    auto check_bt = S[prev_cost].end();
+                    const auto *check_bt = bt;
+                    check_bt = nullptr;
                     if (prev_cost || prev_query || prev_dist) {
                         // std::cerr << "\t\tcontinue" << std::endl;
-                        check_bt = S[prev_cost].find(last_node);
-                        assert(check_bt != S[prev_cost].end());
-                        assert(prev_query >= check_bt->second.offset());
-                        assert(prev_query < check_bt->second.size());
-                        assert(std::get<0>(check_bt->second[prev_query]) == prev_dist);
-                        assert(std::get<3>(check_bt->second[prev_query]) != Cigar::CLIPPED);
+                        check_bt = get_bucket(S, prev_cost, prev_query, last_node);
+                        assert(*check_bt);
+                        assert(std::get<0>(*check_bt) == prev_dist);
+                        assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
                     } else {
                         // std::cerr << "\t\tend" << std::endl;
                         assert(last_node == start_node);
@@ -634,7 +639,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     query_dist = prev_query;
                     node = last_node;
 
-                    if (check_bt == S[cost].end()) {
+                    if (!check_bt) {
                         // std::cerr << "\t\texit" << std::endl;
                         break;
                     }
@@ -645,7 +650,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     throw std::runtime_error("Inf. loop");
                 }
 
-            } while (bt != S[cost].end());
+            } while (bt);
 
             // std::cerr << "\t\tdone" << std::endl;
             assert(dist == 0);
