@@ -335,7 +335,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     //                      best_dist,
                     //                      query_dist, query_size);
                     if (terminate(cost, best_dist, query_dist, node)) {
-                        common::logger->info("FOUND!");
+                        common::logger->info("FOUND with cost {}!", cost);
                         return;
                     }
 
@@ -627,7 +627,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     if (prev_cost || prev_query || prev_dist) {
                         // std::cerr << "\t\tcontinue" << std::endl;
                         check_bt = get_bucket(S, prev_cost, prev_query, last_node);
-                        assert(*check_bt);
+                        assert(check_bt);
                         assert(std::get<0>(*check_bt) == prev_dist);
                         assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
                     } else {
@@ -1125,12 +1125,14 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
             query_window.remove_suffix(it->get_end_clipping() + it->get_seed().size());
             query_window.remove_prefix(smallest_clipping);
 
-            auto terminate_branch = [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
+            auto start_backtracking = [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
                 if (dist == 0 || query_dist == 0)
                     return false;
 
-                if (query_dist == query_window.size())
+                if (query_dist == query_window.size()) {
+                    common::logger->info("REACHED END");
                     return true;
+                }
 
                 // backtrack if we've connected to another anchor
                 auto jt = node_to_anchors.find(node);
@@ -1141,8 +1143,8 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 auto latest_unskipped = begin + (std::find_if(skipped_score.begin(), skipped_score.end(), [&](auto s) {
                     return s != std::numeric_limits<DBGAlignerConfig::score_t>::max();
                 }) - skipped_score.begin());
-                std::cerr << "FOOFOF\t" << (latest_unskipped - begin) << " vs. " << (earliest_anchor - begin) << "\n";
-                if (earliest_anchor == latest_unskipped) {
+                std::cerr << "FOOFOF\t" << cost << "\t" << dist << "\t" << query_dist << "\t" << (latest_unskipped - begin) << " vs. " << (earliest_anchor - begin) << "\n";
+                if (latest_unskipped >= earliest_anchor) {
                     for (size_t j : jt->second) {
                         skipped_score[j] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
                     }
@@ -1175,15 +1177,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                                     std::move(ext_cigar));
                     std::cerr << "\t" << alns.back() << std::endl;
                 },
-                terminate_branch,
+                start_backtracking,
                 [&](size_t cost, size_t dist, size_t query_dist, DeBruijnGraph::node_index node) {
-                    return terminate_branch(cost, dist, query_dist, node)
+                    return start_backtracking(cost, dist, query_dist, node)
                             || cost_to_score(cost, query_dist, dist, match_score) + it->get_score() <= 0;
                 },
-                [&](size_t, size_t, size_t query_dist, DeBruijnGraph::node_index) {
-                    // fully terminate
-                    return query_dist == query_window.size();
-                }
+                start_backtracking
             );
         }
     };
@@ -1205,7 +1204,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
         return a.get_score() > b.get_score();
     });
 
-    alns.resize(1);
+    std::cerr << "DONE! now extending\n";
 
     // for (const auto &aln : alns) {
     //     std::cerr << "Aln: " << aln << std::endl;
