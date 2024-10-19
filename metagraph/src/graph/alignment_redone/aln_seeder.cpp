@@ -1103,18 +1103,17 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
         size_t smallest_clipping = std::numeric_limits<size_t>::max();
         tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_set<size_t>> node_to_anchors;
         for (auto it = begin; it != end; ++it) {
+            skipped_score[it - begin] = it->get_score();
             smallest_clipping = std::min(smallest_clipping, it->get_clipping());
             node_to_anchors[it->get_path().back()].emplace(it - begin);
         }
 
         for (auto it = begin; it != end; ++it) {
             std::cerr << "Anchor " << it - begin << " / " << end - begin - 1 << "\t" << *it << std::endl;
-            if (!it->get_clipping() || skipped_score[it - begin] == std::numeric_limits<DBGAlignerConfig::score_t>::max()) {
+            if (!it->get_clipping() || skipped_score[it - begin] > it->get_score()) {
                 std::cerr << "\tskipped" << std::endl;
                 continue;
             }
-
-            skipped_score[it - begin] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
 
             size_t next_clipping = std::numeric_limits<size_t>::max();
             if (it->get_clipping() > (it + 1)->get_clipping())
@@ -1134,27 +1133,28 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     return true;
                 }
 
-                // backtrack if we've connected to another anchor
+                // first check if we've hit another anchor
                 auto jt = node_to_anchors.find(node);
                 if (jt == node_to_anchors.end())
                     return false;
 
+                DBGAlignerConfig::score_t score = it->get_score() + cost_to_score(cost, query_dist, dist, match_score);
                 if (std::all_of(jt->second.begin(), jt->second.end(), [&](size_t j) {
-                    return skipped_score[j] == std::numeric_limits<DBGAlignerConfig::score_t>::max();
+                    return skipped_score[j] > score;
                 }))
                     return false;
 
-                auto earliest_anchor = begin + *std::max_element(jt->second.begin(), jt->second.end());
-                auto latest_unskipped = begin + (std::find_if(skipped_score.begin(), skipped_score.end(), [&](auto s) {
-                    return s != std::numeric_limits<DBGAlignerConfig::score_t>::max();
-                }) - skipped_score.begin());
-                std::cerr << "FOOFOF\t" << cost << "\t" << dist << "\t" << query_dist << "\t" << (latest_unskipped - begin) << " vs. " << (earliest_anchor - begin) << "\n";
-                if (latest_unskipped >= earliest_anchor) {
-                    for (size_t j : jt->second) {
-                        skipped_score[j] = std::numeric_limits<DBGAlignerConfig::score_t>::max();
-                    }
-                    return false;
-                }
+                // auto earliest_anchor = begin + *std::max_element(jt->second.begin(), jt->second.end());
+                // auto latest_unskipped = begin + (std::find_if(skipped_score.begin() + (it - begin) + 1, skipped_score.end(), [&](auto s) {
+                //     return s < score;
+                // }) - skipped_score.begin());
+                // std::cerr << "FOOFOF\t" << cost << "\t" << dist << "\t" << query_dist << "\t" << (latest_unskipped - begin) << " vs. " << (earliest_anchor - begin) << "\n";
+                // if (latest_unskipped >= earliest_anchor) {
+                //     for (size_t j : jt->second) {
+                //         skipped_score[j] = score;
+                //     }
+                //     return false;
+                // }
 
                 return true;
             };
