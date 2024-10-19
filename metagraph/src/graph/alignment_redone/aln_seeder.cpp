@@ -1139,6 +1139,11 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (jt == node_to_anchors.end())
                     return false;
 
+                if (std::all_of(jt->second.begin(), jt->second.end(), [&](size_t j) {
+                    return skipped_score[j] == std::numeric_limits<DBGAlignerConfig::score_t>::max();
+                }))
+                    return false;
+
                 auto earliest_anchor = begin + *std::max_element(jt->second.begin(), jt->second.end());
                 auto latest_unskipped = begin + (std::find_if(skipped_score.begin(), skipped_score.end(), [&](auto s) {
                     return s != std::numeric_limits<DBGAlignerConfig::score_t>::max();
