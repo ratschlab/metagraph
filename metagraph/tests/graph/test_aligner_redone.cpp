@@ -476,15 +476,15 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     size_t k = 4;
     std::string reference = "TTTCCCTTGGCGCTCTC";
-    std::string query =     "TTTCGGCGCTCTC";
-    //                           DDDD
+    std::string query =     "TT""TC""GGCGCTCTC";
+    //                           II
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -1;
-    run_alignment(*graph, config, query, { reference }, { "4=4D9=" });
+    run_alignment(*graph, config, query, { "TTGGCGCTCTC" }, { "2=2I9=" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
