@@ -344,12 +344,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     if (last_op == Cigar::CLIPPED)
                         continue;
 
+                    bool stop_branch = terminate_branch(cost, it->second, query_dist, node);
                     if (terminate(cost, it->second, query_dist, node)) {
                         common::logger->info("FOUND with cost {}!", cost);
                         return;
                     }
 
-                    if (terminate_branch(cost, it->second, query_dist, node))
+                    if (stop_branch)
                         continue;
 
                     // forward creation of insertions
@@ -792,6 +793,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
+                assert(score <= best_score);
                 return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -879,6 +881,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
+                assert(score <= best_score);
                 return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
