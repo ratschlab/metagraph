@@ -701,35 +701,17 @@ TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
 //     check_extend(graph, aligner.get_config(), paths, query);
 // }
 
-// TYPED_TEST(DBGAlignerTest, align_end_clipping) {
-//     size_t k = 4;
-//     std::string reference = "AAAAGCTTCGAGGCCAATTTTTTT";
-//     std::string query =     "AAAAGCTTCGAGGCCAACCCCCCC";
-//     //                                        SSSSSSS
+TYPED_TEST(DBGAlignerRedoneTest, align_end_clipping) {
+    size_t k = 4;
+    std::string reference = "AAAAGCTTCGAGGCCAATTTTTTT";
+    std::string query =     "AAAAGCTTCGAGGCCAACCCCCCC";
+    //                                        SSSSSSS
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_EQ(14u, path.size());
-//     EXPECT_EQ(reference.substr(0, 17), path.get_sequence());
-//     EXPECT_EQ(config.match_score(query.substr(0, 17)), path.get_score());
-//     EXPECT_EQ("17=7S", path.get_cigar().to_string());
-//     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(0u, path.get_clipping());
-//     EXPECT_EQ(7u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference.substr(0, 17) }, { "17=7S" });
+}
 
 // TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 //     size_t k = 7;
@@ -1130,26 +1112,18 @@ TYPED_TEST(DBGAlignerRedoneTest, align_clipping2) {
 //     check_extend(graph, aligner.get_config(), paths, query);
 // }
 
-// TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
-//     size_t k = 31;
-//     std::string reference_1 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGGATCAGAGAAGAAAGGAATGGCAAATACTCCATAGAAGAGTACCTTCAGGACAGGGACAGATACTATGAGGAGGTGGCCAT";
-//     std::string reference_2 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGAATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
-//     std::string query =       "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGATGAGTACGATGAGTACAAGAGCATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
+TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
+    size_t k = 31;
+    std::string reference_1 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGGATCAGAGAAGAAAGGAATGGCAAATACTCCATAGAAGAGTACCTTCAGGACAGGGACAGATACTATGAGGAGGTGGCCAT";
+    std::string reference_2 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGAATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
+    std::string query =       "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGATGAGTACGATGAGTACAAGAGCATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//     config.xdrop = 27;
-//     config.min_seed_length = 0;
-//     config.max_seed_length = 0;
-//     config.rel_score_cutoff = 0.8;
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-//     EXPECT_EQ("48=1X20=1X80=", path.get_cigar().to_string());
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.xdrop = 27;
+    run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" });
+}
 
 // TEST(DBGAlignerTest, align_dummy) {
 //     size_t k = 7;
