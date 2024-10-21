@@ -67,7 +67,6 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
     for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
         std::vector<Alignment> next_alns;
         for (auto&& aln : alns) {
-            std::cerr << aln << " begins with " << *it->first << std::endl;
             assert(it->first->get_clipping() == aln.get_clipping());
 
             size_t dist = it->second;
@@ -108,7 +107,6 @@ AnchorIt chain_anchors(const Query &query,
     });
 
     if (config.max_seed_length > config.min_seed_length) {
-        std::cerr << "FOOOO\n";
         auto rbegin = std::make_reverse_iterator(end);
         auto rend = std::make_reverse_iterator(begin);
         for (auto it = rbegin; it + 1 != rend; ++it) {
@@ -160,7 +158,6 @@ AnchorIt chain_anchors(const Query &query,
         if (begin == end)
             return;
 
-        common::logger->info("Forward pass");
         auto make_anchor_connector = [&](const AnchorIt i) {
             return [&,i](DBGAlignerConfig::score_t score, const AnchorIt last, size_t dist) {
                 assert(last != i);
@@ -220,7 +217,6 @@ AnchorIt chain_anchors(const Query &query,
                 best_cost = traversed + queried - 2 * best_score / match_score;
             } while (best_cost > b_last);
         } else {
-            common::logger->info("Use alt");
             // otherwise, use this algorithm
             for (AnchorIt i = begin + 1; i != end; ++i) {
                 AnchorIt j = i - std::min(static_cast<size_t>(i - begin), config.chaining_bandwidth);
@@ -263,7 +259,7 @@ AnchorIt chain_anchors(const Query &query,
     }
 
     std::sort(best_chains.begin(), best_chains.end());
-    common::logger->info("Best chain score: {}", -std::get<0>(best_chains[0]));
+    common::logger->trace("Best chain score: {}", -std::get<0>(best_chains[0]));
 
     sdsl::bit_vector used(chain_scores.size());
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
@@ -301,7 +297,7 @@ AnchorIt chain_anchors(const Query &query,
                 used[a_ptr - begin] = true;
             }
 
-            common::logger->info("Found chain with score {}", scores.back());
+            common::logger->trace("Found chain with score {}", scores.back());
 
             extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate);
         }
