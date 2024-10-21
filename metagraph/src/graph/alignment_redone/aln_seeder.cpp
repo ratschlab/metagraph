@@ -480,8 +480,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             }
         }
 
-        // if (starts.size())
-        //     // common::logger->info("FOUND {} ALIGNMENTS AT COST {}", starts.size(), start_cost);
+        if (starts.size())
+            common::logger->info("FOUND {} ALIGNMENTS AT COST {}", starts.size(), start_cost);
 
         std::sort(starts.begin(), starts.end(), [&](const auto &a, const auto &b) {
             return std::make_pair(std::get<0>(b), std::get<1>(a))
@@ -1180,6 +1180,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 for (size_t j : jt->second) {
                     if (num_matches >= (begin + j)->get_seed().size()) {
                         start_backtrack |= !skipped[j] || j + 1 == skipped.size()
+                            || !(begin + j)->get_clipping()
                             || std::none_of(skipped.begin() + j + 1, skipped.end(), [&](bool s) { return s; });
                     }
                 }
@@ -1212,7 +1213,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     if (kt > it && !skipped[kt - begin]) {
                         bool all_prev_skipped = true;
                         for (auto lt = it + 1; lt != kt; ++lt) {
-                            if (lt->get_clipping() < kt->get_clipping() && !skipped[lt - begin]) {
+                            if (lt->get_clipping() > kt->get_clipping() && !skipped[lt - begin]) {
                                 all_prev_skipped = false;
                                 break;
                             }
