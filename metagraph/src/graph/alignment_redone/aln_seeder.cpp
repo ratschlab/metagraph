@@ -296,8 +296,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     auto fill_table = [&]() {
         {
             size_t query_dist = 0;
+            DeBruijnGraph::node_index node = start_node;
             SMap data(0, 0, start_node, Cigar::MATCH, *(query_window_rbegin - 1), start_num_matches);
-            auto &[best_dist, last_ext, node, last_op, c, num_matches] = data;
+            auto &[best_dist, last_ext, last_node, last_op, c, num_matches] = data;
 
             for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
                 if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node))
@@ -426,7 +427,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
 
                                 for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                    if (terminate_branch(cur_cost, data, cur_query_dist, node) || cur_best == max_dist || !has_single_incoming(prev))
+                                    if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
                                         break;
 
                                     if (auto pprev = traverse_back(prev, *jt)) {
@@ -1210,6 +1211,8 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     if (num_matches < kt->get_seed().size())
                         continue;
 
+                    common::logger->info("\tchecking {}", j);
+
                     if (kt > it && !skipped[kt - begin]) {
                         bool all_prev_skipped = true;
                         for (auto lt = it + 1; lt != kt; ++lt) {
@@ -1219,6 +1222,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                             }
                         }
                         if (all_prev_skipped) {
+                            common::logger->info("\t\tskipping {}", j);
                             skipped[kt - begin] = true;
                         }
                     }
