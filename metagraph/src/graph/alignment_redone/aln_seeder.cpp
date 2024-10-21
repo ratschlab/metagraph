@@ -293,9 +293,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     auto fill_table = [&]() {
         {
             size_t query_dist = 0;
-            auto node = start_node;
-            SMap data;
-            size_t &best_dist = std::get<0>(data);
+            SMap data(0, 0, start_node, Cigar::MATCH, *(query_window_rbegin - 1));
+            auto &[best_dist, last_ext, node, last_op, c] = data;
 
             for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
                 if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node))
@@ -304,6 +303,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 if (auto prev = traverse_back(node, *it)) {
                     ++best_dist;
                     ++query_dist;
+                    ++last_ext;
                     node = prev;
                 } else {
                     break;
@@ -1117,7 +1117,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
         }
 
         for (auto it = begin; it != end; ++it) {
-            std::cerr << "Anchor " << it - begin << " / " << end - begin - 1 << "\t" << *it << std::endl;
+            std::cerr << "Anchor " << it - begin << " / " << end - begin - 1 << "\t" << *it << "\t" << skipped_score[it - begin] << std::endl;
             if (!it->get_clipping() || skipped_score[it - begin] > it->get_score()) {
                 std::cerr << "\tskipped" << std::endl;
                 continue;
@@ -1142,13 +1142,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (jt == node_to_anchors.end())
                     return false;
 
-                DBGAlignerConfig::score_t score = it->get_score() + cost_to_score(cost, query_dist, dist, match_score);
-
                 bool start_backtrack = false;
                 for (size_t j : jt->second) {
                     if (last_ext - (last_op == Cigar::MISMATCH) >= (begin + j)->get_seed().size()) {
-                        skipped_score[j] = std::max(skipped_score[j], score);
                         start_backtrack |= (begin + j > it + 1);
+                    } else if (last_op == Cigar::MATCH) {
+                        start_backtrack = true;
                     }
                 }
 
@@ -1180,11 +1179,41 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 },
                 start_backtracking,
                 [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                    size_t dist = std::get<0>(data);
-                    return start_backtracking(cost, data, query_dist, node)
-                            || cost_to_score(cost, query_dist, dist, match_score) + it->get_score() <= 0;
+                    // terminate branch
+                    const auto &[dist, last_ext, last_node, last_op, mismatch_char] = data;
+                    if (dist == 0 || query_dist == 0 || (last_op != Cigar::MATCH && last_op != Cigar::MISMATCH))
+                        return false;
+
+                    // first check if we've hit another anchor
+                    auto jt = node_to_anchors.find(node);
+                    if (jt == node_to_anchors.end())
+                        return false;
+
+                    DBGAlignerConfig::score_t score = cost_to_score(cost, query_dist, dist, match_score) + it->get_score();
+                    if (score <= 0)
+                        return true;
+
+                    bool terminate = false;
+                    for (size_t j : jt->second) {
+                        auto kt = begin + j;
+                        if (last_ext - (last_op == Cigar::MISMATCH) >= kt->get_seed().size()) {
+                            // we know we covered the anchor
+                            common::logger->info("D: {}\t{} vs. {}", j, skipped_score[j], score);
+                            skipped_score[j] = std::max(skipped_score[j], score);
+                            if (it + 1 <= kt) {
+                                for (auto lt = it + 1; lt != kt + 1; ++lt) {
+                                    terminate |= skipped_score[lt - begin] > score;
+                                }
+                            }
+                        }
+                    }
+
+                    return terminate;
                 },
-                start_backtracking
+                [&](size_t, const SMap&, size_t query_dist, DeBruijnGraph::node_index) {
+                    // terminate
+                    return query_dist == query_window.size();
+                }
             );
         }
     };
