@@ -746,10 +746,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         std::string_view query_window = aln.get_query();
         query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
 
-        DBGAlignerConfig::score_t best_score = 0;
-
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            return cost_to_score(cost, query_dist, dist, match_score)
+            return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.right_end_bonus : 0);
         };
 
@@ -761,6 +759,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             assert(it != end);
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
+        DBGAlignerConfig::score_t best_score = aln.get_score();
         align_fwd(
             query_.get_graph(), config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
@@ -786,37 +785,35 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 );
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                size_t dist = std::get<0>(data);
                 // start backtrack
-                if (dist == 0 && query_dist == 0)
+                size_t dist = std::get<0>(data);
+                size_t num_matches = std::get<5>(data);
+                if ((dist == 0 && query_dist == 0) || !num_matches)
                     return false;
 
-                if (query_dist == query_window.size())
-                    return true;
-
                 auto score = get_score(cost, dist, query_dist);
-                if (score > 0 && score >= best_score) {
-                    best_score = score;
-                    return true;
-                }
-
-                return false;
+                return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
+                size_t dist = std::get<0>(data);
+                auto score = get_score(cost, dist, query_dist);
+                best_score = std::max(best_score, score);
+
                 if (query_dist == query_window.size())
                     return true;
 
-                size_t dist = std::get<0>(data);
-                auto score = get_score(cost, dist, query_dist);
+                if (config_.xdrop < best_score - score)
+                    return true;
+
                 if (score + match_score * (query_window.size() - query_dist) <= 0)
                     return true;
 
-                return aln.get_score() + score < 0;
+                return score <= 0;
             },
             [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
-                return false;
+                return query_dist == query_window.size();
             }
         );
 
@@ -835,12 +832,12 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         std::string_view query_window = fwd_ext.get_query();
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
 
-        DBGAlignerConfig::score_t best_score = 0;
-
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            return cost_to_score(cost, query_dist, dist, match_score)
+            return fwd_ext.get_score() + cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
         };
+
+        DBGAlignerConfig::score_t best_score = fwd_ext.get_score();
 
         auto it = aln.get_cigar().data().begin();
         auto end = aln.get_cigar().data().end();
@@ -875,34 +872,35 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 );
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                size_t dist = std::get<0>(data);
                 // start backtrack
-                if (dist == 0 && query_dist == 0)
+                size_t dist = std::get<0>(data);
+                size_t num_matches = std::get<5>(data);
+                if ((dist == 0 && query_dist == 0) || !num_matches)
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
-                if (score > 0 && score >= best_score) {
-                    best_score = score;
-                    return true;
-                }
-
-                return false;
+                return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
+                size_t dist = std::get<0>(data);
+                auto score = get_score(cost, dist, query_dist);
+                best_score = std::max(best_score, score);
+
                 if (query_dist == query_window.size())
                     return true;
 
-                size_t dist = std::get<0>(data);
-                auto score = get_score(cost, dist, query_dist);
+                if (config_.xdrop < best_score - score)
+                    return true;
+
                 if (score + match_score * (query_window.size() - query_dist) <= 0)
                     return true;
 
-                return fwd_ext.get_score() + score < 0;
+                return score <= 0;
             },
             [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
-                return false;
+                return query_dist == query_window.size();
             }
         );
     }
@@ -1137,6 +1135,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     auto chain = [&](auto begin, auto end) {
+        DBGAlignerConfig::score_t best_score = 0;
         sdsl::bit_vector skipped(end - begin);
         skipped[end - begin - 1] = true;
         size_t smallest_clipping = std::numeric_limits<size_t>::max();
@@ -1146,12 +1145,15 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
             node_to_anchors[it->get_path().back()].emplace(it - begin);
         }
 
+        size_t num_extended = 0;
         for (auto it = begin; it != end; ++it) {
             std::cerr << "Anchor " << it - begin << " / " << end - begin - 1 << "\t" << *it << std::endl;
             if (!it->get_clipping() || skipped[it - begin]) {
-                std::cerr << "\tskipped" << std::endl;
+                // std::cerr << "\tskipped" << std::endl;
                 continue;
             }
+
+            ++num_extended;
 
             skipped[it - begin] = true;
             size_t next_clipping = std::numeric_limits<size_t>::max();
@@ -1203,15 +1205,14 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (score <= 0)
                     return true;
 
-                bool terminate = false;
+                best_score = std::max(best_score, score);
+
                 for (size_t j : jt->second) {
                     auto kt = begin + j;
                     assert(kt > it || skipped[j]);
 
                     if (num_matches < kt->get_seed().size())
                         continue;
-
-                    common::logger->info("\tchecking {}", j);
 
                     if (kt > it && !skipped[kt - begin]) {
                         bool all_prev_skipped = true;
@@ -1222,15 +1223,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                             }
                         }
                         if (all_prev_skipped) {
-                            common::logger->info("\t\tskipping {}", j);
                             skipped[kt - begin] = true;
                         }
                     }
-
-                    terminate |= !skipped[kt - begin];
                 }
 
-                return terminate;
+                return config_.xdrop < best_score - score;
             };
 
             align_bwd(
@@ -1265,6 +1263,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 }
             );
         }
+        common::logger->info("Extended {} / {} anchors", num_extended, end - begin);
     };
 
     auto begin = anchors.begin();
