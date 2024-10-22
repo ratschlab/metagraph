@@ -596,6 +596,22 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2) {
     run_alignment(*graph, config, query, { reference },           {       "18=7I8=1X39=" });
 }
 
+TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
+    size_t k = 27;
+    std::string query =         "GCCACAATTGACAAATGA"     "GATCTAATTAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
+    std::string reference =     "GCCACAATTGACAAATGACAAATGTGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
+    //                                             DDDDDDD        X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+
+    run_alignment(*graph, config, query, { reference.substr(10) }, { "3S4=1X9=1X8=1X39=" });
+
+    config.gap_opening_penalty = -3;
+    run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" });
+}
+
 // TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
 //     size_t k = 27;
 //     std::string reference = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGTGCTGGGATTATAGGTGTGAACCACCACACCTGGCTAATTTTTTTTGTGTGTGTGTGTGTTTTTTC";

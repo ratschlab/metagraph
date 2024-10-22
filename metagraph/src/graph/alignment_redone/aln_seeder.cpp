@@ -220,6 +220,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     assert(gap_ext > 0);
     assert(gap_opn >= gap_ext);
 
+    assert(mismatch_cost % 2 == 0);
+    assert(gap_ext % 2 == 0);
+    assert(gap_opn % 2 == 0);
+
     // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
@@ -333,78 +337,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             if (cost < E.size()) {
                 for (size_t query_dist = E[cost].offset(); query_dist < E[cost].size(); ++query_dist) {
                     assert(query_dist <= query_size);
+                    if (query_dist == query_size)
+                        break;
+
                     for (const auto &[node, data] : E[cost][query_dist]) {
                         const auto &[best_dist, last_num_ops] = data;
-
-                        if (last_num_ops == 0 || best_dist == max_dist || query_dist == query_size)
-                            continue;
-
-                        size_t num_matches = 0;
-
-                        std::vector<std::pair<node_index, char>> prevs;
-                        call_incoming_kmers(node, [&](auto prev, char c) {
-                            prevs.emplace_back(prev, c);
-                        });
-
-                        // match
-                        auto local_query_window_begin = query_window_begin;
-                        auto local_query_window_end = query_window_end;
-                        local_query_window_end -= query_dist;
-
-                        auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
-                        auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
-
-                        for (auto [prev, c] : prevs) {
-                            SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
-                            auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
-                            size_t cur_query_dist = query_dist + 1;
-                            size_t cur_cost = cost;
-                            if (c != *local_query_window_rbegin) {
-                                cur_cost += mismatch_cost;
-                                op = Cigar::MISMATCH;
-                                cur_num_matches = 0;
-                            }
-
-                            for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
-                                    break;
-
-                                if (auto pprev = traverse_back(prev, *jt)) {
-                                    ++cur_best;
-                                    ++cur_query_dist;
-                                    ++cur_num_matches;
-                                    prev = pprev;
-                                } else {
-                                    break;
-                                }
-                            }
-
-                            terminate_branch(cur_cost, data, cur_query_dist, prev);
-
-                            assert(cur_query_dist > query_dist || cur_cost > cost);
-                            set_value(
-                                S,
-                                cur_cost,
-                                cur_query_dist,
-                                prev,
-                                cur_best,
-                                node,
-                                cur_query_dist - query_dist,
-                                op,
-                                c,
-                                cur_num_matches
-                            );
-                        }
-                    }
-                }
-            }
-
-            // switch to matches from long deletions
-            if (cost < F.size()) {
-                for (size_t query_dist = F[cost].offset(); query_dist < F[cost].size(); ++query_dist) {
-                    assert(query_dist <= query_size);
-                    for (const auto &[node, data] : F[cost][query_dist]) {
-                        const auto &[best_dist, last_num_ops, last_node] = data;
 
                         if (last_num_ops == 0 || best_dist == max_dist)
                             continue;
@@ -449,7 +386,78 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
                             }
 
-                            terminate_branch(cur_cost, data, cur_query_dist, prev);
+                            assert(cur_query_dist > query_dist || cur_cost > cost);
+                            set_value(
+                                S,
+                                cur_cost,
+                                cur_query_dist,
+                                prev,
+                                cur_best,
+                                node,
+                                cur_query_dist - query_dist,
+                                op,
+                                c,
+                                cur_num_matches
+                            );
+                        }
+                    }
+                }
+            }
+
+            // switch to matches from long deletions
+            if (cost < F.size()) {
+                for (size_t query_dist = F[cost].offset(); query_dist < F[cost].size(); ++query_dist) {
+                    assert(query_dist <= query_size);
+                    if (query_dist == query_size)
+                        break;
+
+                    for (const auto &[node, data] : F[cost][query_dist]) {
+                        const auto &[best_dist, last_num_ops, last_node] = data;
+
+                        assert((last_node == DeBruijnGraph::npos) == (last_num_ops == 0));
+
+                        if (last_num_ops == 0 || best_dist == max_dist)
+                            continue;
+
+                        size_t num_matches = 0;
+
+                        std::vector<std::pair<node_index, char>> prevs;
+                        call_incoming_kmers(node, [&](auto prev, char c) {
+                            prevs.emplace_back(prev, c);
+                        });
+
+                        // match
+                        auto local_query_window_begin = query_window_begin;
+                        auto local_query_window_end = query_window_end;
+                        local_query_window_end -= query_dist;
+
+                        auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
+                        auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
+
+                        for (auto [prev, c] : prevs) {
+                            SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
+                            auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
+                            size_t cur_query_dist = query_dist + 1;
+                            size_t cur_cost = cost;
+                            if (c != *local_query_window_rbegin) {
+                                cur_cost += mismatch_cost;
+                                op = Cigar::MISMATCH;
+                                cur_num_matches = 0;
+                            }
+
+                            for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                    break;
+
+                                if (auto pprev = traverse_back(prev, *jt)) {
+                                    ++cur_best;
+                                    ++cur_query_dist;
+                                    ++cur_num_matches;
+                                    prev = pprev;
+                                } else {
+                                    break;
+                                }
+                            }
 
                             assert(cur_query_dist > query_dist || cur_cost > cost);
                             set_value(
@@ -484,11 +492,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     if (last_op == Cigar::CLIPPED)
                         continue;
 
-                    bool stop_branch = terminate_branch(cost, it->second, query_dist, node);
                     if (terminate(cost, it->second, query_dist, node))
                         return;
 
-                    if (stop_branch)
+                    if (terminate_branch(cost, it->second, query_dist, node))
                         continue;
 
                     // forward creation of insertions
@@ -578,8 +585,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                     }
                                 }
 
-                                terminate_branch(cur_cost, data, cur_query_dist, prev);
-
                                 assert(cur_query_dist > query_dist || cur_cost > cost);
                                 set_value(
                                     S,
@@ -594,6 +599,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                     cur_num_matches
                                 );
                                 it = S[cost][query_dist].begin() + it_dist;
+
+                                if (terminate(cur_cost, data, cur_query_dist, prev))
+                                    return;
                             }
                         }
                     }
@@ -899,7 +907,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar)
                 );
 
-                // assert(fwd_exts.back().get_score() == best_score);
+                assert(fwd_exts.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -914,17 +922,17 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                size_t dist = std::get<0>(data);
-                auto score = get_score(cost, dist, query_dist);
-                best_score = std::max(best_score, score);
-
                 if (query_dist == query_window.size())
                     return true;
 
-                return config_.xdrop < best_score - score;
+                size_t dist = std::get<0>(data);
+                return config_.xdrop < best_score - get_score(cost, dist, query_dist);
             },
-            [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
+            [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
+                size_t dist = std::get<0>(data);
+                auto score = get_score(cost, dist, query_dist);
+                best_score = std::max(best_score, score);
                 return query_dist == query_window.size();
             }
         );
@@ -984,7 +992,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar)
                 );
 
-                // assert(alns.back().get_score() == best_score);
+                assert(alns.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -999,24 +1007,17 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                size_t dist = std::get<0>(data);
-                auto score = get_score(cost, dist, query_dist);
-
-                // if (score > best_score) {
-                //     common::logger->info("c: {}\ts: {}\td: {}\tq: {}", cost, score, dist, query_dist);
-                // } else {
-                //     common::logger->info("sub: c: {}\ts: {}\td: {}\tq: {}", cost, score, dist, query_dist);
-                // }
-
-                best_score = std::max(best_score, score);
-
                 if (query_dist == query_window.size())
                     return true;
 
-                return config_.xdrop < best_score - score;
+                size_t dist = std::get<0>(data);
+                return config_.xdrop < best_score - get_score(cost, dist, query_dist);
             },
-            [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
+            [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
+                size_t dist = std::get<0>(data);
+                auto score = get_score(cost, dist, query_dist);
+                best_score = std::max(best_score, score);
                 return query_dist == query_window.size();
             }
         );
@@ -1148,7 +1149,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             size_t next_to_last_dist = last_to_next_dist - last->get_spelling().size() + next->get_spelling().size() - next->get_path().size() + 1;
             std::string_view query_window = aln.get_query();
             query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
-            query_window.remove_prefix(next->get_clipping() + next->get_path().size() - 1);
+
+            size_t front_trim = next->get_clipping() + next->get_path().size() - 1;
+            query_window.remove_prefix(front_trim);
 
             auto end_branch = [&](size_t, const SMap &data, size_t query_dist, DeBruijnGraph::node_index) {
                 return std::get<0>(data) == next_to_last_dist && query_dist == query_window.size();
@@ -1159,8 +1162,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             };
 
             auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-                return cost_to_score(cost, query_dist, dist, match_score)
-                        + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
+                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                        + (query_dist == query_window.size() + front_trim ? config_.left_end_bonus : 0);
             };
 
             auto start_backtrack = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -1319,9 +1322,6 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (score <= 0)
                     return true;
 
-                best_score = std::max(best_score, score);
-                local_best_score = std::max(local_best_score, score);
-
                 for (size_t j : jt->second) {
                     auto kt = begin + j;
                     assert(kt > it || skipped[j]);
@@ -1371,8 +1371,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 },
                 start_backtracking,
                 terminate_branch,
-                [&](size_t, const SMap&, size_t query_dist, DeBruijnGraph::node_index) {
+                [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index) {
                     // terminate
+                    const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
+                    DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
+                    best_score = std::max(best_score, score);
+                    local_best_score = std::max(local_best_score, score);
                     return query_dist == query_window.size();
                 }
             );
