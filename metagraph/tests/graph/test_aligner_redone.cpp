@@ -763,34 +763,6 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2) {
 //     }
 // }
 
-TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
-    size_t k = 7;
-    std::string reference =    "AAAAGCTTTCGAGGCCAA";
-    std::string query =        "AAAAGTTTTCGAGGCCAA";
-    //                               X
-
-    std::string reference_rc = "TTGGCCTCGAAAGCTTTT";
-    std::string query_rc =     "TTGGCCTCGAAAACTTTT";
-    //                                      X
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
-}
-
-TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
-    size_t k = 11;
-    std::string reference =    "GTAGTGCTAGCTGTAGTCGTGCTGATGC";
-    std::string query =        "GTAGTGCTACCTGTAGTCGTGGTGATGC";
-    //                                   X           X
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    run_alignment(*graph, config, query, { reference }, { "9=1X11=1X6=" });
-}
-
 // TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
 //     size_t k = 6;
 //     std::vector<std::string> seqs;
@@ -827,6 +799,34 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
 //     }
 // }
 #endif
+
+TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
+    size_t k = 7;
+    std::string reference =    "AAAAGCTTTCGAGGCCAA";
+    std::string query =        "AAAAGTTTTCGAGGCCAA";
+    //                               X
+
+    std::string reference_rc = "TTGGCCTCGAAAGCTTTT";
+    std::string query_rc =     "TTGGCCTCGAAAACTTTT";
+    //                                      X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
+    size_t k = 11;
+    std::string reference =    "GTAGTGCTAGCTGTAGTCGTGCTGATGC";
+    std::string query =        "GTAGTGCTACCTGTAGTCGTGGTGATGC";
+    //                                   X           X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    run_alignment(*graph, config, query, { reference }, { "9=1X11=1X6=" });
+}
 
 // TYPED_TEST(DBGAlignerTest, align_nodummy) {
 //     size_t k = 7;

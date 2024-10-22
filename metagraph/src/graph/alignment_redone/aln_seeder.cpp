@@ -329,6 +329,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
         }
 
         for (size_t cost = 0; cost < std::max({ S.size(), E.size(), F.size() }); ++cost) {
+            // switch to matches from long insertions
             if (cost < E.size()) {
                 for (size_t query_dist = E[cost].offset(); query_dist < E[cost].size(); ++query_dist) {
                     assert(query_dist <= query_size);
@@ -398,9 +399,75 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 }
             }
 
-            // if (cost < F.size()) {
-            //     for (size_t query_dist = E[cost].offset(); query_dist < E[cost].size(); ++query_dist) {}
-            // }
+            // switch to matches from long deletions
+            if (cost < F.size()) {
+                for (size_t query_dist = F[cost].offset(); query_dist < F[cost].size(); ++query_dist) {
+                    assert(query_dist <= query_size);
+                    for (const auto &[node, data] : F[cost][query_dist]) {
+                        const auto &[best_dist, last_num_ops, last_node] = data;
+
+                        if (last_num_ops == 0 || best_dist == max_dist)
+                            continue;
+
+                        size_t num_matches = 0;
+
+                        std::vector<std::pair<node_index, char>> prevs;
+                        call_incoming_kmers(node, [&](auto prev, char c) {
+                            prevs.emplace_back(prev, c);
+                        });
+
+                        // match
+                        auto local_query_window_begin = query_window_begin;
+                        auto local_query_window_end = query_window_end;
+                        local_query_window_end -= query_dist;
+
+                        auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
+                        auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
+
+                        for (auto [prev, c] : prevs) {
+                            SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
+                            auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
+                            size_t cur_query_dist = query_dist + 1;
+                            size_t cur_cost = cost;
+                            if (c != *local_query_window_rbegin) {
+                                cur_cost += mismatch_cost;
+                                op = Cigar::MISMATCH;
+                                cur_num_matches = 0;
+                            }
+
+                            for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                    break;
+
+                                if (auto pprev = traverse_back(prev, *jt)) {
+                                    ++cur_best;
+                                    ++cur_query_dist;
+                                    ++cur_num_matches;
+                                    prev = pprev;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            terminate_branch(cur_cost, data, cur_query_dist, prev);
+
+                            assert(cur_query_dist > query_dist || cur_cost > cost);
+                            set_value(
+                                S,
+                                cur_cost,
+                                cur_query_dist,
+                                prev,
+                                cur_best,
+                                node,
+                                cur_query_dist - query_dist,
+                                op,
+                                c,
+                                cur_num_matches
+                            );
+                        }
+                    }
+                }
+            }
 
             if (cost >= S.size())
                 continue;
