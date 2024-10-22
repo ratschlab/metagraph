@@ -1085,6 +1085,9 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     auto chain = [&](auto begin, auto end) {
+        if (begin == end)
+            return;
+
         DBGAlignerConfig::score_t best_score = 0;
         sdsl::bit_vector skipped(end - begin);
         skipped[end - begin - 1] = true;
@@ -1095,22 +1098,30 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
             node_to_anchors[it->get_path().back()].emplace(it - begin);
         }
 
+        std::string_view global_query_window = begin->get_query();
+        global_query_window.remove_prefix(smallest_clipping);
         size_t num_extended = 0;
         for (auto it = begin; it != end; ++it) {
+            assert(it->get_query().end() == global_query_window.end());
             if (!it->get_clipping() || skipped[it - begin])
                 continue;
 
             ++num_extended;
 
             skipped[it - begin] = true;
+            DBGAlignerConfig::score_t local_best_score = it->get_score();
             size_t next_clipping = std::numeric_limits<size_t>::max();
             if (it->get_clipping() > (it + 1)->get_clipping())
                 next_clipping = (it + 1)->get_clipping();
 
             DeBruijnGraph::node_index start_node = it->get_path()[0];
-            std::string_view query_window = it->get_query();
+            std::string_view query_window = global_query_window;
             query_window.remove_suffix(it->get_end_clipping() + it->get_seed().size());
-            query_window.remove_prefix(smallest_clipping);
+
+            auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+                return it->get_score() + cost_to_score(cost, query_dist, dist, match_score)
+                        + (query_dist == query_window.size() + smallest_clipping ? config_.left_end_bonus : 0);
+            };
 
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
@@ -1135,6 +1146,13 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     }
                 }
 
+                if (!start_backtrack) {
+                    DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
+                    assert(score <= local_best_score);
+                    assert(score <= best_score);
+                    start_backtrack = (local_best_score == score);
+                }
+
                 return start_backtrack;
             };
 
@@ -1148,11 +1166,12 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                 if (jt == node_to_anchors.end())
                     return false;
 
-                DBGAlignerConfig::score_t score = cost_to_score(cost, query_dist, dist, match_score) + it->get_score();
+                DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                 if (score <= 0)
                     return true;
 
                 best_score = std::max(best_score, score);
+                local_best_score = std::max(local_best_score, score);
 
                 for (size_t j : jt->second) {
                     auto kt = begin + j;
