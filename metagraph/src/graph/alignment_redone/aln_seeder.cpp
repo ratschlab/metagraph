@@ -150,7 +150,7 @@ DBGAlignerConfig::score_t cost_to_score(size_t cost,
                                         size_t query_size,
                                         size_t match_size,
                                         DBGAlignerConfig::score_t match_score) {
-    return match_score * (query_size + match_size - cost / 2) / 2;
+    return (match_score * (query_size + match_size) - cost) / 2;
 }
 
 template <typename Tuple>
@@ -209,15 +209,18 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     DBGAlignerConfig::score_t match_score = config.match_score("A");
     DBGAlignerConfig::score_t mismatch_score = config.score_sequences("A", "T");
     assert(config.gap_opening_penalty <= config.gap_extension_penalty);
+    assert(config.gap_extension_penalty < 0);
     assert(mismatch_score < match_score);
 
     ssize_t mismatch_cost = (match_score - mismatch_score) * 2;
-    ssize_t gap_ext = config.gap_extension_penalty * -2 + match_score;
-    ssize_t gap_opn = config.gap_opening_penalty * -2 + gap_ext;
+    ssize_t gap_ext = match_score - 2 * config.gap_extension_penalty;
+    ssize_t gap_opn = match_score - 2 * config.gap_opening_penalty;
 
     assert(mismatch_cost > 0);
     assert(gap_ext > 0);
     assert(gap_opn >= gap_ext);
+
+    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -325,7 +328,83 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             );
         }
 
-        for (size_t cost = 0; cost < S.size(); ++cost) {
+        for (size_t cost = 0; cost < std::max({ S.size(), E.size(), F.size() }); ++cost) {
+            if (cost < E.size()) {
+                for (size_t query_dist = E[cost].offset(); query_dist < E[cost].size(); ++query_dist) {
+                    assert(query_dist <= query_size);
+                    for (const auto &[node, data] : E[cost][query_dist]) {
+                        const auto &[best_dist, last_num_ops] = data;
+
+                        if (last_num_ops == 0 || best_dist == max_dist || query_dist == query_size)
+                            continue;
+
+                        size_t num_matches = 0;
+
+                        std::vector<std::pair<node_index, char>> prevs;
+                        call_incoming_kmers(node, [&](auto prev, char c) {
+                            prevs.emplace_back(prev, c);
+                        });
+
+                        // match
+                        auto local_query_window_begin = query_window_begin;
+                        auto local_query_window_end = query_window_end;
+                        local_query_window_end -= query_dist;
+
+                        auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
+                        auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
+
+                        for (auto [prev, c] : prevs) {
+                            SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
+                            auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
+                            size_t cur_query_dist = query_dist + 1;
+                            size_t cur_cost = cost;
+                            if (c != *local_query_window_rbegin) {
+                                cur_cost += mismatch_cost;
+                                op = Cigar::MISMATCH;
+                                cur_num_matches = 0;
+                            }
+
+                            for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                    break;
+
+                                if (auto pprev = traverse_back(prev, *jt)) {
+                                    ++cur_best;
+                                    ++cur_query_dist;
+                                    ++cur_num_matches;
+                                    prev = pprev;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            terminate_branch(cur_cost, data, cur_query_dist, prev);
+
+                            assert(cur_query_dist > query_dist || cur_cost > cost);
+                            set_value(
+                                S,
+                                cur_cost,
+                                cur_query_dist,
+                                prev,
+                                cur_best,
+                                node,
+                                cur_query_dist - query_dist,
+                                op,
+                                c,
+                                cur_num_matches
+                            );
+                        }
+                    }
+                }
+            }
+
+            // if (cost < F.size()) {
+            //     for (size_t query_dist = E[cost].offset(); query_dist < E[cost].size(); ++query_dist) {}
+            // }
+
+            if (cost >= S.size())
+                continue;
+
             for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
                 assert(query_dist <= query_size);
                 size_t it_dist = 0;
@@ -431,6 +510,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                         break;
                                     }
                                 }
+
+                                terminate_branch(cur_cost, data, cur_query_dist, prev);
 
                                 assert(cur_query_dist > query_dist || cur_cost > cost);
                                 set_value(
@@ -750,6 +831,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     config_,
                     std::move(ext_cigar)
                 );
+
+                // assert(fwd_exts.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -771,13 +854,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 if (query_dist == query_window.size())
                     return true;
 
-                if (config_.xdrop < best_score - score)
-                    return true;
-
-                if (score + match_score * (query_window.size() - query_dist) <= 0)
-                    return true;
-
-                return score <= 0;
+                return config_.xdrop < best_score - score;
             },
             [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
@@ -795,6 +872,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
         if (!fwd_ext.get_clipping())
             continue;
+
+        // std::cerr << "bwd extending: " << fwd_ext << "\n";
 
         std::string_view query_window = fwd_ext.get_query();
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
@@ -837,6 +916,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     config_,
                     std::move(ext_cigar)
                 );
+
+                // assert(alns.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -853,18 +934,19 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 // terminate branch
                 size_t dist = std::get<0>(data);
                 auto score = get_score(cost, dist, query_dist);
+
+                // if (score > best_score) {
+                //     common::logger->info("c: {}\ts: {}\td: {}\tq: {}", cost, score, dist, query_dist);
+                // } else {
+                //     common::logger->info("sub: c: {}\ts: {}\td: {}\tq: {}", cost, score, dist, query_dist);
+                // }
+
                 best_score = std::max(best_score, score);
 
                 if (query_dist == query_window.size())
                     return true;
 
-                if (config_.xdrop < best_score - score)
-                    return true;
-
-                if (score + match_score * (query_window.size() - query_dist) <= 0)
-                    return true;
-
-                return score <= 0;
+                return config_.xdrop < best_score - score;
             },
             [&](size_t cost, const SMap&, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
