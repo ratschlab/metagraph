@@ -371,43 +371,19 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long_offset) {
     }
 }
 
-// TYPED_TEST(DBGAlignerTest, align_delete) {
-//     size_t k = 4;
-//     std::string reference = "TTCGATTGGCCT";
-//     std::string query =     "TTCGATGGCCT";
-//     //                             D
+TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
+    size_t k = 4;
+    //                               D
+    std::string reference = "TTCGAT""T""GGCCT";
+    std::string query =     "TTCGAT"   "GGCCT";
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     config.gap_opening_penalty = -3;
-//     config.gap_extension_penalty = -3;
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(reference.size() - k + 1, path.size());
-//     EXPECT_EQ(reference, path.get_sequence());
-//     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty, path.get_score());
-
-//     // TODO: the first should ideally always be true
-//     EXPECT_TRUE("6=1D5=" == path.get_cigar().to_string()
-//         || "5=1D6=" == path.get_cigar().to_string());
-//     // EXPECT_EQ("6=1I5=", path.get_cigar().to_string());
-
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(0u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     // TODO: enable this when the above is correct
-//     // check_extend(graph, aligner.get_config(), paths, query);
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -3;
+    run_alignment(*graph, config, query, { reference }, { "" });
+}
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     size_t k = 4;
@@ -467,71 +443,34 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight_long_xdrop) {
     run_alignment(*graph, config, query, { query }, { "63=" });
 }
 
-// TYPED_TEST(DBGAlignerTest, align_drop_seed) {
-//     size_t k = 4;
-//     std::string reference = "TTTCCCTGGCGCTCTC";
-//     std::string query =     "TTTCCGGGGCGCTCTC";
-//     //                       SSSSSSS
+TYPED_TEST(DBGAlignerRedoneTest, align_drop_seed) {
+    size_t k = 4;
+    std::string reference = "TTTCCCTGGCGCTCTC";
+    std::string query =     "TTTCCGGGGCGCTCTC";
+    //                       SSSSSSS
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -6, -6);
-//     config.gap_opening_penalty = -10;
-//     config.gap_extension_penalty = -4;
-//     config.xdrop = 6;
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -6, -6);
+    config.gap_opening_penalty = -10;
+    config.gap_extension_penalty = -4;
+    config.xdrop = 6;
+    run_alignment(*graph, config, query, { reference.substr(7) }, { "7S9=" });
+}
 
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
+TYPED_TEST(DBGAlignerRedoneTest, align_long_gap_after_seed) {
+    size_t k = 4;
+    std::string reference = "TTTCCCTTAAGGCGCTCTC";
+    std::string query =           "TTTCGGCGCTCTC";
+    //                             SSSS
 
-//     EXPECT_EQ(6, path.size());
-//     EXPECT_EQ(reference.substr(7), path.get_sequence());
-//     EXPECT_EQ(config.match_score(reference.substr(7)), path.get_score());
-//     EXPECT_EQ("7S9=", path.get_cigar().to_string());
-//     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(7u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     // TODO: re-enable this when gap extension is fixed
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
-
-// TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
-//     size_t k = 4;
-//     std::string reference = "TTTCCCTTAAGGCGCTCTC";
-//     std::string query =           "TTTCGGCGCTCTC";
-//     //                             SSSS
-
-//     auto graph = build_graph_batch<TypeParam>(k, { reference });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     config.gap_opening_penalty = -5;
-//     config.gap_extension_penalty = -1;
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_EQ(6, path.size());
-//     EXPECT_EQ(reference.substr(10), path.get_sequence());
-//     EXPECT_EQ(config.match_score(query.substr(4)), path.get_score());
-//     EXPECT_EQ("4S9=", path.get_cigar().to_string());
-//     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(4u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -1;
+    run_alignment(*graph, config, query, { reference.substr(10) }, { "4S9=" });
+}
 
 TYPED_TEST(DBGAlignerRedoneTest, align_repeat_sequence_no_delete_after_insert) {
     size_t k = 27;
