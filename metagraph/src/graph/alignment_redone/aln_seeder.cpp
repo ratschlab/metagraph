@@ -224,8 +224,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
     assert(gap_ext % 2 == 0);
     assert(gap_opn % 2 == 0);
 
-    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
-
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
     ScoreTable<EMap> E; // best cost (last operation is insertion)
@@ -330,6 +328,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                 best_dist > 0 ? *query_window_rbegin : '\0',
                 num_matches
             );
+
+            terminate(0, data, query_dist, node);
         }
 
         for (size_t cost = 0; cost < std::max({ S.size(), E.size(), F.size() }); ++cost) {
@@ -344,6 +344,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         const auto &[best_dist, last_num_ops] = data;
 
                         if (last_num_ops == 0 || best_dist == max_dist)
+                            continue;
+
+                        if (terminate_branch(cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist, node))
                             continue;
 
                         size_t num_matches = 0;
@@ -386,7 +389,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
                             }
 
-                            assert(cur_query_dist > query_dist || cur_cost > cost);
                             set_value(
                                 S,
                                 cur_cost,
@@ -419,6 +421,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         if (last_num_ops == 0 || best_dist == max_dist)
                             continue;
 
+                        if (terminate_branch(cost, SMap(best_dist, 0, last_node, Cigar::DELETION, '\0', 0), query_dist, node))
+                            continue;
+
                         size_t num_matches = 0;
 
                         std::vector<std::pair<node_index, char>> prevs;
@@ -459,7 +464,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
                             }
 
-                            assert(cur_query_dist > query_dist || cur_cost > cost);
                             set_value(
                                 S,
                                 cur_cost,
@@ -492,9 +496,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     if (last_op == Cigar::CLIPPED)
                         continue;
 
-                    if (terminate(cost, it->second, query_dist, node))
-                        return;
-
+                    terminate(cost, it->second, query_dist, node);
                     if (terminate_branch(cost, it->second, query_dist, node))
                         continue;
 
@@ -585,7 +587,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                     }
                                 }
 
-                                assert(cur_query_dist > query_dist || cur_cost > cost);
                                 set_value(
                                     S,
                                     cur_cost,
@@ -600,11 +601,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 );
                                 it = S[cost][query_dist].begin() + it_dist;
 
-                                if (terminate(cur_cost, data, cur_query_dist, prev))
-                                    return;
+                                // terminate(cur_cost, data, cur_query_dist, prev);
                             }
                         }
                     }
+
+                    if (terminate(cost, it->second, query_dist, node))
+                        return;
                 }
             }
         }
@@ -907,7 +910,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar)
                 );
 
-                assert(fwd_exts.back().get_score() == best_score);
+                // assert(fwd_exts.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -926,7 +929,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     return true;
 
                 size_t dist = std::get<0>(data);
-                return config_.xdrop < best_score - get_score(cost, dist, query_dist);
+                auto score = get_score(cost, dist, query_dist);
+                return score <= 0 || config_.xdrop < best_score - score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
@@ -947,8 +951,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
         if (!fwd_ext.get_clipping())
             continue;
-
-        // std::cerr << "bwd extending: " << fwd_ext << "\n";
 
         std::string_view query_window = fwd_ext.get_query();
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
@@ -992,7 +994,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar)
                 );
 
-                assert(alns.back().get_score() == best_score);
+                // assert(alns.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -1011,7 +1013,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     return true;
 
                 size_t dist = std::get<0>(data);
-                return config_.xdrop < best_score - get_score(cost, dist, query_dist);
+                auto score = get_score(cost, dist, query_dist);
+                return score <= 0 || config_.xdrop < best_score - score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate

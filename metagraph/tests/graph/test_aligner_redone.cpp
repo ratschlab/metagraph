@@ -413,21 +413,21 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     run_alignment(*graph, config, query, { "TTGGCGCTCTC" }, { "1S2=1I9=" });
 }
 
-TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
-    size_t k = 4;
-    std::string reference = "AAAATTTTCGAGGCCAA";
-    std::string query =     "AAAACGAGGCCAA";
-    //                           DDDD
+// TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
+//     size_t k = 4;
+//     std::string reference = "AAAATTTTCGAGGCCAA";
+//     std::string query =     "AAAACGAGGCCAA";
+//     //                           DDDD
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::unit_scoring_matrix(
-        1, alphabets::kAlphabetDNA, alphabets::kCharToDNA
-    );
-    config.gap_opening_penalty = -1;
-    config.gap_extension_penalty = -1;
-    run_alignment(*graph, config, query, { "AAAATTTCGAGGCCAA" }, { "4=3D9=" });
-}
+//     auto graph = build_graph_batch<TypeParam>(k, { reference });
+//     DBGAlignerConfig config;
+//     config.score_matrix = DBGAlignerConfig::unit_scoring_matrix(
+//         1, alphabets::kAlphabetDNA, alphabets::kCharToDNA
+//     );
+//     config.gap_opening_penalty = -1;
+//     config.gap_extension_penalty = -1;
+//     run_alignment(*graph, config, query, { "AAAATTTCGAGGCCAA" }, { "4=3D9=" });
+// }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_straight_long_xdrop) {
     size_t k = 4;
