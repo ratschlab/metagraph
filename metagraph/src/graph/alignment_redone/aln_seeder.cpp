@@ -6,6 +6,7 @@
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
 #include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -45,6 +46,65 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
 
         return anchors;
+    }
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+    if (!dbg_succ)
+        return anchors;
+
+    const auto &boss = dbg_succ->get_boss();
+    for (bool orientation : { false, true }) {
+        std::string_view this_query = query_.get_query(orientation);
+        auto encoded = boss.encode(this_query);
+
+        if (std::find(encoded.begin(), encoded.end(),
+                      boss.alph_size) != encoded.end()) {
+            continue;
+        }
+
+        size_t k = graph.get_k();
+        for (size_t i = 0; i + config_.min_seed_length <= this_query.size(); ++i) {
+            auto [first, last, it] = boss.index_range(
+                encoded.begin() + i,
+                encoded.begin() + i + config_.min_seed_length
+            );
+
+            size_t match_size = it - encoded.begin() + i;
+            if (match_size < config_.min_seed_length)
+                continue;
+
+            using edge_index = boss::BOSS::edge_index;
+            std::vector<std::tuple<edge_index, edge_index, std::string>> traverse;
+            traverse.emplace_back(first, last, "");
+            while (traverse.size()) {
+                auto [first, last, suffix] = traverse.back();
+                traverse.pop_back();
+                if (suffix.size() + match_size == k - 1) {
+                    assert(boss.succ_last(first) == last);
+                    for (edge_index e = first; e <= last; ++e) {
+                        if (auto node = dbg_succ->boss_to_kmer_index(e)) {
+                            char c = boss.decode(boss.get_W(e) % boss.alph_size);
+                            if (c != boss::BOSS::kSentinel) {
+                                anchors.emplace_back(this_query,
+                                                    i, i + match_size,
+                                                    orientation,
+                                                    std::vector<Match::node_index>{ node },
+                                                    config_,
+                                                    suffix + c);
+                            }
+                        }
+                    }
+                }
+
+                for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+                    auto next_first = first;
+                    auto next_last = last;
+                    if (boss.tighten_range(&next_first, &next_last, s)) {
+                        traverse.emplace_back(next_first, next_last, suffix + boss.decode(s));
+                    }
+                }
+            }
+        }
     }
 
     return anchors;
@@ -182,9 +242,9 @@ using EMap = std::tuple<size_t, size_t>;
 using FMap = std::tuple<size_t, size_t, DeBruijnGraph::node_index>;
 
 template <typename StrItr>
-void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_single_incoming,
-                const std::function<DeBruijnGraph::node_index(DeBruijnGraph::node_index, char)> &traverse_back,
-                const std::function<void(DeBruijnGraph::node_index, const std::function<void(DeBruijnGraph::node_index, char)>&)> &call_incoming_kmers,
+void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, size_t)> &has_single_incoming,
+                const std::function<DeBruijnGraph::node_index(DeBruijnGraph::node_index, char, size_t, size_t)> &traverse_back,
+                const std::function<void(DeBruijnGraph::node_index, const std::function<void(DeBruijnGraph::node_index, char)>&, size_t, size_t)> &call_incoming_kmers,
                 const DBGAlignerConfig &config,
                 const DeBruijnGraph::node_index start_node,
                 size_t start_num_matches,
@@ -304,10 +364,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
             auto &[best_dist, last_ext, last_node, last_op, c, num_matches] = data;
 
             for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
-                if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node))
+                if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node, best_dist, query_dist))
                     break;
 
-                if (auto prev = traverse_back(node, *it)) {
+                if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
                     ++best_dist;
                     ++query_dist;
                     ++last_ext;
@@ -356,7 +416,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         std::vector<std::pair<node_index, char>> prevs;
                         call_incoming_kmers(node, [&](auto prev, char c) {
                             prevs.emplace_back(prev, c);
-                        });
+                        }, best_dist, query_dist);
 
                         // match
                         auto local_query_window_begin = query_window_begin;
@@ -378,10 +438,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                             }
 
                             for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
                                     break;
 
-                                if (auto pprev = traverse_back(prev, *jt)) {
+                                if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
                                     ++cur_best;
                                     ++cur_query_dist;
                                     ++cur_num_matches;
@@ -431,7 +491,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         std::vector<std::pair<node_index, char>> prevs;
                         call_incoming_kmers(node, [&](auto prev, char c) {
                             prevs.emplace_back(prev, c);
-                        });
+                        }, best_dist, query_dist);
 
                         // match
                         auto local_query_window_begin = query_window_begin;
@@ -453,10 +513,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                             }
 
                             for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
                                     break;
 
-                                if (auto pprev = traverse_back(prev, *jt)) {
+                                if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
                                     ++cur_best;
                                     ++cur_query_dist;
                                     ++cur_num_matches;
@@ -530,7 +590,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                         std::vector<std::pair<node_index, char>> prevs;
                         call_incoming_kmers(node, [&](auto prev, char c) {
                             prevs.emplace_back(prev, c);
-                        });
+                        }, best_dist, query_dist);
 
                         if (prevs.size()) {
                             // deletion
@@ -581,10 +641,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                                 }
 
                                 for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                    if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev))
+                                    if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
                                         break;
 
-                                    if (auto pprev = traverse_back(prev, *jt)) {
+                                    if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
                                         ++cur_best;
                                         ++cur_query_dist;
                                         ++cur_num_matches;
@@ -747,24 +807,27 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index)> &has_sing
                     auto it = query_window_rbegin + prev_query;
                     assert(it != query_window_rend);
                     size_t cur_path_size = path.size();
+                    size_t num_traversed = 0;
                     if (std::get<3>(*bt) == Cigar::MISMATCH) {
                         assert(mismatch_char != *it);
-                        traverse_node = traverse_back(traverse_node, mismatch_char);
+                        traverse_node = traverse_back(traverse_node, mismatch_char, prev_dist, prev_query);
                         assert(traverse_node != DeBruijnGraph::npos);
                         path.emplace_back(traverse_node);
                         ++it;
                         --num_match;
+                        ++num_traversed;
                     } else {
                         assert(mismatch_char == *it);
                     }
 
                     while (num_match) {
                         assert(it != query_window_rend);
-                        traverse_node = traverse_back(traverse_node, *it);
+                        traverse_node = traverse_back(traverse_node, *it, prev_dist + num_traversed, prev_query + num_traversed);
                         assert(traverse_node != DeBruijnGraph::npos);
                         path.emplace_back(traverse_node);
                         ++it;
                         --num_match;
+                        ++num_traversed;
                     }
                     assert(traverse_node == node);
 
@@ -819,9 +882,9 @@ void align_bwd(const DeBruijnGraph &graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate) {
     align_impl(
-        [&graph](DeBruijnGraph::node_index node) { return graph.has_single_incoming(node); },
-        [&graph](DeBruijnGraph::node_index node, char c) { return graph.traverse_back(node, c); },
-        [&graph](DeBruijnGraph::node_index node, const auto &callback) {
+        [&graph](DeBruijnGraph::node_index node, size_t, size_t) { return graph.has_single_incoming(node); },
+        [&graph](DeBruijnGraph::node_index node, char c, size_t, size_t) { return graph.traverse_back(node, c); },
+        [&graph](DeBruijnGraph::node_index node, const auto &callback, size_t, size_t) {
             graph.call_incoming_kmers(node, callback);
         },
         config,
@@ -845,12 +908,29 @@ void align_fwd(const DeBruijnGraph &graph,
                const std::function<void(std::vector<DeBruijnGraph::node_index>&&, Cigar&&)> &callback,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
-               const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate) {
+               const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
+               std::string_view suffix = "") {
     align_impl(
-        [&graph](DeBruijnGraph::node_index node) { return graph.has_single_outgoing(node); },
-        [&graph](DeBruijnGraph::node_index node, char c) { return graph.traverse(node, c); },
-        [&graph](DeBruijnGraph::node_index node, const auto &callback) {
-            graph.call_outgoing_kmers(node, callback);
+        [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, size_t dist, size_t) {
+            assert(dist >= suffix.size() || node == start_node);
+            return dist < suffix.size() || graph.has_single_outgoing(node);
+        },
+        [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, char c, size_t dist, size_t) {
+            assert(dist >= suffix.size() || node == start_node);
+            if (dist < suffix.size()) {
+                 assert(node == start_node);
+                 return c == suffix[dist] ? node : DeBruijnGraph::npos;
+            } else {
+                return graph.traverse(node, c);
+            }
+        },
+        [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, const auto &callback, size_t dist, size_t) {
+            if (dist < suffix.size()) {
+                assert(node == start_node);
+                callback(node, suffix[dist]);
+            } else {
+                graph.call_outgoing_kmers(node, callback);
+            }
         },
         config,
         start_node,
@@ -858,9 +938,12 @@ void align_fwd(const DeBruijnGraph &graph,
         query_window.rbegin(), query_window.rend(),
         max_dist,
         [&](auto&& path, auto&& cigar) {
-            std::reverse(path.begin(), path.end());
-            std::reverse(cigar.data().begin(), cigar.data().end());
-            callback(std::move(path), std::move(cigar));
+            if (path.size() >= suffix.size()) {
+                path.resize(path.size() - suffix.size());
+                std::reverse(path.begin(), path.end());
+                std::reverse(cigar.data().begin(), cigar.data().end());
+                callback(std::move(path), std::move(cigar));
+            }
         },
         start_backtrack,
         terminate_branch,
@@ -892,7 +975,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
         DBGAlignerConfig::score_t best_score = aln.get_score();
-        assert(aln.get_end_trim() == 0);
         align_fwd(
             query_.get_graph(), config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
@@ -923,7 +1005,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 // start backtrack
                 size_t dist = std::get<0>(data);
                 size_t num_matches = std::get<5>(data);
-                if ((dist == 0 && query_dist == 0) || !num_matches)
+                if (!num_matches || dist < aln.get_end_trim() || (dist == 0 && query_dist == 0))
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
@@ -945,7 +1027,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
                 return false;
-            }
+            },
+            aln.get_trim_spelling()
         );
 
         if (fwd_exts.empty())
@@ -992,8 +1075,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 aln_cigar.trim_clipping();
                 ext_cigar.append(std::move(aln_cigar));
 
-                alns.emplace_back(
-                    query_.get_graph(),
+                Alignment next_aln(query_.get_graph(),
                     fwd_ext.get_query(),
                     fwd_ext.get_orientation(),
                     std::move(path),
@@ -1001,6 +1083,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar)
                 );
 
+                next_aln.trim_end();
+                alns.emplace_back(std::move(next_aln));
                 // assert(alns.back().get_score() == best_score);
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {

@@ -38,16 +38,17 @@ void run_alignment(const DeBruijnGraph &graph,
                    const std::vector<std::string> &cigar_str,
                    size_t end_trim = 0) {
     size_t k = graph.get_k();
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
+    if (config.min_seed_length == 0)
         config.min_seed_length = k;
+
+    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
         config.max_seed_length = mx;
 
         Query aln_query(graph, query);
         ExactSeeder seeder(aln_query, config);
         std::vector<Alignment> paths;
         Extender extender(aln_query, config);
-        // for (const auto &base_path : seeder.get_inexact_anchors()) {
-        for (const auto &base_path : seeder.get_alignments()) {
+        for (const auto &base_path : seeder.get_inexact_anchors()) {
             extender.extend(base_path, [&](Alignment&& path) {
                 paths.emplace_back(std::move(path));
             });
@@ -927,6 +928,40 @@ TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
 
 //     check_extend(graph, aligner.get_config(), paths, query);
 // }
+
+TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
+    size_t k = 7;
+    std::string reference = "AAAAGCT";
+    std::string query =     "AAAAGTT";
+    //                            X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.min_seed_length = 5;
+    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+        run_alignment(*graph, config, query, { reference }, { "5=1X1=" });
+    } else {
+        run_alignment(*graph, config, query, {}, {});
+    }
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
+    size_t k = 7;
+    std::string reference = "AAAAGCTTTCGA";
+    std::string query =     "AAAAGTTTTCGA";
+    //                            X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 5;
+    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+        run_alignment(*graph, config, query, { reference }, { "5=1X6=" });
+    } else {
+        run_alignment(*graph, config, query, {}, {});
+    }
+}
 
 // TEST(DBGAlignerTest, align_extended_insert_after_match) {
 //     size_t k = 27;

@@ -84,6 +84,40 @@ std::string spell_path(const DeBruijnGraph &graph,
     return seq;
 }
 
+size_t Anchor::trim_end() {
+    size_t end_trim = get_end_trim();
+    if (end_trim == 0)
+        return 0;
+
+    size_t num_trimmed = 0;
+    while (end_trim && path_.size() > 1) {
+        assert(suffix_.size());
+        suffix_.pop_back();
+        path_.pop_back();
+        --end_trim;
+        ++num_trimmed;
+    }
+
+    return num_trimmed;
+}
+
+size_t Alignment::trim_end() {
+    size_t end_trim = get_end_trim();
+    if (end_trim == 0)
+        return 0;
+
+    size_t num_trimmed = 0;
+    while (end_trim && path_.size() > 1) {
+        assert(path_spelling_.size());
+        path_spelling_.pop_back();
+        path_.pop_back();
+        --end_trim;
+        ++num_trimmed;
+    }
+
+    return num_trimmed;
+}
+
 void Anchor::append(const Anchor &other,
                     const DBGAlignerConfig &config,
                     const DeBruijnGraph *graph) {
