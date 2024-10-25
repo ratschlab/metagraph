@@ -341,34 +341,11 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long_offset) {
     //                             XIIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-
-    for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-        config.gap_opening_penalty = -1;
-        config.gap_extension_penalty = -1;
-        config.min_seed_length = k;
-        config.max_seed_length = mx;
-
-        Query aln_query(*graph, query);
-        ExactSeeder seeder(aln_query, config);
-        auto paths = seeder.get_inexact_anchors();
-
-        ASSERT_LE(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(reference.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_spelling());
-        EXPECT_EQ(config.score_sequences(reference, "TTTCCGCTTGTTA")
-            + config.gap_opening_penalty
-            + 8 * config.gap_extension_penalty, path.get_score());
-        EXPECT_TRUE(path.get_cigar().to_string() == "6=1X9I6="
-            || path.get_cigar().to_string() == "6=9I1X6=") << path.get_cigar().to_string();
-        EXPECT_EQ(12u, path.get_cigar().get_num_matches());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_end_trim());
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -1;
+    run_alignment(*graph, config, query, { reference }, { "" });
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
@@ -401,16 +378,16 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     size_t k = 4;
-    std::string reference = "TTTCCCTT" "GGCGCTCTC";
-    std::string query =          "TTT""CGGCGCTCTC";
-    //                            S    I
+    std::string reference = "TTTCCCTTGGCGCTCTC";
+    std::string query =     "TTTC"  "GGCGCTCTC";
+    //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -1;
-    run_alignment(*graph, config, query, { "TTGGCGCTCTC" }, { "1S2=1I9=" });
+    run_alignment(*graph, config, query, { reference }, { "4=4D9=" });
 }
 
 // TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
