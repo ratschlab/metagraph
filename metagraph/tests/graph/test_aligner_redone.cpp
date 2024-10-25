@@ -897,38 +897,6 @@ TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
     run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" });
 }
 
-// TEST(DBGAlignerTest, align_dummy) {
-//     size_t k = 7;
-//     std::string reference = "AAAAGCTTTCGAGGCCAA";
-//     std::string query =     "AAAAGTTTTCGAGGCCAA";
-//     //                            X
-
-//     auto graph = std::make_shared<DBGSuccinct>(k);
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     config.min_seed_length = 5;
-//     graph->add_sequence(reference);
-
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_EQ(12u, path.size());
-//     EXPECT_EQ(reference, path.get_sequence());
-//     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-//     EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
-//     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-//     EXPECT_FALSE(is_exact_match(path));
-//     EXPECT_EQ(0u, path.get_clipping());
-//     EXPECT_EQ(0u, path.get_end_clipping());
-//     EXPECT_EQ(0u, path.get_offset());
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
-
 TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
     size_t k = 7;
     std::string reference = "AAAAGCT";
@@ -963,30 +931,23 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     }
 }
 
-// TEST(DBGAlignerTest, align_extended_insert_after_match) {
-//     size_t k = 27;
-//     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-//     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-//     std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
-//     auto graph = std::make_shared<DBGSuccinct>(k);
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//     config.min_seed_length = 15;
-//     graph->add_sequence(reference_1);
-//     graph->add_sequence(reference_2);
+TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
+    size_t k = 27;
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG" "GCCCAGGCCCAGGC""CCA" "GGCCCAGGC""CC" "AGGCCCAGGCCCAGGCCCAAGCC";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG" "CCCCAGGCCCAGGC""CCA" "GGCCCAGGC""CC" "AGGCCCAGGCCCAGGCCCAAGCC";
+    std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCA""CGG" "TGGCTGCG""CAGGCCCGCCTGGCACAAGCCACGCTG";
+    //                                               III  XXX         II     I  DDDX   II X  I
 
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     EXPECT_EQ(52u, path.get_score())
-//         << path.get_score() << " " << path.get_cigar().to_string();
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.min_seed_length = 15;
+    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+        run_alignment(*graph, config, query, { reference_1 }, { "22=3I2=3X9=2I3=1I2=3D1X3=2I1=1I7=1D1=2D2=1X3=1X6=6S" });
+    } else {
+        run_alignment(*graph, config, query, {}, {});
+    }
+}
 
 // #if ! _PROTEIN_GRAPH
 // TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
