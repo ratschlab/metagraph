@@ -885,7 +885,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
     for (auto &fwd_ext : fwd_exts) {
         if (!fwd_ext.get_clipping()) {
-            callback(Alignment(fwd_ext));
+            callback(std::move(fwd_ext));
             continue;
         }
 
@@ -967,7 +967,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         );
 
         if (!found)
-            callback(Alignment(fwd_ext));
+            callback(std::move(fwd_ext));
     }
 }
 
