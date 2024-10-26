@@ -549,11 +549,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             }
         }
 
-        std::sort(starts.begin(), starts.end(), [&](const auto &a, const auto &b) {
-            return std::make_pair(std::get<0>(b), std::get<1>(a))
-                    < std::make_pair(std::get<0>(a), std::get<1>(b));
-        });
-
         for (auto [dist, diag, query_dist, node] : starts) {
             size_t cost = start_cost;
 
@@ -970,11 +965,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         );
     }
 
-    std::sort(alns.begin(), alns.end(), [](const auto &a, const auto &b) {
-        return std::make_tuple(a.get_score(), a.get_seed().size())
-             > std::make_tuple(b.get_score(), b.get_seed().size());
-    });
-
     for (auto &a : alns) {
         callback(std::move(a));
     }
@@ -1158,10 +1148,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         }
     );
 
-    std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
-        return std::make_tuple(a.get_score(), a.get_seed().size())
-             > std::make_tuple(b.get_score(), b.get_seed().size());
-    });
     return alignments;
 }
 
