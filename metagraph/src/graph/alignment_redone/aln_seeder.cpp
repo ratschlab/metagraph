@@ -883,12 +883,11 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             fwd_exts.emplace_back(aln);
     }
 
-    std::vector<Alignment> alns;
     for (auto &fwd_ext : fwd_exts) {
-        alns.emplace_back(fwd_ext);
-
-        if (!fwd_ext.get_clipping())
+        if (!fwd_ext.get_clipping()) {
+            callback(Alignment(fwd_ext));
             continue;
+        }
 
         std::string_view query_window = fwd_ext.get_query();
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
@@ -909,6 +908,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
 
+        bool found = false;
         align_bwd(
             query_.get_graph(), config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
@@ -932,8 +932,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 );
 
                 next_aln.trim_end();
-                alns.emplace_back(std::move(next_aln));
-                // assert(alns.back().get_score() == best_score);
+
+                // assert(next_aln.get_score() == best_score);
+                callback(std::move(next_aln));
+                found = true;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
@@ -963,10 +965,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 return false;
             }
         );
-    }
 
-    for (auto &a : alns) {
-        callback(std::move(a));
+        if (!found)
+            callback(Alignment(fwd_ext));
     }
 }
 
