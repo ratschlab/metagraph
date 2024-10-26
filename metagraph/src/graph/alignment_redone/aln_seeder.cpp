@@ -872,9 +872,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
+                size_t num_matches = std::get<5>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return false;
+                return num_matches == query_window.size();
             },
             aln.get_trim_spelling()
         );
@@ -960,9 +961,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
+                size_t num_matches = std::get<5>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return false;
+                return num_matches == query_window.size();
             }
         );
 
@@ -1312,7 +1314,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                     best_score = std::max(best_score, score);
                     local_best_score = std::max(local_best_score, score);
-                    return false;
+                    return num_matches == query_window.size();
                 }
             );
         }
@@ -1327,13 +1329,6 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
     }
 
     chain(begin, anchors.end());
-
-    if (alns.empty())
-        return alns;
-
-    std::sort(alns.begin(), alns.end(), [&](const auto &a, const auto &b) {
-        return a.get_score() > b.get_score();
-    });
 
     return alns;
 }
