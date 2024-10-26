@@ -163,6 +163,7 @@ class Alignment : public Match {
             label_classes_(path_.size(), label_class) {
         assert(path_spelling_.size() - graph.get_k() + 1 == path_.size());
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
         score_ = config.score_cigar(get_spelling(), query_, cigar_);
     }

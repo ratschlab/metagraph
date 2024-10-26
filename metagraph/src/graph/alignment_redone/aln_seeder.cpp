@@ -63,7 +63,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
 
         size_t k = graph.get_k();
-        for (size_t i = 0; i + config_.min_seed_length <= this_query.size(); ++i) {
+        for (size_t i = 0; i + k <= this_query.size(); ++i) {
             auto [first, last, it] = boss.index_range(
                 encoded.begin() + i,
                 encoded.begin() + i + config_.min_seed_length
@@ -880,11 +880,12 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             aln.get_trim_spelling()
         );
 
-        if (fwd_exts.empty())
+        if (fwd_exts.empty() && !aln.get_end_trim())
             fwd_exts.emplace_back(aln);
     }
 
     for (auto &fwd_ext : fwd_exts) {
+        assert(!fwd_ext.get_end_trim());
         if (!fwd_ext.get_clipping()) {
             callback(std::move(fwd_ext));
             continue;
@@ -931,8 +932,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     config_,
                     std::move(ext_cigar)
                 );
-
-                next_aln.trim_end();
 
                 // assert(next_aln.get_score() == best_score);
                 callback(std::move(next_aln));
@@ -1213,7 +1212,6 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
 
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-
                 if (query_dist == query_window.size() && num_matches)
                     return true;
 
@@ -1304,7 +1302,8 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                                     it->get_orientation(),
                                     std::move(path),
                                     config_,
-                                    std::move(ext_cigar));
+                                    std::move(ext_cigar),
+                                    it->get_end_trim());
                 },
                 start_backtracking,
                 terminate_branch,
