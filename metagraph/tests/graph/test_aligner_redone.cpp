@@ -54,7 +54,8 @@ void run_alignment(const DeBruijnGraph &graph,
             });
         }
         std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
-            return a.get_score() > b.get_score();
+            return std::make_pair(a.get_score(), b.get_orientation())
+                 > std::make_pair(b.get_score(), a.get_orientation());
         });
 
         ASSERT_LE(reference.size(), paths.size()) << mx;
