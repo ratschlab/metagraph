@@ -1212,7 +1212,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
 
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-                if (query_dist == query_window.size() && num_matches)
+                if (query_dist == query_window.size() + smallest_clipping)
                     return true;
 
                 if (dist == 0 || query_dist == 0 || (last_op != Cigar::MATCH && last_op != Cigar::MISMATCH))
@@ -1228,7 +1228,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
                     if (num_matches >= (begin + j)->get_seed().size()) {
                         start_backtrack |= !skipped[j] || j + 1 == skipped.size()
                             || !(begin + j)->get_clipping()
-                            || std::none_of(skipped.begin() + j + 1, skipped.end(), [&](bool s) { return s; });
+                            || !std::all_of(skipped.begin() + j + 1, skipped.end(), [&](bool s) { return s; });
                     }
                 }
 
@@ -1329,6 +1329,7 @@ std::vector<Alignment> ExactSeeder::get_alignments() const {
 
     chain(begin, anchors.end());
 
+    common::logger->info("Found {} partial alignments from {} anchors", alns.size(), anchors.size());
     return alns;
 }
 
