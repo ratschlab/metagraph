@@ -53,6 +53,9 @@ void run_alignment(const DeBruijnGraph &graph,
                 paths.emplace_back(std::move(path));
             });
         }
+        std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
+            return a.get_score() > b.get_score();
+        });
 
         ASSERT_LE(reference.size(), paths.size()) << mx;
         paths.resize(reference.size());
@@ -943,7 +946,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.min_seed_length = 15;
     if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { reference_1 }, { "22=3I2=3X9=2I3=1I2=3D1X3=2I1=1I7=1D1=2D2=1X3=1X6=6S" });
+        run_alignment(*graph, config, query, { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" }, { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" });
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
