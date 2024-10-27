@@ -980,6 +980,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
+    bool first_chain = true;
+    DBGAlignerConfig::score_t first_chain_score = DBGAlignerConfig::ninf;
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
         [this,&node_dists](const Anchor &a_j,
                            ssize_t max_dist,
@@ -1072,7 +1074,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             //     }
             //     std::cerr << std::endl;
             // }
-            return chain.size() && (chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
+            assert(chain.size());
+            if (first_chain) {
+                first_chain_score = score_traceback.back();
+                assert(score_traceback.front() <= score_traceback.back());
+            }
+
+            bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
+            first_chain = false;
+            return ret_val;
         },
         [this,match_score](AnchorIt last,
                            AnchorIt next,
