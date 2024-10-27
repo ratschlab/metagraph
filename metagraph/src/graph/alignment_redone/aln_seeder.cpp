@@ -8,15 +8,6 @@
 
 namespace mtg::graph::align_redone {
 
-std::vector<Alignment> Seeder::get_inexact_anchors() const {
-    auto anchors = get_anchors();
-    std::vector<Alignment> inexact_anchors;
-    inexact_anchors.reserve(anchors.size());
-    std::transform(anchors.begin(), anchors.end(), std::back_inserter(inexact_anchors),
-                   [&](const Anchor &a) { return Alignment(a); });
-    return inexact_anchors;
-}
-
 std::vector<Anchor> ExactSeeder::get_anchors() const {
     const DeBruijnGraph &graph = query_.get_graph();
     std::vector<Anchor> anchors;
@@ -142,32 +133,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     }
 
     return anchors;
-}
-
-void call_distances(const DeBruijnGraph &graph,
-                    DeBruijnGraph::node_index start,
-                    DeBruijnGraph::node_index target,
-                    const std::function<void(ssize_t)> &callback,
-                    const std::function<bool(ssize_t)> &terminate_branch = [](ssize_t) { return false; },
-                    const std::function<bool()> &terminate = []() { return false; }) {
-    // TODO: this is a slow DFS-based method, replace with something smarter
-    std::vector<std::pair<DeBruijnGraph::node_index, ssize_t>> traversal_stack;
-    traversal_stack.emplace_back(start, 0);
-    while (traversal_stack.size() && !terminate()) {
-        auto [node, coord_dist] = traversal_stack.back();
-        traversal_stack.pop_back();
-
-        if (node == target)
-            callback(coord_dist);
-
-        if (terminate_branch(coord_dist))
-            continue;
-
-        ++coord_dist;
-        graph.adjacent_incoming_nodes(node, [&](DeBruijnGraph::node_index next) {
-            traversal_stack.emplace_back(next, coord_dist);
-        });
-    }
 }
 
 template <typename T>
