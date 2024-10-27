@@ -751,6 +751,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 //     }
 // }
 
+// TODO: this test is too slow
 // TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
 //     size_t k = 6;
 //     std::vector<std::string> seqs;
@@ -775,16 +776,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 //     config.min_exact_match = 0.0;
 //     config.max_nodes_per_seq_char = 10.0;
 //     config.num_alternative_paths = 3;
-//     run_alignment(*graph, config, query, { reference }, { "30=2D2=1X2=1X6=" });
-
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-
-
-//     DBGAligner<> aligner(*graph, config);
-//     for (size_t i = 0; i < 3; ++i) {
-//         EXPECT_EQ(3u, aligner.align(query).size()) << i;
-//     }
+//     run_alignment(*graph, config, query, { "" }, { "30=2D2=1X2=1X6=" });
 // }
 #endif
 
