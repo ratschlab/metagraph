@@ -1066,23 +1066,28 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 // size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
                 // size_t a_j_chars = a_j.get_spelling().size();
                 bool updated = false;
-                for (const auto &[path_dist, query_dist, added_score] : find_i->second) {
-                    DBGAlignerConfig::score_t cur_coord_dist
-                        = path_dist - a_i.get_path().size() + a_j.get_path().size();
-
-                    DBGAlignerConfig::score_t cur_dist = query_dist - a_i.get_path().size() + a_j.get_path().size();
+                std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
+                for (const auto &[path_dist, query_dist, i, added_score] : find_i->second) {
+                    // query_dist is the distance from the front of a_j to the ith node of a_i
+                    ssize_t offset = a_j.get_seed().size() + i;
+                    offset -= a_i.get_seed().size();
+                    DBGAlignerConfig::score_t cur_dist = query_dist + offset;
+                    std::cerr << "\t\tp: " << path_dist << "\tq: " << query_dist << "\ti: " << i << "\t-> " << cur_dist;
 
                     if (cur_dist == dist && base_score + added_score > score) {
+                        DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
+                        std::cerr << "," << cur_coord_dist;
                         score = base_score + added_score;
                         coord_dist = cur_coord_dist;
                         updated = true;
                     }
+                    std::cerr << "\n";
                 }
 
                 // std::cerr << "connect " << a_i << "\t->\t" << a_j << "\t"
                 //                         << fmt::format("{}", fmt::join(find_i->second, ",")) << "\t" << score << "\t" << dist << "," << coord_dist << std::endl;
 
-                // std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << base_score << "->" << score << "\n";
+                std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << updated << "\t" << base_score << "->" << score << " vs. " << std::get<0>(*(chain_scores + (end - begin))) << "\t" << dist << "," << coord_dist << "\n";
                 if (updated)
                     update_score(score, it, coord_dist);
 
@@ -1101,11 +1106,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             first_chain = false;
 
             // if (ret_val) {
-                // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                // for (const auto &[it, dist] : chain) {
-                //     std::cerr << "\t" << *it << "\t" << dist;
-                // }
-                // std::cerr << std::endl;
+                common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+                for (const auto &[it, dist] : chain) {
+                    std::cerr << "\t" << *it << "\t" << dist;
+                }
+                std::cerr << std::endl;
             // }
 
             return ret_val;
@@ -1117,7 +1122,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                            DBGAlignerConfig::score_t score_up_to_now,
                            const AlignmentCallback &callback) {
             DBGAlignerConfig::score_t best_score = std::numeric_limits<DBGAlignerConfig::score_t>::min();
-            size_t next_to_last_dist = last_to_next_dist - last->get_path().size() + next->get_path().size();
+            size_t next_to_last_dist = last_to_next_dist - last->get_path().size() + 1;
+            std::cerr << "ln: " << last_to_next_dist << " -> nl: " << next_to_last_dist << "\n";
             std::string_view query_window = aln.get_query();
             query_window.remove_suffix(aln.get_end_clipping() + aln.get_seed().size());
 
@@ -1129,18 +1135,17 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         + (query_dist == query_window.size() + front_trim ? config_.left_end_bonus : 0);
             };
 
-            auto end_of_aln = [&](size_t, const SMap &data, size_t query_dist, DeBruijnGraph::node_index) {
-                return std::get<0>(data) == next_to_last_dist && query_dist == query_window.size();
+            auto terminate = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
+                size_t dist = std::get<0>(data);
+                DBGAlignerConfig::score_t score = get_score(cost, dist, query_dist);
+                best_score = std::max(score, best_score);
+                return dist == next_to_last_dist && query_dist == query_window.size() && node == next->get_path().back();
             };
 
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 size_t dist = std::get<0>(data);
                 DBGAlignerConfig::score_t score = get_score(cost, dist, query_dist);
-                return score <= 0 || end_of_aln(cost, data, query_dist, node);
-            };
-
-            auto terminate = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                return end_of_aln(cost, data, query_dist, node) && node == next->get_path().back();
+                return score <= 0 || dist == next_to_last_dist || query_dist == query_window.size();
             };
 
             auto start_backtrack = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -1149,12 +1154,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 size_t dist = std::get<0>(data);
                 DBGAlignerConfig::score_t score = get_score(cost, dist, query_dist);
-                if (score >= best_score) {
-                    best_score = score;
-                    return true;
-                } else {
-                    return false;
-                }
+                std::cerr << "found aln with score " << score << "\n";
+                assert(score <= best_score);
+                return score == best_score;
             };
 
             align_bwd(query_.get_graph(), config_, aln.get_path()[0], last->get_seed().size(), query_window, next_to_last_dist,
@@ -1201,12 +1203,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     return alignments;
 }
 
-std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, DBGAlignerConfig::score_t>>>>>
+std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, size_t, DBGAlignerConfig::score_t>>>>>
 ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
     if (anchors.empty())
         return {};
 
-    std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, DBGAlignerConfig::score_t>>>>> node_dists(anchors[0].get_query().size());
+    std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, size_t, DBGAlignerConfig::score_t>>>>> node_dists(anchors[0].get_query().size());
     if (anchors.size() < 2)
         return node_dists;
 
@@ -1226,9 +1228,13 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
         skipped[end - begin - 1] = true;
         size_t smallest_clipping = std::numeric_limits<size_t>::max();
         tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_set<size_t>> node_to_anchors;
+        tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::pair<size_t, size_t>>> all_nodes_to_anchors;
         for (auto it = begin; it != end; ++it) {
             smallest_clipping = std::min(smallest_clipping, it->get_clipping());
             node_to_anchors[it->get_path().back()].emplace(it - begin);
+            for (size_t i = 0; i < it->get_path().size(); ++i) {
+                all_nodes_to_anchors[it->get_path()[i]].emplace_back(it - begin, i);
+            }
         }
 
         std::string_view global_query_window = begin->get_query();
@@ -1262,26 +1268,25 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     return false;
 
                 // first check if we've hit another anchor
-                auto jt = node_to_anchors.find(node);
-                if (jt == node_to_anchors.end())
+                auto jt = all_nodes_to_anchors.find(node);
+                if (jt == all_nodes_to_anchors.end())
                     return false;
 
                 DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
-                for (size_t j : jt->second) {
+                for (const auto &[j, i] : jt->second) {
                     auto kt = begin + j;
-                    // std::cerr << "Trying to compute " << *kt << " -> " << *it << "\n";
+
+                    std::cerr << "Trying to compute " << *kt << "; " << i << " -> " << *it << "\t" << dist << "," << query_dist << "\n";
                     assert(kt > it || skipped[j]);
 
-                    if (num_matches < kt->get_seed().size() - kt->get_path().size() + 1 || kt <= it)
+                    if (num_matches + i < kt->get_seed().size() || kt <= it)
                         continue;
 
-                    assert(it->get_clipping() >= query_dist);
-
-                    if (it->get_clipping() - query_dist != kt->get_clipping() + kt->get_path().size() - 1)
+                    if (it->get_clipping() != kt->get_clipping() + i + query_dist)
                         continue;
 
-                    // std::cerr << "\tsuccess\n";
-                    node_dists[it->get_clipping()][start_node][node].emplace_back(dist, query_dist, score - it->get_score());
+                    std::cerr << "\tsuccess\n";
+                    node_dists[it->get_clipping()][start_node][node].emplace_back(dist, query_dist, i, score - it->get_score());
                 }
 
                 return false;
@@ -1317,9 +1322,7 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
 
                     // std::cerr << "\tbar\t" << (it->get_clipping() - query_dist == kt->get_clipping() + kt->get_path().size() - 1) << "\n";
 
-                    assert(it->get_clipping() >= query_dist);
-
-                    if (it->get_clipping() - query_dist != kt->get_clipping() + kt->get_path().size() - 1)
+                    if (it->get_clipping() != kt->get_clipping() + kt->get_path().size() - 1 + query_dist)
                         continue;
 
                     // std::cerr << "Reached " << *kt << " -> " << *it << "\n";
