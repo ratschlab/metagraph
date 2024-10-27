@@ -92,7 +92,7 @@ std::string process_search_request(const std::string &received_message,
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(config, anno_graph.get_graph())
+            initialize_align_config(config, anno_graph.get_graph())
         ));
     }
 
@@ -175,7 +175,7 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    align::DBGAligner aligner(graph, initialize_aligner_config(config, graph));
+    align::DBGAligner aligner(graph, initialize_align_config(config, graph));
     const align::DBGAlignerConfig &aligner_config = aligner.get_config();
 
     // TODO: make parallel?

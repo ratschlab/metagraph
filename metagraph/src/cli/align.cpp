@@ -7,8 +7,11 @@
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_labeled.hpp"
+// #include "graph/alignment/dbg_aligner.hpp"
+// #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment_redone/aligner_config.hpp"
+#include "graph/alignment_redone/aln_query.hpp"
+#include "graph/alignment_redone/aln_seeder.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -20,7 +23,7 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-using namespace mtg::graph::align;
+// using namespace mtg::graph::align;
 
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
@@ -30,11 +33,11 @@ using mtg::common::logger;
 const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
 
 
-DBGAlignerConfig initialize_aligner_config(const Config &config,
+align_redone::DBGAlignerConfig initialize_aligner_config(const Config &config,
                                            const DeBruijnGraph &graph) {
     assert(config.alignment_num_alternative_paths);
 
-    DBGAlignerConfig c = {
+    align_redone::DBGAlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
         .min_seed_length = std::min(config.alignment_min_seed_length,
                                     graph.get_k()),
@@ -58,7 +61,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
         .alignment_mm_transversion_score = config.alignment_mm_transversion_score,
-        .score_matrix = DBGAlignerConfig::ScoreMatrix{},
+        .score_matrix = align_redone::DBGAlignerConfig::ScoreMatrix{},
     };
 
     c.set_scoring_matrix();
@@ -251,43 +254,43 @@ void gfa_map_files(const Config *config,
     }
 }
 
-std::string format_alignment(const std::string &header,
-                             const AlignmentResults &paths,
-                             const DeBruijnGraph &graph,
-                             const Config &config) {
-    std::string sout;
-    if (!config.output_json) {
-        sout += fmt::format("{}\t{}", header, paths.get_query());
-        if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
-        } else {
-            for (const auto &path : paths) {
-                sout += fmt::format("\t{}", path);
-            }
-            sout += "\n";
-        }
+// std::string format_alignment(const std::string &header,
+//                              const AlignmentResults &paths,
+//                              const DeBruijnGraph &graph,
+//                              const Config &config) {
+//     std::string sout;
+//     if (!config.output_json) {
+//         sout += fmt::format("{}\t{}", header, paths.get_query());
+//         if (paths.empty()) {
+//             sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
+//         } else {
+//             for (const auto &path : paths) {
+//                 sout += fmt::format("\t{}", path);
+//             }
+//             sout += "\n";
+//         }
 
-    } else {
-        Json::StreamWriterBuilder builder;
-        builder["indentation"] = "";
+//     } else {
+//         Json::StreamWriterBuilder builder;
+//         builder["indentation"] = "";
 
-        bool secondary = false;
-        for (size_t i = 0; i < paths.size(); ++i) {
-            const auto &path = paths[i];
+//         bool secondary = false;
+//         for (size_t i = 0; i < paths.size(); ++i) {
+//             const auto &path = paths[i];
 
-            Json::Value json_line = path.to_json(graph.get_k(), secondary, header);
-            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
-            secondary = true;
-        }
+//             Json::Value json_line = path.to_json(graph.get_k(), secondary, header);
+//             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+//             secondary = true;
+//         }
 
-        if (paths.empty()) {
-            Json::Value json_line = graph::align::Alignment().to_json(graph.get_k(), secondary, header);
-            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
-        }
-    }
+//         if (paths.empty()) {
+//             Json::Value json_line = graph::align::Alignment().to_json(graph.get_k(), secondary, header);
+//             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+//         }
+//     }
 
-    return sout;
-}
+//     return sout;
+// }
 
 int align_to_graph(Config *config) {
     assert(config);
@@ -345,7 +348,7 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
+    align_redone::DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
@@ -395,8 +398,9 @@ int align_to_graph(Config *config) {
         while (it != end) {
             uint64_t num_bytes_read = 0;
 
-            // Read a batch to pass on to a thread
-            typedef std::vector<IDBGAligner::Query> SeqBatch;
+            using SeqBatch = std::vector<std::pair<std::string, std::string>>;
+            // // Read a batch to pass on to a thread
+            // typedef std::vector<IDBGAligner::Query> SeqBatch;
             SeqBatch seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {
@@ -422,22 +426,45 @@ int align_to_graph(Config *config) {
                     aln_graph = wrap_graph(aln_graph);
                 }
 
-                std::unique_ptr<IDBGAligner> aligner;
+                for (const auto &[header, query] : batch) {
+                    align_redone::Query aln_query(*graph, query);
+                    align_redone::ExactSeeder seeder(aln_query, aligner_config);
+                    std::vector<align_redone::Alignment> paths;
+                    align_redone::Extender extender(aln_query, aligner_config);
+                    for (const auto &base_path : seeder.get_inexact_anchors()) {
+                        extender.extend(base_path, [&](align_redone::Alignment&& path) {
+                            paths.emplace_back(std::move(path));
+                        });
+                    }
+                    std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
+                        return std::make_pair(a.get_score(), b.get_orientation())
+                            > std::make_pair(b.get_score(), a.get_orientation());
+                    });
 
-                if (anno_dbg) {
-                    aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
-                                                                 anno_dbg->get_annotator());
-                } else {
-                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
+                    *out << header << "\t" << query;
+                    if (paths.size()) {
+                        *out << "\t" << paths[0] << "\n";
+                    } else {
+                        *out << "\t*\t*\t*\t*\t*\t*\n";
+                    }
                 }
 
-                aligner->align_batch(batch,
-                    [&](const std::string &header, AlignmentResults&& paths) {
-                        const auto &res = format_alignment(header, paths, *graph, *config);
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << res;
-                    }
-                );
+            //     std::unique_ptr<IDBGAligner> aligner;
+
+            //     if (anno_dbg) {
+            //         aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
+            //                                                      anno_dbg->get_annotator());
+            //     } else {
+            //         aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
+            //     }
+
+            //     aligner->align_batch(batch,
+            //         [&](const std::string &header, AlignmentResults&& paths) {
+            //             const auto &res = format_alignment(header, paths, *graph, *config);
+            //             std::lock_guard<std::mutex> lock(print_mutex);
+            //             *out << res;
+            //         }
+                // );
             });
 
             num_bp += num_bytes_read;

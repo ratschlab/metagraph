@@ -15,6 +15,7 @@
 
 #include "common/vector.hpp"
 #include "graph/alignment/alignment.hpp"
+#include "graph/alignment/aligner_config.hpp"
 
 class ThreadPool;
 
@@ -35,6 +36,9 @@ namespace graph {
 namespace cli {
 
 class Config;
+
+graph::align::DBGAlignerConfig initialize_align_config(const Config &config,
+                                           const graph::DeBruijnGraph &graph);
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
