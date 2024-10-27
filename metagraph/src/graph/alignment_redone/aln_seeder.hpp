@@ -34,7 +34,7 @@ class ExactSeeder : public Seeder {
     std::vector<Alignment> get_inexact_anchors() const override;
 
   private:
-    tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, DBGAlignerConfig::score_t>>>>
+    std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, DBGAlignerConfig::score_t>>>>>
     get_node_dists(std::vector<Anchor> &anchors) const;
 };
 
