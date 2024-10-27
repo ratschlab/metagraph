@@ -24,7 +24,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     if (query_.get_query().size() < config_.min_seed_length)
         return anchors;
 
-    if (config_.min_seed_length == graph.get_k()) {
+    if (config_.min_seed_length >= graph.get_k()) {
         for (bool orientation : { false, true }) {
             std::string_view this_query = query_.get_query(orientation);
             size_t begin = 0;
@@ -42,8 +42,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 }
             );
         }
-
-        return anchors;
     } else {
         const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
         if (!dbg_succ)
@@ -108,7 +106,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
     }
 
-    if (anchors.size() && config_.max_seed_length > config_.min_seed_length) {
+    if (anchors.size() && (config_.max_seed_length > config_.min_seed_length || config_.min_seed_length > graph.get_k())) {
+        // common::logger->info("Merging {} anchors", anchors.size());
         auto rbegin = anchors.rbegin();
         auto rend = anchors.rend();
         for (auto it = rbegin; it + 1 != rend; ++it) {
@@ -125,10 +124,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     && a_j_s.size() >= overlap
                     && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
                     && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config_.max_seed_length
-                    && graph.indegree(a_j.get_path()[0]) < 2
-                    && !graph.has_multiple_outgoing(a_j.get_path()[0])
-                    && graph.indegree(a_i.get_path().back()) < 2
-                    && !graph.has_multiple_outgoing(a_i.get_path().back())
+                    && (a_i.get_seed().size() < config_.min_seed_length
+                            || (graph.has_single_incoming(a_j.get_path()[0])
+                            && graph.has_single_outgoing(a_i.get_path().back())))
                     && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
                 // merge them
                 a_i.append(a_j, config_, &query_.get_graph());
@@ -136,7 +134,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             }
         }
 
-        auto end = std::remove_if(anchors.begin(), anchors.end(), [&](auto &a) { return a.empty(); });
+        auto end = std::remove_if(anchors.begin(), anchors.end(), [&](auto &a) {
+            return a.empty() || a.get_seed().size() < config_.min_seed_length;
+        });
+
         anchors.erase(end, anchors.end());
     }
 
@@ -1004,7 +1005,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     std::vector<Anchor> anchors = get_anchors();
-    common::logger->info("Computing distances");
+    common::logger->info("Computing distances for {} anchors", anchors.size());
     auto node_dists = get_node_dists(anchors);
     common::logger->info("DONE");
     std::vector<Alignment> alignments;
@@ -1049,12 +1050,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     continue;
                 }
 
+                // std::cerr << "checking connect " << a_i << " -> " << a_j << "\n";
+
                 auto find_i = find_j->second.find(a_i.get_path().back());
                 if (find_i == find_j->second.end() || find_i->second.empty()) {
                     ++chain_scores;
                     continue;
                 }
-                // std::cerr << "checking connect " << a_i << " -> " << a_j << "\n";
+                // std::cerr << "\tfound!\n";
 
                 DBGAlignerConfig::score_t base_score = std::get<0>(*chain_scores);
 
@@ -1098,11 +1101,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             first_chain = false;
 
             // if (ret_val) {
-            //     common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-            //     for (const auto &[it, dist] : chain) {
-            //         std::cerr << "\t" << *it << "\t" << dist;
-            //     }
-            //     std::cerr << std::endl;
+                // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+                // for (const auto &[it, dist] : chain) {
+                //     std::cerr << "\t" << *it << "\t" << dist;
+                // }
+                // std::cerr << std::endl;
             // }
 
             return ret_val;
@@ -1266,16 +1269,18 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                 DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                 for (size_t j : jt->second) {
                     auto kt = begin + j;
+                    // std::cerr << "Trying to compute " << *kt << " -> " << *it << "\n";
                     assert(kt > it || skipped[j]);
 
-                    if (num_matches < kt->get_seed().size() || kt <= it)
+                    if (num_matches < kt->get_seed().size() - kt->get_path().size() + 1 || kt <= it)
                         continue;
 
-                    assert(kt->get_clipping() <= it->get_clipping());
+                    assert(it->get_clipping() >= query_dist);
 
-                    if (query_dist + kt->get_clipping() + kt->get_path().size() - 1 != it->get_clipping())
+                    if (it->get_clipping() - query_dist != kt->get_clipping() + kt->get_path().size() - 1)
                         continue;
 
+                    // std::cerr << "\tsuccess\n";
                     node_dists[it->get_clipping()][start_node][node].emplace_back(dist, query_dist, score - it->get_score());
                 }
 
@@ -1304,13 +1309,20 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     auto kt = begin + j;
                     assert(kt > it || skipped[j]);
 
-                    if (num_matches < kt->get_seed().size() || kt <= it)
+                    // std::cerr << "Checking " << (kt - begin) << " vs. " << (it - begin) << "\t" << (kt <= it) << "\t" << *kt << " -> " << *it << "\t" << dist << "," << query_dist << "," << num_matches << "\n";
+                    // std::cerr << "\tfoo\t" << it->get_clipping() - query_dist << " vs. " << kt->get_clipping() + kt->get_path().size() - 1 << "\n";
+
+                    if (num_matches < kt->get_seed().size() - kt->get_path().size() + 1 || kt <= it)
                         continue;
 
-                    assert(kt->get_clipping() <= it->get_clipping());
+                    // std::cerr << "\tbar\t" << (it->get_clipping() - query_dist == kt->get_clipping() + kt->get_path().size() - 1) << "\n";
 
-                    if (query_dist + kt->get_clipping() + kt->get_path().size() - 1 != it->get_clipping())
+                    assert(it->get_clipping() >= query_dist);
+
+                    if (it->get_clipping() - query_dist != kt->get_clipping() + kt->get_path().size() - 1)
                         continue;
+
+                    // std::cerr << "Reached " << *kt << " -> " << *it << "\n";
 
                     if (!skipped[j]) {
                         bool all_prev_skipped = true;

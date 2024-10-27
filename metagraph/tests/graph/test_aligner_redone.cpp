@@ -43,7 +43,7 @@ void run_alignment(const DeBruijnGraph &graph,
         config.min_seed_length = k;
 
     for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
-        config.max_seed_length = mx;
+        config.max_seed_length = std::max(mx, config.min_seed_length);
 
         Query aln_query(graph, query);
         ExactSeeder seeder(aln_query, config);
@@ -644,7 +644,8 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 //     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
 //     config.gap_opening_penalty = -5;
 //     config.gap_extension_penalty = -2;
-//     run_alignment(*graph, config, query, { match }, {});
+//     config.min_seed_length = 8;
+//     run_alignment(*graph, config, query, { match }, { "" });
 // }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
