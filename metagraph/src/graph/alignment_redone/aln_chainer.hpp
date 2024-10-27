@@ -111,40 +111,6 @@ AnchorIt chain_anchors(const Query &query,
 
     assert(std::is_sorted(begin, end, AnchorLess<Anchor>()));
 
-    if (config.max_seed_length > config.min_seed_length) {
-        auto rbegin = std::make_reverse_iterator(end);
-        auto rend = std::make_reverse_iterator(begin);
-        for (auto it = rbegin; it + 1 != rend; ++it) {
-            auto &a_j = *it;
-            auto &a_i = *(it + 1);
-            if (a_i.empty() || a_j.empty() || a_i.get_orientation() != a_j.get_orientation()
-                    || a_i.get_label_class() != a_j.get_label_class() || a_i.get_end_trim())
-                continue;
-
-            std::string_view a_i_s = a_i.get_spelling();
-            std::string_view a_j_s = a_j.get_spelling();
-            const DeBruijnGraph &graph = query.get_graph();
-            size_t overlap = graph.get_k() - 1;
-            if (a_i_s.size() >= overlap
-                    && a_j_s.size() >= overlap
-                    && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
-                    && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config.max_seed_length
-                    && graph.indegree(a_j.get_path()[0]) < 2
-                    && !graph.has_multiple_outgoing(a_j.get_path()[0])
-                    && graph.indegree(a_i.get_path().back()) < 2
-                    && !graph.has_multiple_outgoing(a_i.get_path().back())
-                    && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
-                // merge them
-                a_i.append(a_j, config, &query.get_graph());
-                a_j = std::decay_t<decltype(a_j)>();
-            }
-        }
-        end = std::remove_if(begin, end, [&](auto &a) { return a.empty(); });
-
-        if (begin == end)
-            return end;
-    }
-
     ChainScores<AnchorIt> chain_scores;
     chain_scores.reserve(end - begin);
     std::transform(begin, end, std::back_inserter(chain_scores), [&](const Anchor &a) {

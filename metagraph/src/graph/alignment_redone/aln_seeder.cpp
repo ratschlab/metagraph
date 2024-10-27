@@ -44,68 +44,100 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
 
         return anchors;
-    }
+    } else {
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        if (!dbg_succ)
+            return anchors;
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg_succ)
-        return anchors;
+        const auto &boss = dbg_succ->get_boss();
+        for (bool orientation : { false, true }) {
+            std::string_view this_query = query_.get_query(orientation);
+            auto encoded = boss.encode(this_query);
 
-    const auto &boss = dbg_succ->get_boss();
-    for (bool orientation : { false, true }) {
-        std::string_view this_query = query_.get_query(orientation);
-        auto encoded = boss.encode(this_query);
-
-        if (std::find(encoded.begin(), encoded.end(),
-                      boss.alph_size) != encoded.end()) {
-            continue;
-        }
-
-        size_t k = graph.get_k();
-        for (size_t i = 0; i + k <= this_query.size(); ++i) {
-            auto [first, last, it] = boss.index_range(
-                encoded.begin() + i,
-                encoded.begin() + i + config_.min_seed_length
-            );
-
-            size_t match_size = it - (encoded.begin() + i);
-            if (match_size < config_.min_seed_length)
+            if (std::find(encoded.begin(), encoded.end(),
+                        boss.alph_size) != encoded.end()) {
                 continue;
+            }
 
-            using edge_index = boss::BOSS::edge_index;
-            std::vector<std::tuple<edge_index, edge_index, std::string>> traverse;
-            traverse.emplace_back(first, last, "");
-            while (traverse.size()) {
-                auto [first, last, suffix] = traverse.back();
-                assert(boss.get_last(last));
-                traverse.pop_back();
+            size_t k = graph.get_k();
+            for (size_t i = 0; i + k <= this_query.size(); ++i) {
+                auto [first, last, it] = boss.index_range(
+                    encoded.begin() + i,
+                    encoded.begin() + i + config_.min_seed_length
+                );
 
-                if (suffix.size() + match_size == k - 1) {
-                    assert(first == last || !boss.get_last(first));
-                    assert(boss.succ_last(first) == last);
-                    for (edge_index e = first; e <= last; ++e) {
-                        if (auto node = dbg_succ->boss_to_kmer_index(e)) {
-                            char c = boss.decode(boss.get_W(e) % boss.alph_size);
-                            if (c != boss::BOSS::kSentinel) {
-                                anchors.emplace_back(this_query,
-                                                    i, i + match_size,
-                                                    orientation,
-                                                    std::vector<Match::node_index>{ node },
-                                                    config_,
-                                                    suffix + c);
+                size_t match_size = it - (encoded.begin() + i);
+                if (match_size < config_.min_seed_length)
+                    continue;
+
+                using edge_index = boss::BOSS::edge_index;
+                std::vector<std::tuple<edge_index, edge_index, std::string>> traverse;
+                traverse.emplace_back(first, last, "");
+                while (traverse.size()) {
+                    auto [first, last, suffix] = traverse.back();
+                    assert(boss.get_last(last));
+                    traverse.pop_back();
+
+                    if (suffix.size() + match_size == k - 1) {
+                        assert(first == last || !boss.get_last(first));
+                        assert(boss.succ_last(first) == last);
+                        for (edge_index e = first; e <= last; ++e) {
+                            if (auto node = dbg_succ->boss_to_kmer_index(e)) {
+                                char c = boss.decode(boss.get_W(e) % boss.alph_size);
+                                if (c != boss::BOSS::kSentinel) {
+                                    anchors.emplace_back(this_query,
+                                                        i, i + match_size,
+                                                        orientation,
+                                                        std::vector<Match::node_index>{ node },
+                                                        config_,
+                                                        suffix + c);
+                                }
                             }
                         }
                     }
-                }
 
-                for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
-                    auto next_first = first;
-                    auto next_last = last;
-                    if (boss.tighten_range(&next_first, &next_last, s)) {
-                        traverse.emplace_back(next_first, next_last, suffix + boss.decode(s));
+                    for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+                        auto next_first = first;
+                        auto next_last = last;
+                        if (boss.tighten_range(&next_first, &next_last, s)) {
+                            traverse.emplace_back(next_first, next_last, suffix + boss.decode(s));
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (anchors.size() && config_.max_seed_length > config_.min_seed_length) {
+        auto rbegin = anchors.rbegin();
+        auto rend = anchors.rend();
+        for (auto it = rbegin; it + 1 != rend; ++it) {
+            auto &a_j = *it;
+            auto &a_i = *(it + 1);
+            if (a_i.empty() || a_j.empty() || a_i.get_orientation() != a_j.get_orientation()
+                    || a_i.get_label_class() != a_j.get_label_class() || a_i.get_end_trim())
+                continue;
+
+            std::string_view a_i_s = a_i.get_spelling();
+            std::string_view a_j_s = a_j.get_spelling();
+            size_t overlap = graph.get_k() - 1;
+            if (a_i_s.size() >= overlap
+                    && a_j_s.size() >= overlap
+                    && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
+                    && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config_.max_seed_length
+                    && graph.indegree(a_j.get_path()[0]) < 2
+                    && !graph.has_multiple_outgoing(a_j.get_path()[0])
+                    && graph.indegree(a_i.get_path().back()) < 2
+                    && !graph.has_multiple_outgoing(a_i.get_path().back())
+                    && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
+                // merge them
+                a_i.append(a_j, config_, &query_.get_graph());
+                a_j = std::decay_t<decltype(a_j)>();
+            }
+        }
+
+        auto end = std::remove_if(anchors.begin(), anchors.end(), [&](auto &a) { return a.empty(); });
+        anchors.erase(end, anchors.end());
     }
 
     return anchors;
@@ -989,12 +1021,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                            AnchorIt end,
                            typename ChainScores<AnchorIt>::iterator chain_scores,
                            const ScoreUpdater<AnchorIt> &update_score) {
+            // std::cerr << "Anchor: " << a_j << "\n";
             assert(a_j.get_query().size() == node_dists.size());
             auto find_j = node_dists[a_j.get_clipping()].find(a_j.get_path()[0]);
             if (find_j == node_dists[a_j.get_clipping()].end())
                 return;
 
-            const DeBruijnGraph &graph = query_.get_graph();
+            // std::cerr << "End Anchor: " << a_j << "\n";
+
+            // const DeBruijnGraph &graph = query_.get_graph();
             std::string_view query_j = a_j.get_seed();
             const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
 
@@ -1041,14 +1076,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 DBGAlignerConfig::score_t score = DBGAlignerConfig::ninf;
                 DBGAlignerConfig::score_t coord_dist = dist;
-                size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
-                size_t a_j_chars = a_j.get_spelling().size();
+                // size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
+                // size_t a_j_chars = a_j.get_spelling().size();
                 bool updated = false;
                 for (const auto &[path_dist, query_dist, added_score] : find_i->second) {
                     DBGAlignerConfig::score_t cur_coord_dist
-                        = path_dist + a_j_chars - a_i_chars;
+                        = path_dist - a_i.get_path().size() + a_j.get_path().size();
 
-                    DBGAlignerConfig::score_t cur_dist = query_dist + a_j_chars - a_i_chars;
+                    DBGAlignerConfig::score_t cur_dist = query_dist - a_i.get_path().size() + a_j.get_path().size();
 
                     if (cur_dist == dist && base_score + added_score > score) {
                         score = base_score + added_score;
@@ -1068,13 +1103,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             }
         },
         [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
-            // if (chain.size() && (chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length)) {
-            //     std::cerr << "Chain";
-            //     for (const auto &[it, dist] : chain) {
-            //         std::cerr << "\t" << *it << "\t" << dist;
-            //     }
-            //     std::cerr << std::endl;
-            // }
             assert(chain.size());
             if (first_chain) {
                 first_chain_score = score_traceback.back();
@@ -1083,6 +1111,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
             first_chain = false;
+            // if (ret_val) {
+            //     std::cerr << "Chain";
+            //     for (const auto &[it, dist] : chain) {
+            //         std::cerr << "\t" << *it << "\t" << dist;
+            //     }
+            //     std::cerr << std::endl;
+            // }
             return ret_val;
         },
         [this,match_score](AnchorIt last,
@@ -1166,6 +1201,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         alignments.resize(1);
     }
 
+    // std::cerr << "done\n";
     return alignments;
 }
 
@@ -1208,6 +1244,7 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
             if (!it->get_clipping() || skipped[it - begin])
                 continue;
 
+            // std::cerr << "Extending from " << *it << "\n";
             ++num_extended;
 
             skipped[it - begin] = true;
