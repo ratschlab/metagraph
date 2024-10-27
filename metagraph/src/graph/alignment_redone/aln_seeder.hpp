@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tsl/hopscotch_set.h>
+
 #include "aln_match.hpp"
 #include "aln_query.hpp"
 #include "aligner_config.hpp"
@@ -15,7 +17,6 @@ class Seeder {
 
     virtual std::vector<Anchor> get_anchors() const = 0;
     virtual std::vector<Alignment> get_inexact_anchors() const = 0;
-    virtual std::vector<Alignment> get_alignments() const = 0;
 
     const Query& get_query() const { return query_; }
 
@@ -31,7 +32,10 @@ class ExactSeeder : public Seeder {
 
     std::vector<Anchor> get_anchors() const override;
     std::vector<Alignment> get_inexact_anchors() const override;
-    std::vector<Alignment> get_alignments() const override;
+
+  private:
+    tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, DBGAlignerConfig::score_t>>>>
+    get_node_dists(std::vector<Anchor> &anchors) const;
 };
 
 class Extender {

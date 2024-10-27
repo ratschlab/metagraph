@@ -86,6 +86,14 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
     }
 }
 
+template <typename Anchor>
+struct AnchorLess {
+    bool operator()(const Anchor &a, const Anchor &b) const {
+        return std::make_tuple(a.get_orientation(), a.get_label_class(), b.get_end_clipping())
+             < std::make_tuple(b.get_orientation(), b.get_label_class(), a.get_end_clipping());
+    }
+};
+
 template <typename AnchorIt>
 AnchorIt chain_anchors(const Query &query,
                        const DBGAlignerConfig &config,
@@ -101,10 +109,7 @@ AnchorIt chain_anchors(const Query &query,
 
     ssize_t query_size = query.get_query().size();
 
-    std::sort(begin, end, [&](const Anchor &a, const Anchor &b) {
-        return std::make_tuple(a.get_orientation(), a.get_label_class(), b.get_end_clipping())
-             < std::make_tuple(b.get_orientation(), b.get_label_class(), a.get_end_clipping());
-    });
+    assert(std::is_sorted(begin, end, AnchorLess<Anchor>()));
 
     if (config.max_seed_length > config.min_seed_length) {
         auto rbegin = std::make_reverse_iterator(end);

@@ -49,7 +49,7 @@ void run_alignment(const DeBruijnGraph &graph,
         ExactSeeder seeder(aln_query, config);
         std::vector<Alignment> paths;
         Extender extender(aln_query, config);
-        for (const auto &base_path : seeder.get_alignments()) {
+        for (const auto &base_path : seeder.get_inexact_anchors()) {
             extender.extend(base_path, [&](Alignment&& path) {
                 paths.emplace_back(std::move(path));
             });
