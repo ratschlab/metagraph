@@ -1031,7 +1031,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             // const DeBruijnGraph &graph = query_.get_graph();
             std::string_view query_j = a_j.get_seed();
-            const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
+            // const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
 
             for (auto it = begin; it != end; ++it) {
                 const Anchor &a_i = *it;
@@ -1056,24 +1056,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 DBGAlignerConfig::score_t base_score = std::get<0>(*chain_scores);
 
-                bool overlap = false;
-                if (query_i.end() <= query_j.begin()) {
-                    base_score += a_j.get_score();
-                } else {
-                    overlap = true;
-                    std::string_view ext(query_i.data() + query_i.size(),
-                                         query_j.end() - query_i.end());
-                    base_score += config_.match_score(ext);
-
-                    if (!a_j.get_end_clipping())
-                        base_score += config_.right_end_bonus;
-                }
-
-                if (base_score <= score_j) {
-                    ++chain_scores;
-                    continue;
-                }
-
                 DBGAlignerConfig::score_t score = DBGAlignerConfig::ninf;
                 DBGAlignerConfig::score_t coord_dist = dist;
                 // size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
@@ -1095,7 +1077,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 // std::cerr << "connect " << a_i << "\t->\t" << a_j << "\t"
                 //                         << fmt::format("{}", fmt::join(find_i->second, ",")) << "\t" << score << "\t" << dist << "," << coord_dist << std::endl;
 
-                // std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << score << "\n";
+                // std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << base_score << "->" << score << "\n";
                 if (updated)
                     update_score(score, it, coord_dist);
 
@@ -1104,6 +1086,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         },
         [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
             assert(chain.size());
+
             if (first_chain) {
                 first_chain_score = score_traceback.back();
                 assert(score_traceback.front() <= score_traceback.back());
@@ -1111,13 +1094,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
             first_chain = false;
-            // if (ret_val) {
-            //     std::cerr << "Chain";
-            //     for (const auto &[it, dist] : chain) {
-            //         std::cerr << "\t" << *it << "\t" << dist;
-            //     }
-            //     std::cerr << std::endl;
+
+            // std::cerr << "Chain\t" << score_traceback.back() << "\t" << ret_val;
+            // for (const auto &[it, dist] : chain) {
+            //     std::cerr << "\t" << *it << "\t" << dist;
             // }
+            // std::cerr << std::endl;
+
             return ret_val;
         },
         [this,match_score](AnchorIt last,
@@ -1285,6 +1268,7 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     if (query_dist + kt->get_clipping() + kt->get_path().size() - 1 != it->get_clipping())
                         continue;
 
+                    // std::cerr << "dist: " << *kt << "\t->\t" << *it << "\t" << score << "," << dist << "," << query_dist << std::endl;
                     node_dists[it->get_clipping()][start_node][node].emplace_back(dist, query_dist, score - it->get_score());
                 }
 
