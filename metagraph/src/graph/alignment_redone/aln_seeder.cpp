@@ -1097,13 +1097,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
             first_chain = false;
 
-            if (ret_val) {
-                common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                for (const auto &[it, dist] : chain) {
-                    std::cerr << "\t" << *it << "\t" << dist;
-                }
-                std::cerr << std::endl;
-            }
+            // if (ret_val) {
+            //     common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+            //     for (const auto &[it, dist] : chain) {
+            //         std::cerr << "\t" << *it << "\t" << dist;
+            //     }
+            //     std::cerr << std::endl;
+            // }
 
             return ret_val;
         },
@@ -1218,7 +1218,6 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
         if (begin == end)
             return;
 
-        // common::logger->info("Chaining {} anchors", end - begin);
         DBGAlignerConfig::score_t best_score = 0;
         sdsl::bit_vector skipped(end - begin);
         skipped[end - begin - 1] = true;
@@ -1237,7 +1236,6 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
             if (!it->get_clipping() || skipped[it - begin])
                 continue;
 
-            // std::cerr << "Extending from " << *it << "\n";
             ++num_extended;
 
             skipped[it - begin] = true;
@@ -1278,7 +1276,6 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     if (query_dist + kt->get_clipping() + kt->get_path().size() - 1 != it->get_clipping())
                         continue;
 
-                    // std::cerr << "dist: " << *kt << "\t->\t" << *it << "\t" << score << "," << dist << "," << query_dist << std::endl;
                     node_dists[it->get_clipping()][start_node][node].emplace_back(dist, query_dist, score - it->get_score());
                 }
 
@@ -1315,8 +1312,6 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     if (query_dist + kt->get_clipping() + kt->get_path().size() - 1 != it->get_clipping())
                         continue;
 
-                    // std::cerr << "reached\t" << *it << "\t->\t" << *kt << "\t" << cost << "," << dist << "," << query_dist << "," << num_matches << std::endl;
-
                     if (!skipped[j]) {
                         bool all_prev_skipped = true;
                         for (auto lt = it + 1; lt != kt; ++lt) {
@@ -1327,7 +1322,7 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                         }
 
                         if (all_prev_skipped)
-                            skipped[j] = true;
+                            return true;
                     }
                 }
 
@@ -1381,7 +1376,6 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
     }
 
     chain(begin, anchors.end());
-    // common::logger->info("Chose {} starting points", node_dists.size());
 
     return node_dists;
 }
