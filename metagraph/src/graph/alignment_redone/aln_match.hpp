@@ -8,6 +8,7 @@
 
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/logger.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -73,13 +74,14 @@ class Match {
 };
 
 inline std::ostream& operator<<(std::ostream &out, const Match &a) {
-    out << a.get_orientation() << ","
-        << a.get_clipping() << ","
-        << a.get_seed() << ","
-        << a.get_spelling() << ","
-        << a.get_end_clipping() << ","
-        << a.get_score() << ","
-        << a.generate_cigar().to_string();
+    Cigar cigar = a.generate_cigar();
+    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+                       !a.get_orientation() ? "+" : "-",
+                       a.get_spelling(),
+                       a.get_score(),
+                       cigar.get_num_matches(),
+                       cigar.to_string(),
+                       a.get_end_trim());
     return out;
 }
 

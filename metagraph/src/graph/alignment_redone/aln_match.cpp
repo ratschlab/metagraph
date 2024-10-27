@@ -1,7 +1,5 @@
 #include "aln_match.hpp"
 
-#include "common/logger.hpp"
-
 namespace mtg::graph::align_redone {
 
 using mtg::common::logger;
