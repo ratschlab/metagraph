@@ -647,26 +647,17 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 //     run_alignment(*graph, config, query, { match }, {});
 // }
 
-// TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
-//     size_t k = 31;
-//     std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAGGTCTTCGCCTGTGTAGATCTCGGTGGTCG";
-//     std::string query =     "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTTCCTGGTGGTGTAGATC";
+TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
+    size_t k = 31;
+    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAG" "GTCTTC""GCCTGTGTAGATCTCGGTGGTCG";
+    std::string query =        "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAG""AGTGTTCCTGGTGGTGTAGATC";
+    //                                                           I  X   II XXX
 
-//     auto graph = std::make_shared<DBGSuccinct>(k);
-//     graph->add_sequence(reference);
-
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     ASSERT_EQ(1ull, paths.size());
-//     auto path = paths[0];
-//     EXPECT_TRUE(path.is_valid(*graph, &config));
-//     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-//     check_extend(graph, aligner.get_config(), paths, query);
-
-// }
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    run_alignment(*graph, config, query, { reference.substr(3, 50) }, { "31=1I2=1X3=2I1=3X9=" });
+}
 
 // TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 //     size_t k = 7;
