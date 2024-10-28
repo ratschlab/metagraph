@@ -1032,23 +1032,25 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
                 for (const auto &[i, added_score, path, cigar] : find_i->second) {
                     std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
-                    size_t query_dist = cigar.get_num_query();
-                    size_t path_dist = path.size();
-                    assert(path_dist == cigar.get_num_ref());
+                    // size_t query_dist = cigar.get_num_query();
+                    // size_t path_dist = path.size();
+                    // assert(path_dist == cigar.get_num_ref());
                     // query_dist is the distance from the front of a_j to the ith node of a_i
-                    ssize_t offset = a_j.get_seed().size() + i;
-                    offset -= a_i.get_seed().size();
-                    DBGAlignerConfig::score_t cur_dist = query_dist + offset;
+                    // ssize_t offset = a_j.get_seed().size() + i;
+                    // offset -= a_i.get_seed().size();
+                    // DBGAlignerConfig::score_t cur_dist = query_dist + offset;
                     // std::cerr << "\t\tp: " << path_dist << "\tq: " << query_dist << "\ti: " << i << "\t-> " << cur_dist;
 
-                    if (cur_dist == dist && base_score + added_score > score) {
-                        DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
+                    std::string_view a_i_front(a_i.get_seed().begin(), i);
+                    DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front)
+                        + (!a_i.get_clipping() ? config_.left_end_bonus : 0);
+
+                    if (base_score + added_score + front_score > score) {
+                        // DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
                         // std::cerr << "," << cur_coord_dist;
-                        std::string_view a_i_front(a_i.get_seed().begin(), i);
-                        DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front)
-                            + (!a_i.get_clipping() ? config_.left_end_bonus : 0);
+
                         score = base_score + added_score + front_score;
-                        coord_dist = cur_coord_dist;
+                        coord_dist = path.size() + i + a_j.get_seed().size() - a_i.get_seed().size();
                         updated = true;
                         std::cerr << "\tworked\n";
                     }
@@ -1104,13 +1106,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             for (const auto &[i, added_score, bt_path, bt_cigar] : find_i->second) {
                 std::cerr << "try\t" << *next << "\t->\t" << bt_cigar.to_string() << "\t->\t" << aln << std::endl;
-                size_t path_dist = bt_path.size();
-                assert(path_dist == bt_cigar.get_num_ref());
+                size_t coord_dist = bt_path.size() + i + last->get_seed().size() - next->get_seed().size();
+                // size_t path_dist = bt_path.size();
+                // assert(path_dist == bt_cigar.get_num_ref());
 
-                size_t offset = path_dist + last->get_seed().size() - i;
-                size_t cur_coord_dist = offset - next->get_seed().size();
+                // size_t offset = path_dist + last->get_seed().size() - i;
+                // size_t cur_coord_dist = offset - next->get_seed().size();
 
-                if (offset >= next->get_seed().size() && cur_coord_dist == last_to_next_dist) {
+                if (coord_dist == last_to_next_dist) {
                     std::cerr << "\tconnected\n";
                     std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().begin() + i);
                     path.insert(path.end(), bt_path.begin(), bt_path.end());
