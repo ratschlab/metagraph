@@ -845,6 +845,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             assert(it != end);
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
+        size_t max_dist = 0;
         DBGAlignerConfig::score_t best_score = aln.get_score();
         align_fwd(
             query_.get_graph(), config_, aln.get_path().back(), num_matches,
@@ -895,9 +896,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
+                max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return query_dist == query_window.size() && score == best_score;
+                return query_dist == query_window.size() && dist == max_dist;
             },
             aln.get_trim_spelling()
         );
@@ -933,6 +935,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
 
         bool found = false;
+        size_t max_dist = 0;
         // std::cerr << "bwd extending\t" << fwd_ext << "\n";
         align_bwd(
             query_.get_graph(), config_, fwd_ext.get_path()[0], num_matches,
@@ -984,10 +987,11 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
+                max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
                 // return false;
-                return query_dist == query_window.size() && score == best_score;
+                return query_dist == query_window.size() && dist == max_dist;
             }
         );
 
