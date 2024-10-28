@@ -82,6 +82,42 @@ std::string spell_path(const DeBruijnGraph &graph,
     return seq;
 }
 
+bool operator==(const Match &a, const Match &b) {
+    return a.get_orientation() == b.get_orientation()
+        && a.get_query().begin() == b.get_query().begin()
+        && a.get_query().end() == b.get_query().end()
+        && a.get_seed().begin() == b.get_seed().begin()
+        && a.get_seed().end() == b.get_seed().end()
+        && a.get_path() == b.get_path()
+        && a.get_score() == b.get_score();
+}
+
+bool operator==(const Anchor &a, const Anchor &b) {
+    return static_cast<const Match&>(a) == static_cast<const Match&>(b)
+        && a.get_label_class() == b.get_label_class()
+        && a.get_trim_spelling().begin() == b.get_trim_spelling().begin()
+        && a.get_trim_spelling().end() == b.get_trim_spelling().end();
+}
+
+bool operator==(const Alignment &a, const Alignment &b) {
+    return static_cast<const Match&>(a) == static_cast<const Match&>(b)
+        && a.get_end_trim() == b.get_end_trim()
+        && a.get_path_spelling() == b.get_path_spelling()
+        && a.get_cigar() == b.get_cigar();
+}
+
+std::ostream& operator<<(std::ostream &out, const Match &a) {
+    Cigar cigar = a.generate_cigar();
+    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+                       !a.get_orientation() ? "+" : "-",
+                       a.get_spelling(),
+                       a.get_score(),
+                       cigar.get_num_matches(),
+                       cigar.to_string(),
+                       a.get_end_trim());
+    return out;
+}
+
 size_t Anchor::trim_end() {
     size_t end_trim = get_end_trim();
     if (end_trim == 0)
@@ -156,3 +192,19 @@ void Anchor::append(const Anchor &other,
 }
 
 } // namespace mtg::graph::align
+
+namespace std {
+
+std::size_t hash<mtg::graph::align_redone::Match>::operator()(const mtg::graph::align_redone::Match &a) const {
+    return (a.get_path().size() ? a.get_path()[0] : 0) + a.get_clipping() + a.get_end_clipping();
+}
+
+std::size_t hash<mtg::graph::align_redone::Anchor>::operator()(const mtg::graph::align_redone::Anchor &a) const {
+    return std::hash<mtg::graph::align_redone::Match>()(a);
+}
+
+std::size_t hash<mtg::graph::align_redone::Alignment>::operator()(const mtg::graph::align_redone::Alignment &a) const {
+    return std::hash<std::string>()(a.get_cigar().to_string());
+}
+
+} // namespace std

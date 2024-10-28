@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
 
 #include "aln_match.hpp"
 #include "aln_query.hpp"
@@ -34,8 +34,8 @@ class ExactSeeder : public Seeder {
     std::vector<Alignment> get_inexact_anchors() const override;
 
   private:
-    std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, tsl::hopscotch_map<DeBruijnGraph::node_index, std::vector<std::tuple<size_t, size_t, size_t, DBGAlignerConfig::score_t>>>>>
-    get_node_dists(std::vector<Anchor> &anchors) const;
+    using Connections = tsl::hopscotch_map<Anchor, tsl::hopscotch_map<Anchor, std::vector<std::tuple<size_t, DBGAlignerConfig::score_t, std::vector<DeBruijnGraph::node_index>, Cigar>>>>;
+    Connections get_connections(std::vector<Anchor> &anchors) const;
 };
 
 class Extender {

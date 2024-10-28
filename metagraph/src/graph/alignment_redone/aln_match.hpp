@@ -73,17 +73,9 @@ class Match {
     score_t score_;
 };
 
-inline std::ostream& operator<<(std::ostream &out, const Match &a) {
-    Cigar cigar = a.generate_cigar();
-    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
-                       !a.get_orientation() ? "+" : "-",
-                       a.get_spelling(),
-                       a.get_score(),
-                       cigar.get_num_matches(),
-                       cigar.to_string(),
-                       a.get_end_trim());
-    return out;
-}
+bool operator==(const Match &a, const Match &b);
+
+std::ostream& operator<<(std::ostream &out, const Match &a);
 
 class Anchor : public Match {
   public:
@@ -139,6 +131,8 @@ class Anchor : public Match {
     int64_t coord_;
     std::string suffix_;
 };
+
+bool operator==(const Anchor &a, const Anchor &b);
 
 class Alignment : public Match {
   public:
@@ -207,4 +201,25 @@ class Alignment : public Match {
     std::vector<Anchor::label_class_t> label_classes_;
 };
 
+bool operator==(const Alignment &a, const Alignment &b);
+
 } // namespace mtg::graph::align
+
+namespace std {
+
+template<>
+struct hash<mtg::graph::align_redone::Match> {
+    std::size_t operator()(const mtg::graph::align_redone::Match &a) const;
+};
+
+template<>
+struct hash<mtg::graph::align_redone::Anchor> {
+    std::size_t operator()(const mtg::graph::align_redone::Anchor &a) const;
+};
+
+template<>
+struct hash<mtg::graph::align_redone::Alignment> {
+    std::size_t operator()(const mtg::graph::align_redone::Alignment &a) const;
+};
+
+} // namespace std;
