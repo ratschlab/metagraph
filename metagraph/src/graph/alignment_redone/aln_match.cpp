@@ -86,23 +86,20 @@ bool operator==(const Match &a, const Match &b) {
     return a.get_orientation() == b.get_orientation()
         && a.get_query().begin() == b.get_query().begin()
         && a.get_query().end() == b.get_query().end()
-        && a.get_seed().begin() == b.get_seed().begin()
-        && a.get_seed().end() == b.get_seed().end()
+        && a.get_clipping() == b.get_clipping()
+        && a.get_end_clipping() == b.get_end_clipping()
+        && a.get_end_trim() == b.get_end_trim()
         && a.get_path() == b.get_path()
         && a.get_score() == b.get_score();
 }
 
 bool operator==(const Anchor &a, const Anchor &b) {
     return static_cast<const Match&>(a) == static_cast<const Match&>(b)
-        && a.get_label_class() == b.get_label_class()
-        && a.get_trim_spelling().begin() == b.get_trim_spelling().begin()
-        && a.get_trim_spelling().end() == b.get_trim_spelling().end();
+        && a.get_label_class() == b.get_label_class();
 }
 
 bool operator==(const Alignment &a, const Alignment &b) {
     return static_cast<const Match&>(a) == static_cast<const Match&>(b)
-        && a.get_end_trim() == b.get_end_trim()
-        && a.get_path_spelling() == b.get_path_spelling()
         && a.get_cigar() == b.get_cigar();
 }
 

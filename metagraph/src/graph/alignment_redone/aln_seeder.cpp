@@ -969,7 +969,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
-    common::logger->trace("Anchoring seeds");
+    common::logger->info("Anchoring seeds");
     std::vector<Anchor> anchors = get_anchors();
     common::logger->trace("Computing alignments between {} anchors", anchors.size());
     auto connections = get_connections(anchors);
@@ -1031,6 +1031,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 bool updated = false;
                 // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
                 for (const auto &[i, added_score, path, cigar] : find_i->second) {
+                    std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
                     size_t query_dist = cigar.get_num_query();
                     size_t path_dist = path.size();
                     assert(path_dist == cigar.get_num_ref());
@@ -1043,9 +1044,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     if (cur_dist == dist && base_score + added_score > score) {
                         DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
                         // std::cerr << "," << cur_coord_dist;
-                        score = base_score + added_score;
+                        std::string_view a_i_front(a_i.get_seed().begin(), i);
+                        DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front)
+                            + (!a_i.get_clipping() ? config_.left_end_bonus : 0);
+                        score = base_score + added_score + front_score;
                         coord_dist = cur_coord_dist;
                         updated = true;
+                        std::cerr << "\tworked\n";
                     }
                     // std::cerr << "\n";
                 }
@@ -1072,11 +1077,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             first_chain = false;
 
             // if (ret_val) {
-                // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                // for (const auto &[it, dist] : chain) {
-                //     std::cerr << "\t" << *it << "\t" << dist;
-                // }
-                // std::cerr << std::endl;
+                common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+                for (const auto &[it, dist] : chain) {
+                    std::cerr << "\t" << *it << "\t" << dist;
+                }
+                std::cerr << std::endl;
             // }
 
             return ret_val;
@@ -1092,12 +1097,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             auto find_i = find_j->second.find(*next);
             assert(find_i != find_j->second.end() && find_i->second.size());
 
-            auto base_path = next->get_path();
-            base_path.pop_back();
             Cigar base_cigar(Cigar::CLIPPED, next->get_clipping());
-            base_cigar.append(Cigar::MATCH, next->get_path().size() - 1);
+
+            Cigar aln_cigar = aln.get_cigar();
+            aln_cigar.trim_clipping();
 
             for (const auto &[i, added_score, bt_path, bt_cigar] : find_i->second) {
+                std::cerr << "try\t" << *next << "\t->\t" << bt_cigar.to_string() << "\t->\t" << aln << std::endl;
                 size_t path_dist = bt_path.size();
                 assert(path_dist == bt_cigar.get_num_ref());
 
@@ -1105,24 +1111,25 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 size_t cur_coord_dist = offset - next->get_seed().size();
 
                 if (offset >= next->get_seed().size() && cur_coord_dist == last_to_next_dist) {
-                    auto path = base_path;
+                    std::cerr << "\tconnected\n";
+                    std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().begin() + i);
                     path.insert(path.end(), bt_path.begin(), bt_path.end());
                     path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
 
                     auto cigar = base_cigar;
+                    cigar.append(Cigar::MATCH, i);
                     cigar.append(Cigar(bt_cigar));
+                    cigar.append(Cigar(aln_cigar));
 
-                    Cigar aln_cigar = aln.get_cigar();
-                    aln_cigar.trim_clipping();
-                    cigar.append(std::move(aln_cigar));
-
-                    callback(Alignment(query_.get_graph(),
+                    Alignment next_aln(query_.get_graph(),
                                     aln.get_query(),
                                     aln.get_orientation(),
                                     std::move(path),
                                     config_,
                                     std::move(cigar),
-                                    aln.get_end_trim()));
+                                    aln.get_end_trim());
+                    std::cerr << "\tworked!\t" << next_aln << "\n";
+                    callback(std::move(next_aln));
                 }
             }
         },
@@ -1140,7 +1147,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         alignments.resize(1);
     }
 
-    // std::cerr << "done\n";
+    std::cerr << "done\n";
     return alignments;
 }
 
@@ -1212,7 +1219,6 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                 if (jt == all_nodes_to_anchors.end())
                     return false;
 
-                bool found = false;
                 for (const auto &[j, i] : jt->second) {
                     auto kt = begin + j;
 
@@ -1225,10 +1231,10 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     if (it->get_clipping() != kt->get_clipping() + i + query_dist)
                         continue;
 
-                    found = true;
+                    return true;
                 }
 
-                return found;
+                return false;
             };
 
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -1295,15 +1301,16 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     size_t query_dist = cigar.get_num_query();
                     assert(dist == cigar.get_num_ref());
                     DeBruijnGraph::node_index node = path.front();
-                    assert(cigar.size());
                     auto jt = all_nodes_to_anchors.find(node);
                     assert(jt != all_nodes_to_anchors.end());
+                    bool found = false;
                     for (const auto &[j, i] : jt->second) {
                         auto kt = begin + j;
 
                         assert(kt > it || skipped[j]);
 
                         size_t num_matches = 0;
+                        assert(cigar.size());
                         if (cigar.data()[0].first == Cigar::MATCH) {
                             num_matches += cigar.data()[0].second;
                             if (cigar.size() == 1)
@@ -1316,8 +1323,11 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                         if (it->get_clipping() != kt->get_clipping() + i + query_dist)
                             continue;
 
+                        std::cerr << "found\t" << *kt << "\t->\t" << cigar.to_string() << "\t->\t" << *it << "\n";
                         connections[*it][*kt].emplace_back(i, get_score(cost, dist, query_dist) - it->get_score(), path, cigar);
+                        found = true;
                     }
+                    assert(found);
                 },
                 start_backtracking,
                 terminate_branch,
