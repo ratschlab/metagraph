@@ -1299,18 +1299,20 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                 if (dist == 0 && query_dist == 0)
                     return false;
 
+                if (query_dist == query_window.size())
+                    return true;
+
                 DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                 if (score <= 0 || config_.xdrop < best_score - score)
                     return true;
 
-                bool stop = (query_dist == query_window.size());
                 if (num_matches < config_.min_seed_length)
-                    return stop;
+                    return false;
 
                 // first check if we've hit another anchor
                 auto jt = node_to_anchors.find(node);
                 if (jt == node_to_anchors.end())
-                    return stop;
+                    return false;
 
                 for (size_t j : jt->second) {
                     if (found_next_anchor(j, query_dist, num_matches) && !skipped[j]) {
@@ -1328,7 +1330,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     }
                 }
 
-                return stop;
+                return false;
             };
 
             align_bwd(
