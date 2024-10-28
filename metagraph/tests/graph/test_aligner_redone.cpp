@@ -37,7 +37,8 @@ void run_alignment(const DeBruijnGraph &graph,
                    std::string_view query,
                    const std::vector<std::string> &reference,
                    const std::vector<std::string> &cigar_str,
-                   size_t end_trim = 0) {
+                   size_t end_trim = 0,
+                   bool needs_extension = false) {
     size_t k = graph.get_k();
     if (config.min_seed_length == 0)
         config.min_seed_length = k;
@@ -49,15 +50,21 @@ void run_alignment(const DeBruijnGraph &graph,
         ExactSeeder seeder(aln_query, config);
         std::vector<Alignment> paths;
         Extender extender(aln_query, config);
-        for (const auto &base_path : seeder.get_inexact_anchors()) {
+        std::vector<Alignment> paths_no_extend = seeder.get_inexact_anchors();
+        for (const auto &base_path : paths_no_extend) {
             extender.extend(base_path, [&](Alignment&& path) {
                 paths.emplace_back(std::move(path));
             });
         }
+        std::sort(paths_no_extend.begin(), paths_no_extend.end(), [](const auto &a, const auto &b) {
+            return std::make_pair(a.get_score(), b.get_orientation())
+                 > std::make_pair(b.get_score(), a.get_orientation());
+        });
         std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
             return std::make_pair(a.get_score(), b.get_orientation())
                  > std::make_pair(b.get_score(), a.get_orientation());
         });
+
 
         ASSERT_LE(reference.size(), paths.size()) << mx;
         paths.resize(reference.size());
@@ -87,17 +94,13 @@ void run_alignment(const DeBruijnGraph &graph,
                 Cigar cigar(cigar_str[i]);
                 check_aln(paths[i], cigar, reference[i], "extend");
 
-                if (cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
+                if (!needs_extension
+                        && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
                         && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
                     // this alignment should work with chaining alone
-                    auto paths = seeder.get_inexact_anchors();
-                    ASSERT_LT(i, paths.size());
-                    std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
-                        return std::make_pair(a.get_score(), b.get_orientation())
-                            > std::make_pair(b.get_score(), a.get_orientation());
-                    });
-                    check_ref(paths[i], reference[i], "chain");
-                    check_aln(paths[i], cigar, reference[i], "chain");
+                    ASSERT_LT(i, paths_no_extend.size());
+                    check_ref(paths_no_extend[i], reference[i], "chain");
+                    check_aln(paths_no_extend[i], cigar, reference[i], "chain");
                 }
             }
         }
@@ -357,7 +360,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
-    run_alignment(*graph, config, query, { reference }, { "5=9I5=" });
+    run_alignment(*graph, config, query, { reference }, { "5=9I5=" }, 0, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_insert_long_offset) {

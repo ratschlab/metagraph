@@ -972,8 +972,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                // if (query_dist == query_window.size())
-                //     return true;
+                if (query_dist == query_window.size())
+                    return true;
 
                 size_t dist = std::get<0>(data);
                 auto score = get_score(cost, dist, query_dist);
@@ -984,8 +984,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 size_t dist = std::get<0>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return false;
-                // return query_dist == query_window.size();
+                // return false;
+                return query_dist == query_window.size();
             }
         );
 
