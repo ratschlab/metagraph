@@ -1239,6 +1239,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
             DeBruijnGraph::node_index start_node = it->get_path()[0];
             std::string_view query_window = global_query_window;
             query_window.remove_suffix(it->get_end_clipping() + it->get_seed().size());
+            size_t max_dist = 0;
 
             auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
                 return it->get_score() + cost_to_score(cost, query_dist, dist, match_score)
@@ -1294,6 +1295,19 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                 return true;
             };
 
+            auto is_last_anchor = [&](size_t j) {
+                bool all_prev_skipped = true;
+                auto kt = begin + j;
+                for (auto lt = it + 1; lt != kt; ++lt) {
+                    if (lt->get_clipping() > kt->get_clipping() && !skipped[lt - begin]) {
+                        all_prev_skipped = false;
+                        break;
+                    }
+                }
+
+                return all_prev_skipped;
+            };
+
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                 if (dist == 0 && query_dist == 0)
@@ -1303,7 +1317,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     return true;
 
                 DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
-                if (score <= 0 || config_.xdrop < best_score - score)
+                if (score <= 0 || config_.xdrop < local_best_score - score)
                     return true;
 
                 if (num_matches < config_.min_seed_length)
@@ -1315,19 +1329,8 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     return false;
 
                 for (size_t j : jt->second) {
-                    if (found_next_anchor(j, query_dist, num_matches) && !skipped[j]) {
-                        bool all_prev_skipped = true;
-                        auto kt = begin + j;
-                        for (auto lt = it + 1; lt != kt; ++lt) {
-                            if (lt->get_clipping() > kt->get_clipping() && !skipped[lt - begin]) {
-                                all_prev_skipped = false;
-                                break;
-                            }
-                        }
-
-                        if (all_prev_skipped)
-                            return true;
-                    }
+                    if (found_next_anchor(j, query_dist, num_matches) && !skipped[j] && is_last_anchor(j))
+                        return true;
                 }
 
                 return false;
@@ -1374,20 +1377,23 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                     DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                     best_score = std::max(best_score, score);
                     local_best_score = std::max(local_best_score, score);
-                    if (query_dist != query_window.size() || !terminate_branch(cost, data, query_dist, node))
-                        return false;
 
+                    max_dist = std::max(dist, max_dist);
                     auto jt = all_nodes_to_anchors.find(node);
                     if (jt == all_nodes_to_anchors.end())
                         return false;
 
+                    bool found = false;
                     for (const auto &[j, i] : jt->second) {
                         auto kt = begin + j;
-                        if (found_next_anchor(j, query_dist - kt->get_path().size() + 1 + i, num_matches + i))
-                            return true;
+                        if (found_next_anchor(j, query_dist - kt->get_path().size() + 1 + i, num_matches + i)) {
+                            found = true;
+                            if (is_last_anchor(j))
+                                return true;
+                        }
                     }
 
-                    return false;
+                    return found && query_dist == query_window.size() && dist == max_dist;
                 }
             );
         }
