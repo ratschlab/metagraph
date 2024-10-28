@@ -1057,7 +1057,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 bool updated = false;
                 // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
                 for (const auto &[i, added_score, path, cigar] : find_i->second) {
-                    // std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
+                    std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
                     // size_t query_dist = cigar.get_num_query();
                     // size_t path_dist = path.size();
                     // assert(path_dist == cigar.get_num_ref());
@@ -1067,18 +1067,17 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     // DBGAlignerConfig::score_t cur_dist = query_dist + offset;
                     // std::cerr << "\t\tp: " << path_dist << "\tq: " << query_dist << "\ti: " << i << "\t-> " << cur_dist;
 
-                    std::string_view a_i_front(a_i.get_seed().begin(), i);
-                    DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front)
-                        + (!a_i.get_clipping() ? config_.left_end_bonus : 0);
+                    std::string_view a_i_front(a_i.get_seed().begin() + i, a_i.get_seed().size() - i);
+                    DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front);
 
-                    if (base_score + added_score + front_score > score) {
+                    if (base_score + added_score - front_score + a_j.get_score() > score) {
                         // DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
                         // std::cerr << "," << cur_coord_dist;
 
-                        score = base_score + added_score + front_score;
+                        score = base_score + added_score - front_score + a_j.get_score();
                         coord_dist = path.size() + i + a_j.get_seed().size() - a_i.get_seed().size();
                         updated = true;
-                        // std::cerr << "\tworked\n";
+                        std::cerr << "\tworked\t" << coord_dist << "\t" << base_score << "+" << added_score << "-" << front_score << "+" << a_j.get_score() << "=" << score << "\n";
                     }
                     // std::cerr << "\n";
                 }
@@ -1352,7 +1351,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
 
                         auto kt = begin + j;
                         if (found_next_anchor(j, query_dist - kt->get_path().size() + 1 + i, num_matches + i)) {
-                            std::cerr << "found\t" << *kt << "\t->\t" << cigar.to_string() << "\t->\t" << *it << "\n";
+                            std::cerr << "foundfo\t" << *kt << "\t->\t" << cigar.to_string() << "\t->\t" << *it << "\n";
                             connections[*it][*kt].emplace_back(i, get_score(cost, dist, query_dist) - it->get_score(), path, cigar);
                             found = true;
                         }
