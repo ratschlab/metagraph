@@ -287,7 +287,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     assert(gap_ext % 2 == 0);
     assert(gap_opn % 2 == 0);
 
-    common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
+    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -421,7 +421,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                     assert(last_op != Cigar::CLIPPED);
 
                     if (terminate(cost, it->second, query_dist, node)) {
-                        common::logger->info("Halted at cost {}", cost);
+                        // common::logger->info("Halted at cost {}", cost);
                         return;
                     }
 
@@ -933,7 +933,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
 
         bool found = false;
-        std::cerr << "bwd extending\t" << fwd_ext << "\n";
+        // std::cerr << "bwd extending\t" << fwd_ext << "\n";
         align_bwd(
             query_.get_graph(), config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
@@ -957,7 +957,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 );
 
                 // assert(next_aln.get_score() == best_score);
-                std::cerr << "found\t" << next_aln << "\n";
+                // std::cerr << "found\t" << next_aln << "\n";
                 callback(std::move(next_aln));
                 found = true;
             },
@@ -997,11 +997,11 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
-    common::logger->info("Anchoring seeds");
+    // common::logger->info("Anchoring seeds");
     std::vector<Anchor> anchors = get_anchors();
-    common::logger->info("Computing alignments between {} anchors", anchors.size());
+    // common::logger->info("Computing alignments between {} anchors", anchors.size());
     auto connections = get_connections(anchors);
-    common::logger->info("DONE");
+    // common::logger->info("DONE");
     std::vector<Alignment> alignments;
 
     using AnchorIt = std::vector<Anchor>::iterator;
@@ -1059,7 +1059,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 bool updated = false;
                 // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
                 for (const auto &[i, added_score, path, cigar] : find_i->second) {
-                    std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
+                    // std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
                     // size_t query_dist = cigar.get_num_query();
                     // size_t path_dist = path.size();
                     // assert(path_dist == cigar.get_num_ref());
@@ -1079,7 +1079,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         score = base_score + added_score - front_score + a_j.get_score();
                         coord_dist = path.size() + i + a_j.get_seed().size() - a_i.get_seed().size();
                         updated = true;
-                        std::cerr << "\tworked\t" << coord_dist << "\t" << base_score << "+" << added_score << "-" << front_score << "+" << a_j.get_score() << "=" << score << "\n";
+                        // std::cerr << "\tworked\t" << coord_dist << "\t" << base_score << "+" << added_score << "-" << front_score << "+" << a_j.get_score() << "=" << score << "\n";
                     }
                     // std::cerr << "\n";
                 }
@@ -1106,11 +1106,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             first_chain = false;
 
             // if (ret_val) {
-                common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                for (const auto &[it, dist] : chain) {
-                    std::cerr << "\t" << *it << "\t" << dist;
-                }
-                std::cerr << std::endl;
+                // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+                // for (const auto &[it, dist] : chain) {
+                //     std::cerr << "\t" << *it << "\t" << dist;
+                // }
+                // std::cerr << std::endl;
             // }
 
             return ret_val;
@@ -1164,7 +1164,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             }
         },
         [&alignments](Alignment&& alignment) {
-            std::cerr << "final aln\t" << alignment << "\n";
+            // std::cerr << "final aln\t" << alignment << "\n";
             alignments.emplace_back(std::move(alignment));
         }
     );
@@ -1226,7 +1226,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
             ++num_extended;
 
             skipped[it - begin] = true;
-            std::cerr << "Starting from\t" << *it << "\n";
+            // std::cerr << "Starting from\t" << *it << "\n";
             DBGAlignerConfig::score_t local_best_score = it->get_score();
             size_t next_clipping = std::numeric_limits<size_t>::max();
             if (it->get_clipping() > (it + 1)->get_clipping())
@@ -1353,7 +1353,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
 
                         auto kt = begin + j;
                         if (found_next_anchor(j, query_dist - kt->get_path().size() + 1 + i, num_matches + i)) {
-                            std::cerr << "foundfo\t" << *kt << "\t->\t" << cigar.to_string() << "\t->\t" << *it << "\n";
+                            // std::cerr << "foundfo\t" << *kt << "\t->\t" << cigar.to_string() << "\t->\t" << *it << "\n";
                             connections[*it][*kt].emplace_back(i, get_score(cost, dist, query_dist) - it->get_score(), path, cigar);
                             found = true;
                         }
