@@ -63,22 +63,42 @@ void run_alignment(const DeBruijnGraph &graph,
         paths.resize(reference.size());
 
         for (size_t i = 0; i < reference.size(); ++i) {
-            auto path = paths[i];
-            if (reference[i].size()) {
-                EXPECT_EQ(reference[i].size() - k + 1 + end_trim, path.get_path().size());
-                EXPECT_EQ(reference[i], path.get_spelling()) << mx;
-            }
-            EXPECT_EQ(end_trim, path.get_end_trim()) << mx;
+            auto check_ref = [&](const Alignment &path, const std::string &reference, const std::string &type) {
+                if (reference.size()) {
+                    EXPECT_EQ(reference.size() - k + 1 + end_trim, path.get_path().size()) << mx << "\t" << type;
+                    EXPECT_EQ(reference, path.get_spelling()) << mx << "\t" << type;
+                }
+            };
+
+            auto check_aln = [&](const Alignment &path, const Cigar &cigar, const std::string &reference, const std::string &type) {
+                EXPECT_EQ(end_trim, path.get_end_trim()) << mx << "\t" << type;
+                EXPECT_EQ(cigar.to_string(), path.get_cigar().to_string()) << mx << "\t" << type;
+                if (reference.size()) {
+                    EXPECT_EQ(config.score_cigar(reference, query, cigar), path.get_score()) << mx << "\t" << type;
+                }
+
+                EXPECT_EQ(cigar.get_clipping(), path.get_clipping()) << mx << "\t" << type;
+                EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping()) << mx << "\t" << type;
+            };
+
+            check_ref(paths[i], reference[i], "extend");
 
             if (i < cigar_str.size() && cigar_str[i].size()) {
                 Cigar cigar(cigar_str[i]);
-                EXPECT_EQ(cigar_str[i], path.get_cigar().to_string()) << mx;
-                if (reference[i].size()) {
-                    EXPECT_EQ(config.score_cigar(reference[i], query, cigar), path.get_score()) << mx;
-                }
+                check_aln(paths[i], cigar, reference[i], "extend");
 
-                EXPECT_EQ(cigar.get_clipping(), path.get_clipping());
-                EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping());
+                if (cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
+                        && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
+                    // this alignment should work with chaining alone
+                    auto paths = seeder.get_inexact_anchors();
+                    ASSERT_LT(i, paths.size());
+                    std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
+                        return std::make_pair(a.get_score(), b.get_orientation())
+                            > std::make_pair(b.get_score(), a.get_orientation());
+                    });
+                    check_ref(paths[i], reference[i], "chain");
+                    check_aln(paths[i], cigar, reference[i], "chain");
+                }
             }
         }
     }
