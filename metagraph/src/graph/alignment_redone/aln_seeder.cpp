@@ -535,6 +535,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     fill_table();
 
     // backtrack
+    size_t num_explored_nodes = 0;
     for (size_t start_cost = 0; start_cost < S.size(); ++start_cost) {
         std::vector<std::tuple<size_t, size_t, size_t, DeBruijnGraph::node_index>> starts;
         for (size_t start_query_dist = S[start_cost].offset(); start_query_dist < S[start_cost].size(); ++start_query_dist) {
@@ -542,6 +543,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             for (auto it = S[start_cost][start_query_dist].begin(); it != S[start_cost][start_query_dist].end(); ++it) {
                 DeBruijnGraph::node_index node = it->first;
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = it->second;
+                num_explored_nodes += (last_op != Cigar::CLIPPED);
                 if (last_op != Cigar::CLIPPED && start_backtrack(start_cost, it->second, start_query_dist, node))
                     starts.emplace_back(dist, std::abs(static_cast<ssize_t>(dist - start_query_dist)), start_query_dist, node);
             }
@@ -716,6 +718,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             callback(std::move(path), std::move(cigar), start_cost);
         }
     }
+    common::logger->info("Explored {} nodes", num_explored_nodes);
 }
 
 void align_bwd(const DeBruijnGraph &graph,
@@ -969,11 +972,11 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
-    common::logger->trace("Anchoring seeds");
+    common::logger->info("Anchoring seeds");
     std::vector<Anchor> anchors = get_anchors();
-    common::logger->trace("Computing alignments between {} anchors", anchors.size());
+    common::logger->info("Computing alignments between {} anchors", anchors.size());
     auto connections = get_connections(anchors);
-    common::logger->trace("DONE");
+    common::logger->info("DONE");
     std::vector<Alignment> alignments;
 
     using AnchorIt = std::vector<Anchor>::iterator;
