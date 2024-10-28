@@ -431,7 +431,10 @@ int align_to_graph(Config *config) {
                     align_redone::ExactSeeder seeder(aln_query, aligner_config);
                     std::vector<align_redone::Alignment> paths;
                     align_redone::Extender extender(aln_query, aligner_config);
-                    for (const auto &base_path : seeder.get_inexact_anchors()) {
+                    common::logger->trace("Chaining");
+                    auto chains = seeder.get_inexact_anchors();
+                    common::logger->trace("Extending");
+                    for (const auto &base_path : chains) {
                         extender.extend(base_path, [&](align_redone::Alignment&& path) {
                             paths.emplace_back(std::move(path));
                         });

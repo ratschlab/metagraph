@@ -230,7 +230,6 @@ AnchorIt chain_anchors(const Query &query,
     }
 
     std::sort(best_chains.begin(), best_chains.end());
-    common::logger->trace("Best chain score: {}", -std::get<0>(best_chains[0]));
 
     sdsl::bit_vector used(chain_scores.size());
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
@@ -267,8 +266,6 @@ AnchorIt chain_anchors(const Query &query,
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - begin] = true;
             }
-
-            common::logger->trace("Found chain with score {}", scores.back());
 
             extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate);
         }

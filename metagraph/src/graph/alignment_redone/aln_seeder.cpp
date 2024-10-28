@@ -868,10 +868,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
-                size_t cur_num_matches = std::get<5>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return cur_num_matches >= num_matches && cur_num_matches - num_matches == query_window.size();
+                return query_dist == query_window.size();
             },
             aln.get_trim_spelling()
         );
@@ -956,10 +955,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
-                size_t cur_num_matches = std::get<5>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return cur_num_matches >= num_matches && cur_num_matches - num_matches == query_window.size();
+                return query_dist == query_window.size();
             }
         );
 
@@ -1341,7 +1339,7 @@ ExactSeeder::get_node_dists(std::vector<Anchor> &anchors) const {
                     DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                     best_score = std::max(best_score, score);
                     local_best_score = std::max(local_best_score, score);
-                    return num_matches >= it->get_seed().size() && num_matches - it->get_seed().size() == query_window.size();
+                    return query_dist == query_window.size();
                 }
             );
         }
