@@ -211,7 +211,9 @@ DBGAlignerConfig::score_t cost_to_score(size_t cost,
                                         size_t query_size,
                                         size_t match_size,
                                         DBGAlignerConfig::score_t match_score) {
-    return (match_score * (query_size + match_size) - cost) / 2;
+    DBGAlignerConfig::score_t double_score = match_score * (query_size + match_size) - cost;
+    assert(double_score % 2 == 0);
+    return double_score / 2;
 }
 
 template <typename Tuple>
@@ -895,7 +897,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 size_t dist = std::get<0>(data);
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
-                return query_dist == query_window.size();
+                return query_dist == query_window.size() && score == best_score;
             },
             aln.get_trim_spelling()
         );
@@ -985,7 +987,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 auto score = get_score(cost, dist, query_dist);
                 best_score = std::max(best_score, score);
                 // return false;
-                return query_dist == query_window.size();
+                return query_dist == query_window.size() && score == best_score;
             }
         );
 

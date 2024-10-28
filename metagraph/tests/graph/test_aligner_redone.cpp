@@ -38,13 +38,17 @@ void run_alignment(const DeBruijnGraph &graph,
                    const std::vector<std::string> &reference,
                    const std::vector<std::string> &cigar_str,
                    size_t end_trim = 0,
-                   bool needs_extension = false) {
+                   bool needs_extension = false,
+                   bool needs_extension_long_seed = false) {
     size_t k = graph.get_k();
     if (config.min_seed_length == 0)
         config.min_seed_length = k;
 
     for (auto mx : { k, std::numeric_limits<size_t>::max() }) {
         config.max_seed_length = std::max(mx, config.min_seed_length);
+        bool check_chaining = mx == std::numeric_limits<size_t>::max()
+            ? !needs_extension_long_seed
+            : !needs_extension;
 
         Query aln_query(graph, query);
         ExactSeeder seeder(aln_query, config);
@@ -94,7 +98,7 @@ void run_alignment(const DeBruijnGraph &graph,
                 Cigar cigar(cigar_str[i]);
                 check_aln(paths[i], cigar, reference[i], "extend");
 
-                if (!needs_extension
+                if (check_chaining
                         && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
                         && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
                     // this alignment should work with chaining alone
@@ -402,7 +406,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
-    run_alignment(*graph, config, query, { reference }, { "10=4D9=" });
+    run_alignment(*graph, config, query, { reference }, { "10=4D9=" }, 0, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
@@ -610,10 +614,10 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
 
-    run_alignment(*graph, config, query, { reference.substr(10) }, { "3S4=1X9=1X8=1X39=" });
+    run_alignment(*graph, config, query, { reference.substr(10) }, { "3S4=1X9=1X8=1X39=" }, 0, true, true);
 
     config.gap_opening_penalty = -3;
-    run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" });
+    run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" }, 0, true, true);
 }
 
 // TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
