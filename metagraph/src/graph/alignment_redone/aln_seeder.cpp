@@ -69,6 +69,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     assert(boss.get_last(last));
                     traverse.pop_back();
 
+                    assert(suffix.size() + match_size < k);
                     if (suffix.size() + match_size == k - 1) {
                         assert(first == last || !boss.get_last(first));
                         assert(boss.succ_last(first) == last);
@@ -85,11 +86,13 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 }
                             }
                         }
+
+                        continue;
                     }
 
                     for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
-                        auto next_first = first;
-                        auto next_last = last;
+                        boss::BOSS::edge_index next_first = first;
+                        boss::BOSS::edge_index next_last = last;
                         if (boss.tighten_range(&next_first, &next_last, s)) {
                             traverse.emplace_back(next_first, next_last, suffix + boss.decode(s));
                         }
