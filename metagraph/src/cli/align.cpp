@@ -433,11 +433,11 @@ int align_to_graph(Config *config) {
                     align_redone::Extender extender(aln_query, aligner_config);
                     common::logger->trace("Chaining");
                     auto chains = seeder.get_inexact_anchors();
-                    common::logger->trace("Extending");
                     std::sort(chains.begin(), chains.end(), [](const auto &a, const auto &b) {
                         return std::make_pair(a.get_score(), b.get_orientation())
                             > std::make_pair(b.get_score(), a.get_orientation());
                     });
+                    common::logger->trace("Extending");
                     for (const auto &base_path : chains) {
                         extender.extend(base_path, [&](align_redone::Alignment&& path) {
                             paths.emplace_back(std::move(path));

@@ -1345,7 +1345,7 @@ auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connect
                 start_node,
                 it->get_seed().size(),
                 query_window,
-                std::numeric_limits<size_t>::max(),
+                config_.max_dist_between_seeds,
                 [&](auto&& path, auto&& cigar, size_t cost) {
                     size_t dist = path.size();
                     size_t query_dist = cigar.get_num_query();
