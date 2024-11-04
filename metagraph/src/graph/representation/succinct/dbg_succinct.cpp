@@ -194,6 +194,16 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
+    if (valid_edges_) {
+        try {
+            valid_edges_->call_ones([&](uint64_t i) {
+                callback(i);
+                if (terminate())
+                    throw early_term();
+            });
+        } catch (early_term&) {}
+        return;
+    }
     for (node_index i = 1; i <= max_index() && !terminate(); ++i) {
         if (is_valid(i)) {
             callback(i);
