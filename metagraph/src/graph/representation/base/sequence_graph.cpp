@@ -447,9 +447,9 @@ void DeBruijnGraph
             nodes.pop();
 
             while (!visited[node]) {
+                assert(in_graph(node));
                 visited[node] = true;
-                if (in_graph(node))
-                    callback(node, sequence);
+                callback(node, sequence);
                 sequence.assign(sequence.begin() + 1, sequence.end());
 
                 auto next_node = npos;

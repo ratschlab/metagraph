@@ -801,7 +801,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     if (valid_edges_) {
         serialize_valid_edges(valid_edges_);
     } else {
-        serialize_valid_edges(generate_dummy_kmers(1, false));
+        serialize_valid_edges(generate_valid_kmer_mask(1, false));
     }
 
     if (bloom_filter_) {
@@ -883,7 +883,7 @@ BOSS::State DBGSuccinct::get_state() const {
     return boss_graph_->get_state();
 }
 
-std::unique_ptr<bit_vector> DBGSuccinct::generate_dummy_kmers(size_t num_threads, bool with_pruning) const {
+std::unique_ptr<bit_vector> DBGSuccinct::generate_valid_kmer_mask(size_t num_threads, bool with_pruning) const {
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
@@ -907,7 +907,7 @@ std::unique_ptr<bit_vector> DBGSuccinct::generate_dummy_kmers(size_t num_threads
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
-    valid_edges_ = generate_dummy_kmers(num_threads, with_pruning);
+    valid_edges_ = generate_valid_kmer_mask(num_threads, with_pruning);
 
     assert(valid_edges_.get());
     assert(valid_edges_->size() == boss_graph_->num_edges() + 1);

@@ -313,7 +313,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
                       annotator.num_relations());
 
             graph->call_nodes([&](uint32_t node_idx) {
-                ASSERT_THAT(annotator.get_labels(node_idx - 1), ContainerEq(labels));
+                ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)), ContainerEq(labels));
             });
         }
     }
@@ -367,7 +367,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 EXPECT_EQ(expected_relations[max_depth - 1], annotator.num_relations());
 
                 graph->call_nodes([&](uint32_t node_idx) {
-                    ASSERT_THAT(annotator.get_labels(node_idx - 1), ElementsAre(labels[i]));
+                    ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)), ElementsAre(labels[i]));
                 });
             }
         }
