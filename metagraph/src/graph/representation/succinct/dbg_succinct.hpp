@@ -180,8 +180,8 @@ class DBGSuccinct : public DeBruijnGraph {
 
     bool is_valid(node_index node) const;
     node_index validate_edge(node_index node) const;
-    node_index select_node(uint64_t boss_index) const;
-    uint64_t rank_node(node_index kmer_index) const;
+    node_index select_node(uint64_t rank) const;
+    uint64_t rank_node(node_index node) const;
 
     void initialize_bloom_filter_from_fpr(double false_positive_rate,
                                           uint32_t max_num_hash_functions = -1);

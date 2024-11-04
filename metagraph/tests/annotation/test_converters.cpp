@@ -19,6 +19,13 @@ using namespace mtg;
 using namespace mtg::annot;
 using namespace ::testing;
 
+static auto graph_to_anno_index(graph::DeBruijnGraph::node_index node) {
+    return graph::AnnotatedDBG::graph_to_anno_index(node);
+}
+static auto anno_to_graph_index(graph::AnnotatedDBG::row_index row) {
+    return graph::AnnotatedDBG::anno_to_graph_index(row);
+}
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
@@ -210,8 +217,11 @@ TEST(RowDiff, succ) {
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
         ASSERT_EQ(expected_succ.size(), succ.size());
-        for (uint32_t i = 0; i < expected_succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[i] + 1, graph->rank_node(succ[i] + 1)) << max_depth << " " << i;
+        for (uint32_t i = 0; i < succ.size(); ++i) {
+            EXPECT_EQ(
+                anno_to_graph_index(expected_succ[i]),
+                graph->rank_node(anno_to_graph_index(succ[i]))
+            ) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
@@ -223,7 +233,10 @@ TEST(RowDiff, succ) {
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
         EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
-            EXPECT_EQ(expected_pred[i] + 1, graph->rank_node(pred[i] + 1)) << max_depth << " " << i;
+            EXPECT_EQ(
+                anno_to_graph_index(expected_pred[i]),
+                graph->rank_node(anno_to_graph_index(pred[i]))
+            ) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);
@@ -388,12 +401,10 @@ void test_row_diff(uint32_t k,
 
     ColumnCompressed initial_annotation(graph->max_index());
     std::unordered_set<std::string> all_labels;
-    uint32_t anno_idx = 0;
     graph->call_nodes([&](uint32_t node_idx) {
-        const std::vector<std::string> &labels = annotations[anno_idx];
-        initial_annotation.add_labels({node_idx - 1}, labels);
+        const auto &labels = annotations[graph_to_anno_index(graph->rank_node(node_idx))];
+        initial_annotation.add_labels({graph_to_anno_index(node_idx)}, labels);
         std::for_each(labels.begin(), labels.end(), [&](auto l) { all_labels.insert(l); });
-        ++anno_idx;
     });
 
     initial_annotation.serialize(annot_fname);
@@ -410,15 +421,10 @@ void test_row_diff(uint32_t k,
     ASSERT_EQ(all_labels.size(), annotator.num_labels());
     ASSERT_EQ(graph->max_index(), annotator.num_objects());
 
-    anno_idx = 0;
     graph->call_nodes([&](uint32_t node_idx) {
-        ASSERT_THAT(annotator.get_labels(node_idx - 1),
-                    UnorderedElementsAreArray(annotations[anno_idx]));
-        ++anno_idx;
+        ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)),
+                    UnorderedElementsAreArray(annotations[graph_to_anno_index(graph->rank_node(node_idx))]));
     });
-
-    for (uint32_t anno_idx = 0; anno_idx < graph->max_index(); ++anno_idx) {
-    }
 
     std::filesystem::remove_all(dst_dir);
 }
@@ -444,12 +450,10 @@ void test_row_diff_separate_columns(uint32_t k,
     graph->serialize(graph_fname);
 
     std::map<std::string, std::vector<uint64_t>> col_annotations;
-    uint32_t anno_idx = 0;
     graph->call_nodes([&](auto node_idx) {
-        for (const auto &label : annotations[anno_idx]) {
-            col_annotations[label].push_back(node_idx - 1);
+        for (const auto &label : annotations[graph_to_anno_index(graph->rank_node(node_idx))]) {
+            col_annotations[label].push_back(graph_to_anno_index(node_idx));
         }
-        ++anno_idx;
     });
 
     for (const auto& [label, indices] : col_annotations) {

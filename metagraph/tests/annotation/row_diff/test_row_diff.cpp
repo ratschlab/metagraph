@@ -17,6 +17,10 @@ using ::testing::_;
 using mtg::annot::matrix::RowDiff;
 using mtg::annot::matrix::ColumnMajor;
 
+static auto graph_to_anno_index(graph::DeBruijnGraph::node_index node) {
+    return graph::AnnotatedDBG::graph_to_anno_index(node);
+}
+
 typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
 
 TEST(RowDiff, Empty) {
@@ -197,10 +201,10 @@ TEST(RowDiff, GetAnnotationMasked) {
     cols_concrete[0].resize(graph.max_index() + 1);
     cols_concrete[1].resize(graph.max_index() + 1);
     graph.call_nodes([&](auto i) {
-        auto rank = graph.rank_node(i) - 1;
-        bterminal[i - 1] = bterminal_masked[rank];
-        cols_concrete[0][i - 1] = cols_masked[0][rank];
-        cols_concrete[1][i - 1] = cols_masked[1][rank];
+        auto rank = graph_to_anno_index(graph.rank_node(i));
+        bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];
+        cols_concrete[0][graph_to_anno_index(i)] = cols_masked[0][rank];
+        cols_concrete[1][graph_to_anno_index(i)] = cols_masked[1][rank];
     });
     anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
@@ -216,30 +220,37 @@ TEST(RowDiff, GetAnnotationMasked) {
 
     RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
-
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(1)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(1) - 1})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(1))})[0],
+                ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(2)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(2) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(2))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(3)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(3) - 1})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(3))})[0],
+                ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(4) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(4))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(5)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(5) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(5))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(6) - 1})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(6))})[0],
+                ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(7) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(7))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(8) - 1})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(8))})[0],
+                ElementsAre(0));
 }
 
 /**
@@ -321,10 +332,10 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     cols_concrete[0].resize(graph.max_index() + 1);
     cols_concrete[1].resize(graph.max_index() + 1);
     graph.call_nodes([&](auto i) {
-        auto rank = graph.rank_node(i) - 1;
-        bterminal[i - 1] = bterminal_masked[rank];
-        cols_concrete[0][i - 1] = cols_masked[0][rank];
-        cols_concrete[1][i - 1] = cols_masked[1][rank];
+        auto rank = graph_to_anno_index(graph.rank_node(i));
+        bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];
+        cols_concrete[0][graph_to_anno_index(i)] = cols_masked[0][rank];
+        cols_concrete[1][graph_to_anno_index(i)] = cols_masked[1][rank];
     });
     anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
@@ -345,34 +356,43 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(graph.select_node(1)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(1) - 1})[0], ElementsAre(0, 1));
-
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(1))})[0],
+                ElementsAre(0, 1));
     EXPECT_EQ("CTAT", graph.get_node_sequence(graph.select_node(2)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(2) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(2))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("TACT", graph.get_node_sequence(graph.select_node(3)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(3) - 1})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(3))})[0],
+                ElementsAre(0));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(graph.select_node(4)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(4) - 1})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(4))})[0],
+                ElementsAre(0, 1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(graph.select_node(5)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(5) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(5))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(graph.select_node(6)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(6) - 1})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(6))})[0],
+                ElementsAre(0, 1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(graph.select_node(7)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(7) - 1})[0], ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(7))})[0],
+                ElementsAre(0));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(graph.select_node(8)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(8) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(8))})[0],
+                ElementsAre(1));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(graph.select_node(9)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(9) - 1})[0], ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(9))})[0],
+                ElementsAre(0, 1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(graph.select_node(10)));
-    ASSERT_THAT(annot.get_rows({graph.select_node(10) - 1})[0], ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({graph_to_anno_index(graph.select_node(10))})[0],
+                ElementsAre(1));
 }
 
 } // namespace

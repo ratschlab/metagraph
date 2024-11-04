@@ -354,7 +354,7 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
     } else {
         node_index succ = graph::DeBruijnGraph::npos;
         graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
-            if(rd_succ[adjacent_node]) {
+            if (rd_succ[adjacent_node]) {
                 succ = adjacent_node;
             }
         });
