@@ -918,6 +918,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
                     it.value() = get_rp(it->first).first;
+                    // #pragma omp critical
+                    // common::logger->info("N: {}\tr: {}", n, it->second);
                 }
             }
             progress_bar += (vector_counts.size() - 1) % 1000;
@@ -1040,16 +1042,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             for (uint64_t s = 0; s < probs.size(); ++s) {
                 pvals[n].emplace_back(0.0);
-                bool found = false;
                 for (uint64_t sp = 0; sp < probs.size(); ++sp) {
-                    if (pmf_in[sp] <= pmf_in[s]) {
-                        found = true;
+                    if (pmf_in[sp] <= pmf_in[s])
                         pvals[n][s] += probs[sp];
-                    }
                 }
+            }
 
-                if (found)
-                    min_pval = std::min(min_pval, pvals[n][s]);
+            size_t front = n - std::min(n, num_labels_out);
+            for (uint64_t s = 0; s < front; ++s) {
+                if (pvals[n][s] > 0) {
+                    common::logger->error("Non-zero p-value in impossible configuration: {},{}", n, s);
+                    throw std::domain_error("");
+                }
+            }
+            double local_min_pval = std::min(pvals[n][front],
+                                             pvals[n].back());
+            min_pval = std::min(min_pval, local_min_pval);
+
+            for (uint64_t s = front; s < pvals[n].size(); ++s) {
+                if (pvals[n][s] < local_min_pval) {
+                    common::logger->error("Min p-value not at boundary: {},{}: {} < {}", n, s, pvals[n][s], local_min_pval);
+                    throw std::domain_error("");
+                }
             }
         }
 
@@ -1069,12 +1083,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::make_tuple(masked_graph_in, masked_graph_out, PValStorage{}, nullptr);
         }
 
-        compute_min_pval = [pvals,num_labels_in,&groups](int64_t, const PairContainer &row) {
+        compute_min_pval = [pvals,num_labels_out,&groups](int64_t, const PairContainer &row) {
             size_t n = 0;
             for (const auto &[j, c] : row) {
                 n += static_cast<int64_t>(groups[j] != Group::OTHER) + (groups[j] == Group::BOTH);
             }
-            size_t front = n - std::min(n, num_labels_in);
+            size_t front = n - std::min(n, num_labels_out);
             return std::min(pvals[n][front],
                             pvals[n].back());
         };
@@ -1316,7 +1330,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            double comb_pval = combine_pvals(pvals_min);
+            double comb_pval = *std::min_element(pvals_min.begin(), pvals_min.end());
             if (comb_pval < config.family_wise_error_rate) {
                 for (node_index node : path) {
                     set_bit(unitig_start.data(), node, parallel, MO_RELAXED);
