@@ -1,0 +1,229 @@
+# Tanmay Tanna
+# June 20 2023
+
+import os
+import logging
+import json
+import fnmatch
+from scripts.metadata_to_JSON import metadata_to_JSON
+# Globals ---------------------------------------------------------------------
+
+configfile: "config/config.yaml"
+
+
+# initialize global values from config file
+
+DATAPATH = config["datafolder"]
+GRAPHPATH = config["graphfolder"]
+METADATA = config["metadata_path"]
+LOGPATH = config["logsfolder"] + "/"
+IN_MIN = config["in_min"]
+OUT_MAX = config["out_max"]
+REFERENCE = config["alignment_reference_graph"]
+COUNT_KMERS = config["count_kmers"]
+if COUNT_KMERS=="False" or COUNT_KMERS=="false" or COUNT_KMERS=="FALSE":
+    COUNT_KMERS = False
+else:
+    COUNT_KMERS = True
+REFERENCE_ANNO = config["alignment_reference_graph_annotation"]
+OVERWRITE = config["overwrite_metadata_JSON"]
+if OVERWRITE=="False" or OVERWRITE=="false" or OVERWRITE=="FALSE":
+    OVERWRITE = False
+else:
+    OVERWRITE = True
+METADATA_FILES = [METADATA+ "/" +f for f in os.listdir(METADATA) \
+if ".tsv" in f or ".txt" in f]
+MEM_4x = config["memory_gb"]
+MEM = int(MEM_4x)/4
+MEM_MB = int(MEM)*1000
+THREADS = config["threads"]
+K = config["kmer_size"]
+ext = config["input_extension"]
+
+os.system("mkdir -p " + GRAPHPATH)
+os.system("mkdir -p " + LOGPATH)
+
+for mt in METADATA_FILES:
+    metadata_to_JSON(mt, IN_MIN, OUT_MAX, GRAPHPATH, COUNT_KMERS, METADATA, overwrite = OVERWRITE)
+
+SAMPLES, =  glob_wildcards(DATAPATH+"/{sample}"+ext)
+COMPARISONS, =  glob_wildcards(METADATA+"/{comparison}.json")
+print(SAMPLES)
+# print(COMPARISONS)
+localrules: all
+
+rule all:
+    input:
+        expand(DATAPATH+"/{sample}"+ext, sample=SAMPLES),
+        expand(GRAPHPATH+"/{sample}.cutoff_1.kmc_pre", sample=SAMPLES),
+        expand(GRAPHPATH+"/{sample}.dbg", sample=SAMPLES),
+        expand(GRAPHPATH+"/{sample}.fasta.gz", sample=SAMPLES),
+        GRAPHPATH+"/merged_graph.dbg",
+        expand(GRAPHPATH+"/{sample}.fasta.gz.column.annodbg", sample=SAMPLES),
+        expand(GRAPHPATH+"/{comparison}.fasta.gz", comparison=COMPARISONS)
+        #expand(GRAPHPATH+"/{comparison}.tsv", comparison=COMPARISONS)
+
+# run KMC
+
+rule KMC:
+    input:
+        DATAPATH+"/{sample}"+ext
+    output:
+        GRAPHPATH+"/{sample}.cutoff_1.kmc_pre"
+    threads: THREADS
+    log: LOGPATH+"{sample}_kmc_log.txt"
+    resources:
+        mem_mb_per_cpu=MEM_MB,
+        runtime=1440
+    run:
+        MEM_GB = int(MEM_MB)/1000
+        if 'fastq' in ext or 'fq' in ext:
+            shell('kmc -ci1 -t{THREADS} -k{K} -m{MEM_GB} -fq {input} {wildcards.sample}.cutoff_1 {GRAPHPATH} 2>&1 | tee {log}')
+        else if 'fasta' in ext or 'fa' in ext:
+            shell('kmc -ci1 -t{THREADS} -k{K} -m{MEM_GB} -fm {input} {wildcards.sample}.cutoff_1 {GRAPHPATH} 2>&1 | tee {log}')
+
+# run metagraph build
+
+rule metagraph_build:
+    input:
+        GRAPHPATH+"/{sample}.cutoff_1.kmc_pre"
+    output:
+        GRAPHPATH+"/{sample}.dbg"
+    threads: THREADS
+    log: LOGPATH+"{sample}_metagraph_build_log.txt"
+    resources:
+        mem_mb_per_cpu=MEM_MB,
+        runtime=1440
+    run:
+        if COUNT_KMERS:
+            shell('metagraph build --mode canonical -p {threads} --mem-cap-gb {MEM} -k {K} -v \
+            --disk-swap {GRAPHPATH} -o {GRAPHPATH}/{wildcards.sample} {input} \
+            --count-kmers {input} 2>&1 | tee {log}')
+        else:
+            shell('metagraph build -p {threads} --mem-cap-gb {MEM} -k {K} -v \
+            --disk-swap {GRAPHPATH} -o {GRAPHPATH}/{wildcards.sample} {input} \
+            {input} 2>&1 | tee {log}')
+    
+
+# extract contigs from individual graphs
+
+rule graph_to_contig:
+    input:
+        GRAPHPATH+"/{sample}.dbg"
+    output:
+        GRAPHPATH+"/{sample}.fasta.gz"
+    threads: THREADS
+    log: LOGPATH+"{sample}_graph_to_contig_log.txt"
+    resources:
+        mem_mb_per_cpu=int(MEM_MB)*2,
+        runtime=720
+    shell:
+        'metagraph transform -v --enumerate -p {threads} --to-fasta \
+        -o {GRAPHPATH}/{wildcards.sample} {input}'
+
+
+# create merged graph
+
+rule create_merged_graph:
+    input:
+        [GRAPHPATH+"/{sample}.fasta.gz".format(sample=sample) \
+        for sample in SAMPLES]
+    output:
+        GRAPHPATH+"/merged_graph.dbg"
+    threads: THREADS
+    log: LOGPATH+"merge_graph_log.txt"
+    resources:
+        mem_mb_per_cpu=int(MEM_MB)*4,
+        runtime=720
+    run:
+        if COUNT_KMERS:
+            shell('metagraph build -p {threads} --mem-cap-gb {MEM_4x} -k {K} -v \
+            --disk-swap {GRAPHPATH} -o {GRAPHPATH}/merged_graph_raw \
+            --count-kmers {input} 2>&1 | tee {log}')
+        else:
+            shell('metagraph build -p {threads} --mem-cap-gb {MEM_4x} -k {K} -v \
+            --disk-swap {GRAPHPATH} -o {GRAPHPATH}/merged_graph \
+            {input} 2>&1 | tee {log}')
+
+    
+## annotate merged graph
+
+rule annotate_merged_graph:
+    input:
+        GRAPHPATH+"/merged_graph.dbg"
+    output:
+        expand(GRAPHPATH+"/{sample}.fasta.gz.column.annodbg", sample=SAMPLES)
+    threads: THREADS
+    log: expand(LOGPATH+"{sample}.annotate_graph_log.txt", sample=SAMPLES)
+    resources:
+        mem_mb_per_cpu=int(MEM_MB)*4,
+        runtime=4320
+    run:
+        if COUNT_KMERS:
+            shell('metagraph annotate -v -i {input} --anno-filename --disk-swap {GRAPHPATH} \
+            --mem-cap-gb {MEM_4x} -p 4 --separately --count-kmers --threads-each 4\
+            -o {GRAPHPATH} {GRAPHPATH}/*.fasta.gz')
+        else:
+            shell('metagraph annotate -v -i {input} --anno-filename --disk-swap {GRAPHPATH} \
+            --mem-cap-gb {MEM_4x} -p 4 --separately --threads-each 4\
+            -o {GRAPHPATH} {GRAPHPATH}/*.fasta.gz')
+       
+## transform annotation to row format
+
+rule transform_annotations:
+    input:
+        GRAPHPATH+"/{sample}.fasta.gz.column.annodbg"
+    output:
+        GRAPHPATH+"/{sample}.fasta.gz.row.annodbg"
+    threads: THREADS
+    log: LOGPATH+"{sample}.transform_annotation.txt"
+    resources:
+        mem_mb_per_cpu=int(MEM_MB)*2,
+        runtime=720
+    shell:
+        'metagraph transform_anno --anno-type int_row_flat -o {output} -v --count-kmers {input}'
+
+# run differential assembly
+
+rule run_differential_assembly:
+    input:
+        METADATA+"/{comparison}.json"
+    output:
+        GRAPHPATH+"/{comparison}.fasta.gz"
+    threads: THREADS
+    log: LOGPATH+"{comparison}_differential_assembly.txt"
+    resources:
+        mem_mb_per_cpu=int(MEM_MB)*4,
+        runtime=1440
+    run:
+        strng = ""
+        for filename in os.listdir(GRAPHPATH):
+            if filename.endswith(".row.annodbg"):
+                strng = strng + " -a " + GRAPHPATH + "/" + str(filename)
+        cmd = "metagraph assemble -v --prune-tips --unitigs" \
+        + str(strng) + " -p " + str(threads) + " --diff-assembly-rules " + str(input) \
+        + " -o " + str(GRAPHPATH) + "/" + str(wildcards.comparison) + " " + \
+	str(GRAPHPATH) + "/merged_graph.dbg"
+        print(cmd)
+        shell(cmd)
+
+# run differential assembly alignment
+
+# rule align_differential_assembly:
+#     input:
+#         GRAPHPATH+"/{comparison}.fasta.gz"
+#     output:
+#         GRAPHPATH+"/{comparison}.tsv"
+#     threads: THREADS
+#     log: LOGPATH+"/{comparison}_align_differential_assembly.txt"
+#     resources:
+#         mem_mb_per_cpu=int(MEM_MB)*4,
+#         runtime=1440
+#     shell:
+#         'metagraph align -v {GRAPHPATH}/merged_graph.dbg -k 20  \
+#         -i {REFERENCE} -p {threads} -a {REFERENCE_ANNO}\
+#         -o {GRAPHPATH}/{wildcards.comparison} {input}'
+
+       
+
+        

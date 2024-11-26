@@ -1,0 +1,15 @@
+input_extension: ".fastq.gz"
+threads: 16 
+memory_gb: 16 # maximum memory per thread
+kmer_size: 31 # kmer size for generating graphs
+in_min: 0.5 # differential assembly - minimum proportion of test samples with unitig 
+out_max: 0.2 # differential assembly - max proportion of control samples with unitig
+overwrite_metadata_JSON: "True" # boolean to overwrite metadata JSON files that exist
+count_kmers: "True" # boolean to count kmers and perform differential assembly using statistical test
+datafolder: "/cluster/work/grlab/projects/projects2021-melanoma_metagenomics/validation_for_metagraph/simulation_tanmay_3/fastqs" # directory with input data files (fasta or fastq)
+graphfolder: "/cluster/work/grlab/projects/projects2021-melanoma_metagenomics/validation_for_metagraph/simulation_tanmay_3/graphs" # directory where graphs are (to be) saved
+metadata_path: "/cluster/work/grlab/projects/projects2021-melanoma_metagenomics/validation_for_metagraph/simulation_tanmay_3/metadata" # directory where metadata is saved in tsv file format
+logsfolder: "/cluster/work/grlab/projects/projects2021-melanoma_metagenomics/validation_for_metagraph/simulation_tanmay_3/logs" # directory for saving log files
+alignment_reference_graph: "/cluster/work/grlab/projects/metagenome/data/refseq/release97/output_k31_annotation/k31_full/graph_k31.dbg" # reference graph for aligning diff assembly
+alignment_reference_graph_annotation: "/cluster/work/grlab/projects/metagenome/data/refseq/release97/output_k31_annotation/k31_full/annotation.relaxed_64.row_diff_brwt.annodbg" # reference graph annotation
+
