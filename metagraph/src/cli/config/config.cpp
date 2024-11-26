@@ -353,7 +353,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--prune-unitigs")) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--cleaning-threshold-percentile")) {
-            fallback_abundance_cutoff = std::stod(get_value(i++));
+            cleaning_threshold_percentile = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--smoothing-window")) {
