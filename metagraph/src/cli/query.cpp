@@ -955,8 +955,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
-        full_dbg.map_to_nodes(contigs[i].first,
-                              [&](node_index node) { contigs[i].second.push_back(node); });
+        call_annotated_nodes_offsets(full_dbg, contigs[i].first, [&](node_index node, int64_t) {
+            contigs[i].second.push_back(node);
+        });
     }
     logger->trace("[Query graph construction] Contigs mapped to the full graph in {} sec",
                   timer.elapsed());
