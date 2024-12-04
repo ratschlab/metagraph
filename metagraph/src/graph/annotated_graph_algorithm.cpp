@@ -1021,6 +1021,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             std::swap(pmf_null_cur, pmf_null);
         }
 
+        if (pmf_in.size() != num_labels_in + 1) {
+            common::logger->error("PMF in wrong: {} != {}", pmf_in.size(), num_labels_in + 1);
+            throw std::domain_error("");
+        }
+
+        if (pmf_out.size() != num_labels_out + 1) {
+            common::logger->error("PMF out wrong: {} != {}", pmf_out.size(), num_labels_out + 1);
+            throw std::domain_error("");
+        }
+
+        if (pmf_null.size() != num_labels_in + num_labels_out + 1) {
+            common::logger->error("PMF null wrong: {} != {}", pmf_null.size(), num_labels_in + num_labels_out + 1);
+            throw std::domain_error("");
+        }
+
         common::logger->trace("Precomputing p-values");
         std::vector<std::vector<double>> pvals(num_labels_in + num_labels_out + 1);
         pvals[0].emplace_back(1.0);
@@ -1035,6 +1050,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     break;
                 uint64_t t = n - s;
                 if (s < pmf_in.size() && t < pmf_out.size()) {
+                    if (s < front) {
+                        common::logger->error("Attempting non-zero p-value in impossible configuration: {},{}", n, s);
+                        throw std::domain_error("");
+                    }
                     probs.emplace_back(exp2(log2(pmf_in[s]) + log2(pmf_out[t]) - log2(pmf_null[n])));
                 } else {
                     probs.emplace_back(0.0);
@@ -1043,7 +1062,17 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             for (uint64_t s = 0; s < probs.size(); ++s) {
                 pvals[n].emplace_back(0.0);
+                if (s > n)
+                    break;
+                uint64_t t = n - s;
+                if (s >= pmf_in.size() || t >= pmf_out.size())
+                    continue;
                 for (uint64_t sp = 0; sp < probs.size(); ++sp) {
+                    if (sp > n)
+                        break;
+                    uint64_t tp = n - sp;
+                    if (sp >= pmf_in.size() || tp >= pmf_out.size())
+                        continue;
                     if (pmf_in[sp] <= pmf_in[s])
                         pvals[n][s] += probs[sp];
                 }
