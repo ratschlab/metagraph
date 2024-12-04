@@ -284,7 +284,7 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
                 last = std::max(last, std::pair{c, u});
             });
             set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
-        });
+        }
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
