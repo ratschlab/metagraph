@@ -273,6 +273,7 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
     } else {
         sdsl::bit_vector last_bv(graph.max_index() + 1);
        
+        __atomic_thread_fence(__ATOMIC_RELEASE);
         #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
         for (node_index v = 1; v <= graph.max_index(); ++v) {
             if (!graph.in_graph(v))
@@ -282,8 +283,9 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
                 last = std::max(last, std::pair{c, u});
             });
-            last_bv[last.second] = true;
+            set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
         });
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
 }
