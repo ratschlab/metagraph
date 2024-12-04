@@ -1029,11 +1029,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         for (size_t n = 1; n < pvals.size(); ++n) {
             std::vector<double> probs;
+            size_t front = n - std::min(n, num_labels_out);
             for (uint64_t s = 0; s < pmf_in.size(); ++s) {
                 if (s > n)
                     break;
                 uint64_t t = n - s;
-                if (t < pmf_out.size()) {
+                if (s < pmf_in.size() && t < pmf_out.size()) {
                     probs.emplace_back(exp2(log2(pmf_in[s]) + log2(pmf_out[t]) - log2(pmf_null[n])));
                 } else {
                     probs.emplace_back(0.0);
@@ -1048,7 +1049,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
             }
 
-            size_t front = n - std::min(n, num_labels_out);
             for (uint64_t s = 0; s < front; ++s) {
                 if (pvals[n][s] > 0) {
                     common::logger->error("Non-zero p-value in impossible configuration: {},{}", n, s);
