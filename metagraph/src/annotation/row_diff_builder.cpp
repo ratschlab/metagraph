@@ -271,15 +271,20 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
         return std::shared_ptr<const bit_vector>(
             std::shared_ptr<const bit_vector>{}, &dbg_succ->get_boss().get_last());
     } else {
-        bit_vector_dyn last_bv(graph.max_index() + 1);
-        graph.call_nodes([&](node_index v) {
+        sdsl::bit_vector last_bv(graph.max_index() + 1);
+       
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
+        for (node_index v = 1; v <= graph.max_index(); ++v) {
+            if (!graph.in_graph(v))
+                continue;
+           
             std::pair<char, node_index> last;
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
                 last = std::max(last, std::pair{c, u});
             });
-            last_bv.set(last.second, true);
+            last_bv[last.second] = true;
         });
-        return std::make_shared<bit_vector_dyn>(std::move(last_bv));
+        return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
 }
 
