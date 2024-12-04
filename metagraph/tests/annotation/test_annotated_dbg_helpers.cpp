@@ -90,9 +90,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     }
 
     if constexpr(std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
-        static_assert(std::is_same_v<Graph, DBGSuccinct>);
-        assert(dynamic_cast<const DBGSuccinct*>(base_graph.get()));
-
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
         auto out_fs_path = tmp_dir/"test_col";
         std::string out_path = out_fs_path;
@@ -183,9 +180,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
 
     } else if constexpr(std::is_same_v<Annotation, RowDiffDiskAnnotator>) {
-        static_assert(std::is_same_v<Graph, DBGSuccinct>);
-        assert(dynamic_cast<const DBGSuccinct*>(base_graph.get()));
-
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
         auto out_fs_path = tmp_dir/"test_col";
         std::string out_path = out_fs_path;
@@ -217,7 +211,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
         auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
         auto annotator = std::make_unique<RowDiffDiskAnnotator>(
-                annot::LabelEncoder<>(), static_cast<const DBGSuccinct*>(base_graph.get()));
+                annot::LabelEncoder<>(), base_graph.get());
         if (!annotator->load(rd_path)) {
             logger->error("Cannot load annotations from {}", rd_path);
             exit(1);
@@ -235,6 +229,7 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, ColumnCompres
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSSHash, ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
@@ -242,6 +237,8 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, RowFlatA
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 

@@ -6,7 +6,14 @@ from tempfile import TemporaryDirectory
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
-METAGRAPH = f'{os.getcwd()}/metagraph'
+METAGRAPH_EXE = f'{os.getcwd()}/metagraph'
+DNA_MODE = os.readlink(METAGRAPH_EXE).endswith("_DNA")
+PROTEIN_MODE = os.readlink(METAGRAPH_EXE).endswith("_Protein")
+METAGRAPH = METAGRAPH_EXE
+
+def update_prefix(PREFIX):
+    global METAGRAPH
+    METAGRAPH = PREFIX + METAGRAPH_EXE
 
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 

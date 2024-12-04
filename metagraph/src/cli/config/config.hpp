@@ -143,6 +143,7 @@ class Config {
     double alignment_min_exact_match = 0.7;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
+    double cleaning_threshold_percentile = 0.001;
     std::vector<double> count_slice_quantiles;
     std::vector<double> count_quantiles;
 
