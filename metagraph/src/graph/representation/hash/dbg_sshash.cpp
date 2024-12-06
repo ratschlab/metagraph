@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include <query/streaming_query_canonical_parsing.hpp>
+#include <query/streaming_query_regular_parsing.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
@@ -80,7 +80,6 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
-    build_config.canonical_parsing = (mode != BASIC);
 
     // silence sshash construction messages when not verbose
     std::ios orig_state(nullptr);
@@ -123,7 +122,7 @@ void map_to_nodes_with_rc_impl(size_t k,
     using kmer_t = get_kmer_t<Dict>;
 
     if (with_rc) {
-        sshash::streaming_query_canonical_parsing<kmer_t> parser(&dict);
+        sshash::streaming_query_regular_parsing<kmer_t> parser(&dict);
         for (size_t i = 0; i + k <= sequence.size(); ++i) {
             callback(parser.lookup_advanced(sequence.data() + i));
         }
@@ -407,34 +406,8 @@ bool DBGSSHash::load(std::istream &in) {
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;
 
-    if (num_nodes_) {
-        std::visit([&](auto &d) {
-            d.visit(loader);
-
-            if (mode_ != BASIC) {
-                using kmer_t = get_kmer_t<decltype(d)>;
-
-                // TODO: HACK! this is for backwards compatibility
-                class dict_access {
-                  public:
-                    uint64_t m_size;
-                    uint64_t m_seed;
-                    uint16_t m_k;
-                    uint16_t m_m;
-                    uint16_t m_canonical_parsing;
-                    sshash::minimizers m_minimizers;
-                    sshash::buckets<kmer_t> m_buckets;
-                    sshash::skew_index<kmer_t> m_skew_index;
-                    sshash::weights m_weights;
-                };
-
-                static_assert(sizeof(decltype(d)) == sizeof(dict_access));
-
-                // overwrite canonical parsing variable;
-                reinterpret_cast<dict_access&>(d).m_canonical_parsing = true;
-            }
-        }, dict_);
-    }
+    if (num_nodes_)
+        std::visit([&](auto &d) { d.visit(loader); }, dict_);
 
     return true;
 }
