@@ -2,6 +2,8 @@
 
 #include <type_traits>
 
+#include <query/streaming_query_canonical_parsing.hpp>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/logger.hpp"
@@ -119,20 +121,27 @@ void map_to_nodes_with_rc_impl(size_t k,
 
     using kmer_t = get_kmer_t<Dict>;
 
-    std::vector<bool> invalid_char(n);
-    for (size_t i = 0; i < n; ++i) {
-        invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-    }
+    if (with_rc) {
+        sshash::streaming_query_regular_parsing parser(&dict);
+        for (size_t i = 0; i + k <= sequence.size(); ++i) {
+            callback(parser.lookup_advanced(sequence.c_str() + i));
+        }
+    } else {
+        std::vector<bool> invalid_char(n);
+        for (size_t i = 0; i < n; ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
+        }
 
-    auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
+        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
-    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
-    uint_kmer.pad_char();
-    for (size_t i = k - 1; i < n && !terminate(); ++i) {
-        uint_kmer.drop_char();
-        uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
-        callback(invalid_kmer[i] ? sshash::lookup_result()
-                                 : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
+        uint_kmer.pad_char();
+        for (size_t i = k - 1; i < n && !terminate(); ++i) {
+            uint_kmer.drop_char();
+            uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
+            callback(invalid_kmer[i] ? sshash::lookup_result()
+                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        }
     }
 }
 
