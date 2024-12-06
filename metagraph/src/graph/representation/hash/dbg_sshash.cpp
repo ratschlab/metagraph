@@ -122,9 +122,9 @@ void map_to_nodes_with_rc_impl(size_t k,
     using kmer_t = get_kmer_t<Dict>;
 
     if (with_rc) {
-        sshash::streaming_query_regular_parsing parser(&dict);
+        sshash::streaming_query_canonical_parsing<kmer_t> parser(&dict);
         for (size_t i = 0; i + k <= sequence.size(); ++i) {
-            callback(parser.lookup_advanced(sequence.c_str() + i));
+            callback(parser.lookup_advanced(sequence.data() + i));
         }
     } else {
         std::vector<bool> invalid_char(n);
