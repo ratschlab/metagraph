@@ -84,7 +84,11 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     orig_state.copyfmt(std::cout);
     if (!common::get_verbose())
         std::cout.setstate(std::ios_base::failbit);
-    std::visit([&](auto &d) { d.build(input_filename, build_config); }, dict_);
+    std::visit([&](auto &d) {
+        d.build(input_filename, build_config);
+        using kmer_t = get_kmer_t<decltype(d)>;
+        parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
+    }, dict_);
     if (!common::get_verbose())
         std::cout.copyfmt(orig_state);
 
@@ -100,9 +104,10 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <bool with_rc, class Dict>
+template <bool with_rc, class Dict, class Parser>
 void map_to_nodes_with_rc_impl(size_t k,
                                const Dict &dict,
+                               Parser &parser,
                                std::string_view sequence,
                                const std::function<void(sshash::lookup_result)>& callback,
                                const std::function<bool()>& terminate) {
@@ -119,20 +124,26 @@ void map_to_nodes_with_rc_impl(size_t k,
 
     using kmer_t = get_kmer_t<Dict>;
 
-    std::vector<bool> invalid_char(n);
-    for (size_t i = 0; i < n; ++i) {
-        invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-    }
+    if (with_rc) {
+        for (size_t i = 0; i + k <= sequence.size(); ++i) {
+            callback(parser.lookup_advanced(sequence.data() + i));
+        }
+    } else {
+        std::vector<bool> invalid_char(n);
+        for (size_t i = 0; i < n; ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
+        }
 
-    auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
+        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
-    kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
-    uint_kmer.pad_char();
-    for (size_t i = k - 1; i < n && !terminate(); ++i) {
-        uint_kmer.drop_char();
-        uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
-        callback(invalid_kmer[i] ? sshash::lookup_result()
-                                 : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
+        uint_kmer.pad_char();
+        for (size_t i = k - 1; i < n && !terminate(); ++i) {
+            uint_kmer.drop_char();
+            uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
+            callback(invalid_kmer[i] ? sshash::lookup_result()
+                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        }
     }
 }
 
@@ -141,9 +152,11 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
     std::visit([&](const auto &dict) {
-        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
-            callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
-        }, terminate);
+        std::visit([&](auto &parser) {
+            map_to_nodes_with_rc_impl<with_rc>(k_, dict, parser, sequence, [&](sshash::lookup_result res) {
+                callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
+            }, terminate);
+        }, parser_);
     }, dict_);
 }
 
@@ -397,8 +410,14 @@ bool DBGSSHash::load(std::istream &in) {
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;
 
-    if (num_nodes_)
-        std::visit([&](auto &d) { d.visit(loader); }, dict_);
+    if (num_nodes_) {
+        std::visit([&](auto &d) {
+            d.visit(loader);
+
+            using kmer_t = get_kmer_t<decltype(d)>;
+            parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
+        }, dict_);
+    }
 
     return true;
 }
