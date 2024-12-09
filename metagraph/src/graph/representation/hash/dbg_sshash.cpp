@@ -107,7 +107,7 @@ void DBGSSHash::add_sequence(std::string_view sequence,
 template <bool with_rc, class Dict, class Parser>
 void map_to_nodes_with_rc_impl(size_t k,
                                const Dict &dict,
-                               const Parser &parser,
+                               Parser &parser,
                                std::string_view sequence,
                                const std::function<void(sshash::lookup_result)>& callback,
                                const std::function<bool()>& terminate) {
@@ -152,7 +152,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
     std::visit([&](const auto &dict) {
-        std::visit([&](const auto &parser) {
+        std::visit([&](auto &parser) {
             map_to_nodes_with_rc_impl<with_rc>(k_, dict, parser, sequence, [&](sshash::lookup_result res) {
                 callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
             }, terminate);
