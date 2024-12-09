@@ -2,8 +2,6 @@
 
 #include <type_traits>
 
-#include <query/streaming_query_regular_parsing.hpp>
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/logger.hpp"
@@ -86,7 +84,11 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     orig_state.copyfmt(std::cout);
     if (!common::get_verbose())
         std::cout.setstate(std::ios_base::failbit);
-    std::visit([&](auto &d) { d.build(input_filename, build_config); }, dict_);
+    std::visit([&](auto &d) {
+        d.build(input_filename, build_config);
+        using kmer_t = get_kmer_t<decltype(d)>;
+        parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
+    }, dict_);
     if (!common::get_verbose())
         std::cout.copyfmt(orig_state);
 
@@ -122,9 +124,10 @@ void map_to_nodes_with_rc_impl(size_t k,
     using kmer_t = get_kmer_t<Dict>;
 
     if (with_rc) {
-        sshash::streaming_query_regular_parsing<kmer_t> parser(&dict);
         for (size_t i = 0; i + k <= sequence.size(); ++i) {
-            callback(parser.lookup_advanced(sequence.data() + i));
+            std::visit([&](const auto &p) {
+                callback(p.lookup_advanced(sequence.data() + i));
+            }, parser_);
         }
     } else {
         std::vector<bool> invalid_char(n);
@@ -406,8 +409,14 @@ bool DBGSSHash::load(std::istream &in) {
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;
 
-    if (num_nodes_)
-        std::visit([&](auto &d) { d.visit(loader); }, dict_);
+    if (num_nodes_) {
+        std::visit([&](auto &d) {
+            d.visit(loader);
+
+            using kmer_t = get_kmer_t<decltype(d)>;
+            parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
+        }, dict_);
+    }
 
     return true;
 }

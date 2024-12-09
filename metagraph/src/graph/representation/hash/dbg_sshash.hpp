@@ -7,6 +7,8 @@
 #include <dictionary.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include <query/streaming_query_regular_parsing.hpp>
+
 #include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg::graph {
@@ -116,6 +118,12 @@ class DBGSSHash : public DeBruijnGraph {
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+
+    using parser_t = std::variant<
+                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt64>>,
+                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt128>>,
+                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt256>>>;
+    static parser_t parser_;
 
     size_t dict_size() const;
 };
