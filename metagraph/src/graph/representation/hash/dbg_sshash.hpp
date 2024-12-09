@@ -123,7 +123,7 @@ class DBGSSHash : public DeBruijnGraph {
                         sshash::streaming_query_regular_parsing<kmer_t<KmerInt64>>,
                         sshash::streaming_query_regular_parsing<kmer_t<KmerInt128>>,
                         sshash::streaming_query_regular_parsing<kmer_t<KmerInt256>>>;
-    static mutable parser_t parser_;
+    static parser_t parser_;
 
     size_t dict_size() const;
 };
