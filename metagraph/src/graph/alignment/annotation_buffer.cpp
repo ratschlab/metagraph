@@ -78,7 +78,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 continue;
             }
 
-            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
+            if (boss && !boss->get_W(base_path[i])) {
                 // skip dummy nodes
                 if (node_to_cols_.try_emplace(base_path[i], 0).second && has_coordinates())
                     label_coords_.emplace_back();

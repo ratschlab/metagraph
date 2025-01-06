@@ -86,9 +86,7 @@ std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) cons
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
     for (Row i = 0; i < num_rows(); ++i) {
-        auto edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(i)
-        );
+        auto edge = graph::AnnotatedSequenceGraph::anno_to_graph_index(i);
 
         if (!boss.get_W(edge))
             continue;
