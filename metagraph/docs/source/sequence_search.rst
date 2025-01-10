@@ -52,7 +52,7 @@ The output of the query is in TSV format, with one line per query sequence, wher
 6. Number of exact matches
 7. CIGAR string-like alignment summary
 8. Number of nucleotides trimmed from the prefix of the reference sequence
-9. Ref name matches (if the :code:`-a` flag is passed)
+9. Reference label matches (:code:`;` separated, present if the :code:`-a` flag is passed)
 
 An important parameter is the seed length, which can be set with :code:`--align-min-seed-length` and can be shorter than the value of k used to construct the graph.
 
