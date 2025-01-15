@@ -753,6 +753,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         size_t count_out = 0;
                         size_t total_count = 0;
                         for (const auto &[j, raw_c] : raw_row) {
+                            if (min_counts.size() && raw_c < min_counts[j])
+                                continue;
+
                             uint64_t c = raw_c;
                             if (count_maps.size())
                                 c = count_maps[j].find(c)->second.first;
@@ -1038,6 +1041,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         common::logger->trace("Precomputing p-values");
         std::vector<std::vector<double>> pvals(num_labels_in + num_labels_out + 1);
+        std::vector<double> mid_points(num_labels_in + num_labels_out + 1);
+        mid_points.emplace_back(0);
         pvals[0].emplace_back(1.0);
 
         double min_pval = 1.0;
@@ -1073,7 +1078,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     uint64_t tp = n - sp;
                     if (sp >= pmf_in.size() || tp >= pmf_out.size())
                         continue;
-                    if (pmf_in[sp] <= pmf_in[s])
+                    if (probs[sp] <= probs[s])
                         pvals[n][s] += probs[sp];
                 }
             }
@@ -1088,12 +1093,63 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                              pvals[n].back());
             min_pval = std::min(min_pval, local_min_pval);
 
+            size_t max_prob_counts = 0;
+            double max_prob_pos = 0;
+            // double max_prob = -1;
+
             for (uint64_t s = front; s < pvals[n].size(); ++s) {
                 if (pvals[n][s] < local_min_pval) {
                     common::logger->error("Min p-value not at boundary: {},{}: {} < {}", n, s, pvals[n][s], local_min_pval);
                     throw std::domain_error("");
                 }
             }
+            if (front + 1 == pvals[n].size()) {
+                max_prob_counts = 1;
+                max_prob_pos = front;
+            } else if (front + 2 == pvals[n].size()) {
+                max_prob_counts = 2;
+                max_prob_pos = front + front + 1;
+            } else {
+                for (uint64_t s = front + 1; s < pvals[n].size(); ++s) {
+                    if (probs[s] == probs[s-1]) {
+                        max_prob_counts = 2;
+                        max_prob_pos = s + s;
+                        break;
+                    }
+
+                    if (s + 1 < pvals[n].size()) {
+                        if (probs[s-1] < probs[s] && probs[s] < probs[s+1])
+                            continue;
+
+                        if (probs[s-1] > probs[s] && probs[s] > probs[s+1])
+                            continue;
+
+                        if (probs[s] > probs[s-1] && probs[s] > probs[s+1]) {
+                            if (probs[s] - probs[s-1] == probs[s]-probs[s+1]) {
+                                max_prob_counts = 1;
+                                max_prob_pos = s;
+                            } else if (probs[s] - probs[s-1] > probs[s]-probs[s+1]) {
+                                max_prob_counts = 2;
+                                max_prob_pos = s + s + 1;
+                            } else {
+                                max_prob_counts = 2;
+                                max_prob_pos = s + s - 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (max_prob_counts == 0) {
+                max_prob_counts = 2;
+                max_prob_pos = front - 1 + front;
+            }
+
+            mid_points[n] = static_cast<double>(max_prob_pos) / max_prob_counts;
+            common::logger->trace("Midpoint: n: {}\tmp: {}\t{}\t{}",
+                                  n, mid_points[n],
+                                  fmt::join(probs,","),
+                                  fmt::join(pvals[n],","));
         }
 
         common::logger->trace("Min. p-value: {}", min_pval);
@@ -1122,7 +1178,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                             pvals[n].back());
         };
 
-        compute_pval = [pvals,&groups](int64_t, int64_t, const auto &row) {
+        compute_pval = [pvals,mid_points,&groups](int64_t, int64_t, const auto &row) {
             int64_t n = 0;
             uint64_t s = 0;
             for (const auto &[j, c] : row) {
@@ -1159,6 +1215,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 size_t count_out = 0;
                 size_t total_count = 0;
                 for (const auto &[j, raw_c] : raw_row) {
+                    if (min_counts.size() && raw_c < min_counts[j])
+                        continue;
+
                     uint64_t c = raw_c;
                     if (count_maps.size())
                         c = count_maps[j].find(c)->second.first;
@@ -1413,6 +1472,9 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 size_t count_out = 0;
                 size_t total_count = 0;
                 for (const auto &[j, raw_c] : raw_row) {
+                    if (min_counts.size() && raw_c < min_counts[j])
+                        continue;
+
                     uint64_t c = raw_c;
                     if (count_maps.size())
                         c = count_maps[j].find(c)->second.first;
@@ -1449,6 +1511,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             size_t n = config.test_type != "poisson_binom" ? in_sum + out_sum : row.size();
+
             if (!in_kmer && !out_kmer) {
                 row.clear();
                 n = 0;
@@ -1731,8 +1794,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     bool found = false;
                     Vector<uint64_t> counts(groups.size());
                     for (const auto &[j, raw_c] : row) {
-                        counts[j] = raw_c;
-                        found |= min_counts.empty() || raw_c >= min_counts[j];
+                        if (min_counts.empty() || raw_c >= min_counts[j]) {
+                            counts[j] = raw_c;
+                            found = true;
+                        }
                     }
 
                     if (!found) {
