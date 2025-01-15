@@ -68,7 +68,8 @@ std::vector<VectorMap<uint64_t, size_t>> IntMatrix::get_histograms(const std::ve
 
         Vector<uint64_t> counts(hists_map.size());
         for (const auto &[j, raw_c] : row) {
-            counts[j] = raw_c;
+            if (min_counts.empty() || raw_c >= min_counts[j])
+                counts[j] = raw_c;
         }
 
         #pragma omp critical

@@ -192,12 +192,14 @@ CSRMatrixFlat::get_histograms(const std::vector<size_t> &min_counts,
                     ++local_num_empty_rows;
                 } else {
                     for (const auto &[j, c] : row) {
-                        if (c < HIST_CUTOFF) {
-                            ++hists_map_base[j][c];
-                        } else {
-                            ++hists_map[j][c];
+                        if (min_counts.empty() || c >= min_counts[j]) {
+                            if (c < HIST_CUTOFF) {
+                                ++hists_map_base[j][c];
+                            } else {
+                                ++hists_map[j][c];
+                            }
+                            ++num_nonzeros[thread_id][j];
                         }
-                        ++num_nonzeros[thread_id][j];
                     }
                 }
             };
