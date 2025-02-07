@@ -352,6 +352,8 @@ Config::Config(int argc, char *argv[]) {
             min_tip_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-unitigs")) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--cleaning-threshold-percentile")) {
+            cleaning_threshold_percentile = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--smoothing-window")) {
@@ -1000,6 +1002,7 @@ if (advanced) {
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
                             "\t                         \t\tthan this value (0: auto) [1]\n");
+            fprintf(stderr, "\t   --cleaning-threshold-percentile [FLOAT] the percentile of the k-mer count distribution to set as the cleaning threshold [0.001]\n");
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be\n"
                             "\t                         \t\tdetermined (-1: disables fallback) [1]\n");
             fprintf(stderr, "\n");

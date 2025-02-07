@@ -146,6 +146,7 @@ void writeFastaFile(const std::vector<std::string>& sequences, const std::string
 
     fastaFile.close();
 }
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSSHash>(uint64_t k,
@@ -154,8 +155,8 @@ build_graph<DBGSSHash>(uint64_t k,
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    // use DBGHashString to get contigs for SSHash
-    auto string_graph = build_graph<DBGHashString>(k, sequences, mode);
+    // use DBGHashFast to get contigs for SSHash
+    auto string_graph = build_graph<DBGHashFast>(k, sequences, mode);
 
     std::vector<std::string> contigs;
     size_t num_kmers = 0;

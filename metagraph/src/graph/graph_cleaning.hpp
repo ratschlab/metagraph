@@ -14,7 +14,8 @@ bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
 
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
-                                     uint64_t num_singleton_kmers = 0);
+                                     uint64_t num_singleton_kmers = 0,
+                                     double cleaning_threshold_percentile = 0.001);
 
 } // namespace graph
 } // namespace mtg

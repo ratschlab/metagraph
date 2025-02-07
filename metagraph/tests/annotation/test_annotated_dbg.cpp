@@ -4,15 +4,12 @@
 #include "gtest/gtest.h"
 
 #include "../test_helpers.hpp"
+#include "../graph/all/test_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "graph/representation/bitmap/dbg_bitmap.hpp"
-#include "graph/representation/hash/dbg_hash_string.hpp"
-#include "graph/representation/hash/dbg_hash_ordered.hpp"
-#include "graph/representation/hash/dbg_hash_fast.hpp"
 
 #define protected public
 #define private public
@@ -987,6 +984,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHash, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
@@ -1016,6 +1014,7 @@ class AnnotatedDBGNoNTest : public ::testing::Test {};
 typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHash, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
