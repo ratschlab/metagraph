@@ -87,7 +87,7 @@ jobs:
           sudo make install
           cd ..
 
-          sudo apt-get install libbrotli-dev libzstd-dev libnghttp2-dev
+          sudo apt-get install libpsl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
