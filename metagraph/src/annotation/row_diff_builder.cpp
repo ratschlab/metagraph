@@ -377,7 +377,7 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
         assert(terminal->size() == visited.size());
         assert(rd_succ.size() == visited.size());
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(static, 1000000)
         for (node_index start = 1; start <= graph.max_index(); ++start) {
             if (!graph.in_graph(start) || fetch_bit(visited.data(), start, true, std::memory_order_acquire))
                 continue;
