@@ -371,42 +371,35 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
         return dbg_succ->get_boss().row_diff_traverse(
             num_threads, max_length, rd_succ, terminal);
     } else {
+        std::atomic_thread_fence(std::memory_order_release);
         sdsl::bit_vector visited(graph.max_index() + 1);
         auto finalised = visited;
-        std::vector<size_t> distance(graph.max_index() + 1);
         assert(terminal->size() == visited.size());
         assert(rd_succ.size() == visited.size());
-        auto set_terminal = [&](int v) {
-            distance[v] = 0;
-            (*terminal)[v] = true;
-        };
-        graph.call_nodes([&](node_index v) {
-            static std::stack<node_index> path;
-            while (!visited[v]) {
+
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (node_index start = 1; start <= graph.max_index(); ++start) {
+            if (!graph.in_graph(start) || fetch_bit(visited.data(), start, true, std::memory_order_acquire))
+                continue;
+
+            node_index v = start;
+            std::stack<node_index> path;
+            while (fetch_and_set_bit(visited.data(), v, true, std::memory_order_rel_acq)
+                        && path.size() < max_length) {
                 path.push(v);
-                visited[v] = true;
-                if (!graph.has_no_outgoing(v)) {
+                if (!graph.has_no_outgoing(v))
                     v = row_diff_successor(graph, v, rd_succ);
-                }
             }
+
             // Either a sink, or a cyclic dependency
-            if (!finalised[v]) {
-                set_terminal(v);
-                finalised[v] = true;
+            if (fetch_and_set_bit(finalised.data(), v, true, std::memory_order_rel_acq))
+                set_bit(terminal->data(), v, true, std::memory_order_relaxed);
+
+            for (node_index v : path) {
+                set_bit(finalised.data(), v, true, std::memory_order_release);
             }
-            node_index succ;
-            while (!empty(path)) {
-                succ = std::exchange(v, path.top());
-                if (!finalised[v]) {
-                    distance[v] = distance[succ] + 1;
-                    if (distance[v] == max_length) {
-                        set_terminal(v);
-                    }
-                    finalised[v] = true;
-                }
-                path.pop();
-            }
-        });
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 }
 
