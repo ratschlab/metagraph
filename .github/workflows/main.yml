@@ -86,6 +86,8 @@ jobs:
           make -j 2
           sudo make install
           cd ..
+
+          sudo apt-get install libbrotli-dev libzstd-dev libnghttp2-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
