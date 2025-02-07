@@ -76,14 +76,7 @@ jobs:
         sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          # for static builds, compile curl ourselves
-          git clone https://github.com/curl/curl.git
-          mkdir curl/_build
-          cd curl/_build
-          cmake -DBUILD_SHARED_LIBS=off ..
-          make -j 2
-          sudo make install
-          cd ..
+          sudo apt-get install libcurl4-openssl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
