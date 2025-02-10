@@ -204,7 +204,8 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
             if (terminate())
                 continue;
 
-            size_t end = std::min(begin + block_size, max_index() + 1);
+            size_t end = std::min(begin + block_size,
+                                  static_cast<size_t>(max_index() + 1));
             try {
                 valid_edges_->call_ones_in_range(begin, end, [&](uint64_t i) {
                     callback(i);
