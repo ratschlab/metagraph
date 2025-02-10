@@ -797,11 +797,8 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         valid_edges->serialize(out);
     };
 
-    if (valid_edges_) {
+    if (valid_edges_)
         serialize_valid_edges(valid_edges_);
-    } else {
-        serialize_valid_edges(generate_valid_kmer_mask(1, false));
-    }
 
     if (bloom_filter_) {
         std::ofstream bloom_out = utils::open_new_ofstream(prefix + kBloomFilterExtension);
