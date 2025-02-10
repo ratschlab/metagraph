@@ -150,7 +150,9 @@ void MaskedDeBruijnGraph::call_unitigs(const CallPath &callback,
 
 void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(node_index)> &callback,
-             const std::function<bool()> &stop_early) const {
+             const std::function<bool()> &stop_early,
+             size_t num_threads,
+             size_t batch_size) const {
     assert(max_index() + 1 == kmers_in_graph_->size());
 
     bool stop = false;
@@ -177,7 +179,9 @@ void MaskedDeBruijnGraph
                 if (in_graph(index))
                     callback(index);
             },
-            stop_early
+            stop_early,
+            num_threads,
+            batch_size
         );
     }
 }

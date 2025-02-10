@@ -111,7 +111,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                             const std::function<bool()> &stop_early
                                 = [](){ return false; }) const override final;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
+                            const std::function<bool()> &stop_early = [](){ return false; },
+                            size_t num_threads = 1,
+                            size_t batch_size = 1'000'000) const override final;
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 

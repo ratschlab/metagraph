@@ -46,8 +46,10 @@ class DBGHashFast : public DeBruijnGraph {
     }
 
     void call_nodes(const std::function<void(node_index)> &callback,
-                    const std::function<bool()> &stop_early = [](){ return false; }) const override final {
-        hash_dbg_->call_nodes(callback, stop_early);
+                    const std::function<bool()> &stop_early = [](){ return false; },
+                    size_t num_threads = 1,
+                    size_t batch_size = 1'000'000) const override final {
+        hash_dbg_->call_nodes(callback, stop_early, num_threads, batch_size);
     }
 
     void call_outgoing_kmers(node_index node,

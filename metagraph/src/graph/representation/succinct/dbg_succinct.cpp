@@ -193,7 +193,9 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 }
 
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate) const {
+                             const std::function<bool()> &terminate,
+                             size_t num_threads,
+                             size_t batch_size) const {
     if (valid_edges_) {
         try {
             valid_edges_->call_ones([&](uint64_t i) {
@@ -203,11 +205,8 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
             });
         } catch (early_term&) {}
         return;
-    }
-    for (node_index i = 1; i <= max_index() && !terminate(); ++i) {
-        if (in_graph(i)) {
-            callback(i);
-        }
+    } else {
+        DeBruijnGraph::call_nodes(callback, terminate, num_threads, batch_size);
     }
 }
 
