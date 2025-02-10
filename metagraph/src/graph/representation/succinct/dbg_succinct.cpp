@@ -213,7 +213,6 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                 });
             } catch (early_term&) {}
         }
-    }
     } else {
         DeBruijnGraph::call_nodes(callback, terminate, num_threads, batch_size);
     }
