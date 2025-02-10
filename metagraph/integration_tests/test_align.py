@@ -334,7 +334,8 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -359,7 +360,8 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
