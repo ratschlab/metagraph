@@ -376,7 +376,10 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
         assert(terminal->size() == visited.size());
         assert(rd_succ.size() == visited.size());
 
+        ProgressBar progress_bar(graph.num_nodes(), "Checking nodes", std::cerr,
+                                 !common::get_verbose());
         graph.call_nodes([&](node_index start) {
+            ++progress_bar;
             node_index v = start;
             std::vector<node_index> path;
             while (path.size() < max_length
