@@ -346,10 +346,13 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
                      " edges will be selected for assigning RowDiff successors",
                      count_vectors_dir);
         rd_succ = last;
-        if(dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
+        if (dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
             rd_succ_bv_type().serialize(f);
         } else {
-            rd_succ_bv_type(*rd_succ).serialize(f);
+            assert(std::dynamic_pointer_cast<const bit_vector_stat>(rd_succ));
+            rd_succ_bv_type(std::move(
+                *std::static_pointer_cast<const bit_vector_stat>(rd_succ)
+            )).serialize(f);
         }
     }
 

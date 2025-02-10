@@ -17,8 +17,12 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
                               node_index node,
                               const bit_vector &rd_succ) {
     if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        return dbg_succ->get_boss().row_diff_successor(node, rd_succ);
+        return dbg_succ->get_boss().row_diff_successor(
+            node,
+            rd_succ.size() ? rd_succ : dbg_succ->get_boss().get_last()
+        );
     } else {
+        assert(rd_succ.size());
         node_index succ = graph::DeBruijnGraph::npos;
         graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
             if (rd_succ[adjacent_node]) {
@@ -97,14 +101,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
             if (anchor_[row])
                 break;
 
-            if (fork_succ_.size()) {
-                node = row_diff_successor(*graph_, node, fork_succ_);
-            } else { // Only happens in DBGSuccinct
-                auto *dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(graph_);
-                assert(dbg_succ);
-                node = row_diff_successor(*graph_, node, dbg_succ->get_boss().get_last());
-            }
-            
+            node = row_diff_successor(*graph_, node, fork_succ_);
         }
     }
 
