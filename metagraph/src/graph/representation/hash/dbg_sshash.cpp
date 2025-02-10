@@ -314,13 +314,26 @@ size_t DBGSSHash::indegree(node_index node) const {
 
 void DBGSSHash::call_nodes(
         const std::function<void(node_index)>& callback,
-        const std::function<bool()> &terminate) const {
-    for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
+        const std::function<bool()> &terminate,
+        size_t num_threads,
+        size_t batch_size) const {
+    #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
+    for (size_t node_idx = 1; node_idx <= dict_size(); ++node_idx) {
+        if (terminate())
+            continue;
+
         callback(node_idx);
     }
 
+    if (terminate())
+        return;
+
     if (mode_ == CANONICAL) {
-        for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
+        #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
+        for (size_t node_idx = 1; node_idx <= dict_size(); ++node_idx) {
+            if (terminate())
+                continue;
+
             size_t rc_node_idx = reverse_complement(node_idx);
             if (rc_node_idx != node_idx)
                 callback(rc_node_idx);

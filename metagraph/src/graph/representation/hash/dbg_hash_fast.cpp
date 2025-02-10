@@ -81,8 +81,8 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 
     void call_nodes(const std::function<void(node_index)> &callback,
                     const std::function<bool()> &stop_early,
-                    size_t num_threads,
-                    size_t batch_size) const override final;
+                    size_t num_threads = 1,
+                    size_t batch_size = 1'000'000) const override final;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const override final {
@@ -540,11 +540,14 @@ void DBGHashFastImpl<KMER>::call_nodes(const std::function<void(node_index)> &ca
                                        size_t batch_size) const {
     #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
     for (size_t i = 0; i < kmers_.size(); ++i) {
+        if (stop_early())
+            continue;
+
         Flags flags = bits_[i];
 
         for (TAlphabet c = 0; c < kAlphabetSize; ++c, flags >>= 1) {
             if (stop_early())
-                return;
+                break;
 
             if (flags & static_cast<Flags>(1))
                 callback(bucket_to_node(i) + c);

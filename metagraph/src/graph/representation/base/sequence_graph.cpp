@@ -31,7 +31,10 @@ void SequenceGraph::call_nodes(const std::function<void(node_index)> &callback,
     const auto nnodes = num_nodes();
 
     #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
-    for (node_index i = 1; i <= nnodes && !terminate(); ++i) {
+    for (node_index i = 1; i <= nnodes; ++i) {
+        if (terminate())
+            continue;
+
         if (in_graph(i))
             callback(i);
     }

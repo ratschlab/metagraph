@@ -76,7 +76,9 @@ class DBGSSHash : public DeBruijnGraph {
     node_index traverse_back(node_index node, char prev_char) const override;
 
     void call_nodes(const std::function<void(node_index)>& callback,
-                    const std::function<bool()> &terminate = [](){ return false; }) const override;
+                    const std::function<bool()> &terminate = [](){ return false; },
+                    size_t num_threads = 1,
+                    size_t batch_size = 1'000'000) const override;
 
     size_t outdegree(node_index) const override;
 
