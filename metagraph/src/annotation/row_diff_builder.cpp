@@ -377,17 +377,17 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
         assert(rd_succ.size() == visited.size());
 
         graph.call_nodes([&](node_index start) {
-            if (fetch_bit(visited.data(), start, true, std::memory_order_acquire))
-                return;
-
             node_index v = start;
             std::vector<node_index> path;
-            while (!fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)
-                        && path.size() < max_length) {
+            while (path.size() < max_length
+                    && !fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
                 path.push_back(v);
                 if (!graph.has_no_outgoing(v))
                     v = row_diff_successor(graph, v, rd_succ);
             }
+
+            if (path.empty())
+                return;
 
             // Either a sink, or a cyclic dependency
             if (!fetch_and_set_bit(finalised.data(), v, true, std::memory_order_acq_rel))
