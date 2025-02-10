@@ -272,19 +272,15 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
             std::shared_ptr<const bit_vector>{}, &dbg_succ->get_boss().get_last());
     } else {
         sdsl::bit_vector last_bv(graph.max_index() + 1);
-       
+
         __atomic_thread_fence(__ATOMIC_RELEASE);
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
-        for (node_index v = 1; v <= graph.max_index(); ++v) {
-            if (!graph.in_graph(v))
-                continue;
-           
+        graph.call_nodes([&](node_index v) {
             std::pair<char, node_index> last;
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
                 last = std::max(last, std::pair{c, u});
             });
             set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
-        }
+        }, []() { return false; }, get_num_threads());
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
@@ -344,7 +340,7 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
 
         rd_succ = std::make_shared<rd_succ_bv_type>(std::move(rd_succ_bv));
         rd_succ->serialize(f);
- 
+
     } else {
         logger->warn("No count vectors could be found in {}. The last outgoing"
                      " edges will be selected for assigning RowDiff successors",
@@ -377,10 +373,9 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
         assert(terminal->size() == visited.size());
         assert(rd_succ.size() == visited.size());
 
-        #pragma omp parallel for num_threads(num_threads) schedule(static, 1000000)
-        for (node_index start = 1; start <= graph.max_index(); ++start) {
-            if (!graph.in_graph(start) || fetch_bit(visited.data(), start, true, std::memory_order_acquire))
-                continue;
+        graph.call_nodes([&](node_index start) {
+            if (fetch_bit(visited.data(), start, true, std::memory_order_acquire))
+                return;
 
             node_index v = start;
             std::vector<node_index> path;
@@ -398,7 +393,8 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
             for (node_index v : path) {
                 set_bit(finalised.data(), v, true, std::memory_order_release);
             }
-        }
+        }, []() { return false; }, num_threads);
+
         std::atomic_thread_fence(std::memory_order_acquire);
     }
 }
