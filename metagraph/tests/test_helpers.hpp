@@ -16,8 +16,6 @@ using namespace mtg;
 #ifdef NDEBUG
 #undef ASSERT_DEBUG_DEATH
 #define ASSERT_DEBUG_DEATH(...) (void)0
-#else
-GTEST_FLAG_SET(death_test_style, "threadsafe");
 #endif
 
 #ifdef _NO_DEATH_TEST
