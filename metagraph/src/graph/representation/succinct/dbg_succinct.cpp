@@ -197,14 +197,23 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                              size_t num_threads,
                              size_t batch_size) const {
     if (valid_edges_) {
-        try {
-            valid_edges_->call_ones([&](uint64_t i) {
-                callback(i);
-                if (terminate())
-                    throw early_term();
-            });
-        } catch (early_term&) {}
-        return;
+        size_t block_size = max_index() / num_threads;
+
+        #pragma omp parallel for num_threads(num_threads) schedule(static)
+        for (size_t begin = 1; begin <= max_index(); begin += block_size) {
+            if (terminate())
+                continue;
+
+            size_t end = std::min(begin + block_size, max_index() + 1);
+            try {
+                valid_edges_->call_ones_in_range(begin, end, [&](uint64_t i) {
+                    callback(i);
+                    if (terminate())
+                        throw early_term();
+                });
+            } catch (early_term&) {}
+        }
+    }
     } else {
         DeBruijnGraph::call_nodes(callback, terminate, num_threads, batch_size);
     }
