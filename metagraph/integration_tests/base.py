@@ -6,7 +6,14 @@ from tempfile import TemporaryDirectory
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
-METAGRAPH = f'{os.getcwd()}/metagraph'
+METAGRAPH_EXE = f'{os.getcwd()}/metagraph'
+DNA_MODE = os.readlink(METAGRAPH_EXE).endswith("_DNA")
+PROTEIN_MODE = os.readlink(METAGRAPH_EXE).endswith("_Protein")
+METAGRAPH = METAGRAPH_EXE
+
+def update_prefix(PREFIX):
+    global METAGRAPH
+    METAGRAPH = PREFIX + METAGRAPH_EXE
 
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 
@@ -37,10 +44,19 @@ class TestingBase(unittest.TestCase):
     def _get_stats(graph_path):
         stats_command = METAGRAPH + ' stats ' + graph_path + ' --mmap'
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
-        assert(res.returncode == 0)
+        if res.returncode != 0:
+            raise AssertionError(f"Command '{stats_command}' failed with return code {res.returncode} and error: {res.stderr.decode()}")
         stats_command = METAGRAPH + ' stats ' + graph_path + MMAP_FLAG
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
-        return res
+        parsed = dict()
+        parsed['returncode'] = res.returncode
+        res = res.stdout.decode().split('\n')[2:]
+        for line in res:
+            if ': ' in line:
+                x, y = map(str.strip, line.split(':', 1))
+                assert(x not in parsed or parsed[x] == y)
+                parsed[x] = y
+        return parsed
 
     @staticmethod
     def _build_graph(input, output, k, repr, mode='basic', extra_params=''):

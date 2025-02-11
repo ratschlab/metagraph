@@ -6,13 +6,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
 
 
 """Test graph construction and alignment"""
-
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
@@ -35,11 +32,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation,
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -68,11 +64,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation,
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align -i {graph} --map --count-kmers {reads}'.format(
             exe=METAGRAPH,
@@ -99,11 +94,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation,
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align -i {graph} --map --count-kmers --align-length 10 {reads}'.format(
             exe=METAGRAPH,
@@ -134,11 +128,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 32782', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('32782', params['nodes (k)'])
+        self.assertEqual('canonical', params['mode'])
 
         stats_command = '{exe} align -i {graph} --map --count-kmers {reads}'.format(
             exe=METAGRAPH,
@@ -165,11 +158,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation,
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -189,11 +181,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation,
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -222,11 +213,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 32782', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('32782', params['nodes (k)'])
+        self.assertEqual('canonical', params['mode'])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -256,11 +246,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 32782', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('32782', params['nodes (k)'])
+        self.assertEqual('canonical', params['mode'])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
@@ -286,11 +275,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation, mode='primary',
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16391', params_str[1])
-        self.assertEqual('mode: primary', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16391', params['nodes (k)'])
+        self.assertEqual('primary', params['mode'])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -320,11 +308,10 @@ class TestDNAAlign(TestingBase):
                           k=11, repr=representation, mode='primary',
                           extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16391', params_str[1])
-        self.assertEqual('mode: primary', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16391', params['nodes (k)'])
+        self.assertEqual('primary', params['mode'])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
@@ -347,13 +334,13 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16461', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -373,13 +360,13 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16461', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        self.assertEqual('11', params['k'])
+        self.assertEqual('16438', params['nodes (k)'])
+        self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,

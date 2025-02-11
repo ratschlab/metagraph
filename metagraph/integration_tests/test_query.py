@@ -8,14 +8,11 @@ import glob
 import os
 import numpy as np
 from helpers import get_test_class_name
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 import hashlib
 
 
 """Test graph construction"""
-
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 anno_file_extension = {'column': '.column.annodbg',
                        'column_coord': '.column_coord.annodbg',
@@ -86,13 +83,12 @@ class TestQuery(TestingBase):
                          20, cls.graph_repr, 'basic',
                          '--mask-dummy' if cls.mask_dummy else '')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 20' == out[0])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert('20' == stats_graph['k'])
         if cls.graph_repr != 'succinct' or cls.mask_dummy:
-            assert('nodes (k): 46960' == out[1])
-        assert('mode: basic' == out[2])
+            assert('46960' == stats_graph['nodes (k)'])
+        assert('basic' == stats_graph['mode'])
 
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
@@ -122,17 +118,16 @@ class TestQuery(TestingBase):
         )
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  100' == out[0])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert('100' == stats_annotation['labels'])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 46960' == out[1])
+            assert(stats_graph['max index (k)'] == stats_annotation['objects'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert(f'representation: {cls.anno_repr}' == out[3])
+        assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query(self):
         query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -574,12 +569,11 @@ class TestQueryTinyLinear(TestingBase):
 
         cls._build_graph(cls.fasta_graph, cls.tempdir.name + '/graph', 5, cls.graph_repr, 'basic', '--mask-dummy')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 5' == out[0])
-        assert('nodes (k): 12' == out[1])
-        assert('mode: basic' == out[2])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '5')
+        assert(stats_graph['nodes (k)'] == '12')
+        assert(stats_graph['mode'] == 'basic')
 
         def check_suffix(anno_repr, suffix):
             match = anno_repr.endswith(suffix)
@@ -597,16 +591,15 @@ class TestQueryTinyLinear(TestingBase):
                 separate, no_fork_opt, no_anchor_opt)
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  3' == out[0])
-        assert('objects: 12' == out[1])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert(stats_annotation['labels'] == '3')
+        assert(stats_annotation['objects'] == stats_graph['max index (k)'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert(f'representation: {cls.anno_repr}' == out[3])
+        assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query_coordinates(self):
         if not self.anno_repr.endswith('_coord'):
@@ -655,13 +648,12 @@ class TestQuery1Column(TestingBase):
                          20, cls.graph_repr, 'basic',
                          '--mask-dummy' if cls.mask_dummy else '')
 
-        res = cls._get_stats(cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 20' == out[0])
+        stats_graph = cls._get_stats(cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '20')
         if cls.graph_repr != 'succinct' or cls.mask_dummy:
-            assert('nodes (k): 46960' == out[1])
-        assert('mode: basic' == out[2])
+            assert(stats_graph['nodes (k)'] == '46960')
+        assert(stats_graph['mode'] == 'basic')
 
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
@@ -692,17 +684,16 @@ class TestQuery1Column(TestingBase):
         )
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  1' == out[0])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert(stats_annotation['labels'] == '1')
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 46960' == out[1])
+            assert(stats_annotation['objects'] == stats_graph['max index (k)'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert('representation: ' + cls.anno_repr == out[3])
+        assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query(self):
         query_command = f'{METAGRAPH} query --batch-size 0 \
@@ -788,13 +779,12 @@ class TestQueryCounts(TestingBase):
         cls._build_graph((cls.fasta_file_1, cls.fasta_file_2), cls.tempdir.name + '/graph',
                          cls.k, cls.graph_repr, 'basic', '--mask-dummy' if cls.mask_dummy else '')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 3' == out[0])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '3')
         if cls.graph_repr != 'succinct' or cls.mask_dummy:
-            assert('nodes (k): 12' == out[1])
-        assert('mode: basic' == out[2])
+            assert(stats_graph['nodes (k)'] == '12')
+        assert(stats_graph['mode'] == 'basic')
 
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
@@ -812,13 +802,12 @@ class TestQueryCounts(TestingBase):
         )
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  2' == out[0])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert(stats_annotation['labels'] == '2')
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 12' == out[1])
-        assert('representation: ' + cls.anno_repr == out[3])
+            assert(stats_annotation['objects'] == stats_graph['max index (k)'])
+        assert(stats_annotation['representation'] == cls.anno_repr)
 
         cls.queries = [
             'AAA',
@@ -968,13 +957,12 @@ class TestQueryCanonical(TestingBase):
                          20, cls.graph_repr, 'canonical',
                          '--mask-dummy' if cls.mask_dummy else '')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 20' == out[0])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '20')
         if cls.graph_repr != 'succinct' or cls.mask_dummy:
-            assert('nodes (k): 91584' == out[1])
-        assert('mode: canonical' == out[2])
+            assert(stats_graph['nodes (k)'] == '91584')
+        assert(stats_graph['mode'] == 'canonical')
 
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
@@ -991,17 +979,16 @@ class TestQueryCanonical(TestingBase):
         )
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  100' == out[0])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert(stats_annotation['labels'] == '100')
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 91584' == out[1])
+            assert(stats_annotation['objects'] == stats_graph['max index (k)'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert('representation: ' + cls.anno_repr == out[3])
+        assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query(self):
         query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -1135,13 +1122,12 @@ class TestQueryPrimary(TestingBase):
                          20, cls.graph_repr, 'primary',
                          '--mask-dummy' if cls.mask_dummy else '')
 
-        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('k: 20' == out[0])
+        stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(stats_graph['returncode'] == 0)
+        assert(stats_graph['k'] == '20')
         if cls.graph_repr != 'succinct' or cls.mask_dummy:
-            assert('nodes (k): 45792' == out[1])
-        assert('mode: primary' == out[2])
+            assert(stats_graph['nodes (k)'] == '45792')
+        assert(stats_graph['mode'] == 'primary')
 
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
@@ -1158,17 +1144,16 @@ class TestQueryPrimary(TestingBase):
         )
 
         # check annotation
-        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
-        assert(res.returncode == 0)
-        out = res.stdout.decode().split('\n')[2:]
-        assert('labels:  100' == out[0])
+        stats_annotation = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(stats_annotation['returncode'] == 0)
+        assert(stats_annotation['labels'] == '100')
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
-            assert('objects: 45792' == out[1])
+            assert(stats_annotation['objects'] == stats_graph['max index (k)'])
 
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert('representation: ' + cls.anno_repr == out[3])
+        assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query(self):
         query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
