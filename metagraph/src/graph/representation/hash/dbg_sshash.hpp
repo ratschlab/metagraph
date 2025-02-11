@@ -119,12 +119,6 @@ class DBGSSHash : public DeBruijnGraph {
     size_t num_nodes_;
     Mode mode_;
 
-    using parser_t = std::variant<
-                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt64>>,
-                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt128>>,
-                        sshash::streaming_query_regular_parsing<kmer_t<KmerInt256>>>;
-    static parser_t parser_;
-
     size_t dict_size() const;
 };
 

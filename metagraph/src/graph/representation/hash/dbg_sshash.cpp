@@ -18,6 +18,11 @@ static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits
 static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 #endif
 
+using parser_t = std::variant<
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt64>>,
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt128>>,
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt256>>>;
+
 template <typename T>
 struct template_parameter;
 
@@ -84,11 +89,7 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
     orig_state.copyfmt(std::cout);
     if (!common::get_verbose())
         std::cout.setstate(std::ios_base::failbit);
-    std::visit([&](auto &d) {
-        d.build(input_filename, build_config);
-        using kmer_t = get_kmer_t<decltype(d)>;
-        parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
-    }, dict_);
+    std::visit([&](auto &d) { d.build(input_filename, build_config); }, dict_);
     if (!common::get_verbose())
         std::cout.copyfmt(orig_state);
 
@@ -152,11 +153,11 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
     std::visit([&](const auto &dict) {
-        std::visit([&](auto &parser) {
-            map_to_nodes_with_rc_impl<with_rc>(k_, dict, parser, sequence, [&](sshash::lookup_result res) {
-                callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
-            }, terminate);
-        }, parser_);
+        using kmer_t = get_kmer_t<decltype(dict)>;
+        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, parser, sequence, [&](sshash::lookup_result res) {
+            callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
+        }, terminate);
     }, dict_);
 }
 
@@ -410,14 +411,8 @@ bool DBGSSHash::load(std::istream &in) {
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;
 
-    if (num_nodes_) {
-        std::visit([&](auto &d) {
-            d.visit(loader);
-
-            using kmer_t = get_kmer_t<decltype(d)>;
-            parser_ = sshash::streaming_query_regular_parsing<kmer_t>(&d);
-        }, dict_);
-    }
+    if (num_nodes_)
+        std::visit([&](auto &d) { d.visit(loader); }, dict_);
 
     return true;
 }
