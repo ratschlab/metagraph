@@ -2,6 +2,8 @@
 
 #include <type_traits>
 
+#include <query/streaming_query_regular_parsing.hpp>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/logger.hpp"
@@ -105,10 +107,9 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <bool with_rc, class Dict, class Parser>
+template <bool with_rc, class Dict>
 void map_to_nodes_with_rc_impl(size_t k,
                                const Dict &dict,
-                               Parser &parser,
                                std::string_view sequence,
                                const std::function<void(sshash::lookup_result)>& callback,
                                const std::function<bool()>& terminate) {
@@ -125,8 +126,10 @@ void map_to_nodes_with_rc_impl(size_t k,
 
     using kmer_t = get_kmer_t<Dict>;
 
-    if (with_rc) {
-        for (size_t i = 0; i + k <= sequence.size(); ++i) {
+    if (with_rc && (k & 1)) {
+        // TODO: the streaming parser only works for odd k (because of palindromes?)
+        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
+        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             callback(parser.lookup_advanced(sequence.data() + i));
         }
     } else {
@@ -153,9 +156,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                                      const std::function<void(node_index, bool)>& callback,
                                      const std::function<bool()>& terminate) const {
     std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
-        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
-        map_to_nodes_with_rc_impl<with_rc>(k_, dict, parser, sequence, [&](sshash::lookup_result res) {
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
             callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
         }, terminate);
     }, dict_);

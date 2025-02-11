@@ -7,8 +7,6 @@
 #include <dictionary.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include <query/streaming_query_regular_parsing.hpp>
-
 #include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg::graph {
