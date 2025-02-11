@@ -24,8 +24,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                        const Config &config,
                                                        size_t max_chunks_open) {
     uint64_t max_index = graph->max_index();
-    const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
+    auto base_graph = graph;
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph wrapped into canonical");
@@ -56,13 +56,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         using namespace annot::matrix;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            if (!dbg_graph) {
-                logger->error("Only succinct de Bruijn graph representations"
-                              " are supported for row-diff annotations");
-                std::exit(1);
-            }
-
-            row_diff->set_graph(dbg_graph);
+            row_diff->set_graph(base_graph.get());
 
             if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
                 row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);

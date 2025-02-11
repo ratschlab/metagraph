@@ -171,7 +171,7 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node == npos)
         return npos;
 
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     if (node > dict_size())
         return node - dict_size();
 
@@ -205,13 +205,13 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
     return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
     std::string string_kmer = prev_char + get_node_sequence(node);
     string_kmer.pop_back();
@@ -222,7 +222,7 @@ template <bool with_rc>
 void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
@@ -249,7 +249,7 @@ template <bool with_rc>
 void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
@@ -299,14 +299,14 @@ void DBGSSHash::call_incoming_kmers(node_index node,
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     size_t res = 0;
     adjacent_outgoing_nodes(node, [&](node_index) { ++res; });
     return res;
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     size_t res = 0;
     adjacent_incoming_nodes(node, [&](node_index) { ++res; });
     return res;
@@ -314,13 +314,26 @@ size_t DBGSSHash::indegree(node_index node) const {
 
 void DBGSSHash::call_nodes(
         const std::function<void(node_index)>& callback,
-        const std::function<bool()> &terminate) const {
-    for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
+        const std::function<bool()> &terminate,
+        size_t num_threads,
+        size_t batch_size) const {
+    #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
+    for (size_t node_idx = 1; node_idx <= dict_size(); ++node_idx) {
+        if (terminate())
+            continue;
+
         callback(node_idx);
     }
 
+    if (terminate())
+        return;
+
     if (mode_ == CANONICAL) {
-        for (size_t node_idx = 1; !terminate() && node_idx <= dict_size(); ++node_idx) {
+        #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
+        for (size_t node_idx = 1; node_idx <= dict_size(); ++node_idx) {
+            if (terminate())
+                continue;
+
             size_t rc_node_idx = reverse_complement(node_idx);
             if (rc_node_idx != node_idx)
                 callback(rc_node_idx);
@@ -356,7 +369,7 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string str_kmer(k_, ' ');
     node_index node_canonical = node > dict_size() ? node - dict_size() : node;
     uint64_t ssh_idx = graph_index_to_sshash(node_canonical);
