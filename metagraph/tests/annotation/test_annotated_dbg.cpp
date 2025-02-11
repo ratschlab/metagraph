@@ -27,17 +27,32 @@ void check_labels(const AnnotatedDBG &anno_graph,
                   const std::string &sequence,
                   const std::vector<std::string> labels_present,
                   const std::vector<std::string> labels_not_present) {
+    const DeBruijnGraph &graph = anno_graph.get_graph();
     std::set<SequenceGraph::node_index> indices;
-    anno_graph.get_graph().map_to_nodes(
-        sequence,
-        [&](const auto &index) {
-            ASSERT_NE(SequenceGraph::npos, index);
-            indices.insert(index);
-            EXPECT_EQ(labels_present.size(), anno_graph.get_labels(index).size());
-            EXPECT_EQ(convert_to_set(labels_present),
-                      convert_to_set(anno_graph.get_labels(index)));
+    call_annotated_nodes_offsets(graph, sequence, [&](auto index, int64_t) {
+        ASSERT_NE(SequenceGraph::npos, index);
+        indices.insert(index);
+        auto cur_labels = anno_graph.get_stored_labels(index);
+        EXPECT_EQ(labels_present.size(), cur_labels.size());
+        EXPECT_EQ(convert_to_set(labels_present), convert_to_set(cur_labels));
+
+        if (graph.is_monochromatic()) {
+            DeBruijnGraph::node_index contig_id = graph.get_contig_id(index);
+            EXPECT_EQ(convert_to_set(anno_graph.get_labels(graph.get_node_sequence(contig_id))),
+                      convert_to_set(cur_labels));
+
+            DeBruijnGraph::node_index last_node = graph.get_last_node_in_contig(contig_id);
+            EXPECT_EQ(convert_to_set(anno_graph.get_labels(graph.get_node_sequence(last_node))),
+                      convert_to_set(cur_labels));
+
+            for (DeBruijnGraph::node_index node = contig_id + 1; node <= last_node; ++node) {
+                EXPECT_TRUE(anno_graph.get_stored_labels(node).empty());
+            }
         }
-    );
+    });
+
+    EXPECT_EQ(convert_to_set(labels_present),
+              convert_to_set(anno_graph.get_labels(sequence)));
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
@@ -54,7 +69,7 @@ void check_labels(const AnnotatedDBG &anno_graph,
                             std::back_inserter(diff));
         EXPECT_EQ(0u, diff.size())
             << diff.front()
-            << anno_graph.get_graph().get_node_sequence(diff.front());
+            << graph.get_node_sequence(diff.front());
     }
 }
 
@@ -985,6 +1000,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGSSHash, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHashMonochromatic, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
@@ -1015,6 +1031,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSSHash, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHashMonochromatic, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,

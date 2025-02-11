@@ -2,15 +2,22 @@
 
 #include <type_traits>
 
+#include <progress_bar.hpp>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "seq_io/sequence_io.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
 namespace graph {
+
+const size_t kBufferSize = 10'000'000;
 
 #if _PROTEIN_GRAPH
 static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
@@ -55,7 +62,11 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     }
 }
 
-DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, size_t num_chars)
+DBGSSHash::DBGSSHash(const std::string &input_filename,
+                     size_t k,
+                     Mode mode,
+                     size_t num_chars,
+                     bool is_monochromatic)
       : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
@@ -89,6 +100,110 @@ DBGSSHash::DBGSSHash(const std::string &input_filename, size_t k, Mode mode, siz
         std::cout.copyfmt(orig_state);
 
     num_nodes_ = dict_size();
+
+    if (is_monochromatic) {
+        common::logger->trace("Marking colour boundaries");
+        sdsl::bit_vector id(num_nodes_);
+        {
+            ThreadPool thread_pool(get_num_threads());
+            ProgressBar progress_bar(num_nodes(),
+                                     "Parsing sequences",
+                                     std::cerr, !common::get_verbose());
+
+            auto process_sequence([&](const std::string &seq, const std::string &comment) {
+                auto indices = mtg::graph::map_to_nodes_sequentially(*this, seq);
+                assert(std::equal(indices.begin(), indices.end() - 1,
+                                  indices.begin() + 1, indices.end(),
+                                  [](node_index a, node_index b) { return a + 1 == b; }));
+                size_t pos = graph_index_to_sshash(indices[0]);
+                id[pos] = true;
+                auto split_string = utils::split_string(comment, " ");
+                size_t old_pos = pos;
+                size_t nkmers = seq.size() - k_ + 1;
+
+                for (const auto &part : split_string) {
+                    if (part[0] == 'C') {
+                        auto c_parts = utils::split_string(part, ":");
+                        assert(c_parts.size());
+                        id[pos] = true;
+                        pos += atoll(c_parts.back().c_str());
+                    }
+                }
+
+                if (pos == old_pos)
+                    pos += nkmers;
+
+                assert(pos == old_pos + nkmers);
+                return nkmers;
+            });
+
+            BatchAccumulator<std::pair<std::string, std::string>> batcher(
+                [&](std::vector<std::pair<std::string, std::string>>&& buffer) {
+                    thread_pool.enqueue([&](auto&& buffer) {
+                        size_t total_kmers = 0;
+                        for (const auto &[seq, comment] : buffer) {
+                            total_kmers += process_sequence(seq, comment);
+                        }
+                        progress_bar += total_kmers;
+                    }, std::move(buffer));
+                },
+                std::numeric_limits<size_t>::max(),
+                kBufferSize
+            );
+
+            seq_io::read_fasta_file_critical(input_filename, [&](auto *read_stream) {
+                batcher.push_and_pay(
+                    read_stream->seq.l + read_stream->comment.l,
+                    std::make_pair(
+                        std::string(read_stream->seq.s, read_stream->seq.l),
+                        std::string(read_stream->comment.s, read_stream->comment.l)
+                    )
+                );
+            });
+
+            thread_pool.join();
+        }
+
+        size_t update_batch = 10000;
+        ProgressBar progress_bar(num_nodes_,
+                                 "Marking unitig breakpoints",
+                                 std::cerr, !common::get_verbose());
+        std::atomic_thread_fence(std::memory_order_release);
+
+        std::unique_ptr<const CanonicalDBG> canonical;
+
+        if (mode_ == PRIMARY) {
+            canonical = std::make_unique<const CanonicalDBG>(std::shared_ptr<const DBGSSHash>(
+                std::shared_ptr<const DBGSSHash>{}, this
+            ));
+        }
+
+        auto is_breakpoint = [this,canonical=std::move(canonical)](node_index node) {
+            if (canonical) {
+                return !canonical->has_single_incoming(node) || !canonical->has_single_incoming(reverse_complement(node));
+            } else if (mode_ == CANONICAL) {
+                return !has_single_incoming(node) || !has_single_incoming(reverse_complement(node));
+            } else {
+                return !has_single_incoming(node);
+            }
+        };
+
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (size_t p = 0; p < num_nodes_; ++p) {
+            node_index node = sshash_to_graph_index(p);
+            if (is_breakpoint(node))
+                set_bit(id.data(), p, std::memory_order_relaxed);
+
+            if (p && (p % update_batch) == 0)
+                progress_bar += update_batch;
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        progress_bar += num_nodes_ % update_batch;
+
+        monotig_id_ = bit_vector_rrr<>(std::move(id));
+        common::logger->trace("Marked {} boundaries", monotig_id_.num_set_bits());
+    }
 }
 
 std::string DBGSSHash::file_extension() const {
@@ -155,6 +270,108 @@ template
 void DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
                                             const std::function<void(node_index, bool)>&,
                                             const std::function<bool()>&) const;
+
+void DBGSSHash::map_to_contigs(std::string_view sequence,
+                               const std::function<void(node_index, int64_t)>& callback,
+                               const std::function<bool()>& terminate) const {
+    if (!is_monochromatic()) {
+        DeBruijnGraph::map_to_contigs(sequence, callback, terminate);
+        return;
+    }
+
+    if (mode_ != CANONICAL) {
+        map_to_contigs_with_rc<false>(sequence, [&](node_index node, int64_t offset, bool) {
+            callback(node, offset);
+        });
+    } else {
+        map_to_contigs_with_rc<true>(sequence, [&](node_index node, int64_t offset, bool) {
+            callback(node, offset);
+        });
+    }
+}
+
+DBGSSHash::node_index DBGSSHash::get_contig_id(node_index node) const {
+    assert(node != npos);
+    if (is_monochromatic()) {
+        assert(monotig_id_.size() && monotig_id_[0]);
+        node_index contig_id = sshash_to_graph_index(monotig_id_.prev1(graph_index_to_sshash(node)));
+        assert(contig_id != npos);
+        assert(contig_id <= max_index());
+        return contig_id;
+    }
+
+    return DeBruijnGraph::get_contig_id(node);
+}
+
+DBGSSHash::node_index DBGSSHash::get_last_node_in_contig(node_index contig_id) const {
+    assert(contig_id != npos);
+    if (is_monochromatic()) {
+        assert(monotig_id_.size());
+        uint64_t contig_sshash_id = graph_index_to_sshash(contig_id);
+        assert(monotig_id_[contig_sshash_id]);
+
+        if (contig_sshash_id + 1 == monotig_id_.size())
+            return contig_id;
+
+        uint64_t next_contig = monotig_id_.next1(contig_sshash_id + 1);
+
+        if (next_contig == contig_sshash_id + 1)
+            return contig_id;
+
+        node_index last_node = sshash_to_graph_index(next_contig - 1);
+        assert(last_node != npos);
+        assert(last_node <= max_index());
+        return last_node;
+    }
+
+    return DeBruijnGraph::get_last_node_in_contig(contig_id);
+}
+
+template <bool with_rc>
+void DBGSSHash::map_to_contigs_with_rc(std::string_view sequence,
+                                       const std::function<void(node_index, int64_t, bool)>& callback,
+                                       const std::function<bool()>& terminate) const {
+    if (terminate() || sequence.size() < k_)
+        return;
+
+    if (!num_nodes()) {
+        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
+            callback(npos, 0, false);
+        }
+        return;
+    }
+
+    std::visit([&](const auto &dict) {
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence,
+            [&](sshash::lookup_result res) {
+                node_index node = sshash_to_graph_index(res.kmer_id);
+                if (node == npos) {
+                    res.kmer_id_in_contig = 0;
+                } else if (is_monochromatic()) {
+                    assert(monotig_id_.size() == dict_size());
+                    assert(monotig_id_[res.kmer_id] || res.kmer_id_in_contig);
+                    assert(monotig_id_[res.kmer_id - res.kmer_id_in_contig]);
+                    assert(monotig_id_.prev1(res.kmer_id) >= res.kmer_id - res.kmer_id_in_contig);
+                    res.kmer_id_in_contig = res.kmer_id - monotig_id_.prev1(res.kmer_id);
+                }
+
+                callback(node - res.kmer_id_in_contig,
+                         res.kmer_id_in_contig,
+                         res.kmer_orientation);
+            },
+            terminate
+        );
+    }, dict_);
+}
+
+template
+void DBGSSHash::map_to_contigs_with_rc<true>(std::string_view,
+                                             const std::function<void(node_index, int64_t, bool)>&,
+                                             const std::function<bool()>&) const;
+template
+void DBGSSHash::map_to_contigs_with_rc<false>(std::string_view,
+                                              const std::function<void(node_index, int64_t, bool)>&,
+                                              const std::function<bool()>&) const;
 
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)>& callback,
@@ -377,6 +594,8 @@ void DBGSSHash::serialize(std::ostream& out) const {
 
     if (num_nodes())
         std::visit([&](const auto &d) { saver.visit(d); }, dict_);
+
+    monotig_id_.serialize(out);
 }
 
 void DBGSSHash::serialize(const std::string& filename) const {
@@ -399,6 +618,8 @@ bool DBGSSHash::load(std::istream &in) {
 
     if (num_nodes_)
         std::visit([&](auto &d) { d.visit(loader); }, dict_);
+
+    monotig_id_.load(in);
 
     return true;
 }

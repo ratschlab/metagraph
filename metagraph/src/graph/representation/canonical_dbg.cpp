@@ -161,6 +161,45 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }, terminate);
 }
 
+void CanonicalDBG::map_to_contigs(std::string_view sequence,
+                                  const std::function<void(node_index, int64_t)> &callback,
+                                  const std::function<bool()> &terminate) const {
+    if (sequence.size() < get_k())
+        return;
+
+    if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
+        sshash->map_to_contigs_with_rc<true>(sequence, [&](node_index node, int64_t offset, bool) {
+            callback(node, offset);
+        }, terminate);
+        return;
+    }
+
+    std::string rc(sequence);
+    ::reverse_complement(rc.begin(), rc.end());
+
+    std::vector<std::pair<node_index, int64_t>> rc_map;
+    rc_map.reserve(sequence.size() - get_k() + 1);
+
+    graph_->map_to_contigs(rc, [&](node_index node, int64_t offset) {
+        rc_map.emplace_back(node, offset);
+    }, terminate);
+
+    auto it = rc_map.rbegin();
+    graph_->map_to_contigs(sequence, [&](node_index node, int64_t offset) {
+        assert(it != rc_map.rend());
+        assert(node == npos || it->first == npos);
+
+        if (node != npos) {
+            callback(node, offset);
+        } else {
+            callback(it->first, it->second);
+        }
+
+        ++it;
+    }, terminate);
+    assert(it == rc_map.rend());
+}
+
 void CanonicalDBG::call_outgoing_kmers(node_index node,
                                        const std::string &spelling_hint,
                                        const OutgoingEdgeCallback &callback) const {

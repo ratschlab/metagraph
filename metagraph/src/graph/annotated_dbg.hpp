@@ -28,7 +28,10 @@ class AnnotatedSequenceGraph {
 
     virtual ~AnnotatedSequenceGraph() {}
 
-    virtual std::vector<Label> get_labels(node_index index) const;
+    // Return the labels explicitly stored at this node. Some annotation schemes
+    // may not store labels at all nodes
+    // (e.g., canonical-mode graphs only annotate canonical k-mers)
+    virtual std::vector<Label> get_stored_labels(node_index index) const;
 
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
@@ -72,7 +75,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                  std::unique_ptr<Annotator>&& annotation,
                  bool force_fast = false);
 
-    using AnnotatedSequenceGraph::get_labels;
+    using AnnotatedSequenceGraph::get_stored_labels;
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
@@ -149,7 +152,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     get_kmer_coordinates(const std::vector<node_index> &nodes,
                          size_t num_top_labels,
                          double discovery_fraction,
-                         double presence_fraction) const;
+                         double presence_fraction,
+                         const std::vector<int64_t> &offsets = {}) const;
 
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
@@ -164,6 +168,10 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
   private:
     DeBruijnGraph &dbg_;
 };
+
+void call_annotated_nodes_offsets(const SequenceGraph &graph,
+                                  std::string_view sequence,
+                                  const std::function<void(SequenceGraph::node_index, int64_t)> &callback);
 
 } // namespace graph
 } // namespace mtg
