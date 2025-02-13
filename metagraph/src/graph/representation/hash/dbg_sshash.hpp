@@ -8,6 +8,7 @@
 #include <sdsl/uint256_t.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg::graph {
 
@@ -118,6 +119,8 @@ class DBGSSHash : public DeBruijnGraph {
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+    bit_vector_smart succ_is_next_;
+    bit_vector_smart pred_is_prev_;
 
     size_t dict_size() const;
 };
