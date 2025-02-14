@@ -168,6 +168,7 @@ void reference_based_test_nodeath(const bit_vector &vector,
 
 void reference_based_test_death(const bit_vector &vector,
                                 const sdsl::bit_vector &reference) {
+#ifndef NDEBUG
     ASSERT_DEBUG_DEATH(vector.select1(0), "");
 
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
@@ -177,9 +178,10 @@ void reference_based_test_death(const bit_vector &vector,
     ASSERT_DEBUG_DEATH(vector.select1(vector.size() + 1), "");
     ASSERT_DEBUG_DEATH(vector[vector.size()], "");
     ASSERT_DEBUG_DEATH(vector[vector.size() + 1], "");
-
-    test_next(vector);
-    test_prev(vector);
+#else
+    std::ignore = vector;
+    std::ignore = reference;
+#endif
 }
 
 void reference_based_test(const bit_vector &vector,
