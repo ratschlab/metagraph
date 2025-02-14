@@ -523,9 +523,11 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP_DeathTest) {
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
     for (auto init_list : init_lists) {
-        sdsl::bit_vector numbers(init_list);
         std::ofstream outstream(test_dump_basename, std::ios::binary);
-        std::unique_ptr<bit_vector> vector { new TypeParam(numbers) };
+        std::unique_ptr<bit_vector> vector { new TypeParam(sdsl::bit_vector(100, 0)) };
+        vector->serialize(outstream);
+        sdsl::bit_vector numbers(init_list);
+        vector.reset(new TypeParam(numbers));
         vector->serialize(outstream);
         outstream.close();
 
