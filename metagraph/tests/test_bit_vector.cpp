@@ -170,6 +170,7 @@ void reference_based_test_death(const bit_vector &vector,
                                 const sdsl::bit_vector &reference) {
     ASSERT_DEBUG_DEATH(vector.select1(0), "");
 
+    size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
     for (size_t i : { 1, 2, 10, 100, 1000 }) {
         ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
     }
@@ -522,8 +523,9 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP_DeathTest) {
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
     for (auto init_list : init_lists) {
+        sdsl::bit_vector numbers(init_list);
         std::ofstream outstream(test_dump_basename, std::ios::binary);
-        std::unique_ptr<bit_vector> vector { new TypeParam(sdsl::bit_vector(init_list)) };
+        std::unique_ptr<bit_vector> vector { new TypeParam(numbers) };
         vector->serialize(outstream);
         outstream.close();
 
