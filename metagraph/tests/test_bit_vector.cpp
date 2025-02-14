@@ -121,8 +121,8 @@ void test_prev(const bit_vector &vector) {
     test_prev_subvector(vector, vector.size() - 1);
 }
 
-void reference_based_test(const bit_vector &vector,
-                          const sdsl::bit_vector &reference) {
+void reference_based_test_nodeath(const bit_vector &vector,
+                                  const sdsl::bit_vector &reference) {
     EXPECT_EQ(reference.size(), vector.size());
 
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
@@ -166,6 +166,26 @@ void reference_based_test(const bit_vector &vector,
     test_prev(vector);
 }
 
+void reference_based_test_death(const bit_vector &vector,
+                                const sdsl::bit_vector &reference) {
+    ASSERT_DEBUG_DEATH(vector.select1(0), "");
+
+    for (size_t i : { 1, 2, 10, 100, 1000 }) {
+        ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
+    }
+    ASSERT_DEBUG_DEATH(vector.select1(vector.size() + 1), "");
+    ASSERT_DEBUG_DEATH(vector[vector.size()], "");
+    ASSERT_DEBUG_DEATH(vector[vector.size() + 1], "");
+
+    test_next(vector);
+    test_prev(vector);
+}
+
+void reference_based_test(const bit_vector &vector,
+                          const sdsl::bit_vector &reference) {
+    reference_based_test_nodeath(vector, reference);
+    reference_based_test_death(vector, reference);
+}
 
 template <class T>
 void test_bit_vector_queries() {
@@ -488,7 +508,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector->load(instream));
 
-        reference_based_test(*vector, numbers);
+        reference_based_test_nodeath(*vector, numbers);
     }
 }
 
