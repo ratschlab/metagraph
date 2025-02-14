@@ -219,13 +219,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     std::vector<uint64_t> max_obs_vals(groups.size());
     std::vector<size_t> n_kmers(groups.size());
     std::vector<uint64_t> sums(groups.size());
-    std::vector<uint64_t> sums_of_squares(groups.size());
 
     int64_t total_kmers = 0;
     for (size_t j = 0; j < groups.size(); ++j) {
         for (const auto &[k, c] : hists[j]) {
             sums[j] += k * c;
-            sums_of_squares[j] += k * k * c;
             if (k != 0)
                 n_kmers[j] += c;
 
@@ -405,47 +403,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 pval += boost::math::cdf(boost::math::complement(bdist, sp));
 
             return pval;
-        };
-    } else if (config.test_type == "fisher") {
-        double lbase_shared = lgamma(in_kmers + 1) + lgamma(out_kmers + 1) - lgamma(total_kmers + 1);
-
-        compute_min_pval = [&,lbase_shared](int64_t m1, const PairContainer&) {
-            if (m1 == 0)
-                return 1.0;
-
-            int64_t m2 = total_kmers - m1;
-
-            auto get_pval = [&](int64_t a) {
-                double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
-
-                int64_t b = in_kmers - a;
-                int64_t c = m1 - a;
-                int64_t d = m2 - b;
-                assert(d == out_kmers - c);
-
-                return out_kmers < c
-                    ? 1.0
-                    : exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
-            };
-
-            return std::min(get_pval(0), get_pval(std::min(in_kmers, m1)));
-        };
-
-        compute_pval = [&,lbase_shared](int64_t in_sum, int64_t out_sum, const auto &row) {
-            if (row.empty())
-                return 1.0;
-
-            int64_t m1 = in_sum + out_sum;
-            int64_t m2 = total_kmers - m1;
-
-            double lbase = lbase_shared + lgamma(m1 + 1) + lgamma(m2 + 1);
-
-            int64_t a = in_sum;
-            int64_t b = in_kmers - in_sum;
-            int64_t c = out_sum;
-            int64_t d = out_kmers - out_sum;
-
-            return exp(lbase - lgamma(a + 1) - lgamma(b + 1) - lgamma(c + 1) - lgamma(d + 1));
         };
     } else if (config.test_type == "nbinom_exact" || config.test_type == "gnb_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
@@ -980,6 +937,302 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return compute_pval_r(r, r_in, r_out, lscaling_base, in_sum, out_sum, row);
             };
         }
+    } else if (config.test_type == "lnb_exact") {
+        double max_sum = *std::max_element(sums.begin(), sums.end());
+        std::vector<double> scale_factor;
+        scale_factor.reserve(sums.size());
+        std::transform(sums.begin(), sums.end(), std::back_inserter(scale_factor),
+                       [&](uint64_t sum) -> double { return max_sum / sum; });
+
+        common::logger->trace("Enumerating row count distributions");
+        std::vector<tsl::hopscotch_map<std::vector<double>, double, utils::VectorHash>> vector_counts;
+        {
+            std::vector<std::vector<tsl::hopscotch_map<std::vector<double>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
+
+            generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
+                if (!kept[row_i])
+                    return;
+
+                double in_sum = 0;
+                double out_sum = 0;
+                bool in_kmer = false;
+                bool out_kmer = false;
+
+                std::vector<double> vec;
+                vec.reserve(raw_row.size());
+                size_t count_in = 0;
+                size_t count_out = 0;
+                size_t total_count = 0;
+                for (const auto &[j, raw_c] : raw_row) {
+                    if (min_counts.size() && raw_c < min_counts[j])
+                        continue;
+
+                    double c = raw_c * scale_factor[j];
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                        out_sum += c;
+                        ++count_out;
+                    }
+
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                        in_sum += c;
+                        ++count_in;
+                    }
+
+                    total_count += groups[j] != Group::OTHER;
+
+                    vec.emplace_back(c);
+                }
+
+                if (total_count >= config.min_recurrence) {
+                    in_kmer = count_in >= config.min_in_recurrence && count_out <= config.max_out_recurrence;
+                    out_kmer = count_out >= config.min_out_recurrence && count_in <= config.max_in_recurrence;
+                }
+
+                if (!in_kmer && !out_kmer)
+                    return;
+
+                double sum = in_sum + out_sum;
+
+                // if floating point error puts the sum slightly above the integer value, then round down
+                size_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
+                if (n >= vector_counts_ms[bucket_idx].size())
+                    vector_counts_ms[bucket_idx].resize(n + 1);
+
+                std::sort(vec.begin(), vec.end());
+                ++vector_counts_ms[bucket_idx][n][vec];
+            });
+
+            vector_counts = std::move(vector_counts_ms[0]);
+            size_t max_size = vector_counts.size();
+            for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                max_size = std::max(max_size, vector_counts_ms[j].size());
+            }
+            vector_counts.resize(max_size);
+
+            ProgressBar progress_bar(vector_counts.size() - 1, "Merging row", std::cerr, !common::get_verbose());
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t n = vector_counts.size(); n > 0; --n) {
+                for (size_t j = 1; j < vector_counts_ms.size(); ++j) {
+                    if (n <= vector_counts_ms[j].size()) {
+                        for (const auto &[v, c] : vector_counts_ms[j][n - 1]) {
+                            vector_counts[n - 1][v] += c;
+                        }
+                    }
+                }
+                ++progress_bar;
+            }
+        }
+
+        auto optim = [](const auto &f, auto x_min, auto x_max) {
+            while (x_max - x_min > 1e-5) {
+                double x_mid = (x_min + x_max) / 2;
+                double x_low_mid = (x_min + x_mid) / 2;
+                double x_high_mid = (x_mid + x_max) / 2;
+                if (f(x_low_mid) > f(x_high_mid)) {
+                    x_max = x_mid;
+                } else {
+                    x_min = x_mid;
+                }
+            }
+            return (x_min + x_max) / 2;
+        };
+
+        common::logger->trace("Fitting LN prior distribution for dispersions");
+        double ln_mu = 0.0;
+        double ln_var = 0.0;
+
+        for (size_t n = 0; n < vector_counts.size(); ++n) {
+            for (const auto &[v, c] : vector_counts[n]) {
+                double total = std::accumulate(v.begin(), v.end(), double(0));
+                double total2 = std::accumulate(v.begin(), v.end(), double(0),
+                                                [&](double sum, double vv) { return sum + vv * vv;});
+                double mu = total / total_labels;
+                double mu2 = mu * mu;
+                double var = total2 / total_labels - mu2;
+                if (var <= mu) {
+                    throw std::runtime_error("var <= mu when fitting lognormal");
+                }
+
+                double r = mu2 / (var - mu);
+                ln_mu += -log(r) * c;
+                ln_var += log(r) * log(r) * c;
+            }
+        }
+
+        ln_mu /= nelem;
+        ln_var = ln_var / nelem - ln_mu * ln_mu;
+
+        common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
+                              ln_mu, ln_var,
+                              exp(ln_mu + ln_var/2), exp(ln_mu*2+ln_var)*(exp(ln_var)-1),
+                              exp(-ln_mu - ln_var/2));
+
+        double expr = exp(-ln_mu + ln_var / 2);
+        double target_p = expr / (max_sum / nelem + expr);
+
+        {
+            auto calc_r = [optim,ln_mu,ln_var,gs=total_labels,p=target_p](const auto &counts) {
+                return optim([&](double r) {
+                    double val = gs * log(p) * r - gs * lgamma(r) + log(r) - pow(-log(r)-ln_mu, 2.0)/2/ln_var;
+                    for (double c : counts) {
+                        val += lgamma(c + r);
+                    }
+                    return val;
+                }, 0, 100000);
+            };
+
+            ProgressBar progress_bar(vector_counts.size(), "Precomputing r's", std::cerr, !common::get_verbose());
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t n = 0; n < vector_counts.size(); ++n) {
+                if (n > 0 && n % 1000 == 0)
+                    progress_bar += 1000;
+
+                for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
+                    it.value() = calc_r(it->first);
+                }
+            }
+            progress_bar += vector_counts.size() % 1000;
+        }
+
+        auto get_r = std::make_shared<std::function<double(int64_t, std::vector<double>&)>>(
+            [vc=std::move(vector_counts),scale_factor](int64_t n, auto &counts) {
+                auto it = vc[n].begin();
+                if (vc[n].size() > 1) {
+                    std::sort(counts.begin(), counts.end());
+                    it = vc[n].find(counts);
+                    assert(it != vc[n].end());
+                }
+                return it->second;
+            }
+        );
+
+        compute_min_pval = [get_r,num_labels_in,num_labels_out,scale_factor](int64_t, const PairContainer &row) {
+            if (row.empty())
+                return 1.0;
+
+            std::vector<double> counts;
+            double sum = 0;
+            counts.reserve(row.size());
+            for (const auto &[j, c] : row) {
+                sum += counts.emplace_back(c * scale_factor[j]);
+            }
+            // if floating point error puts the sum slightly above the integer value, then round down
+            int64_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
+
+            double r_base = (*get_r)(n, counts);
+            if (r_base == 0.0)
+                return 1.0;
+
+            double r_in = r_base * num_labels_in;
+            double r_out = r_base * num_labels_out;
+            double r = r_in + r_out;
+            double lscaling_base = lgamma(r) / log(2);
+
+            double half_div0 = -r_in * log2(r_in) - (n + r_out) * log2(n + r_out);
+            double half_divn = -r_out * log2(r_out) - (n + r_in) * log2(n + r_in);
+
+            double pval = 0.0;
+            double lscaling = lscaling_base - lgamma(r + n) / log(2);
+            if (half_div0 >= half_divn)
+                pval += exp2(lscaling + (lgamma(r_out + n) - lgamma(r_out)) / log(2));
+
+            if (half_divn >= half_div0)
+                pval += exp2(lscaling + (lgamma(r_in + n) - lgamma(r_in)) / log(2));
+
+            return std::min(1.0, pval);
+        };
+
+        compute_pval = [get_r,num_labels_in,num_labels_out,scale_factor,groups](int64_t, int64_t, const PairContainer &row) {
+            if (row.empty())
+                return 1.0;
+
+            std::vector<double> counts;
+            double sum = 0;
+            double in_sum = 0;
+            double out_sum = 0;
+            counts.reserve(row.size());
+            for (const auto &[j, c] : row) {
+                sum += counts.emplace_back(c * scale_factor[j]);
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    out_sum += counts.back();
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    in_sum += counts.back();
+                }
+            }
+            // if floating point error puts the sum slightly above the integer value, then round down
+            int64_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
+
+            double r_base = (*get_r)(n, counts);
+
+            if (r_base == 0.0)
+                return 1.0;
+
+            double r_in = r_base * num_labels_in;
+            double r_out = r_base * num_labels_out;
+            double r = r_in + r_out;
+            double lscaling_base = lgamma(r) / log(2);
+
+            double argmin_d = r_in / r * n;
+            if (in_sum == argmin_d)
+                return 1.0;
+
+            double lscaling = lscaling_base - lgamma(r + n) / log(2);
+
+            auto get_pval = [&](const auto &get_stat) {
+                double base_stat = get_stat(in_sum, out_sum,
+                                            r_in != r_out && in_sum > 0 ? log2(in_sum) : 0.0,
+                                            r_in != r_out && out_sum > 0 ? log2(out_sum) : 0.0);
+                double pval = 0.0;
+                int64_t s = 0;
+                int64_t t = n;
+                double ls = 0;
+                double lt = log2(t);
+                if (get_stat(s, t, ls, lt) >= base_stat) {
+                    double base = lscaling + (lgamma(n + r_out) - lgamma(r_out)) / log(2);
+                    pval += exp2(base);
+                    for (++s,--t; s <= n; ++s,--t) {
+                        ls = log2(s);
+                        lt = t > 0 ? log2(t) : 0.0;
+                        if (get_stat(s, t, ls, lt) < base_stat)
+                            break;
+
+                        base += log2(t + 1) + log2(s - 1 + r_in) - ls - log2(t + r_out);
+                        pval += exp2(base);
+                    }
+                }
+
+                int64_t sp = n;
+                t = 0;
+                ls = log2(sp);
+                lt = 0;
+                if (get_stat(sp, t, ls, lt) >= base_stat) {
+                    double base = lscaling + (lgamma(n + r_in) - lgamma(r_in)) / log(2);
+                    pval += exp2(base);
+                    for (--sp,++t; sp >= s; --sp,++t) {
+                        ls = sp > 0 ? log2(sp) : 0.0;
+                        lt = log2(t);
+                        if (get_stat(sp, t, ls, lt) < base_stat)
+                            break;
+
+                        base += log2(sp + 1) + log2(t - 1 + r_out) - lt - log2(sp + r_in);
+                        pval += exp2(base);
+                    }
+                }
+
+                return std::min(1.0, pval);
+            };
+
+            if (r_in == r_out) {
+                return get_pval([&](int64_t s, int64_t, double, double) { return abs(argmin_d - s); });
+            } else {
+                return get_pval([&](int64_t s, int64_t t, double ls, double lt) {
+                    return ls * s - (r_in + s)*log2(r_in + s) + lt * t - (t + r_out)*log2(t + r_out);
+                });
+            }
+        };
+
     } else if (config.test_type == "poisson_binom") {
         // fit distribution
         std::vector<double> p;
