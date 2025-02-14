@@ -185,7 +185,6 @@ void test_bit_vector_queries() {
         EXPECT_EQ(0, (*vector)[i]);
         EXPECT_EQ(i + 1, vector->rank0(i));
         EXPECT_EQ(0u, vector->rank1(i));
-        ASSERT_DEBUG_DEATH(vector->select1(i), "");
     }
     EXPECT_EQ(0u, vector->rank1(0));
     EXPECT_EQ(0u, vector->rank1(1'000));
@@ -207,8 +206,6 @@ void test_bit_vector_queries() {
     EXPECT_EQ(10u, vector->rank1(1'000));
     EXPECT_EQ(0u, vector->rank0(1'000));
     EXPECT_EQ(0u, vector->rank0(0));
-    ASSERT_DEBUG_DEATH(vector->select1(1'000), "");
-    ASSERT_DEBUG_DEATH(vector->select1(0), "");
 
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
@@ -229,9 +226,27 @@ void test_bit_vector_queries() {
     EXPECT_EQ(2000u, vector->size());
 }
 
-
 TYPED_TEST(BitVectorTest, queries) {
     test_bit_vector_queries<TypeParam>();
+}
+
+template <class T>
+void test_bit_vector_queries_death() {
+    std::unique_ptr<bit_vector> vector { new T(10, 0) };
+    ASSERT_TRUE(vector);
+
+    for (size_t i = 0; i < vector->size(); ++i) {
+        ASSERT_DEBUG_DEATH(vector->select1(i), "");
+    }
+
+    vector.reset(new T(10, 1));
+    ASSERT_TRUE(vector);
+    ASSERT_DEBUG_DEATH(vector->select1(1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select1(0), "");
+}
+
+TYPED_TEST(BitVectorTest, queries_DeathTest) {
+    test_bit_vector_queries_death<TypeParam>();
 }
 
 TYPED_TEST(BitVectorTest, select1) {
