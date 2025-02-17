@@ -555,9 +555,12 @@ bool DBGSSHash::load(std::istream &in) {
 
     if (num_nodes_) {
         std::visit([&](auto &d) { d.visit(loader); }, dict_);
+        succ_is_next_.load(in);
+        pred_is_prev_.load(in);
+        // if (!succ_is_next_.size() || pred_is_prev_.size()) {
         // if (!succ_is_next_.load(in) || !pred_is_prev_.load(in)) {
-            common::logger->warn("No succ/pred indicators, generating");
-            std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
+            // common::logger->warn("No succ/pred indicators, generating");
+            // std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
         // }
     }
 
