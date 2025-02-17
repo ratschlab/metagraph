@@ -267,7 +267,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         pvals_buckets[0].push_back(nullpval);
     }
 
-    if (config.test_type == "gnb_exact" && config.test_by_unitig) {
+    if ((config.test_type == "gnb_exact" || config.test_type == "lnb_exact") && config.test_by_unitig) {
         if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
             auto &pvals_min = pvals_min_buckets.emplace_back();
             pvals_min.resize(graph_ptr->max_index() + 1, nullpval);
@@ -505,50 +505,71 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         common::logger->trace("Scaling distributions");
 
-        double target_sum = 0.0;
+        double target_p = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            target_sum += log(static_cast<double>(sums[j]));
+            target_p += log(nb_params[j].second);
         }
-        target_sum = exp(target_sum / total_labels);
+        target_p = exp(target_p / total_labels);
+        // double target_sum = 0.0;
+        // for (size_t j = 0; j < groups.size(); ++j) {
+        //     target_sum += log(static_cast<double>(sums[j]));
+        // }
+        // target_sum = exp(target_sum / total_labels);
 
-        common::logger->trace("Finding common p and r.");
+        // common::logger->trace("Finding common p and r.");
 
-        double r_map;
-        double target_p;
-        std::tie(r_map, target_p) = get_rp([&](const auto &callback) {
-            for (size_t j = 0; j < groups.size(); ++j) {
-                double f = target_sum / sums[j];
-                std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
-                    const auto &[k, c] = a;
-                    callback(f * k, c);
-                });
-            }
-        });
+        // double r_map;
+        // double target_p;
+        // std::tie(r_map, target_p) = get_rp([&](const auto &callback) {
+        //     for (size_t j = 0; j < groups.size(); ++j) {
+        //         double f = target_sum / sums[j];
+        //         std::for_each(hists[j].cbegin(), hist_its[j], [&](const auto &a) {
+        //             const auto &[k, c] = a;
+        //             callback(f * k, c);
+        //         });
+        //     }
+        // });
 
-        double fit_mu = r_map * (1.0 - target_p) / target_p;
-        double fit_var = fit_mu / target_p;
-        common::logger->trace("Common params: r: {}\tp: {}\tmu: {}\tvar: {}",
-                              r_map, target_p, fit_mu, fit_var);
+        // common::logger->trace("Common p: {}", target_p);
 
-        double r_in = r_map * num_labels_in;
-        double r_out = r_map * num_labels_out;
-        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
+        // double fit_mu = r_map * (1.0 - target_p) / target_p;
+        // double fit_var = fit_mu / target_p;
+        // common::logger->trace("Common params: r: {}\tp: {}\tmu: {}\tvar: {}",
+        //                       r_map, target_p, fit_mu, fit_var);
 
-        if (fit_var / fit_mu - 1.0 < 1e-5)
-            common::logger->warn("Fit parameters are close to a Poisson distribution");
+        // double r_in = r_map * num_labels_in;
+        // double r_out = r_map * num_labels_out;
+        // common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
+
+        // if (fit_var / fit_mu - 1.0 < 1e-5)
+        //     common::logger->warn("Fit parameters are close to a Poisson distribution");
 
         count_maps.resize(groups.size());
 
         common::logger->trace("Computing quantile maps");
+        double r_in = 0;
+        double r_out = 0;
         #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             if (hists[j].empty())
                 continue;
 
             const auto &[r, p] = nb_params[j];
+            double r_map = r * target_p * (1.0 - p) / p / (1.0 - target_p);
+
+            if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                #pragma omp atomic
+                r_out += r_map;
+            }
+
+            if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                #pragma omp atomic
+                r_in += r_map;
+            }
 
             boost::math::negative_binomial nb_out(r_map, target_p);
-            double scale = target_sum / sums[j];
+            double scale = 1.0;
+            // double scale = target_sum / sums[j];
 
             auto map_value = [&](uint64_t k, double scale, const auto &old_dist, const auto &new_dist) {
                 double cdf = boost::math::cdf(old_dist, k);
@@ -585,6 +606,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 compute_map(boost::math::poisson(static_cast<double>(sums[j]) * scale / nelem));
             }
         }
+
+        common::logger->trace("Fits: in: {}\tout: {}\tp: {}", r_in, r_out, target_p);
 
         common::logger->trace("Unscaled Totals: in: {}\tout: {}", in_kmers, out_kmers);
         in_kmers = 0;
@@ -945,29 +968,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                        [&](uint64_t sum) -> double { return max_sum / sum; });
 
         common::logger->trace("Enumerating row count distributions");
-        std::vector<tsl::hopscotch_map<std::vector<double>, double, utils::VectorHash>> vector_counts;
+        std::vector<tsl::hopscotch_map<std::vector<uint64_t>, double, utils::VectorHash>> vector_counts;
         {
-            std::vector<std::vector<tsl::hopscotch_map<std::vector<double>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
+            std::vector<std::vector<tsl::hopscotch_map<std::vector<uint64_t>, double, utils::VectorHash>>> vector_counts_ms(num_threads + 1);
 
             generate_rows([&](uint64_t row_i, const auto &raw_row, size_t bucket_idx) {
                 if (!kept[row_i])
                     return;
 
-                double in_sum = 0;
-                double out_sum = 0;
+                uint64_t in_sum = 0;
+                uint64_t out_sum = 0;
                 bool in_kmer = false;
                 bool out_kmer = false;
 
-                std::vector<double> vec;
-                vec.reserve(raw_row.size());
+                std::vector<uint64_t> vec;
+                vec.resize(total_labels);
                 size_t count_in = 0;
                 size_t count_out = 0;
                 size_t total_count = 0;
-                for (const auto &[j, raw_c] : raw_row) {
-                    if (min_counts.size() && raw_c < min_counts[j])
+                for (const auto &[j, c] : raw_row) {
+                    if (min_counts.size() && c < min_counts[j])
                         continue;
 
-                    double c = raw_c * scale_factor[j];
                     if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                         out_sum += c;
                         ++count_out;
@@ -980,7 +1002,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                     total_count += groups[j] != Group::OTHER;
 
-                    vec.emplace_back(c);
+                    vec[j] = c;
                 }
 
                 if (total_count >= config.min_recurrence) {
@@ -991,10 +1013,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 if (!in_kmer && !out_kmer)
                     return;
 
-                double sum = in_sum + out_sum;
-
                 // if floating point error puts the sum slightly above the integer value, then round down
-                size_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
+                size_t n = in_sum + out_sum;
                 if (n >= vector_counts_ms[bucket_idx].size())
                     vector_counts_ms[bucket_idx].resize(n + 1);
 
@@ -1024,8 +1044,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
 
         auto optim = [](const auto &f, auto x_min, auto x_max) {
-            while (x_max - x_min > 1e-5) {
+            // common::logger->info("start");
+            while (x_max - x_min > 1e-3) {
                 double x_mid = (x_min + x_max) / 2;
+                // common::logger->info("({},{}) -> {}", x_min, x_max, f(x_mid));
                 double x_low_mid = (x_min + x_mid) / 2;
                 double x_high_mid = (x_mid + x_max) / 2;
                 if (f(x_low_mid) > f(x_high_mid)) {
@@ -1041,16 +1063,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         double ln_mu = 0.0;
         double ln_var = 0.0;
 
+        size_t skipped = 0;
         for (size_t n = 0; n < vector_counts.size(); ++n) {
             for (const auto &[v, c] : vector_counts[n]) {
-                double total = std::accumulate(v.begin(), v.end(), double(0));
-                double total2 = std::accumulate(v.begin(), v.end(), double(0),
-                                                [&](double sum, double vv) { return sum + vv * vv;});
+                double total = 0;
+                double total2 = 0;
+                for (size_t j = 0; j < v.size(); ++j) {
+                    total += v[j] * scale_factor[j];
+                    total2 += v[j] * scale_factor[j] * v[j] * scale_factor[j];
+                }
                 double mu = total / total_labels;
                 double mu2 = mu * mu;
                 double var = total2 / total_labels - mu2;
                 if (var <= mu) {
-                    throw std::runtime_error("var <= mu when fitting lognormal");
+                    ++skipped;
+                    continue;
                 }
 
                 double r = mu2 / (var - mu);
@@ -1059,8 +1086,11 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        ln_mu /= nelem;
-        ln_var = ln_var / nelem - ln_mu * ln_mu;
+        if (skipped)
+            common::logger->warn("Skipped {} / {} rows", skipped, nelem);
+
+        ln_mu /= (nelem - skipped);
+        ln_var = ln_var / (nelem - skipped) - ln_mu * ln_mu;
 
         common::logger->trace("LN fit: mu: {}\tvar: {}\tE[X]: {}\tVar(X): {}\t1.0/E[X]: {}",
                               ln_mu, ln_var,
@@ -1073,12 +1103,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         {
             auto calc_r = [optim,ln_mu,ln_var,gs=total_labels,p=target_p](const auto &counts) {
                 return optim([&](double r) {
-                    double val = gs * log(p) * r - gs * lgamma(r) + log(r) - pow(-log(r)-ln_mu, 2.0)/2/ln_var;
+                    double val = log(p) * gs * r - lgamma(r) * counts.size() + log(r) - pow(-log(r)-ln_mu, 2.0)/2/ln_var;
                     for (double c : counts) {
                         val += lgamma(c + r);
                     }
                     return val;
-                }, 0, 100000);
+                }, 0.0, 100.0);
             };
 
             ProgressBar progress_bar(vector_counts.size(), "Precomputing r's", std::cerr, !common::get_verbose());
@@ -1088,17 +1118,22 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     progress_bar += 1000;
 
                 for (auto it = vector_counts[n].begin(); it != vector_counts[n].end(); ++it) {
-                    it.value() = calc_r(it->first);
+                    std::vector<double> scale_counts;
+                    scale_counts.reserve(it->first.size());
+                    for (size_t j = 0; j < it->first.size(); ++j) {
+                        if (it->first[j] > 0)
+                            scale_counts.emplace_back(it->first[j] * scale_factor[j]);
+                    }
+                    it.value() = calc_r(scale_counts);
                 }
             }
             progress_bar += vector_counts.size() % 1000;
         }
 
-        auto get_r = std::make_shared<std::function<double(int64_t, std::vector<double>&)>>(
-            [vc=std::move(vector_counts),scale_factor](int64_t n, auto &counts) {
+        auto get_r = std::make_shared<std::function<double(int64_t, std::vector<uint64_t>&)>>(
+            [vc=std::move(vector_counts),scale_factor](int64_t n, const auto &counts) {
                 auto it = vc[n].begin();
                 if (vc[n].size() > 1) {
-                    std::sort(counts.begin(), counts.end());
                     it = vc[n].find(counts);
                     assert(it != vc[n].end());
                 }
@@ -1106,20 +1141,24 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         );
 
-        compute_min_pval = [get_r,num_labels_in,num_labels_out,scale_factor](int64_t, const PairContainer &row) {
+        compute_min_pval = [get_r,num_labels_in,num_labels_out,scale_factor,total_labels](int64_t, const PairContainer &row) {
             if (row.empty())
                 return 1.0;
 
+            int64_t sum = 0;
+            double ssum = 0;
             std::vector<double> counts;
-            double sum = 0;
+            std::vector<uint64_t> row_int(total_labels);
             counts.reserve(row.size());
             for (const auto &[j, c] : row) {
-                sum += counts.emplace_back(c * scale_factor[j]);
+                row_int[j] = c;
+                sum += c;
+                ssum += counts.emplace_back(c * scale_factor[j]);
             }
             // if floating point error puts the sum slightly above the integer value, then round down
             int64_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
 
-            double r_base = (*get_r)(n, counts);
+            double r_base = (*get_r)(sum, row_int);
             if (r_base == 0.0)
                 return 1.0;
 
@@ -1142,17 +1181,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             return std::min(1.0, pval);
         };
 
-        compute_pval = [get_r,num_labels_in,num_labels_out,scale_factor,groups](int64_t, int64_t, const PairContainer &row) {
+        compute_pval = [get_r,num_labels_in,num_labels_out,scale_factor,groups,total_labels](int64_t, int64_t, const PairContainer &row) {
             if (row.empty())
                 return 1.0;
 
-            std::vector<double> counts;
-            double sum = 0;
+            int64_t sum = 0;
+            double ssum = 0;
             double in_sum = 0;
             double out_sum = 0;
+            std::vector<double> counts;
+            std::vector<uint64_t> row_int(total_labels);
             counts.reserve(row.size());
             for (const auto &[j, c] : row) {
-                sum += counts.emplace_back(c * scale_factor[j]);
+                row_int[j] = c;
+                sum += c;
+                ssum += counts.emplace_back(c * scale_factor[j]);
                 if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     out_sum += counts.back();
                 }
@@ -1164,7 +1207,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             // if floating point error puts the sum slightly above the integer value, then round down
             int64_t n = sum - int(sum) < 1e-5 ? floor(sum) : ceil(sum);
 
-            double r_base = (*get_r)(n, counts);
+            double r_base = (*get_r)(sum, row_int);
 
             if (r_base == 0.0)
                 return 1.0;
@@ -1510,7 +1553,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
 
             double pval_min = 0;
-            if (config.test_type != "gnb_exact") {
+            if (config.test_type != "gnb_exact" && config.test_type != "lnb_exact") {
                 assert(bucket_idx < ms.size());
                 if (n >= ms[bucket_idx].size())
                     ms[bucket_idx].resize(n + 1, std::make_pair(1.1, 0));
@@ -1545,19 +1588,19 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
                     eff_size_buckets[bucket_idx][node] = eff_size;
                     sum_buckets[bucket_idx][node] = n;
-                    if (config.test_type == "gnb_exact")
+                    if (config.test_type == "gnb_exact" || config.test_type == "lnb_exact")
                         pvals_min_buckets[bucket_idx][node] = bit_cast<uint64_t>(pval_min);
                 } else {
                     eff_size_buckets[bucket_idx].push_back(eff_size);
                     sum_buckets[bucket_idx].push_back(n);
-                    if (config.test_type == "gnb_exact")
+                    if (config.test_type == "gnb_exact" || config.test_type == "lnb_exact")
                         pvals_min_buckets[bucket_idx].push_back(bit_cast<uint64_t>(pval_min));
                 }
             }
         });
 
         common::logger->trace("Merging min p-value tables");
-        if (config.test_type != "gnb_exact") {
+        if (config.test_type != "gnb_exact" && config.test_type != "lnb_exact") {
             for (size_t i = 1; i < ms.size(); ++i) {
                 size_t end = std::min(ms[0].size(), ms[i].size());
                 for (size_t j = 0; j < end; ++j) {
@@ -1663,7 +1706,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     size_t n = sum_buckets[bucket_idx][node_shift];
                     n_sum += n;
 
-                    if (config.test_type == "gnb_exact") {
+                    if (config.test_type == "gnb_exact" || config.test_type == "lnb_exact") {
                         pvals_min.emplace_back(bit_cast<double, uint64_t>(pvals_min_buckets[bucket_idx][node_shift]));
                     } else {
                         pvals_min.emplace_back(m[n].first);
@@ -1782,7 +1825,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (config.output_pvals
                     || (!config.test_by_unitig && n >= n_cutoff)
                     || (config.test_by_unitig && unitig_start[node])) {
-                if (config.test_type != "gnb_exact" && m[n].first == 1.1) {
+                if (config.test_type != "gnb_exact" && config.test_type != "lnb_exact" && m[n].first == 1.1) {
                     common::logger->error("in: {}\tout: {}\tn: {}", in_sum, out_sum, n);
                     throw std::runtime_error("Indexing invalid");
                 }
@@ -1795,7 +1838,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     return;
                 }
 
-                if (config.test_type != "gnb_exact" && pval < 1.1 && m[n].first - pval > 1e-10) {
+                if (config.test_type != "gnb_exact" && config.test_type != "lnb_exact" && pval < 1.1 && m[n].first - pval > 1e-10) {
                     common::logger->error("Min p-val estimate too high: min {} > cur {}\tn: {}\ttest: {}", m[n].first, pval, n, config.test_type);
                     throw std::runtime_error("Test failed");
                 }
