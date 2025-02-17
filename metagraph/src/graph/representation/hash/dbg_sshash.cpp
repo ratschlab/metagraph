@@ -330,6 +330,46 @@ DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) 
 }
 
 template <bool with_rc>
+void DBGSSHash::adjacent_outgoing_nodes_with_rc(
+        node_index node,
+        const std::function<void(node_index, bool)>& callback) const {
+    assert(in_graph(node));
+
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node]) {
+            callback(node + 1, false);
+            return;
+        }
+    } else {
+        node_index rev_comp = reverse_complement(node);
+        if (pred_is_prev_[rev_comp--]) {
+            callback(rev_comp, true);
+            return;
+        }
+    }
+
+    std::string kmer = get_node_sequence(node);
+    std::visit([&](const auto &dict) {
+        auto nb = dict.kmer_forward_neighbours(kmer.c_str(), with_rc);
+        for (size_t i = 0; i < nb.forward.size(); i++) {
+            if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
+                callback(sshash_to_graph_index(nb.forward[i].kmer_id),
+                        nb.forward[i].kmer_orientation);
+            }
+        }
+    }, dict_);
+}
+
+template
+void DBGSSHash::adjacent_outgoing_nodes_with_rc<true>(
+        node_index,
+        const std::function<void(node_index, bool)>&) const;
+template
+void DBGSSHash::adjacent_outgoing_nodes_with_rc<false>(
+        node_index,
+        const std::function<void(node_index, bool)>&) const;
+
+template <bool with_rc>
 void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
@@ -337,13 +377,13 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
 
     if (node < succ_is_next_.size()) {
         if (succ_is_next_[node]) {
-            callback(node + 1, get_node_sequence(node + 1).back(), false);
+            callback(node + 1, get_last_char(node + 1), false);
             return;
         }
     } else {
         node_index rev_comp = reverse_complement(node);
         if (pred_is_prev_[rev_comp--]) {
-            callback(rev_comp, get_node_sequence(reverse_complement(rev_comp)).back(), true);
+            callback(rev_comp, get_last_char(reverse_complement(rev_comp)), true);
             return;
         }
     }
@@ -371,6 +411,51 @@ void DBGSSHash::call_outgoing_kmers_with_rc<false>(
         node_index,
         const std::function<void(node_index, char, bool)>&) const;
 
+
+
+template <bool with_rc>
+void DBGSSHash::adjacent_incoming_nodes_with_rc(
+        node_index node,
+        const std::function<void(node_index, bool)>& callback) const {
+    assert(in_graph(node));
+
+    if (node < pred_is_prev_.size()) {
+        if (pred_is_prev_[node]) {
+            callback(node - 1, false);
+            return;
+        }
+    } else {
+        node_index rev_comp = reverse_complement(node);
+        if (succ_is_next_[rev_comp++]) {
+            callback(rev_comp, true);
+            return;
+        }
+    }
+
+    std::string kmer = get_node_sequence(node);
+    std::visit([&](const auto &dict) {
+        auto nb = dict.kmer_backward_neighbours(kmer.c_str(), with_rc);
+        for (size_t i = 0; i < nb.backward.size(); i++) {
+            if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
+                callback(sshash_to_graph_index(nb.backward[i].kmer_id),
+                            nb.backward[i].kmer_orientation);
+            }
+        }
+    }, dict_);
+}
+
+template
+void DBGSSHash::adjacent_incoming_nodes_with_rc<true>(
+        node_index,
+        const std::function<void(node_index, bool)>&) const;
+template
+void DBGSSHash::adjacent_incoming_nodes_with_rc<false>(
+        node_index,
+        const std::function<void(node_index, bool)>&) const;
+
+
+
+
 template <bool with_rc>
 void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
@@ -379,13 +464,13 @@ void DBGSSHash::call_incoming_kmers_with_rc(
 
     if (node < pred_is_prev_.size()) {
         if (pred_is_prev_[node]) {
-            callback(node - 1, get_node_sequence(node - 1).front(), false);
+            callback(node - 1, get_first_char(node - 1), false);
             return;
         }
     } else {
         node_index rev_comp = reverse_complement(node);
         if (succ_is_next_[rev_comp++]) {
-            callback(rev_comp, get_node_sequence(reverse_complement(rev_comp)).front(), true);
+            callback(rev_comp, get_first_char(reverse_complement(rev_comp)), true);
             return;
         }
     }
@@ -403,6 +488,10 @@ void DBGSSHash::call_incoming_kmers_with_rc(
         }
     }, dict_);
 }
+
+
+
+
 template
 void DBGSSHash::call_incoming_kmers_with_rc<true>(
         node_index,
@@ -425,6 +514,19 @@ void DBGSSHash::call_outgoing_kmers(node_index node,
     }
 }
 
+void DBGSSHash::adjacent_outgoing_nodes(node_index node,
+    const std::function<void(node_index)>& callback) const {
+if (mode_ == CANONICAL) {
+    adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool orientation) {
+callback(orientation ? reverse_complement(next) : next);
+});
+} else {
+    adjacent_outgoing_nodes_with_rc<false>(node, [&](node_index next, bool) {
+callback(next);
+});
+}
+}
+
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
     if (mode_ == CANONICAL) {
@@ -436,6 +538,19 @@ void DBGSSHash::call_incoming_kmers(node_index node,
             callback(prev, c);
         });
     }
+}
+
+void DBGSSHash::adjacent_incoming_nodes(node_index node,
+    const std::function<void(node_index)>& callback) const {
+if (mode_ == CANONICAL) {
+    adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool orientation) {
+callback(orientation ? reverse_complement(prev) : prev);
+});
+} else {
+    adjacent_incoming_nodes_with_rc<false>(node, [&](node_index prev, bool) {
+callback(prev);
+});
+}
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
@@ -506,6 +621,36 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
     } else {
         return kmer_to_node_with_rc<false>(kmer).first;
     }
+}
+
+char DBGSSHash::get_last_char(node_index node) const {
+    assert(in_graph(node));
+    assert(node <= dict_size());
+    uint64_t ssh_idx = graph_index_to_sshash(node);
+    return std::visit([&](const auto &d) {
+        using kmer_t = get_kmer_t<decltype(d)>;
+        const auto &buckets = d.data();
+        uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
+        sshash::bit_vector_iterator<kmer_t> bv_it(d.strings(), kmer_t::bits_per_char * (offset + get_k() - 1));
+        return kmer_t::uint64_to_char(static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+        // kmer_t read_kmer = bv_it.read(kmer_t::bits_per_char * k);
+        // util::uint_kmer_to_string(read_kmer, string_kmer, k);
+    }, dict_);
+}
+
+char DBGSSHash::get_first_char(node_index node) const {
+    assert(in_graph(node));
+    assert(node <= dict_size());
+    uint64_t ssh_idx = graph_index_to_sshash(node);
+    return std::visit([&](const auto &d) {
+        using kmer_t = get_kmer_t<decltype(d)>;
+        const auto &buckets = d.data();
+        uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
+        sshash::bit_vector_iterator<kmer_t> bv_it(d.strings(), kmer_t::bits_per_char * offset);
+        return kmer_t::uint64_to_char(static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+        // kmer_t read_kmer = bv_it.read(kmer_t::bits_per_char * k);
+        // util::uint_kmer_to_string(read_kmer, string_kmer, k);
+    }, dict_);
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {

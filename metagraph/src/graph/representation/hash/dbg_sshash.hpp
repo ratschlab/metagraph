@@ -113,6 +113,29 @@ class DBGSSHash : public DeBruijnGraph {
 
     node_index reverse_complement(node_index node) const;
 
+
+
+    void adjacent_outgoing_nodes(node_index node,
+        const std::function<void(node_index)>& callback) const override;
+
+template <bool with_rc = true>
+void adjacent_outgoing_nodes_with_rc(
+node_index node,
+const std::function<void(node_index, bool)>& callback) const;
+
+void adjacent_incoming_nodes(node_index node,
+        const std::function<void(node_index)>& callback) const override;
+
+template <bool with_rc = true>
+void adjacent_incoming_nodes_with_rc(
+node_index node,
+const std::function<void(node_index, bool)>& callback) const;
+
+
+
+
+
+
   private:
     static const std::string alphabet_;
     dict_t dict_;
@@ -123,6 +146,9 @@ class DBGSSHash : public DeBruijnGraph {
     bit_vector_smart pred_is_prev_;
 
     size_t dict_size() const;
+
+    char get_last_char(node_index node) const;
+    char get_first_char(node_index node) const;
 };
 
 } // namespace mtg::graph
