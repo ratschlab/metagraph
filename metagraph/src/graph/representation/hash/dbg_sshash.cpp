@@ -377,13 +377,14 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
 
     if (node < succ_is_next_.size()) {
         if (succ_is_next_[node]) {
-            callback(node + 1, get_last_char(node + 1), false);
+            ++node;
+            callback(node, get_last_char(node), false);
             return;
         }
     } else {
         node_index rev_comp = reverse_complement(node);
         if (pred_is_prev_[rev_comp--]) {
-            callback(rev_comp, get_last_char(reverse_complement(rev_comp)), true);
+            callback(rev_comp, complement(get_first_char(rev_comp)), true);
             return;
         }
     }
@@ -464,13 +465,14 @@ void DBGSSHash::call_incoming_kmers_with_rc(
 
     if (node < pred_is_prev_.size()) {
         if (pred_is_prev_[node]) {
-            callback(node - 1, get_first_char(node - 1), false);
+            --node;
+            callback(node, get_first_char(node), false);
             return;
         }
     } else {
         node_index rev_comp = reverse_complement(node);
         if (succ_is_next_[rev_comp++]) {
-            callback(rev_comp, get_first_char(reverse_complement(rev_comp)), true);
+            callback(rev_comp, complement(get_last_char(rev_comp)), true);
             return;
         }
     }
