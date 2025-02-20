@@ -792,62 +792,58 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        double pval = 1.0;
+        if (n == 0)
+            return;
 
-        double eff_size = 0;
-        if (n > 0) {
-            double p = mu1 / (mu1 + mu2);
-            auto bdist = boost::math::binomial(n, p);
+        double p = mu1 / (mu1 + mu2);
+        auto bdist = boost::math::binomial(n, p);
 
-            {
-                double pval0 = boost::math::pdf(bdist, 0);
-                double pvaln = boost::math::pdf(bdist, n);
-                double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-                if (min_pval * k_min >= config.family_wise_error_rate)
-                    return;
-            }
+        double pval0 = boost::math::pdf(bdist, 0);
+        double pvaln = boost::math::pdf(bdist, n);
+        double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+        if (min_pval * k_min >= config.family_wise_error_rate)
+            return;
 
-            eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
+        auto get_deviance = [&](double y, double mu) {
+            y += 1e-8;
+            mu += 1e-8;
+            return 2 * (y * log(y/mu) - y + mu);
+        };
 
-            auto get_deviance = [&](double y, double mu) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2 * (y * log(y/mu) - y + mu);
-            };
-
-            std::vector<double> devs;
-            devs.reserve(n + 1);
-            for (int64_t s = 0; s <= n; ++s) {
-                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-            }
-
-            pval = 0.0;
-
-            int64_t s = 0;
-            for ( ; s <= n; ++s) {
-                if (devs[s] < devs[in_sum])
-                    break;
-            }
-            if (s > 0)
-                pval += boost::math::cdf(bdist, s - 1);
-
-            int64_t sp = n;
-            for ( ; sp >= s; --sp) {
-                if (devs[sp] < devs[in_sum])
-                    break;
-            }
-
-            if (sp < n)
-                pval += boost::math::cdf(boost::math::complement(bdist, sp));
+        std::vector<double> devs;
+        devs.reserve(n + 1);
+        for (int64_t s = 0; s <= n; ++s) {
+            devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
         }
 
-        if (pval * k < config.family_wise_error_rate) {
-            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            if (eff_size > 0) {
-                set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
-            } else if (eff_size < 0) {
-                set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
-            }
+        double pval = 0.0;
+
+        int64_t s = 0;
+        for ( ; s <= n; ++s) {
+            if (devs[s] < devs[in_sum])
+                break;
+        }
+        if (s > 0)
+            pval += boost::math::cdf(bdist, s - 1);
+
+        int64_t sp = n;
+        for ( ; sp >= s; --sp) {
+            if (devs[sp] < devs[in_sum])
+                break;
+        }
+
+        if (sp < n)
+            pval += boost::math::cdf(boost::math::complement(bdist, sp));
+
+        if (pval * k >= config.family_wise_error_rate)
+            return;
+
+        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+        double eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
+        if (eff_size > 0) {
+            set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
+        } else if (eff_size < 0) {
+            set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
         }
     });
 
