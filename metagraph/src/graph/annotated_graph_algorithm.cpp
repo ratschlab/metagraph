@@ -280,6 +280,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     // common::logger->trace("Allocating p-value storage");
     // auto nullpval = bit_cast<uint64_t>(double(1.1));
 
+    // std::vector<PValStorage> mean_buckets;
+    // std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
+    // if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
+    //     auto &means = mean_buckets.emplace_back();
+    //     means.resize(graph_ptr->max_index() + 1, 0);
+    // }
+
+    // if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
+    //     for (size_t i = 0; i < get_num_threads() + 1; ++i) {
+    //         auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
+    //         mean_buckets.emplace_back(tmp_file->name(), std::ios::out);
+    //     }
+    //     mean_buckets[0].push_back(0);
+    // }
+
     // std::vector<PValStorage> pvals_buckets;
     // std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
     // std::vector<PValStorage> pvals_min_buckets;
@@ -661,13 +676,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         }
     }
 
-
-    auto get_deviance = [&](double y, double mu) {
-        y += 1e-8;
-        mu += 1e-8;
-        return 2 * (y * log(y/mu) - y + mu);
-    };
-
     std::vector<std::pair<double, size_t>> m;
     {
         VectorMap<double, size_t> m_vec;
@@ -712,31 +720,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 double pval0 = boost::math::pdf(bdist, 0);
                 double pvaln = boost::math::pdf(bdist, n);
                 pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-
-                // std::vector<double> devs;
-                // devs.reserve(n + 1);
-                // for (int64_t s = 0; s <= n; ++s) {
-                //     devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-                // }
-                // double max_d = *std::max_element(devs.begin(), devs.end());
-                // pval = 0.0;
-
-                // int64_t s = 0;
-                // for ( ; s <= n; ++s) {
-                //     if (devs[s] != max_d)
-                //         break;
-                // }
-                // if (s > 0)
-                //     pval += boost::math::cdf(bdist, s - 1);
-
-                // int64_t sp = n;
-                // for ( ; sp >= s; --sp) {
-                //     if (devs[sp] != max_d)
-                //         break;
-                // }
-
-                // if (sp < n)
-                //     pval += boost::math::cdf(boost::math::complement(bdist, sp));
             }
 
             ++ms[bucket_idx][pval];
@@ -815,58 +798,27 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         if (n > 0) {
             double p = mu1 / (mu1 + mu2);
             auto bdist = boost::math::binomial(n, p);
-            eff_size = static_cast<double>(in_sum) - p * n;
 
-            // std::vector<double> pmfs;
-            // pmfs.reserve(n + 1);
-            // for (int64_t s = 0; s <= n; ++s) {
-            //     pmfs.emplace_back(boost::math::pdf(bdist, s));
-            // }
+            {
+                double pval0 = boost::math::pdf(bdist, 0);
+                double pvaln = boost::math::pdf(bdist, n);
+                double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+                if (min_pval * k_min >= config.family_wise_error_rate)
+                    return;
+            }
 
-            // pval = 0.0;
-            // for (int64_t s = 0; s <= n; ++s) {
-            //     if (pmfs[s] <= pmfs[in_sum])
-            //         pval += pmfs[s];
-            // }
+            eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
 
-            // if (in_sum <= mean) {
-            //     pval = boost::math::cdf(bdist, in_sum);
-            //     int64_t t = boost::math::quantile(bdist, 1.0 - pval);
-            //     pval += boost::math::cdf(boost::math::complement(bdist, t - 1));
-            // } else {
-            //     pval = boost::math::cdf(boost::math::complement(bdist, in_sum - 1));
-            //     int64_t s = boost::math::quantile(bdist, pval);
-            //     pval += boost::math::cdf(bdist, s);
-            // }
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
 
             std::vector<double> devs;
             devs.reserve(n + 1);
             for (int64_t s = 0; s <= n; ++s) {
                 devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-            }
-            double max_d = *std::max_element(devs.begin(), devs.end());
-
-            {
-                double min_pval = 0.0;
-                int64_t s = 0;
-                for ( ; s <= n; ++s) {
-                    if (devs[s] != max_d)
-                        break;
-                }
-                if (s > 0)
-                    min_pval += boost::math::cdf(bdist, s - 1);
-
-                int64_t sp = n;
-                for ( ; sp >= s; --sp) {
-                    if (devs[sp] != max_d)
-                        break;
-                }
-
-                if (sp < n)
-                    min_pval += boost::math::cdf(boost::math::complement(bdist, sp));
-
-                if (min_pval * k_min >= config.family_wise_error_rate)
-                    return;
             }
 
             pval = 0.0;
@@ -889,8 +841,6 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 pval += boost::math::cdf(boost::math::complement(bdist, sp));
         }
 
-        // common::logger->trace("test: {}/{}\t{}\t{}\t{} -> {}", in_sum, n, mu1, mu2, pval, pval * k);
-
         if (pval * k < config.family_wise_error_rate) {
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
             if (eff_size > 0) {
@@ -900,6 +850,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
     });
+
     std::atomic_thread_fence(std::memory_order_acquire);
 
     // if (config.test_type == "poisson_exact") {
