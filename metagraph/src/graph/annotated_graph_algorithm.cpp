@@ -112,7 +112,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Computing histogram from uncleaned counts");
     auto hists_map = get_hist_map(std::vector<size_t>(groups.size(), 1), nullptr);
 
-    sdsl::bit_vector kept(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
+    sdsl::bit_vector kept_bv(AnnotatedDBG::graph_to_anno_index(graph_ptr->max_index() + 1), true);
 
     std::vector<size_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
@@ -174,9 +174,10 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     common::logger->trace("Updating histogram and marking discarded k-mers");
 
     if (groups.size())
-        hists_map = get_hist_map(min_counts, &kept);
+        hists_map = get_hist_map(min_counts, &kept_bv);
 
-    size_t nelem = sdsl::util::cnt_one_bits(kept);
+    bit_vector_stat kept(std::move(kept_bv));
+    size_t nelem = kept.num_set_bits();
 
     std::unique_ptr<MaskedDeBruijnGraph> clean_masked_graph;
     if (config.test_type != "notest" && config.test_by_unitig) {
@@ -274,13 +275,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (config.test_type != "notest" && config.test_by_unitig) {
         if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
             auto &pvals = pvals_buckets.emplace_back();
-            pvals.resize(graph_ptr->max_index() + 1);
+            pvals.reserve(graph_ptr->max_index());
 
             auto &pvals_min = pvals_min_buckets.emplace_back();
-            pvals_min.resize(graph_ptr->max_index() + 1);
+            pvals_min.reserve(graph_ptr->max_index());
 
             auto &eff_size = eff_size_buckets.emplace_back();
-            eff_size.resize(graph_ptr->max_index() + 1);
+            eff_size.reserve(graph_ptr->max_index());
         }
 
         if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
@@ -288,19 +289,16 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
                 pvals_buckets.emplace_back(tmp_file->name(), std::ios::out);
             }
-            pvals_buckets[0].push_back(0);
 
             for (size_t i = 0; i < get_num_threads() + 1; ++i) {
                 auto &tmp_file = tmp_min_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
                 pvals_min_buckets.emplace_back(tmp_file->name(), std::ios::out);
             }
-            pvals_min_buckets[0].push_back(0);
 
             for (size_t i = 0; i < get_num_threads() + 1; ++i) {
                 auto &tmp_file_eff = tmp_eff_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
                 eff_size_buckets.emplace_back(tmp_file_eff->name(), std::ios::out);
             }
-            eff_size_buckets[0].push_back(0);
         }
     }
 
@@ -686,7 +684,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
                 if (n > 0) {
                     double p = mu1 / (mu1 + mu2);
-                    auto bdist = boost::math::binomial(n, p);
+                    boost::math::binomial bdist(n, p);
                     double pval0 = boost::math::pdf(bdist, 0);
                     double pvaln = boost::math::pdf(bdist, n);
                     pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
@@ -714,15 +712,21 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 {
                     std::lock_guard<std::mutex> lock(m_vec_mu);
                     for (node_index node : path) {
-                        size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), node) - offsets.begin() - 1;
-                        pvals.emplace_back(get<PValStorage>(pvals_min_buckets[bucket_idx][node - offsets[bucket_idx]]));
+                        size_t row = AnnotatedDBG::graph_to_anno_index(node);
+                        size_t row_rank = kept.rank1(row);
+                        size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), row_rank) - offsets.begin() - 1;
+                        size_t offset = row_rank - offsets[bucket_idx];
+                        pvals.emplace_back(get<PValStorage>(pvals_min_buckets[bucket_idx][offset]));
                     }
                 }
                 double comp_min_pval = combine_pvals(pvals);
-                size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), path[0]) - offsets.begin() - 1;
+                size_t row = AnnotatedDBG::graph_to_anno_index(path[0]);
+                size_t row_rank = kept.rank1(row);
+                size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), row_rank) - offsets.begin() - 1;
+                size_t offset = row_rank - offsets[bucket_idx];
                 ++ms[bucket_idx][comp_min_pval];
                 std::lock_guard<std::mutex> lock(m_vec_mu);
-                set<PValStorage>(pvals_min_buckets[bucket_idx][path[0] - offsets[bucket_idx]], comp_min_pval);
+                set<PValStorage>(pvals_min_buckets[bucket_idx][offset], comp_min_pval);
             });
         }
 
@@ -830,51 +834,50 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         }
 
-        if (n == 0)
-            return;
-
+        double pval = 1.0;
         double p = mu1 / (mu1 + mu2);
-        auto bdist = boost::math::binomial(n, p);
+        boost::math::binomial bdist(n, p);
+        if (n != 0) {
+            double pval0 = boost::math::pdf(bdist, 0);
+            double pvaln = boost::math::pdf(bdist, n);
+            double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+            if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
+                return;
 
-        double pval0 = boost::math::pdf(bdist, 0);
-        double pvaln = boost::math::pdf(bdist, n);
-        double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-        if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
-            return;
+            auto get_deviance = [&](double y, double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y/mu) - y + mu);
+            };
 
-        auto get_deviance = [&](double y, double mu) {
-            y += 1e-8;
-            mu += 1e-8;
-            return 2 * (y * log(y/mu) - y + mu);
-        };
+            std::vector<double> devs;
+            devs.reserve(n + 1);
+            for (int64_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
 
-        std::vector<double> devs;
-        devs.reserve(n + 1);
-        for (int64_t s = 0; s <= n; ++s) {
-            devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            pval = 0.0;
+
+            int64_t s = 0;
+            for ( ; s <= n; ++s) {
+                if (devs[s] < devs[in_sum])
+                    break;
+            }
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
+
+            int64_t sp = n;
+            for ( ; sp >= s; --sp) {
+                if (devs[sp] < devs[in_sum])
+                    break;
+            }
+
+            if (sp < n)
+                pval += boost::math::cdf(boost::math::complement(bdist, sp));
+
+            if (!config.test_by_unitig && pval * k >= config.family_wise_error_rate)
+                return;
         }
-
-        double pval = 0.0;
-
-        int64_t s = 0;
-        for ( ; s <= n; ++s) {
-            if (devs[s] < devs[in_sum])
-                break;
-        }
-        if (s > 0)
-            pval += boost::math::cdf(bdist, s - 1);
-
-        int64_t sp = n;
-        for ( ; sp >= s; --sp) {
-            if (devs[sp] < devs[in_sum])
-                break;
-        }
-
-        if (sp < n)
-            pval += boost::math::cdf(boost::math::complement(bdist, sp));
-
-        if (!config.test_by_unitig && pval * k >= config.family_wise_error_rate)
-            return;
 
         double eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
         set_pval(pval, eff_size);
@@ -886,9 +889,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         clean_masked_graph->call_unitigs([&](const std::string&, const auto &path) {
             double pval_min = 1.0;
             {
-                size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), path[0]) - offsets.begin() - 1;
+                size_t row = AnnotatedDBG::graph_to_anno_index(path[0]);
+                size_t row_rank = kept.rank1(row);
+                size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), row_rank) - offsets.begin() - 1;
+                size_t offset = row_rank - offsets[bucket_idx];
                 std::lock_guard<std::mutex> lock(m_vec_mu);
-                pval_min = get<PValStorage>(pvals_min_buckets[bucket_idx][path[0] - offsets[bucket_idx]]);
+                pval_min = get<PValStorage>(pvals_min_buckets[bucket_idx][offset]);
             }
 
             if (pval_min * k_min >= config.family_wise_error_rate)
@@ -900,9 +906,12 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             {
                 std::lock_guard<std::mutex> lock(m_vec_mu);
                 for (node_index node : path) {
-                    size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), node) - offsets.begin() - 1;
-                    pvals.emplace_back(get<PValStorage>(pvals_buckets[bucket_idx][node - offsets[bucket_idx]]));
-                    comb_eff_size += get<PValStorage>(eff_size_buckets[bucket_idx][node - offsets[bucket_idx]]);
+                    size_t row = AnnotatedDBG::graph_to_anno_index(node);
+                    size_t row_rank = kept.rank1(row);
+                    size_t bucket_idx = std::lower_bound(offsets.begin(), offsets.end(), row_rank) - offsets.begin() - 1;
+                    size_t offset = row_rank - offsets[bucket_idx];
+                    pvals.emplace_back(get<PValStorage>(pvals_buckets[bucket_idx][offset]));
+                    comb_eff_size += get<PValStorage>(eff_size_buckets[bucket_idx][offset]);
                 }
             }
             double comp_pval = combine_pvals(pvals);
