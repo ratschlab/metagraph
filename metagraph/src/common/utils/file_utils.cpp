@@ -42,9 +42,18 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
             in.reset(new std::ifstream(filename, std::ios_base::binary));
         }
 
-        if (in->good())
+        if (in->good()) {
             break;
+        } else {
+            in.reset();
+        }
     }
+
+    if (!in) {
+        common::logger->error("Failed to load {} after {} tries.", filename, num_retries);
+        throw std::runtime_error("File load failure");
+    }
+
     return in;
 }
 
