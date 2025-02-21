@@ -50,7 +50,7 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
     }
 
     if (!in) {
-        common::logger->error("Failed to load {} after {} tries.", filename, num_retries);
+        mtg::common::logger->error("Failed to load {} after {} tries.", filename, num_retries);
         throw std::runtime_error("File load failure");
     }
 
