@@ -45,6 +45,7 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
         if (in->good()) {
             break;
         } else {
+            mtg::common::logger->warn("Load attempt # {} for {} failed.", i + 1, filename);
             in.reset();
         }
     }
