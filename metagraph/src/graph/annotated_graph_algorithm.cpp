@@ -363,9 +363,13 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         });
     };
 
-    // precompute negative binomial fits for poisson_bayes test
+    // precompute negative binomial fits for poisson_bayes and nbinom_exact tests
     std::vector<std::pair<double, double>> nb_params(groups.size());
-    if (config.test_type == "poisson_bayes") {
+    std::pair<double, double> nb_params_a;
+    std::pair<double, double> nb_params_b;
+    std::pair<double, double> nb_params_null;
+    double nb_base = 0.0;
+    if (config.test_type == "poisson_bayes" || config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
         auto get_rp = [&](const auto &generate) {
             double mu = 0;
@@ -444,6 +448,44 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 common::logger->trace("{}: size: {}\tmax_val: {}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
                                     j, sums[j], (hist.end() - 1)->first, r * (1-p)/p, r*(1-p)/p/p, r, p);
             }
+        }
+
+        if (config.test_type == "nbinom_exact") {
+            double mu_a = 0.0;
+            double mu_b = 0.0;
+            double var_a = 0.0;
+            double var_b = 0.0;
+            for (size_t j = 0; j < groups.size(); ++j) {
+                const auto &[r, p] = nb_params[j];
+                double mu = r * (1.0 - p) / p;
+                double var = mu / p;
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    mu_a += mu;
+                    var_a += var;
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    mu_b += mu;
+                    var_b += var;
+                }
+            }
+
+            nb_params_a.first = mu_a * mu_a / (var_a - mu_a);
+            nb_params_a.second = mu_a / var_a;
+            common::logger->trace("In: r: {}\tp: {}", nb_params_a.first, nb_params_a.second);
+
+            nb_params_b.first = mu_b * mu_b / (var_b - mu_b);
+            nb_params_b.second = mu_b / var_b;
+            common::logger->trace("Out: r: {}\tp: {}", nb_params_b.first, nb_params_b.second);
+
+            double mu_null = mu_a + mu_b;
+            double var_null = var_a + var_b; // the two are independent, so their covariance is 0
+            nb_params_null.first = mu_null * mu_null / (var_null - mu_null);
+            nb_params_null.second = mu_null / var_null;
+            common::logger->trace("Null: r: {}\tp: {}", nb_params_null.first, nb_params_null.second);
+
+            nb_base = (lgamma(nb_params_null.first) - lgamma(nb_params_a.first) - lgamma(nb_params_b.first)) / log(2.0);
+            nb_base += nb_params_a.first*log2(nb_params_a.second) + nb_params_b.first*log2(nb_params_b.second)-nb_params_null.first*log2(nb_params_null.second);
         }
     }
 
@@ -661,7 +703,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 }
                 size_t front = n - std::min(n, num_labels_out);
                 pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
-            } else {
+            } else if (config.test_type == "poisson_exact" || config.test_type == "poisson_bayes") {
                 double mu1 = 0.0;
                 double mu2 = 0.0;
                 if (config.test_type == "poisson_exact") {
@@ -687,6 +729,28 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     boost::math::binomial bdist(n, p);
                     double pval0 = boost::math::pdf(bdist, 0);
                     double pvaln = boost::math::pdf(bdist, n);
+                    pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+                }
+            } else if (config.test_type == "nbinom_exact") {
+                int64_t n = 0;
+                for (const auto &[j, c] : row) {
+                    n += c;
+                }
+
+                if (n > 0) {
+                    auto [r_n, p_n] = nb_params_null;
+                    auto [r_a, p_a] = nb_params_a;
+                    auto [r_b, p_b] = nb_params_b;
+
+                    double base = nb_base + (lgamma(n + 1) - lgamma(r_n + n)) / log(2.0) - n*log2(1.0-p_n);
+                    auto get_pval = [&](int64_t s) {
+                        int64_t t = n - s;
+                        double sbase = (lgamma(r_a+s)+lgamma(r_b+t)-lgamma(s+1)-lgamma(t+1)) / log(2.0);
+                        return exp2(base + sbase +s*log2(1.0-p_a) + t*log2(1.0-p_b));
+                    };
+
+                    double pval0 = get_pval(0);
+                    double pvaln = get_pval(n);
                     pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
                 }
             }
@@ -789,6 +853,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         };
 
+        double eff_size = 0.0;
+        double pval = 1.0;
         if (config.test_type == "poisson_binom") {
             size_t n = 0;
             uint64_t s = 0;
@@ -802,84 +868,161 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
                 return;
 
-            double pval = pb_pvals[n][s];
-            double eff_size = static_cast<double>(s) - mid_points[n];
-            set_pval(pval, eff_size);
-            return;
+            pval = pb_pvals[n][s];
+            eff_size = static_cast<double>(s) - mid_points[n];
+        } else if (config.test_type == "poisson_exact" || config.test_type == "poisson_bayes") {
+            double mu1 = 0.0;
+            double mu2 = 0.0;
+            if (config.test_type == "poisson_exact") {
+                mu1 = static_cast<double>(in_kmers) / nelem;
+                mu2 = static_cast<double>(out_kmers) / nelem;
+            }
+            int64_t n = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            // sdsl::bit_vector found(num_labels_in + num_labels_out);
+            for (const auto &[j, c] : row) {
+                n += c;
+                // double lambda_j = 0.0;
+                // if (config.test_type == "poisson_bayes") {
+                //     const auto &[r, p] = nb_params[j];
+                //     lambda_j = (1.0 - p) * (r - 1.0 + c);
+                //     found[j] = true;
+                // }
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    // mu2 += lambda_j;
+                    out_sum += c;
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    // mu1 += lambda_j;
+                    in_sum += c;
+                }
+            }
+            if (config.test_type == "poisson_bayes") {
+                size_t unitig_id = kmer_to_unitig[AnnotatedDBG::anno_to_graph_index(row_i)];
+                auto &[unitig_size, unitig] = unitig_sums[unitig_id];
+                for (size_t j = 0; j < num_labels_in + num_labels_out; ++j) {
+                    int64_t unitig_sum = unitig[j];
+                    const auto &[r, p] = nb_params[j];
+                    double lambda_j = unitig_sum > 0 || r > 1
+                        ? (r - 1 + unitig_sum) / (unitig_size + p / (1.0 - p))
+                        : 0.0;
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                        mu2 += lambda_j;
+
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                        mu1 += lambda_j;
+                }
+                // for (size_t j = 0; j < found.size(); ++j) {
+                //     if (!found[j]) {
+                //         const auto &[r, p] = nb_params[j];
+                //         if (r > 1.0) {
+                //             double lambda_j = (1.0 - p) * (r - 1);
+                //             if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                //                 mu2 += lambda_j;
+
+                //             if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                //                 mu1 += lambda_j;
+                //         }
+                //     }
+                // }
+            }
+
+            double p = mu1 / (mu1 + mu2);
+            boost::math::binomial bdist(n, p);
+            if (n != 0) {
+                double pval0 = boost::math::pdf(bdist, 0);
+                double pvaln = boost::math::pdf(bdist, n);
+                double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+                if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
+                    return;
+
+                auto get_deviance = [&](double y, double mu) {
+                    y += 1e-8;
+                    mu += 1e-8;
+                    return 2 * (y * log(y/mu) - y + mu);
+                };
+
+                std::vector<double> devs;
+                devs.reserve(n + 1);
+                for (int64_t s = 0; s <= n; ++s) {
+                    devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+                }
+
+                pval = 0.0;
+
+                int64_t s = 0;
+                for ( ; s <= n; ++s) {
+                    if (devs[s] < devs[in_sum])
+                        break;
+                }
+                if (s > 0)
+                    pval += boost::math::cdf(bdist, s - 1);
+
+                int64_t sp = n;
+                for ( ; sp >= s; --sp) {
+                    if (devs[sp] < devs[in_sum])
+                        break;
+                }
+
+                if (sp < n)
+                    pval += boost::math::cdf(boost::math::complement(bdist, sp));
+
+                if (!config.test_by_unitig && pval * k >= config.family_wise_error_rate)
+                    return;
+            }
+
+            eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
+        } else if (config.test_type == "nbinom_exact") {
+            int64_t n = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto &[j, c] : row) {
+                n += c;
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    out_sum += c;
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    in_sum += c;
+                }
+            }
+
+            if (n > 0) {
+                auto [r_n, p_n] = nb_params_null;
+                auto [r_a, p_a] = nb_params_a;
+                auto [r_b, p_b] = nb_params_b;
+
+                double midpoint = r_a * n / (r_a + r_b);
+
+                eff_size = static_cast<double>(in_sum) - midpoint;
+                double in_dist = abs(eff_size);
+
+                double base = nb_base + (lgamma(n + 1) - lgamma(r_n + n)) / log(2.0) - n*log2(1.0-p_n);
+                auto get_pval = [&](int64_t s) {
+                    int64_t t = n - s;
+                    double sbase = (lgamma(r_a+s)+lgamma(r_b+t)-lgamma(s+1)-lgamma(t+1)) / log(2.0);
+                    return exp2(base + sbase +s*log2(1.0-p_a) + t*log2(1.0-p_b));
+                };
+
+                {
+                    double pval0 = get_pval(0);
+                    double pvaln = get_pval(n);
+                    double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
+                    if (!config.test_by_unitig && min_pval * k >= config.family_wise_error_rate)
+                        return;
+                }
+
+                pval = 0.0;
+                for (int64_t s = 0; s <= n; ++s) {
+                    double dist = abs(midpoint - s);
+                    if (dist >= in_dist)
+                        pval += get_pval(s);
+                }
+            }
         }
 
-        double mu1 = 0.0;
-        double mu2 = 0.0;
-        if (config.test_type == "poisson_exact") {
-            mu1 = static_cast<double>(in_kmers) / nelem;
-            mu2 = static_cast<double>(out_kmers) / nelem;
-        }
-        int64_t n = 0;
-        int64_t in_sum = 0;
-        int64_t out_sum = 0;
-        for (const auto &[j, c] : row) {
-            n += c;
-            const auto &[r, p] = nb_params[j];
-            double lambda_j = config.test_type == "poisson_bayes"
-                ? sqrt((1.0 - p) * (r - 1.0 + c))
-                : 0.0;
-            if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                mu2 += lambda_j;
-                out_sum += c;
-            }
-
-            if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                mu1 += lambda_j;
-                in_sum += c;
-            }
-        }
-
-        double pval = 1.0;
-        double p = mu1 / (mu1 + mu2);
-        boost::math::binomial bdist(n, p);
-        if (n != 0) {
-            double pval0 = boost::math::pdf(bdist, 0);
-            double pvaln = boost::math::pdf(bdist, n);
-            double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-            if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
-                return;
-
-            auto get_deviance = [&](double y, double mu) {
-                y += 1e-8;
-                mu += 1e-8;
-                return 2 * (y * log(y/mu) - y + mu);
-            };
-
-            std::vector<double> devs;
-            devs.reserve(n + 1);
-            for (int64_t s = 0; s <= n; ++s) {
-                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-            }
-
-            pval = 0.0;
-
-            int64_t s = 0;
-            for ( ; s <= n; ++s) {
-                if (devs[s] < devs[in_sum])
-                    break;
-            }
-            if (s > 0)
-                pval += boost::math::cdf(bdist, s - 1);
-
-            int64_t sp = n;
-            for ( ; sp >= s; --sp) {
-                if (devs[sp] < devs[in_sum])
-                    break;
-            }
-
-            if (sp < n)
-                pval += boost::math::cdf(boost::math::complement(bdist, sp));
-
-            if (!config.test_by_unitig && pval * k >= config.family_wise_error_rate)
-                return;
-        }
-
-        double eff_size = static_cast<double>(in_sum) - boost::math::mode(bdist);
         set_pval(pval, eff_size);
     });
 
