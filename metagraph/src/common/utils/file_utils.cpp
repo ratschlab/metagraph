@@ -33,22 +33,13 @@ bool with_mmap(bool set_bit) {
     return WITH_MMAP;
 }
 
-std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream, size_t num_retries) {
+std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream) {
     std::unique_ptr<std::ifstream> in;
-    for (size_t i = 0; i < num_retries; ++i) {
-        if (mmap_stream) {
-            in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));
-        } else {
-            in.reset(new std::ifstream(filename, std::ios_base::binary));
-        }
-
-        if (in->good()) {
-            break;
-        } else {
-            mtg::common::logger->warn("Load attempt # {} for {} failed.", i + 1, filename);
-        }
+    if (mmap_stream) {
+        in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));
+    } else {
+        in.reset(new std::ifstream(filename, std::ios_base::binary));
     }
-
     return in;
 }
 

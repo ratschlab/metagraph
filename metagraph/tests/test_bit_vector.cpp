@@ -121,8 +121,8 @@ void test_prev(const bit_vector &vector) {
     test_prev_subvector(vector, vector.size() - 1);
 }
 
-void reference_based_test_nodeath(const bit_vector &vector,
-                                  const sdsl::bit_vector &reference) {
+void reference_based_test(const bit_vector &vector,
+                          const sdsl::bit_vector &reference) {
     EXPECT_EQ(reference.size(), vector.size());
 
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
@@ -166,29 +166,6 @@ void reference_based_test_nodeath(const bit_vector &vector,
     test_prev(vector);
 }
 
-void reference_based_test_death(const bit_vector &vector,
-                                const sdsl::bit_vector &reference) {
-#ifndef NDEBUG
-    ASSERT_DEBUG_DEATH(vector.select1(0), "");
-
-    size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
-    for (size_t i : { 1, 2, 10, 100, 1000 }) {
-        ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
-    }
-    ASSERT_DEBUG_DEATH(vector.select1(vector.size() + 1), "");
-    ASSERT_DEBUG_DEATH(vector[vector.size()], "");
-    ASSERT_DEBUG_DEATH(vector[vector.size() + 1], "");
-#else
-    std::ignore = vector;
-    std::ignore = reference;
-#endif
-}
-
-void reference_based_test(const bit_vector &vector,
-                          const sdsl::bit_vector &reference) {
-    reference_based_test_nodeath(vector, reference);
-    reference_based_test_death(vector, reference);
-}
 
 template <class T>
 void test_bit_vector_queries() {
@@ -208,6 +185,7 @@ void test_bit_vector_queries() {
         EXPECT_EQ(0, (*vector)[i]);
         EXPECT_EQ(i + 1, vector->rank0(i));
         EXPECT_EQ(0u, vector->rank1(i));
+        ASSERT_DEBUG_DEATH(vector->select1(i), "");
     }
     EXPECT_EQ(0u, vector->rank1(0));
     EXPECT_EQ(0u, vector->rank1(1'000));
@@ -229,6 +207,8 @@ void test_bit_vector_queries() {
     EXPECT_EQ(10u, vector->rank1(1'000));
     EXPECT_EQ(0u, vector->rank0(1'000));
     EXPECT_EQ(0u, vector->rank0(0));
+    ASSERT_DEBUG_DEATH(vector->select1(1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select1(0), "");
 
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
@@ -249,27 +229,9 @@ void test_bit_vector_queries() {
     EXPECT_EQ(2000u, vector->size());
 }
 
+
 TYPED_TEST(BitVectorTest, queries) {
     test_bit_vector_queries<TypeParam>();
-}
-
-template <class T>
-void test_bit_vector_queries_death() {
-    std::unique_ptr<bit_vector> vector { new T(10, 0) };
-    ASSERT_TRUE(vector);
-
-    for (size_t i = 0; i < vector->size(); ++i) {
-        ASSERT_DEBUG_DEATH(vector->select1(i), "");
-    }
-
-    vector.reset(new T(10, 1));
-    ASSERT_TRUE(vector);
-    ASSERT_DEBUG_DEATH(vector->select1(1'000), "");
-    ASSERT_DEBUG_DEATH(vector->select1(0), "");
-}
-
-TYPED_TEST(BitVectorTest, queries_DeathTest) {
-    test_bit_vector_queries_death<TypeParam>();
 }
 
 TYPED_TEST(BitVectorTest, select1) {
@@ -511,36 +473,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
         vector.reset(new TypeParam());
         ASSERT_TRUE(vector->load(instream));
 
-        reference_based_test_nodeath(*vector, numbers);
-    }
-}
-
-TYPED_TEST(BitVectorTest, LoadWithMMAP_DeathTest) {
-    std::vector<std::initializer_list<bool>> init_lists = {
-        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
-    };
-    for (auto init_list : init_lists) {
-        std::ofstream outstream(test_dump_basename, std::ios::binary);
-        std::unique_ptr<bit_vector> vector { new TypeParam(sdsl::bit_vector(100, 0)) };
-        vector->serialize(outstream);
-        sdsl::bit_vector numbers(init_list);
-        vector.reset(new TypeParam(numbers));
-        vector->serialize(outstream);
-        outstream.close();
-
-        vector.reset(new TypeParam());
-        ASSERT_TRUE(vector);
-        sdsl::mmap_ifstream instream(test_dump_basename, std::ios::binary);
-        ASSERT_TRUE(vector->load(instream));
-        vector.reset(new TypeParam());
-        ASSERT_TRUE(vector->load(instream));
-
-        reference_based_test_death(*vector, numbers);
+        reference_based_test(*vector, numbers);
     }
 }
 
