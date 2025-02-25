@@ -18,40 +18,36 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
-        compiler: [g++-8, g++-9, g++-10, g++-11]
+        compiler: [g++-11, g++-12, g++-13]
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-8
-            cxx: g++-8
-            cc: gcc-8
-
-          - compiler: g++-9
-            cxx: g++-9
-            cc: gcc-9
-
-          - compiler: g++-10
-            cxx: g++-10
-            cc: gcc-10
-
           - compiler: g++-11
             cxx: g++-11
             cc: gcc-11
 
+          - compiler: g++-12
+            cxx: g++-12
+            cc: gcc-12
+
+          - compiler: g++-13
+            cxx: g++-13
+            cc: gcc-13
+
         exclude:
           - alphabet: Protein
-            compiler: g++-9
-          - compiler: g++-8
+            compiler: g++-11
+          - alphabet: Protein
+            compiler: g++-12
+          - compiler: g++-11
             build_static: ON
-          - compiler: g++-9
-            build_static: ON
-          - compiler: g++-10
+          - compiler: g++-12
             build_static: ON
           - build_type: Debug
             build_static: ON
