@@ -47,12 +47,14 @@ jobs:
             compiler: g++-12
           - compiler: g++-11
             build_static: ON
-            build_type: Debug
           - compiler: g++-12
             build_static: ON
-            build_type: Debug
           - build_type: Debug
             build_static: ON
+          - build_type: Debug
+            compiler: g++-11
+          - build_type: Debug
+            compiler: g++-12
           - with_avx: OFF
             build_static: OFF
 
