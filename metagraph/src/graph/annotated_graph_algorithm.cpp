@@ -399,7 +399,7 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return std::make_pair<long double, long double>(0.0, 1.0);
             }
 
-            auto get_dl = [&](long double r) {
+            auto get_dl_r = [&](long double r) {
                 long double dl = (log(r) - log(r + mu) - boost::math::digamma(r)) * total;
                 generate([&](auto k, auto c) {
                     dl += boost::math::digamma(k + r) * c;
@@ -407,35 +407,40 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 return dl;
             };
 
-            long double r_min = r_guess;
-            long double r_max = r_guess;
+            // auto get_dl_a = [&](long double a) {
+            //     long double dl = (log())
+            //     return dl;
+            // }
 
-            while (true) {
-                long double dl_min = get_dl(r_min);
-                long double dl_max = get_dl(r_max);
+            // long double r_min = r_guess;
+            // long double r_max = r_guess;
 
-                if (dl_min == 0) {
-                    r_max = r_min;
-                    break;
-                }
+            // while (true) {
+            //     long double dl_min = get_dl(r_min);
+            //     long double dl_max = get_dl(r_max);
 
-                if (dl_max == 0) {
-                    r_min = r_max;
-                    break;
-                }
+            //     if (dl_min == 0) {
+            //         r_max = r_min;
+            //         break;
+            //     }
 
-                if (dl_min < 0)
-                    r_min /= 2;
+            //     if (dl_max == 0) {
+            //         r_min = r_max;
+            //         break;
+            //     }
 
-                if (dl_max > 0)
-                    r_max *= 2;
+            //     if (dl_min < 0)
+            //         r_min /= 2;
 
-                if (dl_min > 0 && dl_max < 0)
-                    break;
-            }
+            //     if (dl_max > 0)
+            //         r_max *= 2;
 
-            std::tie(r_min, r_max) = boost::math::tools::bisect(
-                get_dl, r_min, r_max, boost::math::tools::eps_tolerance<long double>(5)
+            //     if (dl_min > 0 && dl_max < 0)
+            //         break;
+            // }
+
+            auto [r_min, r_max] = boost::math::tools::bisect(
+                get_dl_r, 0.0, 1.0, boost::math::tools::eps_tolerance<long double>(5)
             );
 
             long double r = r_max;
