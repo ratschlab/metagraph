@@ -194,7 +194,7 @@ jobs:
 
   Metagraph-Workflows:
     name: Test metagraph workflows
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     needs: [Linux]
 
     steps:
@@ -232,7 +232,7 @@ jobs:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
     if: github.event_name != 'pull_request'
     needs: [Linux, Metagraph-Workflows]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
