@@ -119,7 +119,7 @@ jobs:
       if: matrix.with_avx == 'OFF'
       run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
     - name: upload static binary
-      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-11' }}
+      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-13' }}
       uses: actions/upload-artifact@v4
       with:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
