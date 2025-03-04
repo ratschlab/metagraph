@@ -18,7 +18,7 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
@@ -194,7 +194,7 @@ jobs:
 
   Metagraph-Workflows:
     name: Test metagraph workflows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [Linux]
 
     steps:
@@ -232,7 +232,7 @@ jobs:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
     if: github.event_name != 'pull_request'
     needs: [Linux, Metagraph-Workflows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
@@ -269,7 +269,7 @@ jobs:
   Release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [Linux, Metagraph-Workflows]
     steps:
       - uses: actions/checkout@v1
