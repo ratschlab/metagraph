@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Iterable, Optional, Dict, Any
 
 import snakemake
+import snakemake.io
+import snakemake.utils
 
 from .workflow_configs import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH, \
     AnnotationLabelsSource, AnnotationFormats
@@ -41,7 +43,7 @@ def run_build_workflow(
 
     snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
 
-    config = snakemake.load_configfile(default_path)
+    config = snakemake.io.load_configfile(default_path)
 
     if not seqs_file_list_path and not seqs_dir_path:
         raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
@@ -65,7 +67,7 @@ def run_build_workflow(
                                     annotation_formats] if annotation_formats else config['annotation_formats']
 
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
-    config['max_threads'] = threads if threads else snakemake.available_cpu_count()
+    config['max_threads'] = threads if threads else snakemake.utils.available_cpu_count()
 
     if verbose:
         importlib.reload(logging)
