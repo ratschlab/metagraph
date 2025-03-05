@@ -84,7 +84,7 @@ RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 RUN mkdir ${CODE_BASE}
 COPY . ${CODE_BASE}
 
-RUN pip3 install --break-system-packages ${CODE_BASE}/metagraph/api/python
-RUN pip3 install --break-system-packages ${CODE_BASE}/metagraph/workflows
+RUN pip3 install ${CODE_BASE}/metagraph/api/python
+RUN pip3 install ${CODE_BASE}/metagraph/workflows
 
 ENTRYPOINT ["metagraph"]
