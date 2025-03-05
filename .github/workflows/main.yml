@@ -225,10 +225,8 @@ jobs:
               cd metagraph/workflows
               pytest
 
-
   Build-and-Push-Docker:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
-    if: github.event_name != 'pull_request'
     needs: [Linux, Metagraph-Workflows]
     runs-on: ubuntu-22.04
     permissions:
@@ -255,7 +253,16 @@ jobs:
       with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
+    - name: Build Docker image
+      uses: docker/build-push-action@v2
+      with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
     - name: Build and push Docker image
+      if: github.event_name != 'pull_request'
       uses: docker/build-push-action@v2
       with:
           context: .
