@@ -14,7 +14,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     g++-11 \
     git \
     cmake \
-    libcurl-gnutls-dev \
+    libcurl4-gnutls-dev \
     libboost-all-dev \
     libbrotli-dev \
     libbz2-dev \
