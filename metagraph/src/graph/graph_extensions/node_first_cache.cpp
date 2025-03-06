@@ -36,14 +36,14 @@ void NodeFirstCache::call_incoming_edges(edge_index edge,
 
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
-    assert(dbg_succ_.is_valid(node));
+    assert(dbg_succ_.in_graph(node));
 
     edge_index edge = node;
 
     call_incoming_edges(edge,
         [&](edge_index prev_edge) {
             node_index prev = prev_edge;
-            if (dbg_succ_.is_valid(prev))
+            if (dbg_succ_.in_graph(prev))
                 callback(prev, get_first_char(prev_edge, edge));
         }
     );

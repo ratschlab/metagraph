@@ -38,7 +38,9 @@ class DBGSuccinct : public DeBruijnGraph {
                                          const std::function<void(node_index)> &callback) const override final;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
+                            const std::function<bool()> &terminate = [](){ return false; },
+                            size_t num_threads = 1,
+                            size_t batch_size = 1'000'000) const override final;
 
     // Insert sequence to graph and invoke callback |on_insertion| for each new
     // node index augmenting the range [1,...,max_index], including those not
@@ -178,7 +180,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
-    bool is_valid(node_index node) const;
+    virtual bool in_graph(node_index node) const override final;
     node_index validate_edge(node_index node) const;
     node_index select_node(uint64_t rank) const;
     uint64_t rank_node(node_index node) const;
@@ -203,6 +205,8 @@ class DBGSuccinct : public DeBruijnGraph {
     Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
+
+    std::unique_ptr<bit_vector> generate_valid_kmer_mask(size_t num_threads, bool with_pruning) const;
 };
 
 } // namespace graph

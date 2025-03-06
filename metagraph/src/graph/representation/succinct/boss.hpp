@@ -168,6 +168,7 @@ class BOSS {
         // pick the row-diff successor
         if (&rd_succ != last_ && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
+                assert(edge > 0);
                 edge--;
                 assert(!get_last(edge) && "a row-diff successor must exist");
             }
