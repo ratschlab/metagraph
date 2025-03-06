@@ -92,9 +92,12 @@ input and deduplicate/count/filter the input k-mers.
 For example, the following commands can be used to construct a graph only from k-mers
 occurring at least 5 times in the input::
 
+    # download the input reads
+    wget -nc ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR403/SRR403017/SRR403017.fastq.gz
+
     K=31
     # count k-mers with KMC
-    ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
+    ./KMC/kmc -ci5 -t4 -k$K -m5 -fq SRR403017.fastq.gz SRR403017.cutoff_5 ./KMC
     # build graph with MetaGraph
     metagraph build -v -p 4 -k $K -o graph SRR403017.cutoff_5.kmc_pre
 
@@ -121,7 +124,7 @@ with pre-counting (see :ref:`annotate_with_precounting`).
 .. note::
     A weighted graph can also be constructed directly from raw input sequences, without pre-counting with KMC, e.g.,::
 
-        metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.fasta.gz
+        metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.fastq.gz
 
     This should be used when pre-processing with KMC is complicated or impossible, e.g., when indexing protein sequences.
 
