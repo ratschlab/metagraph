@@ -55,7 +55,8 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSSHash,   annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGHashFast, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
