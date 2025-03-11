@@ -15,6 +15,8 @@
 #include <boost/math/distributions/cauchy.hpp>
 #include <boost/math/distributions/hypergeometric.hpp>
 
+#include <sdust.h>
+
 #include "common/logger.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/vector_map.hpp"
@@ -68,6 +70,22 @@ bit_cast(const From& src) noexcept
     std::memcpy(&dst, &src, sizeof(To));
     return dst;
 }
+
+#if ! _PROTEIN_GRAPH
+inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+    int n;
+    std::unique_ptr<uint64_t, decltype(std::free)*> r {
+        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
+        std::free
+    };
+    return n > 0;
+}
+#else
+inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
+    // TODO: implement a checker here
+    return false;
+}
+#endif
 
 template <class PValStorage>
 double get(typename PValStorage::reference&& ref) {
@@ -260,77 +278,32 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     common::logger->trace("Marking discarded k-mers");
     auto hists_map = get_hist_map(min_counts, &kept_bv);
+    std::unique_ptr<MaskedDeBruijnGraph> clean_masked_graph;
+    // bit_vector_stat kept(std::move(kept_bv));
+    bit_vector_stat kept(kept_bv);
 
-    bit_vector_stat kept(std::move(kept_bv));
-    size_t nelem = kept.num_set_bits();
+    clean_masked_graph = std::make_unique<MaskedDeBruijnGraph>(
+        graph_ptr,
+        [&](node_index node) {
+            return node != DeBruijnGraph::npos
+                    && kept[AnnotatedDBG::graph_to_anno_index(node)];
+        },
+        true,
+        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+    );
 
-    std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
-    for (size_t j = 0; j < hists.size(); ++j) {
-        hists[j] = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(hists_map[j].values_container());
-        std::sort(hists[j].begin(), hists[j].end(), utils::LessFirst());
-        hists_map[j].clear();
-    }
-    hists_map.resize(0);
+    // common::logger->trace("Filtering low-complexity k-mers");
+    // std::atomic_thread_fence(std::memory_order_release);
+    // clean_masked_graph->call_sequences([&](const std::string &contig, const auto &path) {
+    //     for (size_t i = 0; i < path.size(); ++i) {
+    //         if (is_low_complexity(std::string_view(contig.c_str() + i, graph_ptr->get_k())))
+    //             unset_bit(kept_bv.data(), AnnotatedDBG::graph_to_anno_index(path[i]), true, std::memory_order_relaxed);
+    //     }
+    // }, num_threads);
+    // std::atomic_thread_fence(std::memory_order_acquire);
+    // kept = bit_vector_stat(std::move(kept_bv));
 
-    for (size_t j = 0; j < groups.size(); ++j) {
-        size_t total_c = 0;
-        for (const auto &[k, c] : hists[j]) {
-            total_c += c;
-        }
 
-        assert(total_c == nelem);
-
-        if (total_c != nelem) {
-            common::logger->error("FAIL {}: {} != {}", j, total_c, nelem);
-            throw std::runtime_error("GGG");
-        }
-    }
-
-    common::logger->trace("Computing aggregate statistics");
-    int64_t in_kmers = 0;
-    int64_t out_kmers = 0;
-    int64_t in_sq_kmers = 0;
-    int64_t out_sq_kmers = 0;
-    int64_t total_sq_kmers = 0;
-    std::vector<uint64_t> max_obs_vals(groups.size());
-    std::vector<size_t> n_kmers(groups.size());
-    std::vector<uint64_t> sums(groups.size());
-    std::vector<uint64_t> sq_sums(groups.size());
-    uint64_t max_in_obs_val = 0.0;
-    uint64_t max_out_obs_val = 0.0;
-
-    int64_t total_kmers = 0;
-    for (size_t j = 0; j < groups.size(); ++j) {
-        for (const auto &[k, c] : hists[j]) {
-            sums[j] += k * c;
-            sq_sums[j] += k * k * c;
-            if (k != 0)
-                n_kmers[j] += c;
-
-            max_obs_vals[j] = std::max(max_obs_vals[j], k);
-        }
-
-        if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-            out_kmers += sums[j];
-            out_sq_kmers += sq_sums[j];
-            max_out_obs_val += max_obs_vals[j];
-        }
-
-        if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-            in_kmers += sums[j];
-            in_sq_kmers += sq_sums[j];
-            max_in_obs_val += max_obs_vals[j];
-        }
-
-        total_kmers += sums[j];
-        total_sq_kmers += sq_sums[j];
-
-        common::logger->trace("{}: n_unique: {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
-                              j, n_kmers[j], sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
-    }
-
-    common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
-                          nelem, total_kmers);
 
     // common::logger->trace("Allocating p-value storage");
     // auto nullpval = bit_cast<uint64_t>(double(1.1));
@@ -437,12 +410,164 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             bool in_kmer = count_in >= config.min_in_recurrence && count_in <= config.max_in_recurrence;
             bool out_kmer = count_out >= config.min_out_recurrence && count_out <= config.max_out_recurrence;
 
-            if (in_kmer || out_kmer)
+            if (in_kmer || out_kmer) {
                 callback(row_i, row, bucket_idx);
+                // std::vector<std::pair<size_t, size_t>> new_row;
+                // for (const auto &[j, c] : row) {
+                //     if (c < 1024)
+                //         new_row.emplace_back(j, c);
+                // }
+                // callback(row_i, new_row, bucket_idx);
+            }
         });
     };
 
-    std::unique_ptr<MaskedDeBruijnGraph> clean_masked_graph;
+    // common::logger->trace("Marking low-complexity k-mers");
+    // std::atomic_thread_fence(std::memory_order_release);
+    // clean_masked_graph->call_sequences([&](const std::string &contig, const auto &path) {
+    //     for (size_t i = 0; i < path.size(); ++i) {
+    //         std::string_view kmer(contig.c_str() + i, clean_masked_graph->get_k());
+    //         if (is_low_complexity(kmer)) {
+    //             auto row = AnnotatedDBG::graph_to_anno_index(path[i]);
+    //             unset_bit(kept_bv.data(), row, true, std::memory_order_relaxed);
+    //         }
+    //     }
+    // }, num_threads);
+    // std::atomic_thread_fence(std::memory_order_acquire);
+
+    // common::logger->trace("Discarding counts from low-complexity k-mers");
+    // {
+    //     std::vector<std::vector<VectorMap<uint64_t, size_t>>> hist_maps_m(num_threads + 1);
+    //     for (auto &hist_maps : hist_maps_m) {
+    //         hist_maps.resize(groups.size());
+    //     }
+    //     std::atomic_thread_fence(std::memory_order_release);
+    //     generate_clean_rows([&](auto row_i, const auto &row, size_t bucket_idx) {
+    //         if (fetch_bit(kept_bv.data(), row_i, true, std::memory_order_acquire)) {
+    //             if (row.empty()) {
+    //                 unset_bit(kept_bv.data(), row_i, true, std::memory_order_release);
+    //             } else {
+    //                 sdsl::bit_vector found(groups.size());
+    //                 for (const auto &[j, c] : row) {
+    //                     found[j] = true;
+    //                     ++hist_maps_m[bucket_idx][j][c];
+    //                 }
+    //                 for (size_t j = 0; j < found.size(); ++j) {
+    //                     if (!found[j])
+    //                         ++hist_maps_m[bucket_idx][j][0];
+    //                 }
+    //             }
+    //         }
+    //     });
+    //     std::atomic_thread_fence(std::memory_order_acquire);
+    //     std::swap(hists_map, hist_maps_m[0]);
+    //     for (size_t i = 1; i < hist_maps_m.size(); ++i) {
+    //         for (size_t j = 0; j < hist_maps_m[i].size(); ++j) {
+    //             for (const auto &[k, c] : hist_maps_m[i][j]) {
+    //                 hists_map[j][k] += c;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // std::atomic_thread_fence(std::memory_order_release);
+    // generate_rows([&](uint64_t row_i, const auto &row, size_t) {
+    //     if (kept[row_i] && !kept_bv[row_i]) {
+    //         sdsl::bit_vector found(groups.size());
+    //         for (const auto &[j, c] : row) {
+    //             found[j] = true;
+    //             auto find = hists_map[j].find(c);
+    //             assert(find != hists_map[j].end());
+    //             uint64_t prev = __atomic_fetch_sub(&find.value(), 1, std::memory_order_relaxed);
+    //             std::ignore = prev;
+    //             assert(prev);
+    //         }
+    //         for (size_t j = 0; j < found.size(); ++j) {
+    //             if (!found[j]) {
+    //                 auto find = hists_map[j].find(0);
+    //                 assert(find != hists_map[j].end());
+    //                 uint64_t prev = __atomic_fetch_sub(&find.value(), 1, std::memory_order_relaxed);
+    //                 std::ignore = prev;
+    //                 assert(prev);
+    //             }
+    //         }
+    //     }
+    // });
+    // std::atomic_thread_fence(std::memory_order_acquire);
+    // size_t old_nelem = kept.num_set_bits();
+    // kept = bit_vector_stat(std::move(kept_bv));
+
+    size_t nelem = kept.num_set_bits();
+    // common::logger->trace("Kept {} / {} high-complexity k-mers", nelem, old_nelem);
+
+    for (size_t j = 0; j < groups.size(); ++j) {
+        size_t total_c = 0;
+        for (const auto &[k, c] : hists_map[j]) {
+            total_c += c;
+        }
+
+        assert(total_c == nelem);
+
+        if (total_c != nelem) {
+            common::logger->error("{}: {} != {}", j, total_c, nelem);
+            throw std::runtime_error("FAIL");
+        }
+    }
+
+    common::logger->trace("Computing aggregate statistics");
+    int64_t in_kmers = 0;
+    int64_t out_kmers = 0;
+    int64_t in_sq_kmers = 0;
+    int64_t out_sq_kmers = 0;
+    int64_t total_sq_kmers = 0;
+    std::vector<uint64_t> max_obs_vals(groups.size());
+    std::vector<size_t> n_kmers(groups.size());
+    std::vector<uint64_t> sums(groups.size());
+    std::vector<uint64_t> sq_sums(groups.size());
+    uint64_t max_in_obs_val = 0.0;
+    uint64_t max_out_obs_val = 0.0;
+
+    int64_t total_kmers = 0;
+    for (size_t j = 0; j < groups.size(); ++j) {
+        for (const auto &[k, c] : hists_map[j]) {
+            sums[j] += k * c;
+            sq_sums[j] += k * k * c;
+            if (k != 0)
+                n_kmers[j] += c;
+
+            max_obs_vals[j] = std::max(max_obs_vals[j], k);
+        }
+
+        if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+            out_kmers += sums[j];
+            out_sq_kmers += sq_sums[j];
+            max_out_obs_val += max_obs_vals[j];
+        }
+
+        if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+            in_kmers += sums[j];
+            in_sq_kmers += sq_sums[j];
+            max_in_obs_val += max_obs_vals[j];
+        }
+
+        total_kmers += sums[j];
+        total_sq_kmers += sq_sums[j];
+
+        common::logger->trace("{}: n_unique: {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}",
+                              j, n_kmers[j], sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+    }
+
+    common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
+                          nelem, total_kmers);
+
+    std::vector<std::vector<std::pair<uint64_t, size_t>>> hists(groups.size());
+    for (size_t j = 0; j < hists.size(); ++j) {
+        hists[j] = const_cast<std::vector<std::pair<uint64_t, size_t>>&&>(hists_map[j].values_container());
+        std::sort(hists[j].begin(), hists[j].end(), utils::LessFirst());
+        hists_map[j].clear();
+    }
+    hists_map.resize(0);
+
     std::vector<size_t> kmer_to_unitig;
     std::vector<std::tuple<size_t, size_t, size_t>> counts;
     // std::vector<std::pair<size_t, std::vector<uint64_t>>> agg_counts;
@@ -2544,7 +2669,8 @@ mask_nodes_by_label_dual(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             set_pval(pval, eff_size);
         });
 
-        if (config.test_type == "nbinom_exact" || config.test_type == "pig") {
+        // if (config.test_type == "nbinom_exact" || config.test_type == "pig") {
+        if (false) {
             common::logger->trace("Correcting p-vals");
             nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
                                         [&](const auto &a) { return a.second == kept.size(); }),
