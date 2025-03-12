@@ -1944,7 +1944,8 @@ mask_nodes_by_label_dual(
         std::vector<size_t> offsets;
         if (config.test_type != "notest" && config.test_type != "nbinom_exact"
             && config.test_type != "pig" && config.test_type != "mwu"
-            && config.test_type != "bm" && config.test_type != "bb_hypergeometric") {
+            && config.test_type != "bm" && config.test_type != "bb_hypergeometric"
+            && config.test_type != "poisson_binom") {
             common::logger->trace("Computing minimum p-values");
             std::vector<std::vector<std::pair<long double, size_t>>> ms(num_threads + 1);
             std::vector<VectorMap<long double, size_t>> ms_map(num_threads + 1);
@@ -2436,8 +2437,8 @@ mask_nodes_by_label_dual(
         // determine cutoffs for multiple testing correction
         auto [k_min, k, n_cutoff] = correct_pvals(m);
         if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "mwu" || config.test_type == "bm"
-            || config.test_type == "bb_hypergeometric") {
+            || config.test_type == "poisson_binom" || config.test_type == "mwu"
+            || config.test_type == "bm" || config.test_type == "bb_hypergeometric") {
             k_min = 1;
             k = 1;
             n_cutoff = 1;
@@ -2451,8 +2452,8 @@ mask_nodes_by_label_dual(
         common::logger->trace("Running differential tests");
         std::vector<std::pair<long double, size_t>> nb_pvals;
         if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "mwu" || config.test_type == "bm"
-            || config.test_type == "bb_hypergeometric")
+            || config.test_type == "poisson_binom" || config.test_type == "mwu"
+            || config.test_type == "bm" || config.test_type == "bb_hypergeometric")
             nb_pvals.resize(kept.num_set_bits(), std::make_pair(1.0, kept.size()));
 
         std::atomic_thread_fence(std::memory_order_release);
@@ -2526,6 +2527,11 @@ mask_nodes_by_label_dual(
 
                 pval = pb_pvals[n][s];
                 eff_size = static_cast<double>(s) - mid_points[n];
+                size_t nb_idx = kept.rank1(row_i) - 1;
+                nb_pvals[nb_idx].second = row_i;
+                if (pval < config.family_wise_error_rate) {
+                    nb_pvals[nb_idx].first = pval;
+                }
             } else if (config.test_type == "poisson_exact") {
                 size_t n = 0;
                 sdsl::bit_vector found(num_labels_in + num_labels_out);
@@ -3275,8 +3281,8 @@ mask_nodes_by_label_dual(
         });
 
         if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "mwu" || config.test_type == "bm"
-            || config.test_type == "bb_hypergeometric") {
+            || config.test_type == "poisson_binom" || config.test_type == "mwu"
+            || config.test_type == "bm" || config.test_type == "bb_hypergeometric") {
             // if (false) {
             common::logger->trace("Correcting p-vals");
             nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
@@ -3292,11 +3298,11 @@ mask_nodes_by_label_dual(
                            nb_pvals.end());
             common::logger->trace("Sorting {} / {} p-vals", nb_pvals.size(), num_tests);
             std::sort(nb_pvals.begin(), nb_pvals.end());
-            long double harm = 1.0;
-            // long double harm = 0.0;
-            // for (size_t i = 1; i <= nelem; ++i) {
-            //     harm += 1.0 / i;
-            // }
+            // long double harm = 1.0;
+            long double harm = 0.0;
+            for (size_t i = 1; i <= num_tests; ++i) {
+                harm += 1.0 / i;
+            }
 
             common::logger->trace("Selecting cut-off");
             size_t k = 0;
