@@ -1282,38 +1282,41 @@ mask_nodes_by_label_dual(
             common::logger->trace("p: {}", fmt::join(p, ","));
 
             common::logger->trace("Precomputing PMFs");
-            std::vector<long double> pmf_in { 1.0 };
-            std::vector<long double> pmf_out { 1.0 };
-            std::vector<long double> pmf_null { 1.0 };
+            std::vector<long double> pmf_in { 1.0L };
+            std::vector<long double> pmf_out { 1.0L };
+            std::vector<long double> pmf_null { 1.0L };
 
             for (size_t i = 1; i <= groups.size(); ++i) {
                 if (groups[i - 1] == Group::OUT || groups[i - 1] == Group::BOTH) {
                     std::vector<long double> pmf_out_cur(pmf_out.size() + 1);
-                    pmf_out_cur[0] = (1.0 - p[i - 1]) * pmf_out[0];
+                    // pmf_out_cur[0] = (1.0L - p[i - 1]) * pmf_out[0];
+                    pmf_out_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_out[0]));
                     pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
                     for (size_t k = 1; k < pmf_out.size(); ++k) {
                         pmf_out_cur[k] = p[i - 1] * pmf_out[k - 1]
-                                + (1.0 - p[i - 1]) * pmf_out[k];
+                                + (1.0L - p[i - 1]) * pmf_out[k];
                     }
                     std::swap(pmf_out_cur, pmf_out);
                 }
 
                 if (groups[i - 1] == Group::IN || groups[i - 1] == Group::BOTH) {
                     std::vector<long double> pmf_in_cur(pmf_in.size() + 1);
-                    pmf_in_cur[0] = (1.0 - p[i - 1]) * pmf_in[0];
+                    // pmf_in_cur[0] = (1.0L - p[i - 1]) * pmf_in[0];
+                    pmf_in_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_in[0]));
                     pmf_in_cur[pmf_in.size()] = p[i - 1] * pmf_in.back();
                     for (size_t k = 1; k < pmf_in.size(); ++k) {
                         pmf_in_cur[k]
-                                = p[i - 1] * pmf_in[k - 1] + (1.0 - p[i - 1]) * pmf_in[k];
+                                = p[i - 1] * pmf_in[k - 1] + (1.0L - p[i - 1]) * pmf_in[k];
                     }
                     std::swap(pmf_in_cur, pmf_in);
                 }
                 std::vector<long double> pmf_null_cur(i + 1);
-                pmf_null_cur[0] = (1.0 - p[i - 1]) * pmf_null[0];
+                // pmf_null_cur[0] = (1.0L - p[i - 1]) * pmf_null[0];
+                pmf_null_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_null[0]));
                 pmf_null_cur[pmf_null.size()] = p[i - 1] * pmf_null.back();
                 for (size_t k = 1; k < pmf_null.size(); ++k) {
                     pmf_null_cur[k]
-                            = p[i - 1] * pmf_null[k - 1] + (1.0 - p[i - 1]) * pmf_null[k];
+                            = p[i - 1] * pmf_null[k - 1] + (1.0L - p[i - 1]) * pmf_null[k];
                 }
                 std::swap(pmf_null_cur, pmf_null);
             }
@@ -1340,6 +1343,7 @@ mask_nodes_by_label_dual(
             pb_pvals[0].emplace_back(1.0);
 
             long double min_pval = 1.0;
+            // long double last_local_min_pval = 1.0;
 
             for (size_t n = 1; n < pb_pvals.size(); ++n) {
                 std::vector<long double> probs;
@@ -1356,11 +1360,17 @@ mask_nodes_by_label_dual(
                                     n, s);
                             throw std::domain_error("");
                         }
-                        probs.emplace_back(exp2(log2(pmf_in[s]) + log2(pmf_out[t])
-                                                - log2(pmf_null[n])));
+                        probs.emplace_back(exp2l(log2l(pmf_in[s]) + log2l(pmf_out[t])
+                                                 - log2l(pmf_null[n])));
                     } else {
                         probs.emplace_back(0.0);
                     }
+                }
+
+                long double sum_probs = std::accumulate(probs.begin(), probs.end(), 0.0L);
+                if (abs(sum_probs - 1.0L) > 1e-5) {
+                    common::logger->error("Sum of probs for n={} = {}", n, sum_probs);
+                    throw std::runtime_error("Fail");
                 }
 
                 for (uint64_t s = 0; s < probs.size(); ++s) {
@@ -1449,6 +1459,13 @@ mask_nodes_by_label_dual(
                 mid_points[n] = static_cast<long double>(max_prob_pos) / max_prob_counts;
                 common::logger->trace("Midpoint: n: {}\tmp: {}\t{}\t{}", n, mid_points[n],
                                       fmt::join(probs, ","), fmt::join(pb_pvals[n], ","));
+
+                // if (local_min_pval > last_local_min_pval) {
+                //     common::logger->error("Min p-vals failed: n-1: {} -> {}\tn: {} -> {}",
+                //                           n - 1, last_local_min_pval, n, local_min_pval);
+                //     throw std::runtime_error("Min p-val failed");
+                // }
+                // last_local_min_pval = local_min_pval;
             }
 
             common::logger->trace("Min. p-value: {}", min_pval);
@@ -1939,13 +1956,14 @@ mask_nodes_by_label_dual(
             // common::logger->trace("PIG: lambda: {}", lambda);
         }
 
+        bool fdr = config.test_type == "nbinom_exact" || config.test_type == "pig"
+                || config.test_type == "mwu" || config.test_type == "bm"
+                || config.test_type == "bb_hypergeometric" || config.test_type == "cmh";
+
         // precompute minimal attainable p-values
         std::vector<std::pair<long double, size_t>> m;
         std::vector<size_t> offsets;
-        if (config.test_type != "notest" && config.test_type != "nbinom_exact"
-            && config.test_type != "pig" && config.test_type != "mwu"
-            && config.test_type != "bm" && config.test_type != "bb_hypergeometric"
-            && config.test_type != "poisson_binom") {
+        if (config.test_type != "notest" && !fdr) {
             common::logger->trace("Computing minimum p-values");
             std::vector<std::vector<std::pair<long double, size_t>>> ms(num_threads + 1);
             std::vector<VectorMap<long double, size_t>> ms_map(num_threads + 1);
@@ -1959,8 +1977,18 @@ mask_nodes_by_label_dual(
                         n += static_cast<int64_t>(groups[j] != Group::OTHER)
                                 + (groups[j] == Group::BOTH);
                     }
-                    size_t front = n - std::min(n, num_labels_out);
-                    pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
+                    if (ms[bucket_idx].size() <= n)
+                        ms[bucket_idx].resize(n + 1);
+
+                    if (ms[bucket_idx][n].second == 0) {
+                        size_t front = n - std::min(n, num_labels_out);
+                        pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
+                        ms[bucket_idx][n].first = pval;
+                        ms[bucket_idx][n].second = 1;
+                    } else {
+                        ++ms[bucket_idx][n].second;
+                    }
+
                 } else if (config.test_type == "poisson_exact") {
                     sdsl::bit_vector found(num_labels_in + num_labels_out);
                     size_t n = 0;
@@ -2382,6 +2410,9 @@ mask_nodes_by_label_dual(
                     }
                 }
 
+                if (config.test_type == "poisson_binom")
+                    std::sort(m.rbegin(), m.rend());
+
                 // if (config.test_type == "gpoisson") {
                 //     m.erase(std::remove_if(m.begin(), m.end(), [&](const auto &a) {
                 //     return !a.second; }), m.end()); std::sort(m.rbegin(), m.rend());
@@ -2402,13 +2433,15 @@ mask_nodes_by_label_dual(
                     if (jt == m.end())
                         break;
 
-                    if (it->first > 1.0) {
-                        common::logger->error("pval > 1.0: {}", it->first);
+                    if (it->first - 1.0L > 1e-5L) {
+                        common::logger->error("pval it > 1.0: {} ({})", it->first,
+                                              it->first - 1.0L);
                         throw std::runtime_error("p-val fail");
                     }
 
-                    if (jt->first > 1.0) {
-                        common::logger->error("pval > 1.0: {}", jt->first);
+                    if (jt->first - 1.0L > 1e-5L) {
+                        common::logger->error("pval jt > 1.0: {} ({})", jt->first,
+                                              jt->first - 1.0L);
                         throw std::runtime_error("p-val fail");
                     }
 
@@ -2436,9 +2469,7 @@ mask_nodes_by_label_dual(
 
         // determine cutoffs for multiple testing correction
         auto [k_min, k, n_cutoff] = correct_pvals(m);
-        if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "poisson_binom" || config.test_type == "mwu"
-            || config.test_type == "bm" || config.test_type == "bb_hypergeometric") {
+        if (fdr) {
             k_min = 1;
             k = 1;
             n_cutoff = 1;
@@ -2451,9 +2482,7 @@ mask_nodes_by_label_dual(
 
         common::logger->trace("Running differential tests");
         std::vector<std::pair<long double, size_t>> nb_pvals;
-        if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "poisson_binom" || config.test_type == "mwu"
-            || config.test_type == "bm" || config.test_type == "bb_hypergeometric")
+        if (fdr)
             nb_pvals.resize(kept.num_set_bits(), std::make_pair(1.0, kept.size()));
 
         std::atomic_thread_fence(std::memory_order_release);
@@ -2516,21 +2545,23 @@ mask_nodes_by_label_dual(
                     s += (groups[j] == Group::IN);
                 }
 
-                if (n < n_cutoff)
-                    return;
-
-                // size_t front = n - std::min(n, num_labels_out);
-                // double min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
-
-                // if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
+                // if (n < n_cutoff)
                 //     return;
+
+                size_t front = n - std::min(n, num_labels_out);
+                double min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
+
+                if (min_pval * k_min >= config.family_wise_error_rate)
+                    return;
 
                 pval = pb_pvals[n][s];
                 eff_size = static_cast<double>(s) - mid_points[n];
-                size_t nb_idx = kept.rank1(row_i) - 1;
-                nb_pvals[nb_idx].second = row_i;
-                if (pval < config.family_wise_error_rate) {
-                    nb_pvals[nb_idx].first = pval;
+                if (fdr) {
+                    size_t nb_idx = kept.rank1(row_i) - 1;
+                    nb_pvals[nb_idx].second = row_i;
+                    if (pval < config.family_wise_error_rate) {
+                        nb_pvals[nb_idx].first = pval;
+                    }
                 }
             } else if (config.test_type == "poisson_exact") {
                 size_t n = 0;
@@ -3102,7 +3133,6 @@ mask_nodes_by_label_dual(
                     nb_pvals[nb_idx].first = pval;
                     nb_pvals[nb_idx].second = row_i;
                 }
-            } else if (config.test_type == "mwu") {
             } else if (config.test_type == "bm") {
                 auto generate_a = [&](const auto& callback) {
                     sdsl::bit_vector found(groups.size());
@@ -3137,6 +3167,98 @@ mask_nodes_by_label_dual(
                     nb_pvals[nb_idx].second = row_i;
                 }
 
+            } else if (config.test_type == "cmh") {
+                // size_t n = 0;
+                int64_t in_sum = 0;
+                int64_t out_sum = 0;
+                for (const auto& [j, c] : row) {
+                    // n += c;
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                        out_sum += c;
+                    }
+
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                        in_sum += c;
+                    }
+                }
+                eff_size = static_cast<long double>(in_sum) / in_kmers
+                        - static_cast<long double>(out_sum) / out_kmers;
+                // // int64_t a = in_sum;
+                // int64_t b = in_kmers - in_sum;
+                // int64_t c = out_sum;
+                // // int64_t d = out_kmers - out_sum;
+                // // int64_t N = total_kmers;
+                // if (b + c >= 25) {
+                //     long double stat = static_cast<long double>(pow(b - c, 2.0)) / (b + c);
+                //     pval = boost::math::cdf(
+                //             boost::math::complement(boost::math::chi_squared(1), stat));
+                // } else if (b >= c) {
+                //     pval = boost::math::cdf(
+                //             boost::math::complement(boost::math::binomial(b + c, 0.5), b - 1));
+                // } else {
+                //     throw std::runtime_error("CMH not implemented for this case");
+                // }
+                int64_t t = total_kmers;
+                int64_t n1 = in_kmers;
+                int64_t n2 = out_kmers;
+                int64_t m1 = in_sum + out_sum;
+                int64_t m2 = t - m1;
+                assert(m2 >= 0);
+
+                if (m2 == 0) {
+                    common::logger->error(
+                            "This row has all counts. Too few data points. Use fisher "
+                            "instead");
+                    throw std::domain_error("Test failed");
+                }
+
+                double lbase
+                        = log(n1) + log(n2) + log(m1) + log(m2) - log(t) * 2 - log(t - 1);
+                double factor = static_cast<double>(n1 * m1) / t;
+
+                auto get_chi_stat = [&](int64_t a) {
+                    int64_t b = n1 - a;
+                    int64_t c = m1 - a;
+                    int64_t d = m2 - b;
+                    assert(d == n2 - c);
+
+                    if (b < 0 || c < 0 || d < 0)
+                        return 0.0;
+
+                    double a_shift = static_cast<double>(a) - factor;
+
+                    if (a_shift > 0)
+                        return exp(log(a_shift) * 2.0 - lbase);
+
+                    return a_shift * a_shift / exp(lbase);
+                };
+
+                double chi_stat = get_chi_stat(in_sum);
+                if (chi_stat <= 0) {
+                    common::logger->error(
+                            "Test statistic {} <= 0, too few data points. Use fisher "
+                            "instead.\t{}\t{},{},{},{}\t{}\t{}",
+                            chi_stat, in_sum, n1, n2, m1, m2, t, factor);
+                    throw std::domain_error("Test failed");
+                }
+
+                double max_chi_stat
+                        = std::max(get_chi_stat(0), get_chi_stat(std::min(n1, m1)));
+                if (max_chi_stat <= 0) {
+                    common::logger->error(
+                            "Best test statistic {} <= 0, too few data points. Use "
+                            "fisher instead.\t{},{},{},{}\t{}\t{}",
+                            max_chi_stat, n1, n2, m1, m2, t, factor);
+                    throw std::domain_error("Test failed");
+                }
+
+                pval = boost::math::cdf(
+                        boost::math::complement(boost::math::chi_squared(1), chi_stat));
+                if (pval < config.family_wise_error_rate) {
+                    size_t nb_idx = kept.rank1(row_i) - 1;
+                    nb_pvals[nb_idx].first = pval;
+                    nb_pvals[nb_idx].second = row_i;
+                }
             } else if (config.test_type == "bb_hypergeometric") {
                 size_t nb_idx = kept.rank1(row_i) - 1;
                 size_t n = 0;
@@ -3280,9 +3402,7 @@ mask_nodes_by_label_dual(
             set_pval(pval, eff_size);
         });
 
-        if (config.test_type == "nbinom_exact" || config.test_type == "pig"
-            || config.test_type == "poisson_binom" || config.test_type == "mwu"
-            || config.test_type == "bm" || config.test_type == "bb_hypergeometric") {
+        if (fdr) {
             // if (false) {
             common::logger->trace("Correcting p-vals");
             nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
@@ -3298,7 +3418,25 @@ mask_nodes_by_label_dual(
                            nb_pvals.end());
             common::logger->trace("Sorting {} / {} p-vals", nb_pvals.size(), num_tests);
             std::sort(nb_pvals.begin(), nb_pvals.end());
-            // long double harm = 1.0;
+
+            // size_t k = 0;
+            // for (size_t i = 0; i < nb_pvals.size(); ++i) {
+            //     const auto& [pval, row_i] = nb_pvals[i];
+            //     if (pval >= config.family_wise_error_rate)
+            //         break;
+
+            //     if (pval * (num_tests - i) >= config.family_wise_error_rate) {
+            //         node_index node =
+            //         AnnotatedDBG::anno_to_graph_index(nb_pvals[i].second);
+            //         indicator_in[node] = false; indicator_out[node] = false;
+            //     } else {
+            //         ++k;
+            //     }
+            // }
+            // common::logger->trace(
+            //         "Found {} / {} significant p-values. Minimum p-value is {}", k,
+            //         nb_pvals.size(), nb_pvals[0].first);
+
             long double harm = 0.0;
             for (size_t i = 1; i <= num_tests; ++i) {
                 harm += 1.0 / i;
