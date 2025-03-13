@@ -795,15 +795,14 @@ mask_nodes_by_label_dual(
     std::vector<size_t> kmer_to_unitig;
     std::vector<std::tuple<size_t, size_t, size_t>> counts;
     // std::vector<std::pair<size_t, std::vector<uint64_t>>> agg_counts;
-    if (config.test_by_unitig && config.test_type != "notest") {
-        clean_masked_graph = std::make_unique<MaskedDeBruijnGraph>(
-                graph_ptr,
-                [&](node_index node) {
-                    return node != DeBruijnGraph::npos
-                            && kept[AnnotatedDBG::graph_to_anno_index(node)];
-                },
-                true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
-
+    clean_masked_graph = std::make_unique<MaskedDeBruijnGraph>(
+            graph_ptr,
+            [&](node_index node) {
+                return node != DeBruijnGraph::npos
+                        && kept[AnnotatedDBG::graph_to_anno_index(node)];
+            },
+            true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+    if (false && config.test_by_unitig && config.test_type != "notest") {
         common::logger->trace("Associating k-mers to unitigs");
         kmer_to_unitig.resize(graph_ptr->max_index() + 1);
         // std::atomic_thread_fence(std::memory_order_release);
@@ -1956,9 +1955,10 @@ mask_nodes_by_label_dual(
             // common::logger->trace("PIG: lambda: {}", lambda);
         }
 
-        bool fdr = config.test_type == "nbinom_exact" || config.test_type == "pig"
-                || config.test_type == "mwu" || config.test_type == "bm"
-                || config.test_type == "bb_hypergeometric" || config.test_type == "cmh";
+        bool fdr = config.test_by_unitig || config.test_type == "nbinom_exact"
+                || config.test_type == "pig" || config.test_type == "mwu"
+                || config.test_type == "bm" || config.test_type == "bb_hypergeometric"
+                || config.test_type == "cmh";
 
         // precompute minimal attainable p-values
         std::vector<std::pair<long double, size_t>> m;
@@ -2482,8 +2482,11 @@ mask_nodes_by_label_dual(
 
         common::logger->trace("Running differential tests");
         std::vector<std::pair<long double, size_t>> nb_pvals;
-        if (fdr)
+        std::vector<long double> eff_sizes;
+        if (fdr) {
             nb_pvals.resize(kept.num_set_bits(), std::make_pair(1.0, kept.size()));
+            eff_sizes.resize(kept.num_set_bits());
+        }
 
         std::atomic_thread_fence(std::memory_order_release);
         generate_clean_rows([&](uint64_t row_i, const auto& row, uint64_t bucket_idx) {
@@ -2514,6 +2517,12 @@ mask_nodes_by_label_dual(
             }
 
             auto set_pval = [&](long double pval, long double eff_size) {
+                if (fdr) {
+                    size_t nb_idx = kept.rank1(row_i) - 1;
+                    nb_pvals[nb_idx].first = pval;
+                    nb_pvals[nb_idx].second = row_i;
+                    eff_sizes[nb_idx] = eff_size;
+                }
                 // if (!config.test_by_unitig) {
                 if (pval * k < config.family_wise_error_rate) {
                     if (eff_size == 0) {
@@ -2521,11 +2530,15 @@ mask_nodes_by_label_dual(
                         throw std::runtime_error("Pval failure");
                     }
 
-                    node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                    if (eff_size > 0) {
-                        set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
-                    } else if (eff_size < 0) {
-                        set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
+                    if (!config.test_by_unitig) {
+                        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                        if (eff_size > 0) {
+                            set_bit(indicator_in.data(), node, true,
+                                    std::memory_order_relaxed);
+                        } else if (eff_size < 0) {
+                            set_bit(indicator_out.data(), node, true,
+                                    std::memory_order_relaxed);
+                        }
                     }
                 }
                 // } else {
@@ -2548,21 +2561,16 @@ mask_nodes_by_label_dual(
                 // if (n < n_cutoff)
                 //     return;
 
-                size_t front = n - std::min(n, num_labels_out);
-                double min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
+                if (!fdr) {
+                    size_t front = n - std::min(n, num_labels_out);
+                    double min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
 
-                if (min_pval * k_min >= config.family_wise_error_rate)
-                    return;
+                    if (min_pval * k_min >= config.family_wise_error_rate)
+                        return;
+                }
 
                 pval = pb_pvals[n][s];
                 eff_size = static_cast<double>(s) - mid_points[n];
-                if (fdr) {
-                    size_t nb_idx = kept.rank1(row_i) - 1;
-                    nb_pvals[nb_idx].second = row_i;
-                    if (pval < config.family_wise_error_rate) {
-                        nb_pvals[nb_idx].first = pval;
-                    }
-                }
             } else if (config.test_type == "poisson_exact") {
                 size_t n = 0;
                 sdsl::bit_vector found(num_labels_in + num_labels_out);
@@ -2891,7 +2899,7 @@ mask_nodes_by_label_dual(
                     // }
                 }
             } else if (config.test_type == "nbinom_exact") {
-                size_t nb_idx = kept.rank1(row_i) - 1;
+                // size_t nb_idx = kept.rank1(row_i) - 1;
                 size_t n = 0;
                 int64_t in_sum = 0;
                 int64_t out_sum = 0;
@@ -2934,97 +2942,96 @@ mask_nodes_by_label_dual(
                         min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
                     }
 
-                    if (min_pval < config.family_wise_error_rate) {
-                        nb_pvals[nb_idx].second = row_i;
-                        long double midpoint = r_a * n / (r_a + r_b);
+                    // if (min_pval < config.family_wise_error_rate) {
+                    // nb_pvals[nb_idx].second = row_i;
+                    long double midpoint = r_a * n / (r_a + r_b);
 
-                        auto get_deviance_a = [&](long double s) {
-                            if (s == 0)
-                                return r_a * logl(p_a) * -2.0;
+                    auto get_deviance_a = [&](long double s) {
+                        if (s == 0)
+                            return r_a * logl(p_a) * -2.0;
 
-                            return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
-                                    + r_a * (logl(r_a) - logl(p_a)))
-                                    * 2.0;
-                        };
+                        return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
+                                + r_a * (logl(r_a) - logl(p_a)))
+                                * 2.0;
+                    };
 
-                        auto get_deviance_b = [&](long double t) {
-                            if (t == 0)
-                                return r_b * logl(p_b) * -2.0;
+                    auto get_deviance_b = [&](long double t) {
+                        if (t == 0)
+                            return r_b * logl(p_b) * -2.0;
 
-                            return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
-                                    + r_b * (logl(r_b) - logl(p_b)))
-                                    * 2.0;
-                        };
+                        return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
+                                + r_b * (logl(r_b) - logl(p_b)))
+                                * 2.0;
+                    };
 
-                        auto get_deviance = [&](long double s, long double t) {
-                            return get_deviance_a(s) + get_deviance_b(t);
-                        };
+                    auto get_deviance = [&](long double s, long double t) {
+                        return get_deviance_a(s) + get_deviance_b(t);
+                    };
 
-                        long double min_dev
-                                = get_deviance(midpoint,
-                                               static_cast<long double>(n) - midpoint);
-                        long double in_dev = get_deviance(in_sum, out_sum);
+                    long double min_dev
+                            = get_deviance(midpoint, static_cast<long double>(n) - midpoint);
+                    long double in_dev = get_deviance(in_sum, out_sum);
 
-                        if (in_dev > min_dev) {
-                            eff_size = static_cast<long double>(in_sum) - midpoint;
-                            pval = 0.0;
-                            long double base = nb_base
-                                    + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
-                                            / logl(2.0);
-                            double l1pa = log1pl(-p_a) / logl(2.0);
-                            double l1pb = log1pl(-p_b) / logl(2.0);
+                    if (in_dev > min_dev) {
+                        eff_size = static_cast<long double>(in_sum) - midpoint;
+                        pval = 0.0;
+                        long double base = nb_base
+                                + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
+                                        / logl(2.0);
+                        double l1pa = log1pl(-p_a) / logl(2.0);
+                        double l1pb = log1pl(-p_b) / logl(2.0);
 
-                            {
-                                size_t s = 0;
-                                size_t t = n;
-                                long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                     - lgammal(s + 1) - lgammal(t + 1))
-                                                / logl(2.0)
-                                        + s * l1pa + t * l1pb;
-                                pval += exp2(base + sbase);
-                                for (++s; s <= n; ++s) {
-                                    long double dev = get_deviance(s, t - 1);
-                                    if (dev >= in_dev) {
-                                        sbase += log2l(r_a + s) - log2l(r_b + t)
-                                                - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
-                                        --t;
-                                        pval += exp2(base + sbase);
-                                        if (pval >= config.family_wise_error_rate)
-                                            break;
-                                    } else {
+                        {
+                            size_t s = 0;
+                            size_t t = n;
+                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                                 - lgammal(s + 1) - lgammal(t + 1))
+                                            / logl(2.0)
+                                    + s * l1pa + t * l1pb;
+                            pval += exp2(base + sbase);
+                            for (++s; s <= n; ++s) {
+                                long double dev = get_deviance(s, t - 1);
+                                if (dev >= in_dev) {
+                                    sbase += log2l(r_a + s) - log2l(r_b + t)
+                                            - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
+                                    --t;
+                                    pval += exp2(base + sbase);
+                                    if (pval >= config.family_wise_error_rate)
                                         break;
-                                    }
+                                } else {
+                                    break;
                                 }
                             }
-                            if (pval < config.family_wise_error_rate
-                                && get_deviance(n, 0) >= in_dev) {
-                                size_t s = n;
-                                size_t t = 0;
-                                long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                     - lgammal(s + 1) - lgammal(t + 1))
-                                                / logl(2.0)
-                                        + s * l1pa + t * l1pb;
-                                pval += exp2(base + sbase);
-                                for (++t; t <= n; ++t) {
-                                    long double dev = get_deviance(s - 1, t);
-                                    if (dev >= in_dev) {
-                                        sbase -= log2l(r_a + s) - log2l(r_b + t)
-                                                - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
-                                        --s;
-                                        pval += exp2(base + sbase);
-                                        if (pval >= config.family_wise_error_rate)
-                                            break;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-                            nb_pvals[nb_idx].first = pval;
                         }
-                    } else {
-                        nb_pvals[nb_idx].second = row_i;
-                        nb_pvals[nb_idx].first = 1.1;
+                        if (pval < config.family_wise_error_rate
+                            && get_deviance(n, 0) >= in_dev) {
+                            size_t s = n;
+                            size_t t = 0;
+                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                                 - lgammal(s + 1) - lgammal(t + 1))
+                                            / logl(2.0)
+                                    + s * l1pa + t * l1pb;
+                            pval += exp2(base + sbase);
+                            for (++t; t <= n; ++t) {
+                                long double dev = get_deviance(s - 1, t);
+                                if (dev >= in_dev) {
+                                    sbase -= log2l(r_a + s) - log2l(r_b + t)
+                                            - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
+                                    --s;
+                                    pval += exp2(base + sbase);
+                                    if (pval >= config.family_wise_error_rate)
+                                        break;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        // nb_pvals[nb_idx].first = pval;
                     }
+                    // } else {
+                    //     nb_pvals[nb_idx].second = row_i;
+                    //     nb_pvals[nb_idx].first = 1.1;
+                    // }
                 }
             } else if (config.test_type == "hypergeometric"
                        || config.test_type == "poisson_bayes") {
@@ -3128,11 +3135,11 @@ mask_nodes_by_label_dual(
 
                 std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
 
-                if (pval < config.family_wise_error_rate) {
-                    size_t nb_idx = kept.rank1(row_i) - 1;
-                    nb_pvals[nb_idx].first = pval;
-                    nb_pvals[nb_idx].second = row_i;
-                }
+                // if (pval < config.family_wise_error_rate) {
+                //     size_t nb_idx = kept.rank1(row_i) - 1;
+                //     nb_pvals[nb_idx].first = pval;
+                //     nb_pvals[nb_idx].second = row_i;
+                // }
             } else if (config.test_type == "bm") {
                 auto generate_a = [&](const auto& callback) {
                     sdsl::bit_vector found(groups.size());
@@ -3161,11 +3168,11 @@ mask_nodes_by_label_dual(
 
                 std::tie(pval, eff_size) = brunner_munzel(generate_a, generate_b);
 
-                if (pval < config.family_wise_error_rate) {
-                    size_t nb_idx = kept.rank1(row_i) - 1;
-                    nb_pvals[nb_idx].first = pval;
-                    nb_pvals[nb_idx].second = row_i;
-                }
+                // if (pval < config.family_wise_error_rate) {
+                //     size_t nb_idx = kept.rank1(row_i) - 1;
+                //     nb_pvals[nb_idx].first = pval;
+                //     nb_pvals[nb_idx].second = row_i;
+                // }
 
             } else if (config.test_type == "cmh") {
                 // size_t n = 0;
@@ -3254,11 +3261,11 @@ mask_nodes_by_label_dual(
 
                 pval = boost::math::cdf(
                         boost::math::complement(boost::math::chi_squared(1), chi_stat));
-                if (pval < config.family_wise_error_rate) {
-                    size_t nb_idx = kept.rank1(row_i) - 1;
-                    nb_pvals[nb_idx].first = pval;
-                    nb_pvals[nb_idx].second = row_i;
-                }
+                // if (pval < config.family_wise_error_rate) {
+                //     size_t nb_idx = kept.rank1(row_i) - 1;
+                //     nb_pvals[nb_idx].first = pval;
+                //     nb_pvals[nb_idx].second = row_i;
+                // }
             } else if (config.test_type == "bb_hypergeometric") {
                 size_t nb_idx = kept.rank1(row_i) - 1;
                 size_t n = 0;
@@ -3402,13 +3409,63 @@ mask_nodes_by_label_dual(
             set_pval(pval, eff_size);
         });
 
+        std::atomic_thread_fence(std::memory_order_acquire);
+
         if (fdr) {
+            size_t num_tests = nb_pvals.size();
+            std::vector<std::pair<long double, size_t>> sorted_unitig_counts;
+            if (config.test_by_unitig) {
+                VectorMap<long double, size_t> pval_to_count;
+                std::mutex mu;
+                common::logger->trace("Combining p-values within unitigs");
+                num_tests = 0;
+                std::atomic_thread_fence(std::memory_order_release);
+                clean_masked_graph->call_unitigs(
+                        [&](const std::string&, const auto& path) {
+                            __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
+                            std::vector<long double> pvals;
+                            pvals.reserve(path.size());
+                            long double agg_eff_size = 0.0;
+                            for (node_index node : path) {
+                                auto row_i = AnnotatedDBG::graph_to_anno_index(node);
+                                size_t nb_idx = kept.rank1(row_i) - 1;
+                                long double pval = nb_pvals[nb_idx].first;
+                                long double eff_size = eff_sizes[nb_idx];
+                                pvals.emplace_back(pval);
+                                agg_eff_size += eff_size;
+                            }
+                            long double agg_pval = combine_pvals(pvals);
+                            for (node_index node : path) {
+                                auto row_i = AnnotatedDBG::graph_to_anno_index(node);
+                                size_t nb_idx = kept.rank1(row_i) - 1;
+                                nb_pvals[nb_idx].first = agg_pval;
+                                if (agg_pval < config.family_wise_error_rate) {
+                                    if (agg_eff_size > 0) {
+                                        set_bit(indicator_in.data(), node, true,
+                                                std::memory_order_relaxed);
+                                    } else {
+                                        set_bit(indicator_out.data(), node, true,
+                                                std::memory_order_relaxed);
+                                    }
+                                }
+                            }
+                            std::lock_guard<std::mutex> lock(mu);
+                            pval_to_count[agg_pval] += path.size();
+                        },
+                        num_threads);
+                std::atomic_thread_fence(std::memory_order_acquire);
+                sorted_unitig_counts
+                        = const_cast<std::vector<std::pair<long double, size_t>>&&>(
+                                pval_to_count.values_container());
+                std::sort(sorted_unitig_counts.begin(), sorted_unitig_counts.end());
+                for (size_t i = 1; i < sorted_unitig_counts.size(); ++i) {
+                    sorted_unitig_counts[i].second += sorted_unitig_counts[i - 1].second;
+                }
+            }
+
             // if (false) {
             common::logger->trace("Correcting p-vals");
-            nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
-                                          [&](const auto& a) { return a.first > 1.0; }),
-                           nb_pvals.end());
-            size_t num_tests = nb_pvals.size();
+
             common::logger->trace("Discarded {} / {} untestable hypotheses",
                                   nelem - num_tests, nelem);
             nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
@@ -3444,12 +3501,19 @@ mask_nodes_by_label_dual(
 
             common::logger->trace("Selecting cut-off");
             size_t k = 0;
+            auto it = sorted_unitig_counts.begin();
             for (size_t i = 0; i < nb_pvals.size(); ++i) {
                 if (nb_pvals[i].first >= config.family_wise_error_rate)
                     break;
 
+                if (it != sorted_unitig_counts.end() && i == it->second)
+                    ++it;
+
+                size_t cur_count = it == sorted_unitig_counts.end()
+                        ? i
+                        : it - sorted_unitig_counts.begin();
                 if (nb_pvals[i].first
-                    <= config.family_wise_error_rate * (i + 1) / num_tests / harm) {
+                    <= config.family_wise_error_rate * (cur_count + 1) / num_tests / harm) {
                     k = std::max(i + 1, k);
                     node_index node = AnnotatedDBG::anno_to_graph_index(nb_pvals[i].second);
                     if (!indicator_in[node] && !indicator_out[node]) {
@@ -3464,6 +3528,7 @@ mask_nodes_by_label_dual(
             common::logger->trace(
                     "Found {} / {} significant p-values. Minimum p-value is {}", k,
                     nb_pvals.size(), nb_pvals[0].first);
+
             for (size_t i = k; i < nb_pvals.size(); ++i) {
                 const auto& [pval, row_i] = nb_pvals[i];
                 if (nb_pvals[i].first >= config.family_wise_error_rate)
@@ -3528,7 +3593,6 @@ mask_nodes_by_label_dual(
         //     eff_size_buckets.resize(0);
         //     tmp_eff_buckets.resize(0);
         // }
-        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     // common::logger->trace("Computing minimum p-values");
