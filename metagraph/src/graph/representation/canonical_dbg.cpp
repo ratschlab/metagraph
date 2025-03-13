@@ -360,6 +360,10 @@ void CanonicalDBG
         adjacent_outgoing_nodes(node - offset_, [&](node_index prev) {
             callback(reverse_complement(prev));
         });
+    } else if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
+        sshash->adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool orientation) {
+            callback(orientation ? reverse_complement(prev) : prev);
+        });
     } else {
         call_incoming_kmers(node, [&](node_index prev, char) { callback(prev); });
     }
@@ -374,6 +378,10 @@ void CanonicalDBG
     if (node > offset_) {
         adjacent_incoming_nodes(node - offset_, [&](node_index next) {
             callback(reverse_complement(next));
+        });
+    } else if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
+        sshash->adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool orientation) {
+            callback(orientation ? reverse_complement(next) : next);
         });
     } else {
         call_outgoing_kmers(node, [&](node_index next, char) { callback(next); });

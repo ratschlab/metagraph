@@ -26,13 +26,15 @@ class DBGSSHash : public DeBruijnGraph {
     using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;
 #endif
 
-    using dict_t = std::variant<
-                        sshash::dictionary<kmer_t<KmerInt64>>,
-                        sshash::dictionary<kmer_t<KmerInt128>>,
-                        sshash::dictionary<kmer_t<KmerInt256>>>;
+    using dict_t = std::variant<sshash::dictionary<kmer_t<KmerInt64>>,
+                                sshash::dictionary<kmer_t<KmerInt128>>,
+                                sshash::dictionary<kmer_t<KmerInt256>>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
-    DBGSSHash(const std::string &input_filename, size_t k, Mode mode = BASIC, size_t num_chars = 0);
+    DBGSSHash(const std::string& input_filename,
+              size_t k,
+              Mode mode = BASIC,
+              size_t num_chars = 0);
 
     // SequenceGraph overrides
     void add_sequence(
@@ -76,10 +78,11 @@ class DBGSSHash : public DeBruijnGraph {
     node_index traverse(node_index node, char next_char) const override;
     node_index traverse_back(node_index node, char prev_char) const override;
 
-    void call_nodes(const std::function<void(node_index)>& callback,
-                    const std::function<bool()> &terminate = [](){ return false; },
-                    size_t num_threads = 1,
-                    size_t batch_size = 1'000'000) const override;
+    void call_nodes(
+            const std::function<void(node_index)>& callback,
+            const std::function<bool()>& terminate = []() { return false; },
+            size_t num_threads = 1,
+            size_t batch_size = 1'000'000) const override;
 
     size_t outdegree(node_index) const override;
 
@@ -106,34 +109,27 @@ class DBGSSHash : public DeBruijnGraph {
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
 
-
     const std::string& alphabet() const override final { return alphabet_; }
 
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
 
-
-
     void adjacent_outgoing_nodes(node_index node,
-        const std::function<void(node_index)>& callback) const override;
+                                 const std::function<void(node_index)>& callback) const override;
 
-template <bool with_rc = true>
-void adjacent_outgoing_nodes_with_rc(
-node_index node,
-const std::function<void(node_index, bool)>& callback) const;
+    template <bool with_rc = true>
+    void
+    adjacent_outgoing_nodes_with_rc(node_index node,
+                                    const std::function<void(node_index, bool)>& callback) const;
 
-void adjacent_incoming_nodes(node_index node,
-        const std::function<void(node_index)>& callback) const override;
+    void adjacent_incoming_nodes(node_index node,
+                                 const std::function<void(node_index)>& callback) const override;
 
-template <bool with_rc = true>
-void adjacent_incoming_nodes_with_rc(
-node_index node,
-const std::function<void(node_index, bool)>& callback) const;
-
-
-
-
+    template <bool with_rc = true>
+    void
+    adjacent_incoming_nodes_with_rc(node_index node,
+                                    const std::function<void(node_index, bool)>& callback) const;
 
 
   private:
