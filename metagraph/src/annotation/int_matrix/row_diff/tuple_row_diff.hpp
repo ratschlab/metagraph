@@ -67,16 +67,12 @@ std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) co
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
-    for (Row i = 0; i < num_rows(); ++i) {
-        auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(i);
-
-        if (!graph_->in_graph(node))
-            continue;
-
+    graph_->call_nodes([&](auto node) {
+        auto i = graph::AnnotatedDBG::graph_to_anno_index(node);
         SetBitPositions set_bits = get_rows({ i })[0];
         if (std::binary_search(set_bits.begin(), set_bits.end(), j))
             result.push_back(i);
-    }
+    });
     return result;
 }
 

@@ -126,16 +126,12 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
     std::vector<Row> result;
     // TODO: implement a more efficient algorithm
-    for (Row row = 0; row < num_rows(); ++row) {
-        auto edge = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
-
-        if (!graph_->in_graph(edge))
-            continue;
-
+    graph_->call_nodes([&](auto node) {
+        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
         SetBitPositions set_bits = get_rows({ row })[0];
         if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
-    }
+    });
     return result;
 }
 
