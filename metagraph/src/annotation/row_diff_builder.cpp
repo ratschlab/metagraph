@@ -464,13 +464,15 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                     skip_succ = (*dummy)[succinct->get_boss().fwd(boss_idx)];
                 }
             }
-            auto with_rd_succ = [&](bit_vector const& rd_succ) {
-                if(!skip_succ) {
+
+            if (!skip_all) {
+                if (!skip_succ) {
                     auto j = row_diff_successor(graph, i, rd_succ);
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
-                if(rd_succ[i]) {
+
+                if (rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
                         if (dummy && (*dummy)[pred]) {
                             return;
@@ -479,15 +481,8 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
                         pred_boundary_buf.push_back(0);
                     });
                 }
-            };
-            if (!skip_all) {
-                if (rd_succ.size()) {
-                    with_rd_succ(rd_succ);
-                } else {
-                    auto last = get_last(graph);
-                    with_rd_succ(*last);
-                }
             }
+
             succ_boundary_buf.push_back(1);
             pred_boundary_buf.push_back(1);
             ++progress_bar;
