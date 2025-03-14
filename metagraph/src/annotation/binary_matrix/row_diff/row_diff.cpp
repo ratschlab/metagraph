@@ -64,7 +64,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
                 graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         while (true) {
-            if (graph_->is_valid(boss_edge)) {
+            if (graph_->in_graph(boss_edge)) {
                 row = graph::AnnotatedSequenceGraph::graph_to_anno_index(boss_edge);
 
                 auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());

@@ -83,14 +83,14 @@ bool DeBruijnGraph::find(std::string_view sequence,
 void DeBruijnGraph
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= max_index());
+    assert(in_graph(node));
     call_outgoing_kmers(node, [&](auto child, char) { callback(child); });
 }
 
 void DeBruijnGraph
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    assert(node > 0 && node <= max_index());
+    assert(in_graph(node));
     call_incoming_kmers(node, [&](auto parent, char) { callback(parent); });
 }
 
@@ -122,7 +122,7 @@ void DeBruijnGraph::traverse(node_index start,
     for (; begin != end && !terminate(); ++begin) {
         start = traverse(start, *begin);
 
-        if (start == npos)
+        if (!in_graph(start))
             return;
 
         callback(start);
@@ -446,6 +446,7 @@ void DeBruijnGraph
             nodes.pop();
 
             while (!visited[node]) {
+                assert(in_graph(node));
                 visited[node] = true;
                 callback(node, sequence);
                 sequence.assign(sequence.begin() + 1, sequence.end());
