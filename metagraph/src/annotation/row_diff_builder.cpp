@@ -346,23 +346,6 @@ rd_succ_bv_type route_at_forks(const graph::DeBruijnGraph &graph,
     return rd_succ;
 }
 
-node_index row_diff_successor(const graph::DeBruijnGraph &graph,
-                              node_index node,
-                              const bit_vector &rd_succ) {
-    if (auto* dbg_succ = dynamic_cast<graph::DBGSuccinct const*>(&graph)) {
-        return dbg_succ->get_boss().row_diff_successor(node, rd_succ);
-    } else {
-        node_index succ = graph::DeBruijnGraph::npos;
-        graph.adjacent_outgoing_nodes(node, [&](node_index adjacent_node) {
-            if (rd_succ[adjacent_node]) {
-                succ = adjacent_node;
-            }
-        });
-        assert(succ != graph::DeBruijnGraph::npos && "a row diff successor must exist");
-        return succ;
-    }
-}
-
 void row_diff_traverse(const graph::DeBruijnGraph &graph,
                        size_t num_threads,
                        size_t max_length,
