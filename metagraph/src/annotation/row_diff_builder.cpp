@@ -275,11 +275,13 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
 
         __atomic_thread_fence(__ATOMIC_RELEASE);
         graph.call_nodes([&](node_index v) {
-            std::pair<char, node_index> last;
+            std::pair<char, node_index> last = { '\0', graph::DeBruijnGraph::npos };
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
-                last = std::max(last, std::pair{c, u});
+                last = std::max(last, std::pair{ c, u });
             });
-            set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
+
+            if (last.second != graph::DeBruijnGraph::npos)
+                set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
         }, []() { return false; }, get_num_threads());
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
@@ -455,8 +457,9 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
 
         for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
             bool skip_succ = false;
-            bool skip_all = false;
-            if (succinct) { // Legacy code for DBGSuccinct
+            bool skip_all = !graph.in_graph(i);
+
+            if (!skip_all && succinct) { // Legacy code for DBGSuccinct
                 BOSS::edge_index boss_idx = i;
                 if((*dummy)[boss_idx]) {
                     skip_all = true;
@@ -466,6 +469,7 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
             }
 
             if (!skip_all) {
+                skip_succ |= graph.has_no_outgoing(i);
                 if (!skip_succ) {
                     auto j = row_diff_successor(graph, i, rd_succ);
                     succ_buf.push_back(to_row(j));
