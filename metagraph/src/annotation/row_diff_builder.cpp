@@ -434,6 +434,12 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
     sdsl::int_vector_buffer<> pred(outfbase + ".pred", std::ios::out, BUFFER_SIZE, width);
     sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BUFFER_SIZE);
 
+    std::optional<sdsl::bit_vector> dummy;
+    auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph);
+    if (succinct) {
+        dummy = succinct->get_boss().mark_all_dummy_edges(num_threads);
+    }
+
     ProgressBar progress_bar(graph.max_index(), "Compute succ/pred", std::cerr,
                              !common::get_verbose());
 
@@ -448,17 +454,38 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
         std::vector<bool> pred_boundary_buf;
 
         for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
-            if (graph.in_graph(i)) {
-                if(!graph.has_no_outgoing(i)) {
+            bool skip_succ = false;
+            bool skip_all = false;
+            if (succinct) { // Legacy code for DBGSuccinct
+                BOSS::edge_index boss_idx = i;
+                if((*dummy)[boss_idx]) {
+                    skip_all = true;
+                } else {
+                    skip_succ = (*dummy)[succinct->get_boss().fwd(boss_idx)];
+                }
+            }
+            auto with_rd_succ = [&](bit_vector const& rd_succ) {
+                if(!skip_succ) {
                     auto j = row_diff_successor(graph, i, rd_succ);
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
                 if(rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                        if (dummy && (*dummy)[pred]) {
+                            return;
+                        }
                         pred_buf.push_back(to_row(pred));
                         pred_boundary_buf.push_back(0);
                     });
+                }
+            };
+            if (!skip_all) {
+                if (rd_succ.size()) {
+                    with_rd_succ(rd_succ);
+                } else {
+                    auto last = get_last(graph);
+                    with_rd_succ(*last);
                 }
             }
             succ_boundary_buf.push_back(1);
