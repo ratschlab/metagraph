@@ -2782,7 +2782,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
     traverse_dummy_edges(*this, NULL, NULL, num_threads,
         [&](edge_index edge, size_t depth) {
             assert(depth <= get_k());
-            assert(!(*terminal)[edge]);
+            unset_bit(terminal->data(), edge, async);
             set_bit(dummy.data(), edge, async);
             if (depth < get_k())
                 set_bit(visited.data(), edge, async);
