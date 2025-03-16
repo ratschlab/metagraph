@@ -275,11 +275,13 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
 
         __atomic_thread_fence(__ATOMIC_RELEASE);
         graph.call_nodes([&](node_index v) {
-            std::pair<char, node_index> last;
+            std::pair<char, node_index> last = { '\0', graph::DeBruijnGraph::npos };
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
-                last = std::max(last, std::pair{c, u});
+                last = std::max(last, std::pair{ c, u });
             });
-            set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
+
+            if (last.second != graph::DeBruijnGraph::npos)
+                set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
         }, []() { return false; }, get_num_threads());
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
@@ -551,6 +553,12 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
     sdsl::int_vector_buffer<> pred(outfbase + ".pred", std::ios::out, BUFFER_SIZE, width);
     sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BUFFER_SIZE);
 
+    std::optional<sdsl::bit_vector> dummy;
+    auto* succinct = dynamic_cast<graph::DBGSuccinct const*>(&graph);
+    if (succinct) {
+        dummy = succinct->get_boss().mark_all_dummy_edges(num_threads);
+    }
+
     ProgressBar progress_bar(graph.max_index(), "Compute succ/pred", std::cerr,
                              !common::get_verbose());
 
@@ -565,19 +573,37 @@ void build_pred_succ(const graph::DeBruijnGraph &graph,
         std::vector<bool> pred_boundary_buf;
 
         for (node_index i = start; i < std::min(start + BS, graph.max_index() + 1); ++i) {
-            if (graph.in_graph(i)) {
-                if (!graph.has_no_outgoing(i)) {
+            bool skip_succ = false;
+            bool skip_all = !graph.in_graph(i);
+
+            if (!skip_all && succinct) { // Legacy code for DBGSuccinct
+                BOSS::edge_index boss_idx = i;
+                if((*dummy)[boss_idx]) {
+                    skip_all = true;
+                } else {
+                    skip_succ = (*dummy)[succinct->get_boss().fwd(boss_idx)];
+                }
+            }
+
+            if (!skip_all) {
+                skip_succ |= graph.has_no_outgoing(i);
+                if (!skip_succ) {
                     auto j = row_diff_successor(graph, i, rd_succ);
                     succ_buf.push_back(to_row(j));
                     succ_boundary_buf.push_back(0);
                 }
+
                 if (rd_succ[i]) {
                     graph.adjacent_incoming_nodes(i, [&](auto pred) {
+                        if (dummy && (*dummy)[pred]) {
+                            return;
+                        }
                         pred_buf.push_back(to_row(pred));
                         pred_boundary_buf.push_back(0);
                     });
                 }
             }
+
             succ_boundary_buf.push_back(1);
             pred_boundary_buf.push_back(1);
             ++progress_bar;
