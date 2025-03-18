@@ -65,7 +65,7 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
 }
 
 std::pair<bit_vector_smart, bit_vector_smart>
-generate_succ_pred(const DBGSSHash &graph, size_t num_nodes) {
+generate_succ_pred(const DBGSSHash &graph, uint64_t num_nodes) {
     sdsl::bit_vector succ_is_next(num_nodes + 1, false);
     sdsl::bit_vector pred_is_prev(num_nodes + 1, false);
     bool with_rc = (graph.get_mode() != DBGSSHash::BASIC);
@@ -76,7 +76,7 @@ generate_succ_pred(const DBGSSHash &graph, size_t num_nodes) {
         ProgressBar progress_bar(graph.num_nodes(), "Checking succ/pred",
                                  std::cerr, !common::get_verbose());
 
-        static const size_t BS = 1'048'576;
+        static const uint64_t BS = 1'048'576;
 
         // make sure each thread gets a disjoint block of words
         static_assert(BS % (sizeof(*succ_is_next.data()) * 8) == 0);
