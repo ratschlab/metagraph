@@ -8,6 +8,7 @@
 #include <sdsl/uint256_t.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg::graph {
 
@@ -112,14 +113,42 @@ class DBGSSHash : public DeBruijnGraph {
 
     node_index reverse_complement(node_index node) const;
 
+
+
+    void adjacent_outgoing_nodes(node_index node,
+        const std::function<void(node_index)>& callback) const override;
+
+template <bool with_rc = true>
+void adjacent_outgoing_nodes_with_rc(
+node_index node,
+const std::function<void(node_index, bool)>& callback) const;
+
+void adjacent_incoming_nodes(node_index node,
+        const std::function<void(node_index)>& callback) const override;
+
+template <bool with_rc = true>
+void adjacent_incoming_nodes_with_rc(
+node_index node,
+const std::function<void(node_index, bool)>& callback) const;
+
+
+
+
+
+
   private:
     static const std::string alphabet_;
     dict_t dict_;
     size_t k_;
     size_t num_nodes_;
     Mode mode_;
+    bit_vector_smart succ_is_next_;
+    bit_vector_smart pred_is_prev_;
 
     size_t dict_size() const;
+
+    char get_last_char(node_index node) const;
+    char get_first_char(node_index node) const;
 };
 
 } // namespace mtg::graph
