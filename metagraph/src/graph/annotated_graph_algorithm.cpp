@@ -398,6 +398,16 @@ std::pair<long double, long double> brunner_munzel(const G1& generate_a,
     return std::make_pair(p, eff_size);
 }
 
+long double combine_pvals(const std::vector<long double>& pvals) {
+    static const boost::math::cauchy dist;
+    long double stat = 0.0;
+    for (long double pval : pvals) {
+        stat += tan((0.5 - pval) * M_PI);
+    }
+    stat /= pvals.size();
+    return boost::math::cdf(boost::math::complement(dist, stat));
+};
+
 template <typename value_type, class PValStorage, typename HistGetter, typename Generator>
 std::tuple<std::shared_ptr<DeBruijnGraph>,
            std::shared_ptr<DeBruijnGraph>,
@@ -420,16 +430,6 @@ mask_nodes_by_label_dual(
     num_parallel_files = get_num_threads();
     num_threads = get_num_threads();
     bool is_primary = graph_ptr->get_mode() == DeBruijnGraph::PRIMARY;
-
-    auto combine_pvals
-            = [dist = boost::math::cauchy()](const std::vector<long double>& pvals) {
-                  long double stat = 0.0;
-                  for (long double pval : pvals) {
-                      stat += tan((0.5 - pval) * M_PI);
-                  }
-                  stat /= pvals.size();
-                  return boost::math::cdf(boost::math::complement(dist, stat));
-              };
 
     size_t num_labels_both = std::count(groups.begin(), groups.end(), Group::BOTH);
     size_t num_labels_out = std::count(groups.begin(), groups.end(), Group::OUT);
