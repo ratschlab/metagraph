@@ -414,37 +414,154 @@ void row_diff_traverse(const graph::DeBruijnGraph &graph,
             num_threads, max_length, rd_succ, terminal);
     } else {
         std::atomic_thread_fence(std::memory_order_release);
+
         sdsl::bit_vector visited(graph.max_index() + 1);
-        auto finalised = visited;
         assert(terminal->size() == visited.size());
         assert(rd_succ.size() == visited.size());
 
         ProgressBar progress_bar(graph.num_nodes(), "Checking nodes", std::cerr,
                                  !common::get_verbose());
-        graph.call_nodes([&](node_index start) {
-            ++progress_bar;
-            node_index v = start;
-            std::vector<node_index> path;
-            while (path.size() < max_length
-                    && !fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
-                path.push_back(v);
-                if (!graph.has_no_outgoing(v))
-                    v = row_diff_successor(graph, v, rd_succ);
-            }
 
-            if (path.empty())
-                return;
-
-            // Either a sink, or a cyclic dependency
-            if (!fetch_and_set_bit(finalised.data(), v, true, std::memory_order_acq_rel))
+        graph.call_nodes([&](node_index v) {
+            if (!graph.outdegree(v)) {
+                assert(rd_succ[v]);
+                // mark all terminals as anchors
                 set_bit(terminal->data(), v, true, std::memory_order_relaxed);
+                std::vector<std::pair<node_index, size_t>> traversal;
+                traversal.emplace_back(v, 0);
+                while (traversal.size()) {
+                    auto [v, d] = traversal.back();
+                    traversal.pop_back();
+                    if (fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel))
+                        continue;
 
-            for (node_index v : path) {
-                set_bit(finalised.data(), v, true, std::memory_order_release);
+                    ++progress_bar;
+
+                    if (d == max_length) {
+                        set_bit(terminal->data(), v, true, std::memory_order_release);
+                        d = 0;
+                    }
+
+                    if (rd_succ[v]) {
+                        graph.adjacent_incoming_nodes(v, [&](node_index pred) {
+                            traversal.emplace_back(pred, d + 1);
+                        });
+                    }
+                }
             }
         }, []() { return false; }, num_threads);
 
+        graph.call_nodes([&](node_index v) {
+            if (!graph.indegree(v)) {
+                // traverse forwards from sources
+                size_t d = 0;
+                node_index last_v = graph::DeBruijnGraph::npos;
+                while (!fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+                    ++d;
+                    ++progress_bar;
+                    if (d == max_length) {
+                        set_bit(terminal->data(), v, true, std::memory_order_release);
+                        d = 0;
+                    }
+                    last_v = v;
+                    v = row_diff_successor(graph, v, rd_succ);
+                }
+                if (last_v && !fetch_bit(terminal->data(), v, true, std::memory_order_acquire))
+                    set_bit(terminal->data(), last_v, true, std::memory_order_relaxed);
+            }
+        }, []() { return false; }, num_threads);
+
+        graph.call_nodes([&](node_index v) {
+            if (fetch_bit(terminal->data(), v, true, std::memory_order_acquire)) {
+                // start at next nodes from termini
+                graph.adjacent_outgoing_nodes(v, [&](node_index v) {
+                    size_t d = 0;
+                    node_index last_v = graph::DeBruijnGraph::npos;
+                    while (!fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+                        ++d;
+                        ++progress_bar;
+                        if (d == max_length) {
+                            set_bit(terminal->data(), v, true, std::memory_order_release);
+                            d = 0;
+                        }
+                        last_v = v;
+                        v = row_diff_successor(graph, v, rd_succ);
+                    }
+                    if (last_v && !fetch_bit(terminal->data(), v, true, std::memory_order_acquire))
+                        set_bit(terminal->data(), last_v, true, std::memory_order_relaxed);
+                });
+            }
+        }, []() { return false; }, num_threads);
+
+        // forks
+        graph.call_nodes([&](node_index v) {
+            if (graph.has_multiple_outgoing(v)) {
+                graph.adjacent_outgoing_nodes(v, [&](node_index v) {
+                    size_t d = 0;
+                    node_index last_v = graph::DeBruijnGraph::npos;
+                    while (!fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+                        ++d;
+                        ++progress_bar;
+                        if (d == max_length) {
+                            set_bit(terminal->data(), v, true, std::memory_order_release);
+                            d = 0;
+                        }
+                        last_v = v;
+                        v = row_diff_successor(graph, v, rd_succ);
+                    }
+                    if (last_v && !fetch_bit(terminal->data(), v, true, std::memory_order_acquire))
+                        set_bit(terminal->data(), last_v, true, std::memory_order_relaxed);
+                });
+            }
+        }, []() { return false; }, num_threads);
+
+        // everything else
+        graph.call_nodes([&](node_index v) {
+            size_t d = 0;
+            node_index last_v = graph::DeBruijnGraph::npos;
+            while (!fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+                ++d;
+                ++progress_bar;
+                if (d == max_length) {
+                    set_bit(terminal->data(), v, true, std::memory_order_release);
+                    d = 0;
+                }
+                last_v = v;
+                v = row_diff_successor(graph, v, rd_succ);
+            }
+            if (last_v && !fetch_bit(terminal->data(), v, true, std::memory_order_acquire))
+                set_bit(terminal->data(), last_v, true, std::memory_order_relaxed);
+        }, []() { return false; }, num_threads);
+
         std::atomic_thread_fence(std::memory_order_acquire);
+
+        // std::atomic_thread_fence(std::memory_order_release);
+        // auto finalised = visited;
+        // graph.call_nodes([&](node_index start) {
+        //     node_index v = start;
+        //     std::vector<node_index> path;
+        //     while (path.size() < max_length
+        //             && !fetch_and_set_bit(visited.data(), v, true, std::memory_order_acq_rel)) {
+        //         path.push_back(v);
+        //         if (!graph.has_no_outgoing(v))
+        //             v = row_diff_successor(graph, v, rd_succ);
+        //     }
+
+        //     if (path.empty())
+        //         return;
+
+        //     progress_bar += path.size();
+
+        //     // Either a sink, or a cyclic dependency
+        //     if (!fetch_and_set_bit(finalised.data(), v, true, std::memory_order_acq_rel))
+        //         set_bit(terminal->data(), v, true, std::memory_order_relaxed);
+
+        //     for (node_index v : path) {
+        //         set_bit(finalised.data(), v, true, std::memory_order_release);
+        //     }
+        // }, []() { return false; }, num_threads);
+
+        // std::atomic_thread_fence(std::memory_order_acquire);
     }
 }
 
