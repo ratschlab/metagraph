@@ -37,8 +37,11 @@ int transform_graph(Config *config) {
 
     auto dbg_succ = std::dynamic_pointer_cast<graph::DBGSuccinct>(graph);
 
-    if (!dbg_succ.get())
-        throw std::runtime_error("Only implemented for DBGSuccinct");
+    if (!dbg_succ.get()) {
+        logger->warn("Transformations only implemented for DBGSuccinct, serializing graph and exiting");
+        graph->serialize(config->outfbase);
+        return 0;
+    }
 
     if (config->initialize_bloom) {
         assert(config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0);
