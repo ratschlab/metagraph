@@ -284,13 +284,26 @@ auto CSRMatrixFlat::get_row_values(const std::vector<BinaryMatrix::Row> &rows) c
     const auto &flat = matrix_.data();
 
     std::visit([&](const auto &v) {
-        for (size_t i = 0; i < rows.size(); ++i) {
-            uint64_t idx_begin = rows[i] * num_columns_;
-            uint64_t idx_end = idx_begin + num_columns_;
-            uint64_t r = flat.rank1(idx_begin) - flat[idx_begin];
-            flat.call_ones_in_range(idx_begin, idx_end, [&](uint64_t j) {
-                row_values[i].emplace_back(j % num_columns_, v[r++]);
-            });
+        using S = std::decay_t<decltype(v)>;
+        if constexpr(std::is_same_v<S, sdsl::int_vector_buffer<>>) {
+            sdsl::int_vector_buffer<> vcopy(v.filename(), std::ios::in, v.buffersize(), 0, false, offset_);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                uint64_t idx_begin = rows[i] * num_columns_;
+                uint64_t idx_end = idx_begin + num_columns_;
+                uint64_t r = flat.rank1(idx_begin) - flat[idx_begin];
+                flat.call_ones_in_range(idx_begin, idx_end, [&](uint64_t j) {
+                    row_values[i].emplace_back(j % num_columns_, vcopy[r++]);
+                });
+            }
+        } else {
+            for (size_t i = 0; i < rows.size(); ++i) {
+                uint64_t idx_begin = rows[i] * num_columns_;
+                uint64_t idx_end = idx_begin + num_columns_;
+                uint64_t r = flat.rank1(idx_begin) - flat[idx_begin];
+                flat.call_ones_in_range(idx_begin, idx_end, [&](uint64_t j) {
+                    row_values[i].emplace_back(j % num_columns_, v[r++]);
+                });
+            }
         }
     }, values_);
 
