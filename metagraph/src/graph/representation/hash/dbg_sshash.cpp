@@ -651,8 +651,6 @@ char DBGSSHash::get_last_char(node_index node) const {
                         d.strings(), kmer_t::bits_per_char * (offset + get_k() - 1));
                 return kmer_t::uint64_to_char(
                         static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
-                // kmer_t read_kmer = bv_it.read(kmer_t::bits_per_char * k);
-                // util::uint_kmer_to_string(read_kmer, string_kmer, k);
             },
             dict_);
 }
@@ -670,8 +668,6 @@ char DBGSSHash::get_first_char(node_index node) const {
                                                           kmer_t::bits_per_char * offset);
                 return kmer_t::uint64_to_char(
                         static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
-                // kmer_t read_kmer = bv_it.read(kmer_t::bits_per_char * k);
-                // util::uint_kmer_to_string(read_kmer, string_kmer, k);
             },
             dict_);
 }
