@@ -1,6 +1,8 @@
 #ifndef __SEQUENCE_GRAPH_HPP__
 #define __SEQUENCE_GRAPH_HPP__
 
+#include "common/vectors/bit_vector.hpp"
+
 #include <vector>
 #include <string>
 #include <functional>
@@ -60,10 +62,11 @@ class SequenceGraph {
                                          const std::function<void(node_index)> &callback) const = 0;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const;
+                            const std::function<bool()> &terminate = [](){ return false; }) const;
 
     virtual uint64_t num_nodes() const = 0;
     virtual uint64_t max_index() const { return num_nodes(); };
+    virtual bool in_graph(node_index node) const { return node > 0 && node <= max_index(); }
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
@@ -203,6 +206,7 @@ class DeBruijnGraph : public SequenceGraph {
                             const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
+    virtual bool has_no_outgoing(node_index node) const { return outdegree(node) == 0; }
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
     virtual bool has_multiple_outgoing(node_index node) const { return outdegree(node) > 1; }
 

@@ -536,7 +536,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
                     graph.map_to_nodes(
                         unitig,
                         [&](const auto &index) {
-                            EXPECT_TRUE(graph.in_subgraph(index));
+                            EXPECT_TRUE(graph.in_graph(index));
                             EXPECT_NE(DeBruijnGraph::npos, index);
                         }
                     );
@@ -721,7 +721,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
 
             std::multiset<MaskedDeBruijnGraph::node_index> ref_nodes;
             full_graph->call_nodes([&](auto i) {
-                if (graph.in_subgraph(i))
+                if (graph.in_graph(i))
                     ref_nodes.insert(i);
             });
 
@@ -803,7 +803,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
                     full_graph->adjacent_outgoing_nodes(node, [&](auto i) { outnodes_full.push_back(i); });
                     outnodes_full.erase(std::remove_if(outnodes_full.begin(),
                                                        outnodes_full.end(),
-                                                       [&](auto i) { return !graph.in_subgraph(i); }),
+                                                       [&](auto i) { return !graph.in_graph(i); }),
                                         outnodes_full.end());
                     EXPECT_EQ(convert_to_set(outnodes_full), convert_to_set(outnodes));
                 }
@@ -847,7 +847,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
                     full_graph->adjacent_incoming_nodes(node, [&](auto i) { innodes_full.push_back(i); });
                     innodes_full.erase(std::remove_if(innodes_full.begin(),
                                                       innodes_full.end(),
-                                                      [&](auto i) { return !graph.in_subgraph(i); }),
+                                                      [&](auto i) { return !graph.in_graph(i); }),
                                         innodes_full.end());
                     EXPECT_EQ(convert_to_set(innodes_full), convert_to_set(innodes));
                 }

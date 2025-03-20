@@ -115,7 +115,7 @@ void CanonicalDBG
                                                    sequence.substr(1));
         boss.map_to_edges(sequence.substr(1),
             [&](boss::BOSS::edge_index edge) {
-                path.push_back(dbg_succ->boss_to_kmer_index(edge));
+                path.push_back(dbg_succ->validate_edge(edge));
                 ++it;
             },
             []() { return false; },
@@ -285,7 +285,6 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
     SmallVector<node_index> parents(alphabet.size(), npos);
     // "- has_sentinel_" because there can't be a dummy sink with another non-dummy edge
     size_t max_num_edges_left = parents.size() - has_sentinel_;
-
     auto incoming_kmer_callback = [&](node_index prev, char c) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
@@ -601,18 +600,15 @@ void CanonicalDBG
         //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
         const boss::BOSS &boss = dbg_succ_->get_boss();
 
-        boss::BOSS::edge_index rc_edge = get_cache().get_prefix_rc(
-            dbg_succ_->kmer_to_boss_index(node),
-            spelling_hint
-        );
+        boss::BOSS::edge_index rc_edge = get_cache().get_prefix_rc(node, spelling_hint);
 
         if (!rc_edge)
             return;
 
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
-            node_index prev = dbg_succ_->boss_to_kmer_index(adjacent_edge);
-            if (prev == DeBruijnGraph::npos)
+            node_index prev = adjacent_edge;
+            if (!dbg_succ_->in_graph(prev))
                 return;
 
             char c = boss.decode(boss.get_W(adjacent_edge) % boss.alph_size);
@@ -665,18 +661,15 @@ void CanonicalDBG
 
         auto &cache = get_cache();
 
-        boss::BOSS::edge_index rc_edge = cache.get_suffix_rc(
-            dbg_succ_->kmer_to_boss_index(node),
-            spelling_hint
-        );
+        boss::BOSS::edge_index rc_edge = cache.get_suffix_rc(node, spelling_hint);
 
         if (!rc_edge)
             return;
 
         cache.call_incoming_edges(rc_edge,
             [&](edge_index prev_edge) {
-                node_index prev = dbg_succ_->boss_to_kmer_index(prev_edge);
-                if (!prev)
+                node_index prev = prev_edge;
+                if (!dbg_succ_->in_graph(prev))
                     return;
 
                 char c = cache.get_first_char(prev_edge, rc_edge);
