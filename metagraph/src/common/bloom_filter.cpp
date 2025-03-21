@@ -110,7 +110,8 @@ batch_insert_avx2(BloomFilter &bloom,
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
         simde__m256i block_indices
             = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
-        const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
+        alignas(32) uint64_t block_index_array[4];
+        simde_mm256_store_si256(reinterpret_cast<simde__m256i*>(block_index_array), block_indices);
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
@@ -211,13 +212,13 @@ batch_check_avx2(const BloomFilter &bloom,
     const simde__m256i add = simde_mm256_setr_epi64x(0, 1, 2, 3);
     const simde__m256i numhash = simde_mm256_set1_epi64x(num_hash_functions_);
 
-    simde__m256i block_indices;
-    const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
-
     // check four input elements (represented by hashes) at a time
     size_t i = 0;
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
-        block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
+        simde__m256i block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
+        alignas(32) uint64_t block_index_array[4];
+        simde_mm256_store_si256(reinterpret_cast<simde__m256i*>(block_index_array), block_indices);
+
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {
