@@ -5,13 +5,10 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 
 """Test graph construction"""
-
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',

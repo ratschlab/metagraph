@@ -6,13 +6,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
 
 
 """Test graph construction and alignment"""
-
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
@@ -337,11 +334,12 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
-        self.assertEqual('16461', params['nodes (k)'])
+        self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
@@ -362,11 +360,12 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation)
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
-        self.assertEqual('16461', params['nodes (k)'])
+        self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
         stats_command = '{exe} align --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
