@@ -123,9 +123,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     std::vector<Row> result;
     // TODO: implement a more efficient algorithm
     for (Row row = 0; row < num_rows(); ++row) {
-        auto edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row)
-        );
+        auto edge = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
         if (!boss.get_W(edge))
             continue;

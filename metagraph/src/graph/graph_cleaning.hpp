@@ -15,7 +15,8 @@ bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
 
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
-                                     uint64_t num_singleton_kmers = 0);
+                                     uint64_t num_singleton_kmers = 0,
+                                     double cleaning_threshold_percentile = 0.001);
 
 std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t, size_t)>&)> &generator,
                                             uint8_t width = 64,
@@ -30,7 +31,8 @@ std::tuple<int64_t,double,double>
 estimate_min_kmer_abundance(const bit_vector &idx,
                             const sdsl::int_vector<> &values,
                             uint64_t num_singleton_kmers = 0,
-                            bool discard_last_count = false);
+                            bool discard_last_count = false,
+                            double cleaning_threshold_percentile = 0.001);
 
 } // namespace graph
 } // namespace mtg

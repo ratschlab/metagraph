@@ -36,14 +36,14 @@ void NodeFirstCache::call_incoming_edges(edge_index edge,
 
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
-    assert(node > 0 && node <= dbg_succ_.num_nodes());
+    assert(dbg_succ_.in_graph(node));
 
-    edge_index edge = dbg_succ_.kmer_to_boss_index(node);
+    edge_index edge = node;
 
     call_incoming_edges(edge,
         [&](edge_index prev_edge) {
-            node_index prev = dbg_succ_.boss_to_kmer_index(prev_edge);
-            if (prev != DeBruijnGraph::npos)
+            node_index prev = prev_edge;
+            if (dbg_succ_.in_graph(prev))
                 callback(prev, get_first_char(prev_edge, edge));
         }
     );

@@ -33,13 +33,15 @@ bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
 
 
 int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double fdr_thres,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
 // returns -1 if the automatic estimation fails
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
-                                     uint64_t num_singleton_kmers) {
+                                     uint64_t num_singleton_kmers,
+                                     double cleaning_threshold_percentile) {
     std::vector<uint64_t> hist;
     graph.call_nodes([&](auto i) {
         uint64_t kmer_count = node_weights[i];
@@ -60,6 +62,7 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
     return cleaning_pick_kmer_threshold(hist.data(), hist.size(),
+                                        cleaning_threshold_percentile,
                                         &alpha_est_ptr, &beta_est_ptr,
                                         &false_pos_ptr, &false_neg_ptr);
 }
@@ -162,7 +165,8 @@ std::tuple<int64_t,double,double>
 estimate_min_kmer_abundance(const bit_vector &idx,
                             const sdsl::int_vector<> &values,
                             uint64_t num_singleton_kmers,
-                            bool discard_last_count) {
+                            bool discard_last_count,
+                            double cleaning_threshold_percentile) {
     std::vector<uint64_t> hist;
     idx.call_ones([&](auto i) {
         uint64_t kmer_count = values[idx.rank1(i) - 1];
@@ -187,6 +191,7 @@ estimate_min_kmer_abundance(const bit_vector &idx,
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
     int64_t threshold = cleaning_pick_kmer_threshold(
         hist.data(), hist.size(),
+        cleaning_threshold_percentile,
         &alpha_est_ptr, &beta_est_ptr,
         &false_pos_ptr, &false_neg_ptr
     );
@@ -331,11 +336,13 @@ static inline bool is_cutoff_good(const uint64_t *kmer_covg, size_t arrlen,
  *
  * @param kmer_covg Histogram of kmer counts at coverages 1,2,.. arrlen-1
  * @param arrlen    Length of array kmer_covg
+ * @param fdr_thes  Percentile of the kmer coverage histogram to use as the error threshold
  * @param alpha_est_ptr If not NULL, used to return estimate for alpha
  * @param beta_est_ptr  If not NULL, used to return estimate for beta
  * @return -1 if no cut-off satisfies FDR, otherwise returns coverage cutoff
  */
 int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double fdr_thres,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr)
 {
@@ -415,7 +422,7 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
 
   // Find cutoff by finding first coverage level where errors make up less than
   // 0.1% of total coverage
-  cutoff = pick_cutoff_with_fdr_thresh(e_covg, kmer_covg, arrlen, 0.001);
+  cutoff = pick_cutoff_with_fdr_thresh(e_covg, kmer_covg, arrlen, fdr_thres);
   // printf("A cutoff: %i\n", cutoff);
 
   // Pick highest cutoff that keeps FP < FN

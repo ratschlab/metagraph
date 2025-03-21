@@ -2,9 +2,12 @@
 
 #include <type_traits>
 
+#include <query/streaming_query_regular_parsing.hpp>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/logger.hpp"
+#include "common/algorithms.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 
@@ -16,6 +19,11 @@ static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits
 #else
 static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 #endif
+
+using parser_t = std::variant<
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt64>>,
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt128>>,
+                        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt256>>>;
 
 template <typename T>
 struct template_parameter;
@@ -99,32 +107,61 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
-template <bool with_rc>
-void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
-                                     const std::function<void(node_index, bool)>& callback,
-                                     const std::function<bool()>& terminate) const {
-    if (terminate() || sequence.size() < k_)
+template <bool with_rc, class Dict>
+void map_to_nodes_with_rc_impl(size_t k,
+                               const Dict &dict,
+                               std::string_view sequence,
+                               const std::function<void(sshash::lookup_result)>& callback,
+                               const std::function<bool()>& terminate) {
+    size_t n = sequence.size();
+    if (terminate() || n < k)
         return;
 
-    if (!num_nodes()) {
-        for (size_t i = 0; i < sequence.size() - k_ + 1 && !terminate(); ++i) {
-            callback(npos, false);
+    if (!dict.size()) {
+        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
+            callback(sshash::lookup_result());
         }
         return;
     }
 
-    std::visit([&](const auto &dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
-        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k_ - 1);
-        uint_kmer.pad_char();
-        for (size_t i = k_ - 1; i < sequence.size() && !terminate(); ++i) {
-            uint_kmer.drop_char();
-            uint_kmer.kth_char_or(k_ - 1, kmer_t::char_to_uint(sequence[i]));
-            auto res = dict.lookup_advanced_uint(uint_kmer, with_rc);
-            callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
+    using kmer_t = get_kmer_t<Dict>;
+
+    if (with_rc && (k & 1)) {
+        // TODO: the streaming parser only works for odd k (because of palindromes?)
+        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
+        for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
+            callback(parser.lookup_advanced(sequence.data() + i));
         }
+    } else {
+        std::vector<bool> invalid_char(n);
+        for (size_t i = 0; i < n; ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
+        }
+
+        auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
+
+        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
+        uint_kmer.pad_char();
+        for (size_t i = k - 1; i < n && !terminate(); ++i) {
+            uint_kmer.drop_char();
+            uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
+            callback(invalid_kmer[i] ? sshash::lookup_result()
+                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        }
+    }
+}
+
+template <bool with_rc>
+void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
+                                     const std::function<void(node_index, bool)>& callback,
+                                     const std::function<bool()>& terminate) const {
+    std::visit([&](const auto &dict) {
+        map_to_nodes_with_rc_impl<with_rc>(k_, dict, sequence, [&](sshash::lookup_result res) {
+            callback(sshash_to_graph_index(res.kmer_id), res.kmer_orientation);
+        }, terminate);
     }, dict_);
 }
+
 template
 void DBGSSHash::map_to_nodes_with_rc<true>(std::string_view,
                                            const std::function<void(node_index, bool)>&,
@@ -149,7 +186,7 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node == npos)
         return npos;
 
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     if (node > dict_size())
         return node - dict_size();
 
@@ -183,13 +220,13 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
 }
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
     return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 
 DBGSSHash::node_index DBGSSHash::traverse_back(node_index node, char prev_char) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     // TODO: if a node is in the middle of a unitig, then we only need to check the previous node index
     std::string string_kmer = prev_char + get_node_sequence(node);
     string_kmer.pop_back();
@@ -200,7 +237,7 @@ template <bool with_rc>
 void DBGSSHash::call_outgoing_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
@@ -227,7 +264,7 @@ template <bool with_rc>
 void DBGSSHash::call_incoming_kmers_with_rc(
         node_index node,
         const std::function<void(node_index, char, bool)>& callback) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string kmer = get_node_sequence(node);
     std::visit([&](const auto &dict) {
         using kmer_t = get_kmer_t<decltype(dict)>;
@@ -277,14 +314,14 @@ void DBGSSHash::call_incoming_kmers(node_index node,
 }
 
 size_t DBGSSHash::outdegree(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     size_t res = 0;
     adjacent_outgoing_nodes(node, [&](node_index) { ++res; });
     return res;
 }
 
 size_t DBGSSHash::indegree(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     size_t res = 0;
     adjacent_incoming_nodes(node, [&](node_index) { ++res; });
     return res;
@@ -334,7 +371,7 @@ DBGSSHash::node_index DBGSSHash::kmer_to_node(std::string_view kmer) const {
 }
 
 std::string DBGSSHash::get_node_sequence(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(in_graph(node));
     std::string str_kmer(k_, ' ');
     node_index node_canonical = node > dict_size() ? node - dict_size() : node;
     uint64_t ssh_idx = graph_index_to_sshash(node_canonical);

@@ -16,13 +16,13 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
                           const std::string &row_count_fname,
                           bool with_coordinates = false);
 
-void build_pred_succ(const std::string &graph_filename,
+void build_pred_succ(const graph::DeBruijnGraph &graph,
                      const std::string &outfbase,
                      const std::string &count_vectors_dir,
                      const std::string &row_count_extension,
                      uint32_t num_threads);
 
-void assign_anchors(const std::string &graph_filename,
+void assign_anchors(const graph::DeBruijnGraph &graph,
                     const std::string &outfbase,
                     const std::filesystem::path &dest_dir,
                     uint32_t max_length,

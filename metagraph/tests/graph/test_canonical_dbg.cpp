@@ -6,6 +6,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/alignment/alignment.hpp"
 
 
 namespace {
@@ -498,12 +499,14 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
 
                 std::atomic<size_t> num_kmers_both = 0;
                 graph->call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(sequence, align::spell_path(*graph, map_to_nodes_sequentially(*graph, sequence)));
                     ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers_both += path.size();
                 }, num_threads);
 
                 std::atomic<size_t> num_kmers = 0;
                 graph->call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(sequence, align::spell_path(*graph, map_to_nodes_sequentially(*graph, sequence)));
                     ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers += path.size();
                 }, num_threads, true);
