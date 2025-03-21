@@ -102,7 +102,7 @@ TEST(Utils, TempFileCheckStateFlow) {
     {
         utils::TempFile tmp;
         ASSERT_TRUE(tmp.ifstream().good());
-        EXPECT_DEBUG_DEATH(tmp.ofstream().good(), "Can't write after reading");
+        EXPECT_DEBUG_DEATH((void)tmp.ofstream().good(), "Can't write after reading");
     }
     {
         utils::TempFile tmp;
@@ -110,7 +110,7 @@ TEST(Utils, TempFileCheckStateFlow) {
         ASSERT_TRUE(tmp.ofstream().good());
         ASSERT_TRUE(tmp.ifstream().good());
         ASSERT_TRUE(tmp.ifstream().good());
-        EXPECT_DEBUG_DEATH(tmp.ofstream().good(), "Can't write after reading");
+        EXPECT_DEBUG_DEATH((void)tmp.ofstream().good(), "Can't write after reading");
     }
 }
 
