@@ -5,6 +5,8 @@
 #include <fstream>
 #include <thread>
 
+#include <unistd.h>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/string_utils.hpp"
 #include "vcf_parser.hpp"
