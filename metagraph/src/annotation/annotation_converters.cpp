@@ -214,7 +214,7 @@ convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
-    const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
+    const graph::DeBruijnGraph* graph = annotator.get_matrix().graph();
 
     auto matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(annotator.release_matrix()->diffs().data()),

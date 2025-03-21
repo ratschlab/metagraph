@@ -193,21 +193,38 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
 }
 
 void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
-                             const std::function<bool()> &terminate) const {
+                             const std::function<bool()> &terminate,
+                             size_t num_threads,
+                             size_t batch_size) const {
     if (valid_edges_) {
-        try {
-            valid_edges_->call_ones([&](uint64_t i) {
-                callback(i);
-                if (terminate())
-                    throw early_term();
-            });
-        } catch (early_term&) {}
-        return;
-    }
-    for (node_index i = 1; i <= max_index() && !terminate(); ++i) {
-        if (in_graph(i)) {
-            callback(i);
+        size_t block_size = max_index() / num_threads;
+
+        #pragma omp parallel for num_threads(num_threads) schedule(static)
+        for (size_t begin = 1; begin <= max_index(); begin += block_size) {
+            if (terminate())
+                continue;
+
+            size_t end = std::min(begin + block_size,
+                                  static_cast<size_t>(max_index() + 1));
+            try {
+                valid_edges_->call_ones_in_range(begin, end, [&](uint64_t i) {
+                    callback(i);
+                    if (terminate())
+                        throw early_term();
+                });
+            } catch (early_term&) {}
         }
+    } else if (!terminate()) {
+        try {
+            call_sequences([&](const std::string&, const auto &path) {
+                for (node_index node : path) {
+                    if (terminate())
+                        throw early_term();
+
+                    callback(node);
+                }
+            }, num_threads);
+        } catch (early_term&) {}
     }
 }
 
@@ -780,24 +797,26 @@ void DBGSuccinct::serialize(const std::string &filename) const {
             throw std::ios_base::failure("Can't write to file " + out_filename);
     }
 
-    if (!valid_edges_.get())
-        return;
+    auto serialize_valid_edges = [&](auto &&valid_edges) {
+        assert((boss_graph_->get_state() == BOSS::State::STAT
+                    && dynamic_cast<const bit_vector_small*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::FAST
+                    && dynamic_cast<const bit_vector_stat*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::DYN
+                    && dynamic_cast<const bit_vector_dyn*>(valid_edges.get()))
+            || (boss_graph_->get_state() == BOSS::State::SMALL
+                    && dynamic_cast<const bit_vector_small*>(valid_edges.get())));
 
-    assert((boss_graph_->get_state() == BOSS::State::STAT
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::FAST
-                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::DYN
-                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::SMALL
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
+        const auto out_filename = prefix + kDummyMaskExtension;
+        std::ofstream out = utils::open_new_ofstream(out_filename);
+        if (!out.good())
+            throw std::ios_base::failure("Can't write to file " + out_filename);
 
-    const auto out_filename = prefix + kDummyMaskExtension;
-    std::ofstream out = utils::open_new_ofstream(out_filename);
-    if (!out.good())
-        throw std::ios_base::failure("Can't write to file " + out_filename);
+        valid_edges->serialize(out);
+    };
 
-    valid_edges_->serialize(out);
+    if (valid_edges_)
+        serialize_valid_edges(valid_edges_);
 
     if (bloom_filter_) {
         std::ofstream bloom_out = utils::open_new_ofstream(prefix + kBloomFilterExtension);
@@ -878,9 +897,7 @@ BOSS::State DBGSuccinct::get_state() const {
     return boss_graph_->get_state();
 }
 
-void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
-    valid_edges_.reset();
-
+std::unique_ptr<bit_vector> DBGSuccinct::generate_valid_kmer_mask(size_t num_threads, bool with_pruning) const {
     auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
@@ -888,23 +905,23 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     vector_mask.flip();
 
     switch (get_state()) {
-        case BOSS::State::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::FAST: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::DYN: {
-            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
-            break;
-        }
+        case BOSS::State::STAT:
+            return std::make_unique<bit_vector_small>(std::move(vector_mask));
+        case BOSS::State::FAST:
+            return std::make_unique<bit_vector_stat>(std::move(vector_mask));
+        case BOSS::State::DYN:
+            return std::make_unique<bit_vector_dyn>(std::move(vector_mask));
+        case BOSS::State::SMALL:
+            return std::make_unique<bit_vector_small>(std::move(vector_mask));
+        default:
+            throw std::runtime_error("Invalid state");
     }
+}
+
+void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
+    valid_edges_.reset();
+
+    valid_edges_ = generate_valid_kmer_mask(num_threads, with_pruning);
 
     assert(valid_edges_.get());
     assert(valid_edges_->size() == boss_graph_->num_edges() + 1);

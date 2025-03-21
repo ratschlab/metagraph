@@ -12,8 +12,6 @@ from helpers import get_test_class_name
 
 """Test operations on annotation columns"""
 
-DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 NUM_THREADS = 4

@@ -57,13 +57,13 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     }
 
     void add_sequence(std::string_view sequence,
-                      const std::function<void(node_index)> &on_insertion);
+                      const std::function<void(node_index)> &on_insertion) override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     void map_to_nodes(std::string_view sequence,
                       const std::function<void(node_index)> &callback,
-                      const std::function<bool()> &terminate) const;
+                      const std::function<bool()> &terminate) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
@@ -71,19 +71,21 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate) const;
+                                   const std::function<bool()> &terminate) const override final;
 
     void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback &callback) const;
+                             const OutgoingEdgeCallback &callback) const override final;
 
     void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const;
+                             const IncomingEdgeCallback &callback) const override final;
 
     void call_nodes(const std::function<void(node_index)> &callback,
-                    const std::function<bool()> &stop_early) const;
+                    const std::function<bool()> &stop_early,
+                    size_t num_threads = 1,
+                    size_t batch_size = 1'000'000) const override final;
 
     // Traverse the outgoing edge
-    node_index traverse(node_index node, char next_char) const {
+    node_index traverse(node_index node, char next_char) const override final {
         assert(in_graph(node));
 
         // TODO: use `next_kmer()`
@@ -93,7 +95,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return get_node_index(kmer);
     }
     // Traverse the incoming edge
-    node_index traverse_back(node_index node, char prev_char) const {
+    node_index traverse_back(node_index node, char prev_char) const override final {
         assert(in_graph(node));
 
         // TODO: check previous k-mer in vector similarly to `next_kmer()`
@@ -103,70 +105,73 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
         return get_node_index(kmer);
     }
 
-    size_t outdegree(node_index) const;
-    bool has_single_outgoing(node_index node) const {
+    size_t outdegree(node_index) const override final;
+    bool has_single_outgoing(node_index node) const override final{
         assert(in_graph(node));
         return outdegree(node) == 1;
     }
-    bool has_multiple_outgoing(node_index node) const {
+    bool has_multiple_outgoing(node_index node) const override final {
         assert(in_graph(node));
         return outdegree(node) > 1;
     }
 
-    size_t indegree(node_index) const;
-    bool has_no_incoming(node_index) const;
-    bool has_single_incoming(node_index node) const {
+    size_t indegree(node_index) const override final;
+    bool has_no_incoming(node_index) const override final;
+    bool has_single_incoming(node_index node) const override final {
         assert(in_graph(node));
         return indegree(node) == 1;
     }
 
-    node_index kmer_to_node(std::string_view kmer) const {
+    node_index kmer_to_node(std::string_view kmer) const override final {
         assert(kmer.length() == k_);
         return get_node_index(seq_encoder_.encode(kmer));
     }
 
-    std::string get_node_sequence(node_index node) const {
+    std::string get_node_sequence(node_index node) const override final {
         assert(in_graph(node));
         return seq_encoder_.kmer_to_sequence(get_kmer(node), k_);
     }
 
-    size_t get_k() const { return k_; }
-    Mode get_mode() const { return mode_; }
+    size_t get_k() const override final { return k_; }
+    Mode get_mode() const override final { return mode_; }
 
-    uint64_t num_nodes() const {
+    uint64_t num_nodes() const override final {
         uint64_t nnodes = 0;
         call_nodes([&](auto) { nnodes++; }, [](){ return false; });
         return nnodes;
     }
-    uint64_t max_index() const { return kmers_.size() * kAlphabetSize; }
+    uint64_t max_index() const override final { return kmers_.size() * kAlphabetSize; }
 
-    void serialize(std::ostream &out) const;
-    void serialize(const std::string &filename) const {
+    void serialize(std::ostream &out) const override final;
+    void serialize(const std::string &filename) const override final {
         std::ofstream out(utils::make_suffix(filename, kExtension), std::ios::binary);
         serialize(out);
     }
 
-    bool load(std::istream &in);
-    bool load(const std::string &filename) {
+    bool load(std::istream &in) override final;
+    bool load(const std::string &filename) override final {
         std::ifstream in(utils::make_suffix(filename, kExtension), std::ios::binary);
         return load(in);
     }
 
-    std::string file_extension() const { return kExtension; }
+    std::string file_extension() const override final { return kExtension; }
 
-    bool operator==(const DeBruijnGraph &other) const;
+    bool operator==(const DeBruijnGraph &other) const override final;
 
-    const std::string& alphabet() const { return seq_encoder_.alphabet; }
+    const std::string& alphabet() const override final { return seq_encoder_.alphabet; }
 
-  private:
-    bool in_graph(node_index node) const {
-        assert(node > 0 && node <= max_index());
+    bool in_graph(node_index node) const override final {
+        if (node == npos) {
+            return false;
+        }
+        assert(DBGHashFast::DBGHashFastInterface::in_graph(node));
 
         Flags flags = bits_[node_to_bucket(node)];
 
         return (flags >> ((node - 1) % kAlphabetSize)) & static_cast<Flags>(1);
     }
 
+  private:
     Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
@@ -234,8 +239,8 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
 
         for (const auto &kmer_pair : sequence_to_kmers(sequence)) {
             // putting the structured binding in the for statement above crashes gcc 8.2.0
-            const auto &[kmer, is_valid] = kmer_pair;
-            if (!is_valid) {
+            const auto &[kmer, in_graph] = kmer_pair;
+            if (!in_graph) {
                 previous_valid = false;
                 continue;
             }
@@ -290,7 +295,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                                 std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -298,7 +303,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                || get_node_index(kmer) == npos
                || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(kmer) : npos);
+        callback(in_graph ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
@@ -309,13 +314,13 @@ template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
         assert(!get_node_index(kmer) || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(is_valid ? get_node_index(kmer) : npos);
+        callback(in_graph ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
@@ -530,13 +535,19 @@ DBGHashFastImpl<KMER>::get_node_index(const Kmer &kmer) const {
 
 template <typename KMER>
 void DBGHashFastImpl<KMER>::call_nodes(const std::function<void(node_index)> &callback,
-                                       const std::function<bool()> &stop_early) const {
+                                       const std::function<bool()> &stop_early,
+                                       size_t num_threads,
+                                       size_t batch_size) const {
+    #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
     for (size_t i = 0; i < kmers_.size(); ++i) {
+        if (stop_early())
+            continue;
+
         Flags flags = bits_[i];
 
         for (TAlphabet c = 0; c < kAlphabetSize; ++c, flags >>= 1) {
             if (stop_early())
-                return;
+                break;
 
             if (flags & static_cast<Flags>(1))
                 callback(bucket_to_node(i) + c);

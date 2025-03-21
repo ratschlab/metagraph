@@ -13,10 +13,7 @@ from metagraph.client import GraphClientJson, MultiGraphClient
 from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR
-
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 class TestAPIBase(TestingBase):
     @classmethod

@@ -19,6 +19,11 @@
 
 namespace mtg {
 namespace annot {
+
+graph::DeBruijnGraph::node_index row_diff_successor(const graph::DeBruijnGraph &graph,
+                                                    graph::DeBruijnGraph::node_index node,
+                                                    const bit_vector &rd_succ);
+
 namespace matrix {
 
 const std::string kRowDiffAnchorExt = ".anchors";
@@ -34,8 +39,8 @@ class IRowDiff {
 
     virtual ~IRowDiff() {}
 
-    const graph::DBGSuccinct* graph() const { return graph_; }
-    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
+    const graph::DeBruijnGraph* graph() const { return graph_; }
+    void set_graph(const graph::DeBruijnGraph *graph) { graph_ = graph; }
 
     void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
@@ -49,7 +54,7 @@ class IRowDiff {
     std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
     get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
 
-    const graph::DBGSuccinct *graph_ = nullptr;
+    const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;
 };
@@ -79,7 +84,7 @@ template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
     template <typename... Args>
-    RowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+    RowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     /**
@@ -117,21 +122,16 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     std::vector<Row> result;
     // TODO: implement a more efficient algorithm
-    for (Row row = 0; row < num_rows(); ++row) {
-        auto edge = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
-
-        if (!boss.get_W(edge))
-            continue;
-
+    graph_->call_nodes([&](auto node) {
+        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
         SetBitPositions set_bits = get_rows({ row })[0];
         if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
-    }
+    });
     return result;
 }
 
@@ -140,7 +140,7 @@ std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);

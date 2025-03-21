@@ -150,7 +150,9 @@ void MaskedDeBruijnGraph::call_unitigs(const CallPath &callback,
 
 void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(node_index)> &callback,
-             const std::function<bool()> &stop_early) const {
+             const std::function<bool()> &stop_early,
+             size_t num_threads,
+             size_t batch_size) const {
     assert(max_index() + 1 == kmers_in_graph_->size());
 
     bool stop = false;
@@ -158,18 +160,28 @@ void MaskedDeBruijnGraph
     if (only_valid_nodes_in_mask_) {
         // iterate only through the nodes marked in the mask
         // TODO: add terminate<bool(void)> to call_ones
-        kmers_in_graph_->call_ones([&](auto index) {
-            if (stop || !index)
-                return;
+        size_t batch_size = kmers_in_graph_->size() / num_threads;
 
-            assert(in_graph(index));
+        #pragma omp parallel for num_threads(num_threads) schedule(static)
+        for (node_index begin = 0; begin <= kmers_in_graph_->size(); begin += batch_size) {
+            if (stop)
+                continue;
 
-            if (stop_early()) {
-                stop = true;
-            } else {
-                callback(index);
-            }
-        });
+            size_t end = std::min(begin + batch_size, kmers_in_graph_->size());
+
+            kmers_in_graph_->call_ones_in_range(begin, end, [&](auto index) {
+                if (stop || !index)
+                    return;
+
+                assert(in_graph(index));
+
+                if (stop_early()) {
+                    stop = true;
+                } else {
+                    callback(index);
+                }
+            });
+        }
     } else {
         // call all nodes in the base graph and check the mask
         graph_->call_nodes(
@@ -177,7 +189,9 @@ void MaskedDeBruijnGraph
                 if (in_graph(index))
                     callback(index);
             },
-            stop_early
+            stop_early,
+            num_threads,
+            batch_size
         );
     }
 }

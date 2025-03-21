@@ -5,6 +5,7 @@ import fnmatch
 import sys
 import argparse
 from helpers import TimeLoggingTestResult
+from base import update_prefix
 
 
 """Run all integration tests"""
@@ -32,7 +33,11 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description='Metagraph integration tests.')
         parser.add_argument('--test_filter', dest='filter', type=str, default="*",
                             help='filter test cases (default: run all)')
+        parser.add_argument('--gdb', dest='use_gdb', action='store_true',
+                            help='run metagraph with gdb')
         args = parser.parse_args()
+        if args.use_gdb:
+            update_prefix('gdb -ex run -ex bt -ex quit --args ')
 
         result = unittest.TextTestRunner(
             resultclass=TimeLoggingTestResult

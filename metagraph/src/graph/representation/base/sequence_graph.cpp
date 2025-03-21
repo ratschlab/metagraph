@@ -23,12 +23,20 @@ static_assert(!(kBlockSize & 0xFF));
 /*************** SequenceGraph ***************/
 
 void SequenceGraph::call_nodes(const std::function<void(node_index)> &callback,
-                               const std::function<bool()> &terminate) const {
+                               const std::function<bool()> &terminate,
+                               size_t num_threads,
+                               size_t batch_size) const {
     assert(num_nodes() == max_index());
 
     const auto nnodes = num_nodes();
-    for (node_index i = 1; i <= nnodes && !terminate(); ++i) {
-        callback(i);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(static, batch_size)
+    for (node_index i = 1; i <= nnodes; ++i) {
+        if (terminate())
+            continue;
+
+        if (in_graph(i))
+            callback(i);
     }
 }
 

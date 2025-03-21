@@ -6,12 +6,10 @@ from tempfile import TemporaryDirectory
 import filecmp
 import glob
 import os
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
 
 
 """Test graph annotation"""
-
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
