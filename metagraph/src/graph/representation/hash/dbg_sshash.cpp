@@ -104,6 +104,25 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
 
                         last_single_outdeg = false;
 
+                        /*
+                        auto suffix = sshash::get_suffix(kmer);
+                        bool calc_minimizer = false;
+                        uint64_t last_minimizer;
+                        for (size_t i = 0; i < kmer_t::alphabet_size; i++) {
+                            kmer_t new_kmer = suffix;
+                            new_kmer.kth_char_or(dict.k() - 1,
+                                                 kmer_t::char_to_uint(kmer_t::alphabet[i]));
+                            kmer_t new_kmer_rc = new_kmer;
+                            new_kmer_rc.reverse_complement_inplace(dict.k());
+                            if (!calc_minimizer) {
+                                calc_minimizer = true;
+                                last_minimizer = sshash::util::compute_minimizer(
+                                        new_kmer, dict.k(), dict.m(), dict.seed());
+                            } else {
+                            }
+                        }
+                        */
+
                         auto nb = dict.kmer_neighbours(kmer, with_rc);
                         bool found_fw = false;
                         size_t found_i = 0;
@@ -685,6 +704,77 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
     return str_kmer;
 }
 
+bool DBGSSHash::has_no_outgoing(node_index node) const {
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node])
+            return false;
+    } else if (pred_is_prev_[reverse_complement(node)]) {
+        return false;
+    }
+
+    return DeBruijnGraph::has_no_outgoing(node);
+}
+
+bool DBGSSHash::has_single_outgoing(node_index node) const {
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node])
+            return true;
+    } else if (pred_is_prev_[reverse_complement(node)]) {
+        return true;
+    }
+
+    return DeBruijnGraph::has_single_outgoing(node);
+}
+
+bool DBGSSHash::has_multiple_outgoing(node_index node) const {
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node])
+            return false;
+    } else if (pred_is_prev_[reverse_complement(node)]) {
+        return false;
+    }
+
+    return DeBruijnGraph::has_multiple_outgoing(node);
+}
+
+bool DBGSSHash::has_no_incoming(node_index node) const {
+    if (node < pred_is_prev_.size()) {
+        if (pred_is_prev_[node])
+            return false;
+    } else if (succ_is_next_[reverse_complement(node)]) {
+        return false;
+    }
+
+    return DeBruijnGraph::has_no_incoming(node);
+}
+
+bool DBGSSHash::has_single_incoming(node_index node) const {
+    if (node < pred_is_prev_.size()) {
+        if (pred_is_prev_[node])
+            return true;
+    } else if (succ_is_next_[reverse_complement(node)]) {
+        return true;
+    }
+    return DeBruijnGraph::has_single_incoming(node);
+}
+
+void DBGSSHash::call_source_nodes(const std::function<void(node_index)>& callback) const {
+    call_zeros(pred_is_prev_, [&](node_index n) {
+        if (n && DeBruijnGraph::has_no_incoming(n))
+            callback(n);
+    });
+
+    if (num_nodes() > dict_size()) {
+        call_zeros(succ_is_next_, [&](node_index n) {
+            if (n) {
+                n = reverse_complement(n);
+                if (DeBruijnGraph::has_no_outgoing(n))
+                    callback(n);
+            }
+        });
+    }
+}
+
 void DBGSSHash::serialize(std::ostream& out) const {
     essentials::generic_saver saver(out);
 
@@ -719,6 +809,7 @@ bool DBGSSHash::load(std::istream& in) {
 
     if (num_nodes_) {
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
+        // std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
         succ_is_next_.load(in);
         pred_is_prev_.load(in);
     }
