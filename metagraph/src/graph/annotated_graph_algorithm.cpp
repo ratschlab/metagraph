@@ -495,6 +495,295 @@ mask_nodes_by_label_dual(
                         && kept[AnnotatedDBG::graph_to_anno_index(node)];
             },
             true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+
+    // precompute negative binomial fits for poisson_bayes and nbinom_exact tests
+    std::vector<std::pair<long double, long double>> nb_params(groups.size());
+    std::pair<long double, long double> nb_params_a;
+    std::pair<long double, long double> nb_params_b;
+    std::pair<long double, long double> nb_params_null;
+    long double nb_base = 0.0;
+    if (config.test_type == "nbinom_exact") {
+        common::logger->trace("Fitting per-sample negative binomial distributions");
+
+
+#pragma omp parallel for num_threads(num_parallel_files)
+        for (size_t j = 0; j < groups.size(); ++j) {
+            const auto& hist = hists[j];
+            if (hist.size()) {
+                auto [r, p, mu, var] = get_rp([&](const auto& callback) {
+                    for (const auto& [k, c] : hist) {
+                        callback(k, c);
+                    }
+                });
+                nb_params[j] = std::make_pair(r, p);
+                common::logger->trace(
+                        "{}: size: {}\tmax_val: {}\tsample mean: {}\tsample var: "
+                        "{}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
+                        j, sums[j], (hist.end() - 1)->first, mu, var, r * (1 - p) / p,
+                        r * (1 - p) / p / p, r, p);
+            }
+        }
+        // based on this method for combining gamma distributions
+        // https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables
+        long double num_a = 0.0;
+        long double num_b = 0.0;
+
+        long double denom_a = 0.0;
+        long double denom_b = 0.0;
+
+        for (size_t j = 0; j < groups.size(); ++j) {
+            const auto& [r, p] = nb_params[j];
+            long double theta = (1.0 - p) / p;
+            if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                num_b += theta * r;
+                denom_b += theta * theta * r;
+            }
+
+            if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                num_a += theta * r;
+                denom_a += theta * theta * r;
+            }
+        }
+
+        long double r_a = num_a * num_a / denom_a;
+        long double theta_a = num_a / r_a;
+
+        long double r_b = num_b * num_b / denom_b;
+        long double theta_b = num_b / r_b;
+
+        long double r_null = pow(num_a + num_a, 2.0) / (denom_a + denom_b);
+        long double theta_null = (num_a + num_b) / r_null;
+
+        nb_params_a.first = r_a;
+        nb_params_b.first = r_b;
+        nb_params_null.first = r_null;
+
+        nb_params_a.second = 1.0 / (theta_a + 1.0);
+        nb_params_b.second = 1.0 / (theta_b + 1.0);
+        nb_params_null.second = 1.0 / (theta_null + 1.0);
+
+        common::logger->trace("In: r: {}\tp: {}", nb_params_a.first, nb_params_a.second);
+
+        common::logger->trace("Out: r: {}\tp: {}", nb_params_b.first, nb_params_b.second);
+
+        common::logger->trace("Null: r: {}\tp: {}", nb_params_null.first,
+                              nb_params_null.second);
+
+        nb_base = (lgammal(nb_params_null.first) - lgammal(nb_params_a.first)
+                   - lgammal(nb_params_b.first))
+                / logl(2.0);
+        nb_base += nb_params_a.first * log2l(nb_params_a.second)
+                + nb_params_b.first * log2l(nb_params_b.second)
+                - nb_params_null.first * log2l(nb_params_null.second);
+    }
+
+    long double mu1 = static_cast<long double>(in_kmers) / nelem;
+    long double mu2 = static_cast<long double>(out_kmers) / nelem;
+
+    // precompute p-values for poisson_binom test
+    std::vector<std::vector<long double>> pb_pvals(num_labels_in + num_labels_out + 1);
+    std::vector<long double> mid_points(num_labels_in + num_labels_out + 1);
+    if (config.test_type == "poisson_binom") {
+        // fit distribution
+        std::vector<long double> p;
+        p.reserve(groups.size());
+        for (size_t i = 0; i < groups.size(); ++i) {
+            p.emplace_back(static_cast<long double>(n_kmers[i]) / nelem);
+        }
+
+        common::logger->trace("p: {}", fmt::join(p, ","));
+
+        common::logger->trace("Precomputing PMFs");
+        std::vector<long double> pmf_in { 1.0L };
+        std::vector<long double> pmf_out { 1.0L };
+        std::vector<long double> pmf_null { 1.0L };
+
+        for (size_t i = 1; i <= groups.size(); ++i) {
+            if (groups[i - 1] == Group::OUT || groups[i - 1] == Group::BOTH) {
+                std::vector<long double> pmf_out_cur(pmf_out.size() + 1);
+                // pmf_out_cur[0] = (1.0L - p[i - 1]) * pmf_out[0];
+                pmf_out_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_out[0]));
+                pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
+                for (size_t k = 1; k < pmf_out.size(); ++k) {
+                    pmf_out_cur[k]
+                            = p[i - 1] * pmf_out[k - 1] + (1.0L - p[i - 1]) * pmf_out[k];
+                }
+                std::swap(pmf_out_cur, pmf_out);
+            }
+
+            if (groups[i - 1] == Group::IN || groups[i - 1] == Group::BOTH) {
+                std::vector<long double> pmf_in_cur(pmf_in.size() + 1);
+                // pmf_in_cur[0] = (1.0L - p[i - 1]) * pmf_in[0];
+                pmf_in_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_in[0]));
+                pmf_in_cur[pmf_in.size()] = p[i - 1] * pmf_in.back();
+                for (size_t k = 1; k < pmf_in.size(); ++k) {
+                    pmf_in_cur[k] = p[i - 1] * pmf_in[k - 1] + (1.0L - p[i - 1]) * pmf_in[k];
+                }
+                std::swap(pmf_in_cur, pmf_in);
+            }
+            std::vector<long double> pmf_null_cur(i + 1);
+            // pmf_null_cur[0] = (1.0L - p[i - 1]) * pmf_null[0];
+            pmf_null_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_null[0]));
+            pmf_null_cur[pmf_null.size()] = p[i - 1] * pmf_null.back();
+            for (size_t k = 1; k < pmf_null.size(); ++k) {
+                pmf_null_cur[k]
+                        = p[i - 1] * pmf_null[k - 1] + (1.0L - p[i - 1]) * pmf_null[k];
+            }
+            std::swap(pmf_null_cur, pmf_null);
+        }
+
+        if (pmf_in.size() != num_labels_in + 1) {
+            common::logger->error("PMF in wrong: {} != {}", pmf_in.size(), num_labels_in + 1);
+            throw std::domain_error("");
+        }
+
+        if (pmf_out.size() != num_labels_out + 1) {
+            common::logger->error("PMF out wrong: {} != {}", pmf_out.size(),
+                                  num_labels_out + 1);
+            throw std::domain_error("");
+        }
+
+        if (pmf_null.size() != num_labels_in + num_labels_out + 1) {
+            common::logger->error("PMF null wrong: {} != {}", pmf_null.size(),
+                                  num_labels_in + num_labels_out + 1);
+            throw std::domain_error("");
+        }
+
+        common::logger->trace("Precomputing p-values");
+        pb_pvals[0].emplace_back(1.0);
+
+        long double min_pval = 1.0;
+        // long double last_local_min_pval = 1.0;
+
+        for (size_t n = 1; n < pb_pvals.size(); ++n) {
+            std::vector<long double> probs;
+            size_t front = n - std::min(n, num_labels_out);
+            for (uint64_t s = 0; s < pmf_in.size(); ++s) {
+                if (s > n)
+                    break;
+                uint64_t t = n - s;
+                if (s < pmf_in.size() && t < pmf_out.size()) {
+                    if (s < front) {
+                        common::logger->error(
+                                "Attempting non-zero p-value in impossible "
+                                "configuration: {},{}",
+                                n, s);
+                        throw std::domain_error("");
+                    }
+                    probs.emplace_back(exp2l(log2l(pmf_in[s]) + log2l(pmf_out[t])
+                                             - log2l(pmf_null[n])));
+                } else {
+                    probs.emplace_back(0.0);
+                }
+            }
+
+            long double sum_probs = std::accumulate(probs.begin(), probs.end(), 0.0L);
+            if (abs(sum_probs - 1.0L) > 1e-5) {
+                common::logger->error("Sum of probs for n={} = {}", n, sum_probs);
+                throw std::runtime_error("Fail");
+            }
+
+            for (uint64_t s = 0; s < probs.size(); ++s) {
+                pb_pvals[n].emplace_back(0.0);
+                if (s > n)
+                    break;
+                uint64_t t = n - s;
+                if (s >= pmf_in.size() || t >= pmf_out.size())
+                    continue;
+                for (uint64_t sp = 0; sp < probs.size(); ++sp) {
+                    if (sp > n)
+                        break;
+                    uint64_t tp = n - sp;
+                    if (sp >= pmf_in.size() || tp >= pmf_out.size())
+                        continue;
+                    if (probs[sp] <= probs[s])
+                        pb_pvals[n][s] += probs[sp];
+                }
+            }
+
+            for (uint64_t s = 0; s < front; ++s) {
+                if (pb_pvals[n][s] > 0) {
+                    common::logger->error(
+                            "Non-zero p-value in impossible configuration: {},{}", n, s);
+                    throw std::domain_error("");
+                }
+            }
+            long double local_min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
+            min_pval = std::min(min_pval, local_min_pval);
+
+            size_t max_prob_counts = 0;
+            long double max_prob_pos = 0;
+
+            for (uint64_t s = front; s < pb_pvals[n].size(); ++s) {
+                if (pb_pvals[n][s] < local_min_pval) {
+                    common::logger->error("Min p-value not at boundary: {},{}: {} < {}",
+                                          n, s, pb_pvals[n][s], local_min_pval);
+                    throw std::domain_error("");
+                }
+            }
+            if (front + 1 == pb_pvals[n].size()) {
+                max_prob_counts = 1;
+                max_prob_pos = front;
+            } else if (front + 2 == pb_pvals[n].size()) {
+                max_prob_counts = 2;
+                max_prob_pos = front + front + 1;
+            } else {
+                for (uint64_t s = front + 1; s < pb_pvals[n].size(); ++s) {
+                    if (probs[s] == probs[s - 1]) {
+                        max_prob_counts = 2;
+                        max_prob_pos = s + s;
+                        break;
+                    }
+
+                    if (s + 1 < pb_pvals[n].size()) {
+                        if (probs[s - 1] < probs[s] && probs[s] < probs[s + 1])
+                            continue;
+
+                        if (probs[s - 1] > probs[s] && probs[s] > probs[s + 1])
+                            continue;
+
+                        if (probs[s] > probs[s - 1] && probs[s] > probs[s + 1]) {
+                            if (probs[s] - probs[s - 1] == probs[s] - probs[s + 1]) {
+                                max_prob_counts = 1;
+                                max_prob_pos = s;
+                            } else if (probs[s] - probs[s - 1] > probs[s] - probs[s + 1]) {
+                                max_prob_counts = 2;
+                                max_prob_pos = s + s + 1;
+                            } else {
+                                max_prob_counts = 2;
+                                max_prob_pos = s + s - 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (max_prob_counts == 0) {
+                max_prob_counts = 2;
+                max_prob_pos = front - 1 + front;
+            }
+
+            mid_points[n] = static_cast<long double>(max_prob_pos) / max_prob_counts;
+            common::logger->trace("Midpoint: n: {}\tmp: {}\t{}\t{}", n, mid_points[n],
+                                  fmt::join(probs, ","), fmt::join(pb_pvals[n], ","));
+        }
+
+        common::logger->trace("Min. p-value: {}", min_pval);
+        if (min_pval >= config.family_wise_error_rate) {
+            common::logger->warn("No significant p-values achievable");
+            auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
+                    graph_ptr, [](node_index) { return false; }, true,
+                    is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+
+            auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
+                    graph_ptr, [](node_index) { return false; }, true,
+                    is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
+
+            return std::make_tuple(masked_graph_in, masked_graph_out, PValStorage {},
+                                   nullptr);
+        }
+    }
+
     if (config.test_by_unitig && config.test_type != "notest") {
         std::vector<std::tuple<long double, size_t, Group, node_index>> nb_pvals;
         nb_pvals.resize(nelem,
@@ -658,352 +947,6 @@ mask_nodes_by_label_dual(
             indicator_out[node] = false;
         }
     } else {
-        // precompute negative binomial fits for poisson_bayes and nbinom_exact tests
-        std::vector<std::pair<long double, long double>> nb_params(groups.size());
-        std::pair<long double, long double> nb_params_a;
-        std::pair<long double, long double> nb_params_b;
-        std::pair<long double, long double> nb_params_null;
-        long double nb_base = 0.0;
-        if (config.test_type == "nbinom_exact") {
-            common::logger->trace("Fitting per-sample negative binomial distributions");
-
-
-#pragma omp parallel for num_threads(num_parallel_files)
-            for (size_t j = 0; j < groups.size(); ++j) {
-                const auto& hist = hists[j];
-                if (hist.size()) {
-                    auto [r, p, mu, var] = get_rp([&](const auto& callback) {
-                        for (const auto& [k, c] : hist) {
-                            callback(k, c);
-                        }
-                    });
-                    nb_params[j] = std::make_pair(r, p);
-                    common::logger->trace(
-                            "{}: size: {}\tmax_val: {}\tsample mean: {}\tsample var: "
-                            "{}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
-                            j, sums[j], (hist.end() - 1)->first, mu, var, r * (1 - p) / p,
-                            r * (1 - p) / p / p, r, p);
-                }
-            }
-
-            if (config.test_type == "nbinom_exact") {
-                // based on this method for combining gamma distributions
-                // https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables
-                long double num_a = 0.0;
-                long double num_b = 0.0;
-
-                long double denom_a = 0.0;
-                long double denom_b = 0.0;
-
-                for (size_t j = 0; j < groups.size(); ++j) {
-                    const auto& [r, p] = nb_params[j];
-                    long double theta = (1.0 - p) / p;
-                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                        num_b += theta * r;
-                        denom_b += theta * theta * r;
-                    }
-
-                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                        num_a += theta * r;
-                        denom_a += theta * theta * r;
-                    }
-                }
-
-                long double r_a = num_a * num_a / denom_a;
-                long double theta_a = num_a / r_a;
-
-                long double r_b = num_b * num_b / denom_b;
-                long double theta_b = num_b / r_b;
-
-                long double r_null = pow(num_a + num_a, 2.0) / (denom_a + denom_b);
-                long double theta_null = (num_a + num_b) / r_null;
-
-                nb_params_a.first = r_a;
-                nb_params_b.first = r_b;
-                nb_params_null.first = r_null;
-
-                // theta = (1 - p) / p
-                // ptheta = 1 - p
-                // ptheta + p = 1
-                // p = 1/(1+theta)
-
-                nb_params_a.second = 1.0 / (theta_a + 1.0);
-                nb_params_b.second = 1.0 / (theta_b + 1.0);
-                nb_params_null.second = 1.0 / (theta_null + 1.0);
-                // long double mu_a = 0.0;
-                // long double mu_b = 0.0;
-                // long double var_a = 0.0;
-                // long double var_b = 0.0;
-                // for (size_t j = 0; j < groups.size(); ++j) {
-                //     const auto &[r, p] = nb_params[j];
-                //     long double mu = r * (1.0 - p) / p;
-                //     long double var = mu / p;
-                //     if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                //         mu_a += mu;
-                //         var_a += var;
-                //     }
-
-                //     if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                //         mu_b += mu;
-                //         var_b += var;
-                //     }
-                // }
-
-                // nb_params_a.first = mu_a * mu_a / (var_a - mu_a);
-                // nb_params_a.second = mu_a / var_a;
-                common::logger->trace("In: r: {}\tp: {}", nb_params_a.first,
-                                      nb_params_a.second);
-
-                // nb_params_b.first = mu_b * mu_b / (var_b - mu_b);
-                // nb_params_b.second = mu_b / var_b;
-                common::logger->trace("Out: r: {}\tp: {}", nb_params_b.first,
-                                      nb_params_b.second);
-
-                // long double mu_null = mu_a + mu_b;
-                // long double var_null = var_a + var_b; // the two are independent, so
-                // their covariance is 0 nb_params_null.first = mu_null * mu_null /
-                // (var_null - mu_null); nb_params_null.second = mu_null / var_null;
-                common::logger->trace("Null: r: {}\tp: {}", nb_params_null.first,
-                                      nb_params_null.second);
-
-                nb_base = (lgammal(nb_params_null.first) - lgammal(nb_params_a.first)
-                           - lgammal(nb_params_b.first))
-                        / logl(2.0);
-                nb_base += nb_params_a.first * log2l(nb_params_a.second)
-                        + nb_params_b.first * log2l(nb_params_b.second)
-                        - nb_params_null.first * log2l(nb_params_null.second);
-            }
-        }
-
-        using RowGenerator
-                = std::function<void(const std::function<void(size_t, uint64_t)>&)>;
-        using GetLambda
-                = std::function<std::pair<long double, long double>(size_t, const RowGenerator&)>;
-        GetLambda get_lambda;
-
-        if (config.test_type == "poisson_exact") {
-            get_lambda = [&](size_t, const RowGenerator&) {
-                return std::make_pair(static_cast<long double>(in_kmers) / nelem,
-                                      static_cast<long double>(out_kmers) / nelem);
-            };
-        }
-
-        // precompute p-values for poisson_binom test
-        std::vector<std::vector<long double>> pb_pvals(num_labels_in + num_labels_out + 1);
-        std::vector<long double> mid_points(num_labels_in + num_labels_out + 1);
-        if (config.test_type == "poisson_binom") {
-            // fit distribution
-            std::vector<long double> p;
-            p.reserve(groups.size());
-            for (size_t i = 0; i < groups.size(); ++i) {
-                p.emplace_back(static_cast<long double>(n_kmers[i]) / nelem);
-            }
-
-            common::logger->trace("p: {}", fmt::join(p, ","));
-
-            common::logger->trace("Precomputing PMFs");
-            std::vector<long double> pmf_in { 1.0L };
-            std::vector<long double> pmf_out { 1.0L };
-            std::vector<long double> pmf_null { 1.0L };
-
-            for (size_t i = 1; i <= groups.size(); ++i) {
-                if (groups[i - 1] == Group::OUT || groups[i - 1] == Group::BOTH) {
-                    std::vector<long double> pmf_out_cur(pmf_out.size() + 1);
-                    // pmf_out_cur[0] = (1.0L - p[i - 1]) * pmf_out[0];
-                    pmf_out_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_out[0]));
-                    pmf_out_cur[pmf_out.size()] = p[i - 1] * pmf_out.back();
-                    for (size_t k = 1; k < pmf_out.size(); ++k) {
-                        pmf_out_cur[k] = p[i - 1] * pmf_out[k - 1]
-                                + (1.0L - p[i - 1]) * pmf_out[k];
-                    }
-                    std::swap(pmf_out_cur, pmf_out);
-                }
-
-                if (groups[i - 1] == Group::IN || groups[i - 1] == Group::BOTH) {
-                    std::vector<long double> pmf_in_cur(pmf_in.size() + 1);
-                    // pmf_in_cur[0] = (1.0L - p[i - 1]) * pmf_in[0];
-                    pmf_in_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_in[0]));
-                    pmf_in_cur[pmf_in.size()] = p[i - 1] * pmf_in.back();
-                    for (size_t k = 1; k < pmf_in.size(); ++k) {
-                        pmf_in_cur[k]
-                                = p[i - 1] * pmf_in[k - 1] + (1.0L - p[i - 1]) * pmf_in[k];
-                    }
-                    std::swap(pmf_in_cur, pmf_in);
-                }
-                std::vector<long double> pmf_null_cur(i + 1);
-                // pmf_null_cur[0] = (1.0L - p[i - 1]) * pmf_null[0];
-                pmf_null_cur[0] = expl(log1pl(-p[i - 1]) + logl(pmf_null[0]));
-                pmf_null_cur[pmf_null.size()] = p[i - 1] * pmf_null.back();
-                for (size_t k = 1; k < pmf_null.size(); ++k) {
-                    pmf_null_cur[k]
-                            = p[i - 1] * pmf_null[k - 1] + (1.0L - p[i - 1]) * pmf_null[k];
-                }
-                std::swap(pmf_null_cur, pmf_null);
-            }
-
-            if (pmf_in.size() != num_labels_in + 1) {
-                common::logger->error("PMF in wrong: {} != {}", pmf_in.size(),
-                                      num_labels_in + 1);
-                throw std::domain_error("");
-            }
-
-            if (pmf_out.size() != num_labels_out + 1) {
-                common::logger->error("PMF out wrong: {} != {}", pmf_out.size(),
-                                      num_labels_out + 1);
-                throw std::domain_error("");
-            }
-
-            if (pmf_null.size() != num_labels_in + num_labels_out + 1) {
-                common::logger->error("PMF null wrong: {} != {}", pmf_null.size(),
-                                      num_labels_in + num_labels_out + 1);
-                throw std::domain_error("");
-            }
-
-            common::logger->trace("Precomputing p-values");
-            pb_pvals[0].emplace_back(1.0);
-
-            long double min_pval = 1.0;
-            // long double last_local_min_pval = 1.0;
-
-            for (size_t n = 1; n < pb_pvals.size(); ++n) {
-                std::vector<long double> probs;
-                size_t front = n - std::min(n, num_labels_out);
-                for (uint64_t s = 0; s < pmf_in.size(); ++s) {
-                    if (s > n)
-                        break;
-                    uint64_t t = n - s;
-                    if (s < pmf_in.size() && t < pmf_out.size()) {
-                        if (s < front) {
-                            common::logger->error(
-                                    "Attempting non-zero p-value in impossible "
-                                    "configuration: {},{}",
-                                    n, s);
-                            throw std::domain_error("");
-                        }
-                        probs.emplace_back(exp2l(log2l(pmf_in[s]) + log2l(pmf_out[t])
-                                                 - log2l(pmf_null[n])));
-                    } else {
-                        probs.emplace_back(0.0);
-                    }
-                }
-
-                long double sum_probs = std::accumulate(probs.begin(), probs.end(), 0.0L);
-                if (abs(sum_probs - 1.0L) > 1e-5) {
-                    common::logger->error("Sum of probs for n={} = {}", n, sum_probs);
-                    throw std::runtime_error("Fail");
-                }
-
-                for (uint64_t s = 0; s < probs.size(); ++s) {
-                    pb_pvals[n].emplace_back(0.0);
-                    if (s > n)
-                        break;
-                    uint64_t t = n - s;
-                    if (s >= pmf_in.size() || t >= pmf_out.size())
-                        continue;
-                    for (uint64_t sp = 0; sp < probs.size(); ++sp) {
-                        if (sp > n)
-                            break;
-                        uint64_t tp = n - sp;
-                        if (sp >= pmf_in.size() || tp >= pmf_out.size())
-                            continue;
-                        if (probs[sp] <= probs[s])
-                            pb_pvals[n][s] += probs[sp];
-                    }
-                }
-
-                for (uint64_t s = 0; s < front; ++s) {
-                    if (pb_pvals[n][s] > 0) {
-                        common::logger->error(
-                                "Non-zero p-value in impossible configuration: {},{}", n, s);
-                        throw std::domain_error("");
-                    }
-                }
-                long double local_min_pval
-                        = std::min(pb_pvals[n][front], pb_pvals[n].back());
-                min_pval = std::min(min_pval, local_min_pval);
-
-                size_t max_prob_counts = 0;
-                long double max_prob_pos = 0;
-                // double max_prob = -1;
-
-                for (uint64_t s = front; s < pb_pvals[n].size(); ++s) {
-                    if (pb_pvals[n][s] < local_min_pval) {
-                        common::logger->error(
-                                "Min p-value not at boundary: {},{}: {} < {}", n, s,
-                                pb_pvals[n][s], local_min_pval);
-                        throw std::domain_error("");
-                    }
-                }
-                if (front + 1 == pb_pvals[n].size()) {
-                    max_prob_counts = 1;
-                    max_prob_pos = front;
-                } else if (front + 2 == pb_pvals[n].size()) {
-                    max_prob_counts = 2;
-                    max_prob_pos = front + front + 1;
-                } else {
-                    for (uint64_t s = front + 1; s < pb_pvals[n].size(); ++s) {
-                        if (probs[s] == probs[s - 1]) {
-                            max_prob_counts = 2;
-                            max_prob_pos = s + s;
-                            break;
-                        }
-
-                        if (s + 1 < pb_pvals[n].size()) {
-                            if (probs[s - 1] < probs[s] && probs[s] < probs[s + 1])
-                                continue;
-
-                            if (probs[s - 1] > probs[s] && probs[s] > probs[s + 1])
-                                continue;
-
-                            if (probs[s] > probs[s - 1] && probs[s] > probs[s + 1]) {
-                                if (probs[s] - probs[s - 1] == probs[s] - probs[s + 1]) {
-                                    max_prob_counts = 1;
-                                    max_prob_pos = s;
-                                } else if (probs[s] - probs[s - 1] > probs[s] - probs[s + 1]) {
-                                    max_prob_counts = 2;
-                                    max_prob_pos = s + s + 1;
-                                } else {
-                                    max_prob_counts = 2;
-                                    max_prob_pos = s + s - 1;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (max_prob_counts == 0) {
-                    max_prob_counts = 2;
-                    max_prob_pos = front - 1 + front;
-                }
-
-                mid_points[n] = static_cast<long double>(max_prob_pos) / max_prob_counts;
-                common::logger->trace("Midpoint: n: {}\tmp: {}\t{}\t{}", n, mid_points[n],
-                                      fmt::join(probs, ","), fmt::join(pb_pvals[n], ","));
-
-                // if (local_min_pval > last_local_min_pval) {
-                //     common::logger->error("Min p-vals failed: n-1: {} -> {}\tn: {} -> {}",
-                //                           n - 1, last_local_min_pval, n, local_min_pval);
-                //     throw std::runtime_error("Min p-val failed");
-                // }
-                // last_local_min_pval = local_min_pval;
-            }
-
-            common::logger->trace("Min. p-value: {}", min_pval);
-            if (min_pval >= config.family_wise_error_rate) {
-                common::logger->warn("No significant p-values achievable");
-                auto masked_graph_in = std::make_shared<MaskedDeBruijnGraph>(
-                        graph_ptr, [](node_index) { return false; }, true,
-                        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
-
-                auto masked_graph_out = std::make_shared<MaskedDeBruijnGraph>(
-                        graph_ptr, [](node_index) { return false; }, true,
-                        is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
-
-                return std::make_tuple(masked_graph_in, masked_graph_out, PValStorage {},
-                                       nullptr);
-            }
-        }
-
         bool fdr = config.test_by_unitig || config.test_type == "nbinom_exact"
                 || config.test_type == "mwu" || config.test_type == "cmh";
 
@@ -1043,16 +986,6 @@ mask_nodes_by_label_dual(
                         n += c;
                         found[j] = true;
                     }
-
-                    auto [mu1, mu2] = get_lambda(bucket_idx, [&](const auto& callback) {
-                        for (const auto& [j, c] : row) {
-                            callback(j, c);
-                        }
-                        for (size_t j = 0; j < found.size(); ++j) {
-                            if (!found[j])
-                                callback(j, 0);
-                        }
-                    });
 
                     if (n > 0) {
                         if (ms[bucket_idx].size() <= n)
@@ -1294,28 +1227,12 @@ mask_nodes_by_label_dual(
                         in_sum += c;
                 }
 
-                auto [mu1, mu2] = get_lambda(bucket_idx, [&](const auto& callback) {
-                    for (const auto& [j, c] : row) {
-                        callback(j, c);
-                    }
-                    for (size_t j = 0; j < found.size(); ++j) {
-                        if (!found[j])
-                            callback(j, 0);
-                    }
-                });
-
                 if (n < n_cutoff)
                     return;
 
                 long double p = mu1 / (mu1 + mu2);
                 boost::math::binomial bdist(n, p);
                 if (n != 0) {
-                    // double pval0 = boost::math::pdf(bdist, 0);
-                    // double pvaln = boost::math::pdf(bdist, n);
-                    // double min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-                    // if (!config.test_by_unitig && min_pval * k_min >= config.family_wise_error_rate)
-                    //     return;
-
                     auto get_deviance = [&](long double y, long double mu) {
                         y += 1e-8;
                         mu += 1e-8;
