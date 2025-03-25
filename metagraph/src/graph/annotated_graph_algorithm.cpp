@@ -303,9 +303,6 @@ mask_nodes_by_label_dual(
     std::vector<size_t> min_counts(groups.size(), config.min_count);
     std::vector<uint64_t> check_cutoff(groups.size(), std::numeric_limits<uint64_t>::max());
 
-    // std::mutex agg_mu;
-    // using PairContainer = std::vector<std::pair<uint64_t, value_type>>;
-
     if (config.clean) {
         common::logger->trace("Computing histogram from uncleaned counts");
         auto hists_map = get_hist_map(std::vector<size_t>(groups.size(), 1), nullptr);
@@ -362,7 +359,6 @@ mask_nodes_by_label_dual(
     common::logger->trace("Marking discarded k-mers");
     auto hists_map = get_hist_map(min_counts, &kept_bv);
     std::unique_ptr<MaskedDeBruijnGraph> clean_masked_graph;
-    // bit_vector_stat kept(std::move(kept_bv));
     bit_vector_stat kept(kept_bv);
 
     clean_masked_graph = std::make_unique<MaskedDeBruijnGraph>(
@@ -372,86 +368,6 @@ mask_nodes_by_label_dual(
                         && kept[AnnotatedDBG::graph_to_anno_index(node)];
             },
             true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
-
-    // common::logger->trace("Filtering low-complexity k-mers");
-    // std::atomic_thread_fence(std::memory_order_release);
-    // clean_masked_graph->call_sequences([&](const std::string &contig, const auto &path) {
-    //     for (size_t i = 0; i < path.size(); ++i) {
-    //         if (is_low_complexity(std::string_view(contig.c_str() + i, graph_ptr->get_k())))
-    //             unset_bit(kept_bv.data(), AnnotatedDBG::graph_to_anno_index(path[i]), true, std::memory_order_relaxed);
-    //     }
-    // }, num_threads);
-    // std::atomic_thread_fence(std::memory_order_acquire);
-    // kept = bit_vector_stat(std::move(kept_bv));
-
-
-    // common::logger->trace("Allocating p-value storage");
-    // auto nullpval = bit_cast<uint64_t>(double(1.1));
-
-    // std::vector<PValStorage> mean_buckets;
-    // std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
-    // if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
-    //     auto &means = mean_buckets.emplace_back();
-    //     means.resize(graph_ptr->max_index() + 1, 0);
-    // }
-
-    // if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
-    //     for (size_t i = 0; i < get_num_threads() + 1; ++i) {
-    //         auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
-    //         mean_buckets.emplace_back(tmp_file->name(), std::ios::out);
-    //     }
-    //     mean_buckets[0].push_back(0);
-    // }
-
-    // std::vector<PValStorage> pvals_buckets;
-    // std::vector<std::unique_ptr<utils::TempFile>> tmp_buckets;
-    // std::vector<PValStorage> pvals_min_buckets;
-    // std::vector<std::unique_ptr<utils::TempFile>> tmp_min_buckets;
-    // std::vector<PValStorage> eff_size_buckets;
-    // std::vector<std::unique_ptr<utils::TempFile>> tmp_eff_buckets;
-    // // constexpr bool preallocated = std::is_same_v<PValStorage, std::vector<uint64_t>>;
-
-    // if (config.test_type != "notest" && config.test_by_unitig) {
-    //     if constexpr(std::is_same_v<PValStorage, std::vector<uint64_t>>) {
-    //         auto &pvals = pvals_buckets.emplace_back();
-    //         pvals.reserve(graph_ptr->max_index());
-
-    //         auto &pvals_min = pvals_min_buckets.emplace_back();
-    //         pvals_min.reserve(graph_ptr->max_index());
-
-    //         auto &eff_size = eff_size_buckets.emplace_back();
-    //         eff_size.reserve(graph_ptr->max_index());
-    //     }
-
-    //     if constexpr(std::is_same_v<PValStorage, sdsl::int_vector_buffer<64>>) {
-    //         for (size_t i = 0; i < get_num_threads() + 1; ++i) {
-    //             auto &tmp_file = tmp_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
-    //             pvals_buckets.emplace_back(tmp_file->name(), std::ios::out);
-    //         }
-
-    //         for (size_t i = 0; i < get_num_threads() + 1; ++i) {
-    //             auto &tmp_file = tmp_min_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
-    //             pvals_min_buckets.emplace_back(tmp_file->name(), std::ios::out);
-    //         }
-
-    //         for (size_t i = 0; i < get_num_threads() + 1; ++i) {
-    //             auto &tmp_file_eff = tmp_eff_buckets.emplace_back(std::make_unique<utils::TempFile>(tmp_dir));
-    //             eff_size_buckets.emplace_back(tmp_file_eff->name(), std::ios::out);
-    //         }
-    //     }
-    // }
-
-    // if ((config.test_type == "gnb_exact" || config.test_type == "lnb_exact") && config.test_by_unitig) {
-
-    // }
-
-
-    // std::vector<PValStorage> sum_buckets;
-    // std::vector<std::unique_ptr<utils::TempFile>> tmp_sum_buckets;
-    // if (config.test_by_unitig) {
-    //     common::logger->trace("Allocating effect size and row sum storage");
-
-    // }
 
     sdsl::bit_vector indicator_in;
     sdsl::bit_vector indicator_out;
@@ -494,91 +410,11 @@ mask_nodes_by_label_dual(
 
             if (in_kmer || out_kmer) {
                 callback(row_i, row, bucket_idx);
-                // std::vector<std::pair<size_t, size_t>> new_row;
-                // for (const auto &[j, c] : row) {
-                //     if (c < 1024)
-                //         new_row.emplace_back(j, c);
-                // }
-                // callback(row_i, new_row, bucket_idx);
             }
         });
     };
 
-    // common::logger->trace("Marking low-complexity k-mers");
-    // std::atomic_thread_fence(std::memory_order_release);
-    // clean_masked_graph->call_sequences([&](const std::string &contig, const auto &path) {
-    //     for (size_t i = 0; i < path.size(); ++i) {
-    //         std::string_view kmer(contig.c_str() + i, clean_masked_graph->get_k());
-    //         if (is_low_complexity(kmer)) {
-    //             auto row = AnnotatedDBG::graph_to_anno_index(path[i]);
-    //             unset_bit(kept_bv.data(), row, true, std::memory_order_relaxed);
-    //         }
-    //     }
-    // }, num_threads);
-    // std::atomic_thread_fence(std::memory_order_acquire);
-
-    // common::logger->trace("Discarding counts from low-complexity k-mers");
-    // {
-    //     std::vector<std::vector<VectorMap<uint64_t, size_t>>> hist_maps_m(num_threads +
-    //     1); for (auto &hist_maps : hist_maps_m) {
-    //         hist_maps.resize(groups.size());
-    //     }
-    //     std::atomic_thread_fence(std::memory_order_release);
-    //     generate_clean_rows([&](auto row_i, const auto &row, size_t bucket_idx) {
-    //         if (fetch_bit(kept_bv.data(), row_i, true, std::memory_order_acquire)) {
-    //             if (row.empty()) {
-    //                 unset_bit(kept_bv.data(), row_i, true, std::memory_order_release);
-    //             } else {
-    //                 sdsl::bit_vector found(groups.size());
-    //                 for (const auto &[j, c] : row) {
-    //                     found[j] = true;
-    //                     ++hist_maps_m[bucket_idx][j][c];
-    //                 }
-    //                 for (size_t j = 0; j < found.size(); ++j) {
-    //                     if (!found[j])
-    //                         ++hist_maps_m[bucket_idx][j][0];
-    //                 }
-    //             }
-    //         }
-    //     });
-    //     std::atomic_thread_fence(std::memory_order_acquire);
-    //     std::swap(hists_map, hist_maps_m[0]);
-    //     for (size_t i = 1; i < hist_maps_m.size(); ++i) {
-    //         for (size_t j = 0; j < hist_maps_m[i].size(); ++j) {
-    //             for (const auto &[k, c] : hist_maps_m[i][j]) {
-    //                 hists_map[j][k] += c;
-    //             }
-    //         }
-    //     }
-    // }
-
-    // std::atomic_thread_fence(std::memory_order_release);
-    // generate_rows([&](uint64_t row_i, const auto &row, size_t) {
-    //     if (kept[row_i] && !kept_bv[row_i]) {
-    //         sdsl::bit_vector found(groups.size());
-    //         for (const auto &[j, c] : row) {
-    //             found[j] = true;
-    //             auto find = hists_map[j].find(c);
-    //             assert(find != hists_map[j].end());
-    //             uint64_t prev = __atomic_fetch_sub(&find.value(), 1,
-    //             std::memory_order_relaxed); std::ignore = prev; assert(prev);
-    //         }
-    //         for (size_t j = 0; j < found.size(); ++j) {
-    //             if (!found[j]) {
-    //                 auto find = hists_map[j].find(0);
-    //                 assert(find != hists_map[j].end());
-    //                 uint64_t prev = __atomic_fetch_sub(&find.value(), 1,
-    //                 std::memory_order_relaxed); std::ignore = prev; assert(prev);
-    //             }
-    //         }
-    //     }
-    // });
-    // std::atomic_thread_fence(std::memory_order_acquire);
-    // size_t old_nelem = kept.num_set_bits();
-    // kept = bit_vector_stat(std::move(kept_bv));
-
     size_t nelem = kept.num_set_bits();
-    // common::logger->trace("Kept {} / {} high-complexity k-mers", nelem, old_nelem);
 
     for (size_t j = 0; j < groups.size(); ++j) {
         size_t total_c = 0;
@@ -652,7 +488,6 @@ mask_nodes_by_label_dual(
 
     std::vector<size_t> kmer_to_unitig;
     std::vector<std::tuple<size_t, size_t, size_t>> counts;
-    // std::vector<std::pair<size_t, std::vector<uint64_t>>> agg_counts;
     clean_masked_graph = std::make_unique<MaskedDeBruijnGraph>(
             graph_ptr,
             [&](node_index node) {
@@ -661,115 +496,6 @@ mask_nodes_by_label_dual(
             },
             true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
     if (config.test_by_unitig && config.test_type != "notest") {
-        // using RowStorage = tsl::hopscotch_map<
-        //         PairContainer, std::pair<long double, std::vector<size_t>>, PairVectorHash>;
-        // RowStorage row_storage;
-        // std::mutex mu;
-        // generate_clean_rows([&](auto row_i, const auto& row, size_t) {
-        //     // std::lock_guard<std::mutex> lock(mu);
-
-        // });
-
-        // std::vector<size_t> kmer_to_unitig(nelem, nelem);
-        // using IDMap = tsl::hopscotch_map<size_t, size_t>;
-        // std::vector<std::tuple<size_t, size_t, long double, long double, IDMap>> unitig_sizes;
-        // {
-        //     std::mutex mu;
-        //     std::atomic_thread_fence(std::memory_order_release);
-        //     clean_masked_graph->call_unitigs([&](const std::string&, const auto& path) {
-        //         size_t unitig_id;
-        //         {
-        //             std::lock_guard<std::mutex> lock(mu);
-        //             unitig_id = unitig_sizes.size();
-        //             auto& [size, sofar, pval, eff_size, bucket]
-        //                     = unitig_sizes.emplace_back();
-        //             size = path.size();
-        //             pval = 1.0;
-        //         }
-        //         for (node_index node : path) {
-        //             auto row_i = AnnotatedDBG::graph_to_anno_index(node);
-        //             size_t idx = kept.rank1(row_i) - 1;
-        //             kmer_to_unitig[idx] = unitig_id;
-        //         }
-        //     });
-        //     std::atomic_thread_fence(std::memory_order_acquire);
-
-
-        //     VectorSet<PairContainer, PairVectorHash> unique_rows;
-
-        //     std::atomic_thread_fence(std::memory_order_release);
-        //     generate_clean_rows([&](auto row_i, const auto& row, size_t) {
-        //         size_t idx = kept.rank1(row_i) - 1;
-        //         size_t unitig_id = kmer_to_unitig[idx];
-        //         auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
-        //                 = unitig_sizes[unitig_id];
-        //         size_t added
-        //                 = __atomic_add_fetch(&unitig_sofar, 1, std::memory_order_acq_rel);
-        //         {
-        //             std::lock_guard<std::mutex> lock(mu);
-        //             auto it = unique_rows.emplace(row).first;
-        //             size_t annot_id = it - unique_rows.begin();
-        //             ++unitig_bucket[annot_id];
-        //         }
-
-        //         if (added == unitig_size) {
-        //             // we've observed everything, now do the test
-        //             auto generate_a = [&](const auto& callback) {
-        //                 for (const auto& [annot_id, n] : unitig_bucket) {
-        //                     const auto& row = *(unique_rows.begin() + annot_id);
-        //                     sdsl::bit_vector found(groups.size());
-        //                     for (const auto& [j, c] : row) {
-        //                         if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-        //                             found[j] = true;
-        //                             for (size_t i = 0; i < n; ++i) {
-        //                                 callback(static_cast<long double>(c) / sums[j]);
-        //                             }
-        //                         }
-        //                     }
-        //                     for (size_t j = 0; j < found.size(); ++j) {
-        //                         if (!found[j]
-        //                             && (groups[j] == Group::IN || groups[j] == Group::BOTH)) {
-        //                             for (size_t i = 0; i < n; ++i) {
-        //                                 callback(0.0L);
-        //                             }
-        //                         }
-        //                     }
-        //                 }
-        //             };
-        //             auto generate_b = [&](const auto& callback) {
-        //                 for (const auto& [annot_id, n] : unitig_bucket) {
-        //                     const auto& row = *(unique_rows.begin() + annot_id);
-        //                     sdsl::bit_vector found(groups.size());
-        //                     for (const auto& [j, c] : row) {
-        //                         if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-        //                             found[j] = true;
-        //                             for (size_t i = 0; i < n; ++i) {
-        //                                 callback(static_cast<long double>(c) / sums[j]);
-        //                             }
-        //                         }
-        //                     }
-        //                     for (size_t j = 0; j < found.size(); ++j) {
-        //                         if (!found[j]
-        //                             && (groups[j] == Group::OUT || groups[j] == Group::BOTH)) {
-        //                             for (size_t i = 0; i < n; ++i) {
-        //                                 callback(0.0L);
-        //                             }
-        //                         }
-        //                     }
-        //                 }
-        //             };
-        //             std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
-        //             unitig_bucket = IDMap();
-        //         }
-        //     });
-        //     std::atomic_thread_fence(std::memory_order_acquire);
-        // }
-        // uint64_t num_tests = unitig_sizes.size();
-
-        // std::vector<std::tuple<long double, uint64_t, node_index>> nb_pvals;
-        // nb_pvals.resize(nelem,
-        //                 std::make_tuple(1.0L, graph_ptr->max_index() + 1,
-        //                                 graph_ptr->max_index() + 1));
         std::vector<std::tuple<long double, size_t, Group, node_index>> nb_pvals;
         nb_pvals.resize(nelem,
                         std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
@@ -887,129 +613,6 @@ mask_nodes_by_label_dual(
                 num_threads);
         std::atomic_thread_fence(std::memory_order_acquire);
         common::logger->trace("Found {} monotigs", num_tests);
-
-        // size_t idx = 0;
-        // kept.call_ones([&](auto row_i) {
-        //     size_t unitig_id = kmer_to_unitig[idx];
-        //     const auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
-        //             = unitig_sizes[unitig_id];
-        //     if (unitig_bucket.size()) {
-        //         throw std::runtime_error("Found non-empty bucket");
-        //     }
-
-        //     if (eff_size != 0 && pval < config.family_wise_error_rate) {
-        //         auto& [kmer_pval, kmer_unitig_id, node] = nb_pvals[idx];
-        //         kmer_pval = pval;
-        //         kmer_unitig_id = unitig_id;
-        //         node = AnnotatedDBG::anno_to_graph_index(row_i);
-        //         if (eff_size > 0) {
-        //             indicator_in[node] = true;
-        //         } else {
-        //             indicator_out[node] = true;
-        //         }
-        //     }
-        //     ++idx;
-        // });
-
-
-        // generate_unitigs(*clean_masked_graph, [&](const auto& path, const auto& row_values) {
-        //     uint64_t unitig_id
-        //             = __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
-        //     long double pval = 1.0;
-        //     long double eff_size = 0.0;
-        //     if (config.test_type == "mwu") {
-        //         auto generate_a = [&](const auto& callback) {
-        //             size_t total = num_labels_in * path.size();
-        //             size_t observed = 0;
-        //             for (const auto& values : row_values) {
-        //                 for (const auto& [j, c] : values) {
-        //                     if (groups[j] == Group::IN) {
-        //                         callback(static_cast<long double>(c) / sums[j]);
-        //                         ++observed;
-        //                     }
-        //                 }
-        //             }
-        //             for (size_t n = observed; n < total; ++n) {
-        //                 callback(0.0L);
-        //             }
-        //         };
-        //         auto generate_b = [&](const auto& callback) {
-        //             size_t total = num_labels_out * path.size();
-        //             size_t observed = 0;
-        //             for (const auto& values : row_values) {
-        //                 for (const auto& [j, c] : values) {
-        //                     if (groups[j] == Group::OUT) {
-        //                         callback(static_cast<long double>(c) / sums[j]);
-        //                         ++observed;
-        //                     }
-        //                 }
-        //             }
-        //             for (size_t n = observed; n < total; ++n) {
-        //                 callback(0.0L);
-        //             }
-        //         };
-
-        //         std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
-
-        //     } else if (config.test_type == "cmh") {
-        //         int64_t in_sum = 0;
-        //         int64_t out_sum = 0;
-        //         for (const auto& values : row_values) {
-        //             for (const auto& [j, c] : values) {
-        //                 if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-        //                     out_sum += c;
-        //                 }
-
-        //                 if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-        //                     in_sum += c;
-        //                 }
-        //             }
-        //         }
-        //         eff_size = static_cast<long double>(in_sum) / in_kmers
-        //                 - static_cast<long double>(out_sum) / out_kmers;
-        //         int64_t t = total_kmers;
-        //         int64_t n1 = in_kmers;
-        //         int64_t n2 = out_kmers;
-        //         int64_t m1 = in_sum + out_sum;
-        //         int64_t m2 = t - m1;
-        //         assert(m2 >= 0);
-
-        //         double lbase
-        //                 = log(n1) + log(n2) + log(m1) + log(m2) - log(t) * 2 - log(t - 1);
-        //         double factor = static_cast<double>(n1 * m1) / t;
-
-        //         auto get_chi_stat = [&](int64_t a) {
-        //             int64_t b = n1 - a;
-        //             int64_t c = m1 - a;
-        //             int64_t d = m2 - b;
-        //             assert(d == n2 - c);
-
-        //             if (b < 0 || c < 0 || d < 0)
-        //                 return 0.0;
-
-        //             double a_shift = static_cast<double>(a) - factor;
-
-        //             if (a_shift > 0)
-        //                 return exp(log(a_shift) * 2.0 - lbase);
-
-        //             return a_shift * a_shift / exp(lbase);
-        //         };
-
-        //         double chi_stat = get_chi_stat(in_sum);
-        //         pval = boost::math::cdf(
-        //                 boost::math::complement(boost::math::chi_squared(1), chi_stat));
-        //     }
-
-        //     if (eff_size != 0 && pval < config.family_wise_error_rate) {
-        //         auto* data = eff_size > 0 ? indicator_in.data() : indicator_out.data();
-        //         for (node_index node : path) {
-        //             auto row_i = AnnotatedDBG::graph_to_anno_index(node);
-        //             size_t nb_idx = kept.rank1(row_i) - 1;
-        //             nb_pvals[nb_idx] = std::make_tuple(pval, unitig_id, node);
-        //             set_bit(data, node, true, std::memory_order_relaxed);
-        //         }
-        //     }
-        // });
         std::atomic_thread_fence(std::memory_order_acquire);
         std::sort(nb_pvals.begin(), nb_pvals.end());
 
@@ -1061,9 +664,6 @@ mask_nodes_by_label_dual(
         std::pair<long double, long double> nb_params_b;
         std::pair<long double, long double> nb_params_null;
         long double nb_base = 0.0;
-        // long double alpha = in_kmers;
-        // long double beta = out_kmers;
-        // long double hg_base = (lgammal(alpha + beta) - lgammal(alpha) - lgammal(beta)) / logl(2.0);
         if (config.test_type == "nbinom_exact") {
             common::logger->trace("Fitting per-sample negative binomial distributions");
 
@@ -1521,7 +1121,6 @@ mask_nodes_by_label_dual(
                 std::sort(m.rbegin(), m.rend());
             } else {
                 std::swap(m, ms[0]);
-                // std::swap(gp_pvals, gp_pvals_m[0]);
                 size_t max_size = m.size();
                 for (size_t i = 1; i < ms.size(); ++i) {
                     max_size = std::max(max_size, ms[i].size());
@@ -1533,8 +1132,6 @@ mask_nodes_by_label_dual(
                         const auto& [pval, c] = ms[i][n];
                         m[n].first = pval;
                         m[n].second += c;
-                        // if (gp_pvals[n].empty() && gp_pvals_m[i][n].size())
-                        //     std::swap(gp_pvals[n], gp_pvals_m[i][n]);
                     }
                 }
 
