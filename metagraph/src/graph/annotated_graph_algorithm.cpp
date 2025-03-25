@@ -822,134 +822,253 @@ mask_nodes_by_label_dual(
         //         PairContainer, std::pair<long double, std::vector<size_t>>, PairVectorHash>;
         // RowStorage row_storage;
         // std::mutex mu;
-        // generate_clean_rows([&](auto, const auto& row, size_t) {
-        //     std::lock_guard<std::mutex> lock(mu);
+        // generate_clean_rows([&](auto row_i, const auto& row, size_t) {
+        //     // std::lock_guard<std::mutex> lock(mu);
 
         // });
 
-        using IDMap = tsl::hopscotch_map<size_t, size_t>;
-        std::vector<std::tuple<size_t, size_t, long double, long double, IDMap>> unitig_sizes;
-        std::vector<size_t> kmer_to_unitig(nelem, nelem);
-        {
-            std::mutex mu;
-            std::atomic_thread_fence(std::memory_order_release);
-            clean_masked_graph->call_unitigs([&](const std::string&, const auto& path) {
-                size_t unitig_id;
-                {
-                    std::lock_guard<std::mutex> lock(mu);
-                    unitig_id = unitig_sizes.size();
-                    auto& [size, sofar, pval, eff_size, bucket]
-                            = unitig_sizes.emplace_back();
-                    size = path.size();
-                    pval = 1.0;
-                }
-                for (node_index node : path) {
-                    auto row_i = AnnotatedDBG::graph_to_anno_index(node);
-                    size_t idx = kept.rank1(row_i) - 1;
-                    kmer_to_unitig[idx] = unitig_id;
-                }
-            });
-            std::atomic_thread_fence(std::memory_order_acquire);
+        // std::vector<size_t> kmer_to_unitig(nelem, nelem);
+        // using IDMap = tsl::hopscotch_map<size_t, size_t>;
+        // std::vector<std::tuple<size_t, size_t, long double, long double, IDMap>> unitig_sizes;
+        // {
+        //     std::mutex mu;
+        //     std::atomic_thread_fence(std::memory_order_release);
+        //     clean_masked_graph->call_unitigs([&](const std::string&, const auto& path) {
+        //         size_t unitig_id;
+        //         {
+        //             std::lock_guard<std::mutex> lock(mu);
+        //             unitig_id = unitig_sizes.size();
+        //             auto& [size, sofar, pval, eff_size, bucket]
+        //                     = unitig_sizes.emplace_back();
+        //             size = path.size();
+        //             pval = 1.0;
+        //         }
+        //         for (node_index node : path) {
+        //             auto row_i = AnnotatedDBG::graph_to_anno_index(node);
+        //             size_t idx = kept.rank1(row_i) - 1;
+        //             kmer_to_unitig[idx] = unitig_id;
+        //         }
+        //     });
+        //     std::atomic_thread_fence(std::memory_order_acquire);
 
 
-            VectorSet<PairContainer, PairVectorHash> unique_rows;
+        //     VectorSet<PairContainer, PairVectorHash> unique_rows;
 
-            std::atomic_thread_fence(std::memory_order_release);
-            generate_clean_rows([&](auto row_i, const auto& row, size_t) {
-                size_t idx = kept.rank1(row_i) - 1;
-                size_t unitig_id = kmer_to_unitig[idx];
-                auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
-                        = unitig_sizes[unitig_id];
-                size_t added
-                        = __atomic_add_fetch(&unitig_sofar, 1, std::memory_order_acq_rel);
-                {
-                    std::lock_guard<std::mutex> lock(mu);
-                    auto it = unique_rows.emplace(row).first;
-                    size_t annot_id = it - unique_rows.begin();
-                    ++unitig_bucket[annot_id];
-                }
+        //     std::atomic_thread_fence(std::memory_order_release);
+        //     generate_clean_rows([&](auto row_i, const auto& row, size_t) {
+        //         size_t idx = kept.rank1(row_i) - 1;
+        //         size_t unitig_id = kmer_to_unitig[idx];
+        //         auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
+        //                 = unitig_sizes[unitig_id];
+        //         size_t added
+        //                 = __atomic_add_fetch(&unitig_sofar, 1, std::memory_order_acq_rel);
+        //         {
+        //             std::lock_guard<std::mutex> lock(mu);
+        //             auto it = unique_rows.emplace(row).first;
+        //             size_t annot_id = it - unique_rows.begin();
+        //             ++unitig_bucket[annot_id];
+        //         }
 
-                if (added == unitig_size) {
-                    // we've observed everything, now do the test
-                    auto generate_a = [&](const auto& callback) {
-                        for (const auto& [annot_id, n] : unitig_bucket) {
-                            const auto& row = *(unique_rows.begin() + annot_id);
-                            sdsl::bit_vector found(groups.size());
-                            for (const auto& [j, c] : row) {
-                                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                                    found[j] = true;
-                                    for (size_t i = 0; i < n; ++i) {
-                                        callback(static_cast<long double>(c) / sums[j]);
-                                    }
-                                }
-                            }
-                            for (size_t j = 0; j < found.size(); ++j) {
-                                if (!found[j]
-                                    && (groups[j] == Group::IN || groups[j] == Group::BOTH)) {
-                                    for (size_t i = 0; i < n; ++i) {
-                                        callback(0.0L);
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    auto generate_b = [&](const auto& callback) {
-                        for (const auto& [annot_id, n] : unitig_bucket) {
-                            const auto& row = *(unique_rows.begin() + annot_id);
-                            sdsl::bit_vector found(groups.size());
-                            for (const auto& [j, c] : row) {
-                                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                                    found[j] = true;
-                                    for (size_t i = 0; i < n; ++i) {
-                                        callback(static_cast<long double>(c) / sums[j]);
-                                    }
-                                }
-                            }
-                            for (size_t j = 0; j < found.size(); ++j) {
-                                if (!found[j]
-                                    && (groups[j] == Group::OUT || groups[j] == Group::BOTH)) {
-                                    for (size_t i = 0; i < n; ++i) {
-                                        callback(0.0L);
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
-                    unitig_bucket = IDMap();
-                }
-            });
-            std::atomic_thread_fence(std::memory_order_acquire);
-        }
-        uint64_t num_tests = unitig_sizes.size();
+        //         if (added == unitig_size) {
+        //             // we've observed everything, now do the test
+        //             auto generate_a = [&](const auto& callback) {
+        //                 for (const auto& [annot_id, n] : unitig_bucket) {
+        //                     const auto& row = *(unique_rows.begin() + annot_id);
+        //                     sdsl::bit_vector found(groups.size());
+        //                     for (const auto& [j, c] : row) {
+        //                         if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+        //                             found[j] = true;
+        //                             for (size_t i = 0; i < n; ++i) {
+        //                                 callback(static_cast<long double>(c) / sums[j]);
+        //                             }
+        //                         }
+        //                     }
+        //                     for (size_t j = 0; j < found.size(); ++j) {
+        //                         if (!found[j]
+        //                             && (groups[j] == Group::IN || groups[j] == Group::BOTH)) {
+        //                             for (size_t i = 0; i < n; ++i) {
+        //                                 callback(0.0L);
+        //                             }
+        //                         }
+        //                     }
+        //                 }
+        //             };
+        //             auto generate_b = [&](const auto& callback) {
+        //                 for (const auto& [annot_id, n] : unitig_bucket) {
+        //                     const auto& row = *(unique_rows.begin() + annot_id);
+        //                     sdsl::bit_vector found(groups.size());
+        //                     for (const auto& [j, c] : row) {
+        //                         if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+        //                             found[j] = true;
+        //                             for (size_t i = 0; i < n; ++i) {
+        //                                 callback(static_cast<long double>(c) / sums[j]);
+        //                             }
+        //                         }
+        //                     }
+        //                     for (size_t j = 0; j < found.size(); ++j) {
+        //                         if (!found[j]
+        //                             && (groups[j] == Group::OUT || groups[j] == Group::BOTH)) {
+        //                             for (size_t i = 0; i < n; ++i) {
+        //                                 callback(0.0L);
+        //                             }
+        //                         }
+        //                     }
+        //                 }
+        //             };
+        //             std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
+        //             unitig_bucket = IDMap();
+        //         }
+        //     });
+        //     std::atomic_thread_fence(std::memory_order_acquire);
+        // }
+        // uint64_t num_tests = unitig_sizes.size();
 
-        std::vector<std::tuple<long double, uint64_t, node_index>> nb_pvals;
+        // std::vector<std::tuple<long double, uint64_t, node_index>> nb_pvals;
+        // nb_pvals.resize(nelem,
+        //                 std::make_tuple(1.0L, graph_ptr->max_index() + 1,
+        //                                 graph_ptr->max_index() + 1));
+        std::vector<std::tuple<long double, size_t, Group, node_index>> nb_pvals;
         nb_pvals.resize(nelem,
-                        std::make_tuple(1.0L, graph_ptr->max_index() + 1,
+                        std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
                                         graph_ptr->max_index() + 1));
 
-        size_t idx = 0;
-        kept.call_ones([&](auto row_i) {
-            size_t unitig_id = kmer_to_unitig[idx];
-            const auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
-                    = unitig_sizes[unitig_id];
-            if (unitig_bucket.size()) {
-                throw std::runtime_error("Found non-empty bucket");
-            }
+        generate_clean_rows([&](auto row_i, const auto& row, size_t) {
+            auto generate_a = [&](const auto& callback) {
+                sdsl::bit_vector found(groups.size());
+                for (const auto& [j, c] : row) {
+                    found[j] = true;
+                    if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                        callback(static_cast<long double>(c) / sums[j]);
+                }
+                for (size_t j = 0; j < found.size(); ++j) {
+                    if (!found[j] && (groups[j] == Group::IN || groups[j] == Group::BOTH))
+                        callback(0.0L);
+                }
+            };
+            auto generate_b = [&](const auto& callback) {
+                sdsl::bit_vector found(groups.size());
+                for (const auto& [j, c] : row) {
+                    found[j] = true;
+                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                        callback(static_cast<long double>(c) / sums[j]);
+                }
+                for (size_t j = 0; j < found.size(); ++j) {
+                    if (!found[j] && (groups[j] == Group::OUT || groups[j] == Group::BOTH))
+                        callback(0.0L);
+                }
+            };
 
-            if (eff_size != 0 && pval < config.family_wise_error_rate) {
-                auto& [kmer_pval, kmer_unitig_id, node] = nb_pvals[idx];
-                kmer_pval = pval;
-                kmer_unitig_id = unitig_id;
+            size_t idx = kept.rank1(row_i) - 1;
+            auto& [pval, monotig_id, group, node] = nb_pvals[idx];
+
+            long double eff_size;
+
+            std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
+            if (eff_size != 0.0) {
                 node = AnnotatedDBG::anno_to_graph_index(row_i);
                 if (eff_size > 0) {
-                    indicator_in[node] = true;
-                } else {
-                    indicator_out[node] = true;
+                    group = Group::IN;
+                } else if (eff_size < 0) {
+                    group = Group::OUT;
                 }
             }
-            ++idx;
         });
+
+        uint64_t num_tests = 0;
+        std::atomic_thread_fence(std::memory_order_release);
+        clean_masked_graph->call_unitigs(
+                [&](const std::string&, const auto& path) {
+                    std::vector<long double> pvals;
+                    pvals.reserve(path.size());
+
+                    Group last_group = Group::BOTH;
+                    size_t last_i = 0;
+
+                    std::vector<size_t> ranks;
+                    ranks.reserve(path.size());
+                    for (node_index node : path) {
+                        size_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                        ranks.emplace_back(kept.rank1(row_i) - 1);
+                    }
+
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        size_t idx = ranks[i];
+                        const auto& [pval, monotig_id, group, stored_node] = nb_pvals[idx];
+                        if (group != last_group) {
+                            if (pvals.size()) {
+                                uint64_t monotig_id
+                                        = __atomic_fetch_add(&num_tests, 1,
+                                                             std::memory_order_relaxed);
+                                long double comb_pval = combine_pvals(pvals);
+                                for (size_t j = last_i; j < i; ++j) {
+                                    size_t jdx = ranks[j];
+                                    std::get<0>(nb_pvals[jdx]) = comb_pval;
+                                    std::get<1>(nb_pvals[jdx]) = monotig_id;
+                                    if (comb_pval < config.family_wise_error_rate) {
+                                        if (last_group == Group::IN) {
+                                            set_bit(indicator_in.data(), path[j], true,
+                                                    std::memory_order_relaxed);
+                                        } else if (last_group == Group::OUT) {
+                                            set_bit(indicator_out.data(), path[j], true,
+                                                    std::memory_order_relaxed);
+                                        }
+                                    }
+                                }
+                            }
+                            pvals.clear();
+                            last_group = group;
+                            last_i = i;
+                        }
+                        pvals.emplace_back(pval);
+                    }
+                    if (pvals.size()) {
+                        uint64_t monotig_id = __atomic_fetch_add(&num_tests, 1,
+                                                                 std::memory_order_relaxed);
+                        long double comb_pval = combine_pvals(pvals);
+                        for (size_t j = last_i; j < path.size(); ++j) {
+                            size_t jdx = ranks[j];
+                            std::get<0>(nb_pvals[jdx]) = comb_pval;
+                            std::get<1>(nb_pvals[jdx]) = monotig_id;
+                            if (comb_pval < config.family_wise_error_rate) {
+                                if (last_group == Group::IN) {
+                                    set_bit(indicator_in.data(), path[j], true,
+                                            std::memory_order_relaxed);
+                                } else if (last_group == Group::OUT) {
+                                    set_bit(indicator_out.data(), path[j], true,
+                                            std::memory_order_relaxed);
+                                }
+                            }
+                        }
+                    }
+                },
+                num_threads);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        common::logger->trace("Found {} monotigs", num_tests);
+
+        // size_t idx = 0;
+        // kept.call_ones([&](auto row_i) {
+        //     size_t unitig_id = kmer_to_unitig[idx];
+        //     const auto& [unitig_size, unitig_sofar, pval, eff_size, unitig_bucket]
+        //             = unitig_sizes[unitig_id];
+        //     if (unitig_bucket.size()) {
+        //         throw std::runtime_error("Found non-empty bucket");
+        //     }
+
+        //     if (eff_size != 0 && pval < config.family_wise_error_rate) {
+        //         auto& [kmer_pval, kmer_unitig_id, node] = nb_pvals[idx];
+        //         kmer_pval = pval;
+        //         kmer_unitig_id = unitig_id;
+        //         node = AnnotatedDBG::anno_to_graph_index(row_i);
+        //         if (eff_size > 0) {
+        //             indicator_in[node] = true;
+        //         } else {
+        //             indicator_out[node] = true;
+        //         }
+        //     }
+        //     ++idx;
+        // });
+
+
         // generate_unitigs(*clean_masked_graph, [&](const auto& path, const auto& row_values) {
         //     uint64_t unitig_id
         //             = __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
@@ -1061,7 +1180,7 @@ mask_nodes_by_label_dual(
         uint64_t last_unitig_id = graph_ptr->max_index() + 1;
         size_t cur_count = 0;
         for (size_t i = 0; i < nb_pvals.size(); ++i) {
-            const auto& [pval, unitig_id, node] = nb_pvals[i];
+            const auto& [pval, unitig_id, group, node] = nb_pvals[i];
             if (pval >= config.family_wise_error_rate)
                 break;
 
@@ -1079,7 +1198,7 @@ mask_nodes_by_label_dual(
                               k, nb_pvals.size(), std::get<0>(nb_pvals[0]));
 
         for (size_t i = k; i < nb_pvals.size(); ++i) {
-            const auto& [pval, unitig_id, node] = nb_pvals[i];
+            const auto& [pval, unitig_id, group, node] = nb_pvals[i];
             if (pval >= config.family_wise_error_rate)
                 break;
 
