@@ -579,6 +579,7 @@ mask_nodes_by_label_dual(
 
     long double mu1 = static_cast<long double>(in_kmers) / nelem;
     long double mu2 = static_cast<long double>(out_kmers) / nelem;
+    long double p = mu1 / (mu1 + mu2);
 
     // precompute p-values for poisson_binom test
     std::vector<std::vector<long double>> pb_pvals(num_labels_in + num_labels_out + 1);
@@ -784,13 +785,221 @@ mask_nodes_by_label_dual(
         }
     }
 
-    if (config.test_by_unitig && config.test_type != "notest") {
-        std::vector<std::tuple<long double, size_t, Group, node_index>> nb_pvals;
-        nb_pvals.resize(nelem,
-                        std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
-                                        graph_ptr->max_index() + 1));
+    common::logger->trace("Allocating p-value storage");
+    std::vector<std::tuple<long double, size_t, Group, node_index>> all_pvals;
+    all_pvals.resize(nelem,
+                     std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
+                                     graph_ptr->max_index() + 1));
 
-        generate_clean_rows([&](auto row_i, const auto& row, size_t) {
+    common::logger->trace("Starting tests");
+    std::atomic_thread_fence(std::memory_order_release);
+    generate_clean_rows([&](uint64_t row_i, const auto& row, uint64_t bucket_idx) {
+        if (config.test_type == "notest") {
+            size_t count_in = 0;
+            size_t count_out = 0;
+            for (const auto& [j, c] : row) {
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                    ++count_out;
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                    ++count_in;
+            }
+
+            bool in_kmer = count_in >= config.min_in_recurrence
+                    && count_in <= config.max_in_recurrence;
+            bool out_kmer = count_out >= config.min_out_recurrence
+                    && count_out <= config.max_out_recurrence;
+
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            if (in_kmer)
+                set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
+
+            if (out_kmer)
+                set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
+
+            return;
+        }
+
+        auto set_pval = [&](long double pval, long double eff_size) {
+            size_t idx = kept.rank1(row_i) - 1;
+            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+            Group group;
+            if (eff_size > 0) {
+                group = Group::IN;
+            } else if (eff_size < 0) {
+                group = Group::OUT;
+            } else {
+                group = Group::BOTH;
+            }
+
+            all_pvals[idx] = std::tie(pval, node, group, node);
+        };
+
+        long double eff_size = 0.0;
+        long double pval = 1.0;
+        if (config.test_type == "poisson_binom") {
+            size_t n = 0;
+            uint64_t s = 0;
+            for (const auto& [j, c] : row) {
+                n += static_cast<int64_t>(groups[j] != Group::OTHER)
+                        + (groups[j] == Group::BOTH);
+                s += (groups[j] == Group::IN);
+            }
+
+            pval = pb_pvals[n][s];
+            eff_size = static_cast<double>(s) - mid_points[n];
+        } else if (config.test_type == "poisson_exact") {
+            size_t n = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto& [j, c] : row) {
+                n += c;
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                    out_sum += c;
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                    in_sum += c;
+            }
+
+            boost::math::binomial bdist(n, p);
+            auto get_deviance = [&](long double y, long double mu) {
+                y += 1e-8;
+                mu += 1e-8;
+                return 2 * (y * log(y / mu) - y + mu);
+            };
+
+            std::vector<long double> devs;
+            devs.reserve(n + 1);
+            for (size_t s = 0; s <= n; ++s) {
+                devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
+            }
+
+            pval = 0.0;
+
+            size_t s = 0;
+            for (; s <= n; ++s) {
+                if (devs[s] < devs[in_sum])
+                    break;
+            }
+
+            if (s > 0)
+                pval += boost::math::cdf(bdist, s - 1);
+
+            if (pval < config.family_wise_error_rate) {
+                size_t sp = n;
+                for (; sp >= s; --sp) {
+                    if (devs[sp] < devs[in_sum])
+                        break;
+                }
+
+                if (sp < n)
+                    pval += boost::math::cdf(boost::math::complement(bdist, sp));
+            }
+
+            eff_size = static_cast<long double>(in_sum) - boost::math::mode(bdist);
+
+        } else if (config.test_type == "nbinom_exact") {
+            size_t n = 0;
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto& [j, c] : row) {
+                n += c;
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    out_sum += c;
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    in_sum += c;
+                }
+            }
+
+            auto [r_a, p_a] = nb_params_a;
+            auto [r_b, p_b] = nb_params_b;
+            auto [r_n, p_n] = nb_params_null;
+
+            long double midpoint = r_a * n / (r_a + r_b);
+
+            auto get_deviance_a = [&](long double s) {
+                if (s == 0)
+                    return r_a * logl(p_a) * -2.0;
+
+                return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
+                        + r_a * (logl(r_a) - logl(p_a)))
+                        * 2.0;
+            };
+
+            auto get_deviance_b = [&](long double t) {
+                if (t == 0)
+                    return r_b * logl(p_b) * -2.0;
+
+                return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
+                        + r_b * (logl(r_b) - logl(p_b)))
+                        * 2.0;
+            };
+
+            auto get_deviance = [&](long double s, long double t) {
+                return get_deviance_a(s) + get_deviance_b(t);
+            };
+
+            long double min_dev
+                    = get_deviance(midpoint, static_cast<long double>(n) - midpoint);
+            long double in_dev = get_deviance(in_sum, out_sum);
+
+            if (in_dev > min_dev) {
+                eff_size = static_cast<long double>(in_sum) - midpoint;
+                pval = 0.0;
+                long double base = nb_base
+                        + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n)) / logl(2.0);
+                double l1pa = log1pl(-p_a) / logl(2.0);
+                double l1pb = log1pl(-p_b) / logl(2.0);
+
+                {
+                    size_t s = 0;
+                    size_t t = n;
+                    long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                         - lgammal(s + 1) - lgammal(t + 1))
+                                    / logl(2.0)
+                            + s * l1pa + t * l1pb;
+                    pval += exp2(base + sbase);
+                    for (++s; s <= n; ++s) {
+                        long double dev = get_deviance(s, t - 1);
+                        if (dev >= in_dev) {
+                            sbase += log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
+                                    + log2l(t + 1) + l1pa - l1pb;
+                            --t;
+                            pval += exp2(base + sbase);
+                            if (pval >= config.family_wise_error_rate)
+                                break;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                if (pval < config.family_wise_error_rate && get_deviance(n, 0) >= in_dev) {
+                    size_t s = n;
+                    size_t t = 0;
+                    long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                         - lgammal(s + 1) - lgammal(t + 1))
+                                    / logl(2.0)
+                            + s * l1pa + t * l1pb;
+                    pval += exp2(base + sbase);
+                    for (++t; t <= n; ++t) {
+                        long double dev = get_deviance(s - 1, t);
+                        if (dev >= in_dev) {
+                            sbase -= log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
+                                    + log2l(t + 1) + l1pa - l1pb;
+                            --s;
+                            pval += exp2(base + sbase);
+                            if (pval >= config.family_wise_error_rate)
+                                break;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (config.test_type == "mwu") {
             auto generate_a = [&](const auto& callback) {
                 sdsl::bit_vector found(groups.size());
                 for (const auto& [j, c] : row) {
@@ -816,843 +1025,181 @@ mask_nodes_by_label_dual(
                 }
             };
 
-            size_t idx = kept.rank1(row_i) - 1;
-            auto& [pval, monotig_id, group, node] = nb_pvals[idx];
-
-            long double eff_size;
-
             std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
-            if (eff_size != 0.0) {
-                node = AnnotatedDBG::anno_to_graph_index(row_i);
-                if (eff_size > 0) {
-                    group = Group::IN;
-                } else if (eff_size < 0) {
-                    group = Group::OUT;
+
+        } else if (config.test_type == "cmh") {
+            int64_t in_sum = 0;
+            int64_t out_sum = 0;
+            for (const auto& [j, c] : row) {
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+                    out_sum += c;
+                }
+
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+                    in_sum += c;
                 }
             }
-        });
+            eff_size = static_cast<long double>(in_sum) / in_kmers
+                    - static_cast<long double>(out_sum) / out_kmers;
 
-        uint64_t num_tests = 0;
-        std::atomic_thread_fence(std::memory_order_release);
-        clean_masked_graph->call_unitigs(
-                [&](const std::string&, const auto& path) {
-                    std::vector<long double> pvals;
-                    pvals.reserve(path.size());
+            int64_t t = total_kmers;
+            int64_t n1 = in_kmers;
+            int64_t n2 = out_kmers;
+            int64_t m1 = in_sum + out_sum;
+            int64_t m2 = t - m1;
+            assert(m2 >= 0);
 
-                    Group last_group = Group::BOTH;
-                    size_t last_i = 0;
-
-                    std::vector<size_t> ranks;
-                    ranks.reserve(path.size());
-                    for (node_index node : path) {
-                        size_t row_i = AnnotatedDBG::graph_to_anno_index(node);
-                        ranks.emplace_back(kept.rank1(row_i) - 1);
-                    }
-
-                    for (size_t i = 0; i < path.size(); ++i) {
-                        size_t idx = ranks[i];
-                        const auto& [pval, monotig_id, group, stored_node] = nb_pvals[idx];
-                        if (group != last_group) {
-                            if (pvals.size()) {
-                                uint64_t monotig_id
-                                        = __atomic_fetch_add(&num_tests, 1,
-                                                             std::memory_order_relaxed);
-                                long double comb_pval = combine_pvals(pvals);
-                                for (size_t j = last_i; j < i; ++j) {
-                                    size_t jdx = ranks[j];
-                                    std::get<0>(nb_pvals[jdx]) = comb_pval;
-                                    std::get<1>(nb_pvals[jdx]) = monotig_id;
-                                    if (comb_pval < config.family_wise_error_rate) {
-                                        if (last_group == Group::IN) {
-                                            set_bit(indicator_in.data(), path[j], true,
-                                                    std::memory_order_relaxed);
-                                        } else if (last_group == Group::OUT) {
-                                            set_bit(indicator_out.data(), path[j], true,
-                                                    std::memory_order_relaxed);
-                                        }
-                                    }
-                                }
-                            }
-                            pvals.clear();
-                            last_group = group;
-                            last_i = i;
-                        }
-                        pvals.emplace_back(pval);
-                    }
-                    if (pvals.size()) {
-                        uint64_t monotig_id = __atomic_fetch_add(&num_tests, 1,
-                                                                 std::memory_order_relaxed);
-                        long double comb_pval = combine_pvals(pvals);
-                        for (size_t j = last_i; j < path.size(); ++j) {
-                            size_t jdx = ranks[j];
-                            std::get<0>(nb_pvals[jdx]) = comb_pval;
-                            std::get<1>(nb_pvals[jdx]) = monotig_id;
-                            if (comb_pval < config.family_wise_error_rate) {
-                                if (last_group == Group::IN) {
-                                    set_bit(indicator_in.data(), path[j], true,
-                                            std::memory_order_relaxed);
-                                } else if (last_group == Group::OUT) {
-                                    set_bit(indicator_out.data(), path[j], true,
-                                            std::memory_order_relaxed);
-                                }
-                            }
-                        }
-                    }
-                },
-                num_threads);
-        std::atomic_thread_fence(std::memory_order_acquire);
-        common::logger->trace("Found {} monotigs", num_tests);
-        std::atomic_thread_fence(std::memory_order_acquire);
-        std::sort(nb_pvals.begin(), nb_pvals.end());
-
-        long double harm = 0.0;
-        for (size_t i = 1; i <= num_tests; ++i) {
-            harm += 1.0 / i;
-        }
-
-        common::logger->trace("Selecting cut-off");
-        size_t k = 0;
-        uint64_t last_unitig_id = graph_ptr->max_index() + 1;
-        size_t cur_count = 0;
-        for (size_t i = 0; i < nb_pvals.size(); ++i) {
-            const auto& [pval, unitig_id, group, node] = nb_pvals[i];
-            if (pval >= config.family_wise_error_rate)
-                break;
-
-            if (unitig_id != last_unitig_id) {
-                last_unitig_id = unitig_id;
-                ++cur_count;
-            }
-
-            if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm) {
-                k = std::max(i + 1, k);
-            }
-        }
-
-        common::logger->trace("Found {} / {} significant p-values. Minimum p-value is {}",
-                              k, nb_pvals.size(), std::get<0>(nb_pvals[0]));
-
-        for (size_t i = k; i < nb_pvals.size(); ++i) {
-            const auto& [pval, unitig_id, group, node] = nb_pvals[i];
-            if (pval >= config.family_wise_error_rate)
-                break;
-
-            if (!indicator_in[node] && !indicator_out[node]) {
+            if (m2 == 0) {
                 common::logger->error(
-                        "Node {} not marked, but original p-value {} significant", node,
-                        pval);
-                throw std::runtime_error("Index fail");
-            }
-            indicator_in[node] = false;
-            indicator_out[node] = false;
-        }
-    } else {
-        bool fdr = config.test_by_unitig || config.test_type == "nbinom_exact"
-                || config.test_type == "mwu" || config.test_type == "cmh";
-
-        // precompute minimal attainable p-values
-        std::vector<std::pair<long double, size_t>> m;
-        std::vector<size_t> offsets;
-        if (config.test_type != "notest" && !fdr) {
-            common::logger->trace("Computing minimum p-values");
-            std::vector<std::vector<std::pair<long double, size_t>>> ms(num_threads + 1);
-            std::vector<VectorMap<long double, size_t>> ms_map(num_threads + 1);
-            std::vector<std::vector<std::vector<long double>>> gp_pvals_m(num_threads + 1);
-            std::mutex mu;
-            generate_clean_rows([&](uint64_t row_i, const auto& row, uint64_t bucket_idx) {
-                long double pval = 1.0;
-                size_t n = 0;
-                if (config.test_type == "poisson_binom") {
-                    for (const auto& [j, c] : row) {
-                        n += static_cast<int64_t>(groups[j] != Group::OTHER)
-                                + (groups[j] == Group::BOTH);
-                    }
-                    if (ms[bucket_idx].size() <= n)
-                        ms[bucket_idx].resize(n + 1);
-
-                    if (ms[bucket_idx][n].second == 0) {
-                        size_t front = n - std::min(n, num_labels_out);
-                        pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
-                        ms[bucket_idx][n].first = pval;
-                        ms[bucket_idx][n].second = 1;
-                    } else {
-                        ++ms[bucket_idx][n].second;
-                    }
-
-                } else if (config.test_type == "poisson_exact") {
-                    sdsl::bit_vector found(num_labels_in + num_labels_out);
-                    size_t n = 0;
-                    for (const auto& [j, c] : row) {
-                        n += c;
-                        found[j] = true;
-                    }
-
-                    if (n > 0) {
-                        if (ms[bucket_idx].size() <= n)
-                            ms[bucket_idx].resize(n + 1);
-
-                        if (ms[bucket_idx][n].second == 0) {
-                            long double p = mu1 / (mu1 + mu2);
-                            boost::math::binomial bdist(n, p);
-                            long double pval0 = boost::math::pdf(bdist, 0);
-                            long double pvaln = boost::math::pdf(bdist, n);
-                            pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-                            ms[bucket_idx][n].first = pval;
-                            ms[bucket_idx][n].second = 1;
-                        } else {
-                            ++ms[bucket_idx][n].second;
-                        }
-                    }
-                } else if (config.test_type == "nbinom_exact") {
-                    for (const auto& [j, c] : row) {
-                        n += c;
-                    }
-
-                    if (n > 0) {
-                        if (ms[bucket_idx].size() <= n)
-                            ms[bucket_idx].resize(n + 1);
-
-                        if (ms[bucket_idx][n].second == 0) {
-                            auto [r_n, p_n] = nb_params_null;
-                            auto [r_a, p_a] = nb_params_a;
-                            auto [r_b, p_b] = nb_params_b;
-
-                            long double l21p = log1p(-p_n) / log2l(2.0);
-                            long double base = nb_base
-                                    + (lgammal(n + 1) - lgammal(r_n + n)) / log2l(2.0)
-                                    - n * l21p;
-                            auto get_pval = [&](int64_t s) {
-                                int64_t t = n - s;
-                                long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                     - lgammal(s + 1) - lgammal(t + 1)
-                                                     + s * log1pl(-p_a) + t * log1pl(-p_b))
-                                        / logl(2.0);
-                                return exp2l(base + sbase);
-                            };
-
-                            long double pval0 = get_pval(0);
-                            long double pvaln = get_pval(n);
-                            pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-                            ms[bucket_idx][n].first = pval;
-                            ms[bucket_idx][n].second = 1;
-                        } else {
-                            ++ms[bucket_idx][n].second;
-                        }
-                    }
-                }
-            });
-
-            if (config.test_type == "poisson_bayes") {
-                VectorMap<long double, size_t> m_map = std::move(ms_map[0]);
-                for (size_t i = 1; i < ms_map.size(); ++i) {
-                    for (const auto& [pval, c] : ms_map[i]) {
-                        m_map[pval] += c;
-                    }
-                }
-                m = const_cast<std::vector<std::pair<long double, size_t>>&&>(
-                        m_map.values_container());
-                std::sort(m.rbegin(), m.rend());
-            } else {
-                std::swap(m, ms[0]);
-                size_t max_size = m.size();
-                for (size_t i = 1; i < ms.size(); ++i) {
-                    max_size = std::max(max_size, ms[i].size());
-                }
-                m.resize(max_size);
-                // gp_pvals.resize(max_size);
-                for (size_t i = 1; i < ms.size(); ++i) {
-                    for (size_t n = 0; n < ms[i].size(); ++i) {
-                        const auto& [pval, c] = ms[i][n];
-                        m[n].first = pval;
-                        m[n].second += c;
-                    }
-                }
-
-                if (config.test_type == "poisson_binom")
-                    std::sort(m.rbegin(), m.rend());
+                        "This row has all counts. Too few data points. Use fisher "
+                        "instead");
+                throw std::domain_error("Test failed");
             }
 
-            if (m.size() > 1) {
-                auto it = m.begin();
-                auto jt = it + 1;
-                while (jt != m.end()) {
-                    while (it->second == 0 && jt != m.end()) {
-                        ++it;
-                        ++jt;
-                    }
-                    while (jt != m.end() && jt->second == 0) {
-                        ++jt;
-                    }
-                    if (jt == m.end())
-                        break;
+            double lbase = log(n1) + log(n2) + log(m1) + log(m2) - log(t) * 2 - log(t - 1);
+            double factor = static_cast<double>(n1 * m1) / t;
 
-                    if (it->first - 1.0L > 1e-5L) {
-                        common::logger->error("pval it > 1.0: {} ({})", it->first,
-                                              it->first - 1.0L);
-                        throw std::runtime_error("p-val fail");
-                    }
+            auto get_chi_stat = [&](int64_t a) {
+                int64_t b = n1 - a;
+                int64_t c = m1 - a;
+                int64_t d = m2 - b;
+                assert(d == n2 - c);
 
-                    if (jt->first - 1.0L > 1e-5L) {
-                        common::logger->error("pval jt > 1.0: {} ({})", jt->first,
-                                              jt->first - 1.0L);
-                        throw std::runtime_error("p-val fail");
-                    }
+                if (b < 0 || c < 0 || d < 0)
+                    return 0.0;
 
-                    if (jt->first - it->first > 1e-5) {
-                        common::logger->error(
-                                "min p-vals not sorted: {} vs. {}\t{} !>= {}",
-                                it - m.begin(), jt - m.begin(), it->first, jt->first);
-                        throw std::runtime_error("p-val fail");
-                    }
-                    ++it;
-                    ++jt;
-                }
-            }
-        }
+                double a_shift = static_cast<double>(a) - factor;
 
-        // determine cutoffs for multiple testing correction
-        auto [k_min, k, n_cutoff] = correct_pvals(m);
-        if (fdr) {
-            k_min = 1;
-            k = 1;
-            n_cutoff = 1;
-        }
+                if (a_shift > 0)
+                    return exp(log(a_shift) * 2.0 - lbase);
 
-        common::logger->trace("Picked: k: {}\tn: {} / {}\tpval_min: {}\tn_cutoff: {}",
-                              k_min, k, nelem, config.family_wise_error_rate / k, n_cutoff);
-
-        common::logger->trace("Running differential tests");
-        std::vector<std::pair<long double, size_t>> nb_pvals;
-        std::vector<long double> eff_sizes;
-        if (fdr) {
-            nb_pvals.resize(kept.num_set_bits(), std::make_pair(1.0, kept.size()));
-            eff_sizes.resize(kept.num_set_bits());
-        }
-
-        std::atomic_thread_fence(std::memory_order_release);
-        generate_clean_rows([&](uint64_t row_i, const auto& row, uint64_t bucket_idx) {
-            if (config.test_type == "notest") {
-                size_t count_in = 0;
-                size_t count_out = 0;
-                for (const auto& [j, c] : row) {
-                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
-                        ++count_out;
-
-                    if (groups[j] == Group::IN || groups[j] == Group::BOTH)
-                        ++count_in;
-                }
-
-                bool in_kmer = count_in >= config.min_in_recurrence
-                        && count_in <= config.max_in_recurrence;
-                bool out_kmer = count_out >= config.min_out_recurrence
-                        && count_out <= config.max_out_recurrence;
-
-                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                if (in_kmer)
-                    set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
-
-                if (out_kmer)
-                    set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
-
-                return;
-            }
-
-            auto set_pval = [&](long double pval, long double eff_size) {
-                if (fdr) {
-                    size_t nb_idx = kept.rank1(row_i) - 1;
-                    nb_pvals[nb_idx].first = pval;
-                    nb_pvals[nb_idx].second = row_i;
-                    eff_sizes[nb_idx] = eff_size;
-                }
-                // if (!config.test_by_unitig) {
-                if (pval * k < config.family_wise_error_rate) {
-                    if (eff_size == 0) {
-                        common::logger->error("Effect size 0 when p-value is {}", pval);
-                        throw std::runtime_error("Pval failure");
-                    }
-
-                    if (!config.test_by_unitig) {
-                        node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                        if (eff_size > 0) {
-                            set_bit(indicator_in.data(), node, true,
-                                    std::memory_order_relaxed);
-                        } else if (eff_size < 0) {
-                            set_bit(indicator_out.data(), node, true,
-                                    std::memory_order_relaxed);
-                        }
-                    }
-                }
-                // } else {
-                //     push_back(pvals_buckets[bucket_idx], pval);
-                //     push_back(eff_size_buckets[bucket_idx], eff_size);
-                // }
+                return a_shift * a_shift / exp(lbase);
             };
 
-            long double eff_size = 0.0;
-            long double pval = 1.0;
-            if (config.test_type == "poisson_binom") {
-                size_t n = 0;
-                uint64_t s = 0;
-                for (const auto& [j, c] : row) {
-                    n += static_cast<int64_t>(groups[j] != Group::OTHER)
-                            + (groups[j] == Group::BOTH);
-                    s += (groups[j] == Group::IN);
-                }
-
-                // if (n < n_cutoff)
-                //     return;
-
-                if (!fdr) {
-                    size_t front = n - std::min(n, num_labels_out);
-                    double min_pval = std::min(pb_pvals[n][front], pb_pvals[n].back());
-
-                    if (min_pval * k_min >= config.family_wise_error_rate)
-                        return;
-                }
-
-                pval = pb_pvals[n][s];
-                eff_size = static_cast<double>(s) - mid_points[n];
-            } else if (config.test_type == "poisson_exact") {
-                size_t n = 0;
-                sdsl::bit_vector found(num_labels_in + num_labels_out);
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                for (const auto& [j, c] : row) {
-                    n += c;
-                    found[j] = true;
-                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
-                        out_sum += c;
-
-                    if (groups[j] == Group::IN || groups[j] == Group::BOTH)
-                        in_sum += c;
-                }
-
-                if (n < n_cutoff)
-                    return;
-
-                long double p = mu1 / (mu1 + mu2);
-                boost::math::binomial bdist(n, p);
-                if (n != 0) {
-                    auto get_deviance = [&](long double y, long double mu) {
-                        y += 1e-8;
-                        mu += 1e-8;
-                        return 2 * (y * log(y / mu) - y + mu);
-                    };
-
-                    std::vector<long double> devs;
-                    devs.reserve(n + 1);
-                    for (size_t s = 0; s <= n; ++s) {
-                        devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
-                    }
-
-                    pval = 0.0;
-
-                    size_t s = 0;
-                    for (; s <= n; ++s) {
-                        if (devs[s] < devs[in_sum])
-                            break;
-                    }
-                    if (s > 0)
-                        pval += boost::math::cdf(bdist, s - 1);
-
-                    size_t sp = n;
-                    for (; sp >= s; --sp) {
-                        if (devs[sp] < devs[in_sum])
-                            break;
-                    }
-
-                    if (sp < n)
-                        pval += boost::math::cdf(boost::math::complement(bdist, sp));
-
-                    if (pval * k >= config.family_wise_error_rate)
-                        return;
-
-                    eff_size = static_cast<long double>(in_sum) - boost::math::mode(bdist);
-                }
-
-            } else if (config.test_type == "nbinom_exact") {
-                // size_t nb_idx = kept.rank1(row_i) - 1;
-                size_t n = 0;
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                for (const auto& [j, c] : row) {
-                    n += c;
-                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                        out_sum += c;
-                    }
-
-                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                        in_sum += c;
-                    }
-                }
-
-                // if (n < n_cutoff)
-                //     return;
-
-                if (n > 0) {
-                    // long double min_pval = 1.0;
-                    auto [r_a, p_a] = nb_params_a;
-                    auto [r_b, p_b] = nb_params_b;
-                    auto [r_n, p_n] = nb_params_null;
-                    long double min_pval = 1.0;
-                    {
-                        long double l21p = log1p(-p_n) / log2l(2.0);
-                        long double base = nb_base
-                                + (lgammal(n + 1) - lgammal(r_n + n)) / log2l(2.0)
-                                - n * l21p;
-                        auto get_pval = [&](int64_t s) {
-                            int64_t t = n - s;
-                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                 - lgammal(s + 1) - lgammal(t + 1)
-                                                 + s * log1pl(-p_a) + t * log1pl(-p_b))
-                                    / logl(2.0);
-                            return exp2l(base + sbase);
-                        };
-
-                        long double pval0 = get_pval(0);
-                        long double pvaln = get_pval(n);
-                        min_pval = std::min(pval0, pvaln) * (1 + (pval0 == pvaln));
-                    }
-
-                    // if (min_pval < config.family_wise_error_rate) {
-                    // nb_pvals[nb_idx].second = row_i;
-                    long double midpoint = r_a * n / (r_a + r_b);
-
-                    auto get_deviance_a = [&](long double s) {
-                        if (s == 0)
-                            return r_a * logl(p_a) * -2.0;
-
-                        return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
-                                + r_a * (logl(r_a) - logl(p_a)))
-                                * 2.0;
-                    };
-
-                    auto get_deviance_b = [&](long double t) {
-                        if (t == 0)
-                            return r_b * logl(p_b) * -2.0;
-
-                        return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
-                                + r_b * (logl(r_b) - logl(p_b)))
-                                * 2.0;
-                    };
-
-                    auto get_deviance = [&](long double s, long double t) {
-                        return get_deviance_a(s) + get_deviance_b(t);
-                    };
-
-                    long double min_dev
-                            = get_deviance(midpoint, static_cast<long double>(n) - midpoint);
-                    long double in_dev = get_deviance(in_sum, out_sum);
-
-                    if (in_dev > min_dev) {
-                        eff_size = static_cast<long double>(in_sum) - midpoint;
-                        pval = 0.0;
-                        long double base = nb_base
-                                + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
-                                        / logl(2.0);
-                        double l1pa = log1pl(-p_a) / logl(2.0);
-                        double l1pb = log1pl(-p_b) / logl(2.0);
-
-                        {
-                            size_t s = 0;
-                            size_t t = n;
-                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                 - lgammal(s + 1) - lgammal(t + 1))
-                                            / logl(2.0)
-                                    + s * l1pa + t * l1pb;
-                            pval += exp2(base + sbase);
-                            for (++s; s <= n; ++s) {
-                                long double dev = get_deviance(s, t - 1);
-                                if (dev >= in_dev) {
-                                    sbase += log2l(r_a + s) - log2l(r_b + t)
-                                            - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
-                                    --t;
-                                    pval += exp2(base + sbase);
-                                    if (pval >= config.family_wise_error_rate)
-                                        break;
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                        if (pval < config.family_wise_error_rate
-                            && get_deviance(n, 0) >= in_dev) {
-                            size_t s = n;
-                            size_t t = 0;
-                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                 - lgammal(s + 1) - lgammal(t + 1))
-                                            / logl(2.0)
-                                    + s * l1pa + t * l1pb;
-                            pval += exp2(base + sbase);
-                            for (++t; t <= n; ++t) {
-                                long double dev = get_deviance(s - 1, t);
-                                if (dev >= in_dev) {
-                                    sbase -= log2l(r_a + s) - log2l(r_b + t)
-                                            - log2l(s + 1) + log2l(t + 1) + l1pa - l1pb;
-                                    --s;
-                                    pval += exp2(base + sbase);
-                                    if (pval >= config.family_wise_error_rate)
-                                        break;
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                        // nb_pvals[nb_idx].first = pval;
-                    }
-                    // } else {
-                    //     nb_pvals[nb_idx].second = row_i;
-                    //     nb_pvals[nb_idx].first = 1.1;
-                    // }
-                }
-            } else if (config.test_type == "mwu") {
-                auto generate_a = [&](const auto& callback) {
-                    sdsl::bit_vector found(groups.size());
-                    for (const auto& [j, c] : row) {
-                        found[j] = true;
-                        if (groups[j] == Group::IN || groups[j] == Group::BOTH)
-                            callback(static_cast<long double>(c) / sums[j]);
-                    }
-                    for (size_t j = 0; j < found.size(); ++j) {
-                        if (!found[j] && (groups[j] == Group::IN || groups[j] == Group::BOTH))
-                            callback(0.0L);
-                    }
-                };
-                auto generate_b = [&](const auto& callback) {
-                    sdsl::bit_vector found(groups.size());
-                    for (const auto& [j, c] : row) {
-                        found[j] = true;
-                        if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
-                            callback(static_cast<long double>(c) / sums[j]);
-                    }
-                    for (size_t j = 0; j < found.size(); ++j) {
-                        if (!found[j] && (groups[j] == Group::OUT || groups[j] == Group::BOTH))
-                            callback(0.0L);
-                    }
-                };
-
-                std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
-
-                // if (pval < config.family_wise_error_rate) {
-                //     size_t nb_idx = kept.rank1(row_i) - 1;
-                //     nb_pvals[nb_idx].first = pval;
-                //     nb_pvals[nb_idx].second = row_i;
-                // }
-            } else if (config.test_type == "cmh") {
-                // size_t n = 0;
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                for (const auto& [j, c] : row) {
-                    // n += c;
-                    if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                        out_sum += c;
-                    }
-
-                    if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                        in_sum += c;
-                    }
-                }
-                eff_size = static_cast<long double>(in_sum) / in_kmers
-                        - static_cast<long double>(out_sum) / out_kmers;
-                // // int64_t a = in_sum;
-                // int64_t b = in_kmers - in_sum;
-                // int64_t c = out_sum;
-                // // int64_t d = out_kmers - out_sum;
-                // // int64_t N = total_kmers;
-                // if (b + c >= 25) {
-                //     long double stat = static_cast<long double>(pow(b - c, 2.0)) / (b + c);
-                //     pval = boost::math::cdf(
-                //             boost::math::complement(boost::math::chi_squared(1), stat));
-                // } else if (b >= c) {
-                //     pval = boost::math::cdf(
-                //             boost::math::complement(boost::math::binomial(b + c, 0.5), b - 1));
-                // } else {
-                //     throw std::runtime_error("CMH not implemented for this case");
-                // }
-                int64_t t = total_kmers;
-                int64_t n1 = in_kmers;
-                int64_t n2 = out_kmers;
-                int64_t m1 = in_sum + out_sum;
-                int64_t m2 = t - m1;
-                assert(m2 >= 0);
-
-                if (m2 == 0) {
-                    common::logger->error(
-                            "This row has all counts. Too few data points. Use fisher "
-                            "instead");
-                    throw std::domain_error("Test failed");
-                }
-
-                double lbase
-                        = log(n1) + log(n2) + log(m1) + log(m2) - log(t) * 2 - log(t - 1);
-                double factor = static_cast<double>(n1 * m1) / t;
-
-                auto get_chi_stat = [&](int64_t a) {
-                    int64_t b = n1 - a;
-                    int64_t c = m1 - a;
-                    int64_t d = m2 - b;
-                    assert(d == n2 - c);
-
-                    if (b < 0 || c < 0 || d < 0)
-                        return 0.0;
-
-                    double a_shift = static_cast<double>(a) - factor;
-
-                    if (a_shift > 0)
-                        return exp(log(a_shift) * 2.0 - lbase);
-
-                    return a_shift * a_shift / exp(lbase);
-                };
-
-                double chi_stat = get_chi_stat(in_sum);
-                if (chi_stat <= 0) {
-                    common::logger->error(
-                            "Test statistic {} <= 0, too few data points. Use fisher "
-                            "instead.\t{}\t{},{},{},{}\t{}\t{}",
-                            chi_stat, in_sum, n1, n2, m1, m2, t, factor);
-                    throw std::domain_error("Test failed");
-                }
-
-                double max_chi_stat
-                        = std::max(get_chi_stat(0), get_chi_stat(std::min(n1, m1)));
-                if (max_chi_stat <= 0) {
-                    common::logger->error(
-                            "Best test statistic {} <= 0, too few data points. Use "
-                            "fisher instead.\t{},{},{},{}\t{}\t{}",
-                            max_chi_stat, n1, n2, m1, m2, t, factor);
-                    throw std::domain_error("Test failed");
-                }
-
-                pval = boost::math::cdf(
-                        boost::math::complement(boost::math::chi_squared(1), chi_stat));
-                // if (pval < config.family_wise_error_rate) {
-                //     size_t nb_idx = kept.rank1(row_i) - 1;
-                //     nb_pvals[nb_idx].first = pval;
-                //     nb_pvals[nb_idx].second = row_i;
-                // }
+            double chi_stat = get_chi_stat(in_sum);
+            if (chi_stat <= 0) {
+                common::logger->error(
+                        "Test statistic {} <= 0, too few data points. Use fisher "
+                        "instead.\t{}\t{},{},{},{}\t{}\t{}",
+                        chi_stat, in_sum, n1, n2, m1, m2, t, factor);
+                throw std::domain_error("Test failed");
             }
 
-            set_pval(pval, eff_size);
-        });
+            double max_chi_stat = std::max(get_chi_stat(0), get_chi_stat(std::min(n1, m1)));
+            if (max_chi_stat <= 0) {
+                common::logger->error(
+                        "Best test statistic {} <= 0, too few data points. Use "
+                        "fisher instead.\t{},{},{},{}\t{}\t{}",
+                        max_chi_stat, n1, n2, m1, m2, t, factor);
+                throw std::domain_error("Test failed");
+            }
 
-        std::atomic_thread_fence(std::memory_order_acquire);
+            pval = boost::math::cdf(
+                    boost::math::complement(boost::math::chi_squared(1), chi_stat));
+        }
 
-        if (fdr) {
-            size_t num_tests = nb_pvals.size();
-            std::vector<std::pair<long double, size_t>> sorted_unitig_counts;
-            if (config.test_by_unitig) {
-                VectorMap<long double, size_t> pval_to_count;
-                std::mutex mu;
-                common::logger->trace("Combining p-values within unitigs");
-                num_tests = 0;
-                std::atomic_thread_fence(std::memory_order_release);
-                clean_masked_graph->call_unitigs(
-                        [&](const std::string&, const auto& path) {
-                            __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
-                            std::vector<long double> pvals;
-                            pvals.reserve(path.size());
-                            long double agg_eff_size = 0.0;
-                            for (node_index node : path) {
-                                auto row_i = AnnotatedDBG::graph_to_anno_index(node);
-                                size_t nb_idx = kept.rank1(row_i) - 1;
-                                long double pval = nb_pvals[nb_idx].first;
-                                long double eff_size = eff_sizes[nb_idx];
-                                pvals.emplace_back(pval);
-                                agg_eff_size += eff_size;
-                            }
-                            long double agg_pval = combine_pvals(pvals);
-                            for (node_index node : path) {
-                                auto row_i = AnnotatedDBG::graph_to_anno_index(node);
-                                size_t nb_idx = kept.rank1(row_i) - 1;
-                                nb_pvals[nb_idx].first = agg_pval;
-                                if (agg_pval < config.family_wise_error_rate) {
-                                    if (agg_eff_size > 0) {
-                                        set_bit(indicator_in.data(), node, true,
-                                                std::memory_order_relaxed);
-                                    } else {
-                                        set_bit(indicator_out.data(), node, true,
-                                                std::memory_order_relaxed);
+        set_pval(pval, eff_size);
+    });
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    if (config.test_type != "notest") {
+        uint64_t num_tests = nelem;
+        if (config.test_by_unitig) {
+            num_tests = 0;
+            std::atomic_thread_fence(std::memory_order_release);
+            clean_masked_graph->call_unitigs(
+                    [&](const std::string&, const auto& path) {
+                        std::vector<long double> pvals;
+                        pvals.reserve(path.size());
+
+                        Group last_group = Group::BOTH;
+                        size_t last_i = 0;
+
+                        std::vector<size_t> ranks;
+                        ranks.reserve(path.size());
+                        for (node_index node : path) {
+                            size_t row_i = AnnotatedDBG::graph_to_anno_index(node);
+                            ranks.emplace_back(kept.rank1(row_i) - 1);
+                        }
+
+                        for (size_t i = 0; i < path.size(); ++i) {
+                            size_t idx = ranks[i];
+                            const auto& [pval, monotig_id, group, stored_node]
+                                    = all_pvals[idx];
+                            if (group != last_group) {
+                                if (pvals.size()) {
+                                    uint64_t monotig_id
+                                            = __atomic_fetch_add(&num_tests, 1,
+                                                                 std::memory_order_relaxed);
+                                    long double comb_pval = combine_pvals(pvals);
+                                    for (size_t j = last_i; j < i; ++j) {
+                                        size_t jdx = ranks[j];
+                                        std::get<0>(all_pvals[jdx]) = comb_pval;
+                                        std::get<1>(all_pvals[jdx]) = monotig_id;
                                     }
                                 }
+                                pvals.clear();
+                                last_group = group;
+                                last_i = i;
                             }
-                            std::lock_guard<std::mutex> lock(mu);
-                            pval_to_count[agg_pval] += path.size();
-                        },
-                        num_threads);
-                std::atomic_thread_fence(std::memory_order_acquire);
-                sorted_unitig_counts
-                        = const_cast<std::vector<std::pair<long double, size_t>>&&>(
-                                pval_to_count.values_container());
-                std::sort(sorted_unitig_counts.begin(), sorted_unitig_counts.end());
-                for (size_t i = 1; i < sorted_unitig_counts.size(); ++i) {
-                    sorted_unitig_counts[i].second += sorted_unitig_counts[i - 1].second;
-                }
-            }
+                            pvals.emplace_back(pval);
+                        }
+                        if (pvals.size()) {
+                            uint64_t monotig_id
+                                    = __atomic_fetch_add(&num_tests, 1,
+                                                         std::memory_order_relaxed);
+                            long double comb_pval = combine_pvals(pvals);
+                            for (size_t j = last_i; j < path.size(); ++j) {
+                                size_t jdx = ranks[j];
+                                std::get<0>(all_pvals[jdx]) = comb_pval;
+                                std::get<1>(all_pvals[jdx]) = monotig_id;
+                            }
+                        }
+                    },
+                    num_threads);
+            std::atomic_thread_fence(std::memory_order_acquire);
+            common::logger->trace("Found {} monotigs", num_tests);
+        }
 
-            // if (false) {
-            common::logger->trace("Correcting p-vals");
+        common::logger->trace("Correcting p-vals");
+        all_pvals.erase(std::remove_if(all_pvals.begin(), all_pvals.end(),
+                                       [&](const auto& a) {
+                                           return std::get<0>(a)
+                                                   >= config.family_wise_error_rate;
+                                       }),
+                        all_pvals.end());
+        common::logger->trace("Sorting {} / {} p-vals", all_pvals.size(), num_tests);
+        std::sort(all_pvals.begin(), all_pvals.end());
 
-            common::logger->trace("Discarded {} / {} untestable hypotheses",
-                                  nelem - num_tests, nelem);
-            nb_pvals.erase(std::remove_if(nb_pvals.begin(), nb_pvals.end(),
-                                          [&](const auto& a) {
-                                              return a.second == kept.size();
-                                          }),
-                           nb_pvals.end());
-            common::logger->trace("Sorting {} / {} p-vals", nb_pvals.size(), num_tests);
-            std::sort(nb_pvals.begin(), nb_pvals.end());
-
+        size_t num_sig = 0;
+        if (all_pvals.size() && std::get<0>(all_pvals[0]) < config.family_wise_error_rate) {
             long double harm = 0.0;
             for (size_t i = 1; i <= num_tests; ++i) {
                 harm += 1.0 / i;
             }
 
-            common::logger->trace("Selecting cut-off");
-            size_t k = 0;
-            auto it = sorted_unitig_counts.begin();
-            for (size_t i = 0; i < nb_pvals.size(); ++i) {
-                if (nb_pvals[i].first >= config.family_wise_error_rate)
-                    break;
+            common::logger->trace("Selecting significant k-mers");
+            size_t last_tig_id = std::numeric_limits<size_t>::max();
+            size_t cur_count = 0;
+            for (const auto& [pval, tig_id, group, node] : all_pvals) {
+                if (tig_id != last_tig_id) {
+                    ++cur_count;
+                    last_tig_id = tig_id;
+                }
 
-                if (it != sorted_unitig_counts.end() && i == it->second)
-                    ++it;
-
-                size_t cur_count = it == sorted_unitig_counts.end()
-                        ? i
-                        : it - sorted_unitig_counts.begin();
-                if (nb_pvals[i].first <= config.family_wise_error_rate * (cur_count + 1)
-                            / num_tests / harm) {
-                    k = std::max(i + 1, k);
-                    node_index node = AnnotatedDBG::anno_to_graph_index(nb_pvals[i].second);
-                    if (!indicator_in[node] && !indicator_out[node]) {
-                        common::logger->error(
-                                "Node {} not marked, but p-value {} significant", node,
-                                nb_pvals[i].first);
-                        throw std::runtime_error("Index fail");
+                if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm) {
+                    if (group == Group::IN) {
+                        indicator_in[node] = true;
+                        ++num_sig;
+                    } else if (group == Group::OUT) {
+                        indicator_out[node] = true;
+                        ++num_sig;
                     }
                 }
             }
-
-            common::logger->trace(
-                    "Found {} / {} significant p-values. Minimum p-value is {}", k,
-                    nb_pvals.size(), nb_pvals[0].first);
-
-            for (size_t i = k; i < nb_pvals.size(); ++i) {
-                const auto& [pval, row_i] = nb_pvals[i];
-                if (nb_pvals[i].first >= config.family_wise_error_rate)
-                    break;
-
-                node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-                if (!indicator_in[node] && !indicator_out[node]) {
-                    common::logger->error(
-                            "Node {} not marked, but original p-value {} significant",
-                            node, nb_pvals[i].first);
-                    throw std::runtime_error("Index fail");
-                }
-                indicator_in[node] = false;
-                indicator_out[node] = false;
-            }
         }
+
+        common::logger->trace("Found {} / {} significant p-values.", num_sig, nelem);
     }
 
     std::unique_ptr<utils::TempFile> tmp_file;
