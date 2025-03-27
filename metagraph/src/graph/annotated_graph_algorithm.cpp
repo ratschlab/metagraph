@@ -657,7 +657,6 @@ mask_nodes_by_label_dual(
         pb_pvals[0].emplace_back(1.0);
 
         long double min_pval = 1.0;
-        // long double last_local_min_pval = 1.0;
 
         for (size_t n = 1; n < pb_pvals.size(); ++n) {
             std::vector<long double> probs;
@@ -789,10 +788,172 @@ mask_nodes_by_label_dual(
     }
 
     common::logger->trace("Allocating p-value storage");
-    std::vector<std::tuple<long double, size_t, Group, node_index>> all_pvals;
+    std::vector<std::tuple<long double, size_t, long double, node_index>> all_pvals;
     all_pvals.resize(nelem,
                      std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
                                      graph_ptr->max_index() + 1));
+
+    bool is_discrete = false && !config.test_by_unitig
+        && (config.test_type == "poisson_binom" || config.test_type == "poisson_exact"
+            || config.test_type == "nbinom_exact");
+
+    uint64_t num_tests = nelem;
+
+    std::vector<std::pair<long double, size_t>> min_pvals;
+    long double min_pval_cutoff = 1.0;
+    if (is_discrete) {
+        {
+            std::vector<std::vector<std::pair<long double, size_t>>> min_pvals_b(
+                num_threads + 1);
+            generate_clean_rows([&](uint64_t, const auto& row, uint64_t bucket_id) {
+                size_t n = 0;
+                int64_t in_sum = 0;
+                int64_t out_sum = 0;
+                if (config.test_type == "poisson_binom") {
+                    for (const auto& [j, c] : row) {
+                        n += static_cast<int64_t>(groups[j] != Group::OTHER)
+                            + (groups[j] == Group::BOTH);
+                    }
+                } else {
+                    for (const auto& [j, c] : row) {
+                        if (groups[j] == Group::IN || groups[j] == Group::OUT)
+                            in_sum += c;
+
+                        if (groups[j] == Group::OUT || groups[j] == Group::OUT)
+                            out_sum += c;
+                    }
+                    n = in_sum + out_sum;
+                }
+
+                auto& min_pval_b = min_pvals_b[bucket_id];
+
+                if (min_pval_b.size() <= n)
+                    min_pval_b.resize(n + 1, std::make_pair(1.0L, 0));
+
+                if (!min_pval_b[n].second) {
+                    // compute the min-attainable p-value
+                    if (config.test_type == "poisson_binom") {
+                        size_t front = n - std::min(n, num_labels_out);
+                        size_t back = std::min(n, num_labels_in);
+                        assert(s >= front);
+                        long double pval0 = pb_pvals[n][front];
+                        long double pvaln = pb_pvals[n][back];
+                        min_pval_b[n].first = std::min(pval0, pvaln)
+                            * (1 + (pval0 == pvaln && front != back));
+                    } else if (config.test_type == "poisson_exact") {
+                        boost::math::binomial bdist(n, p);
+                        auto get_deviance = [&](long double y, long double mu) {
+                            y += 1e-8;
+                            mu += 1e-8;
+                            return 2 * (y * log(y / mu) - y + mu);
+                        };
+
+                        long double dev0 = get_deviance(0, mu1) + get_deviance(n, mu2);
+                        long double devn = get_deviance(n, mu1) + get_deviance(0, mu2);
+
+                        min_pval_b[n].first = 0.0L;
+                        if (dev0 >= devn)
+                            min_pval_b[n].first += boost::math::pdf(bdist, 0);
+
+                        if (dev0 <= devn)
+                            min_pval_b[n].first += boost::math::pdf(bdist, n);
+
+                    } else if (config.test_type == "nbinom_exact") {
+                        auto [r_a, p_a] = nb_params_a;
+                        auto [r_b, p_b] = nb_params_b;
+                        auto [r_n, p_n] = nb_params_null;
+
+                        long double base = nb_base
+                            + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
+                                / logl(2.0);
+                        double l1pa = log1pl(-p_a) / logl(2.0);
+                        double l1pb = log1pl(-p_b) / logl(2.0);
+
+                        auto get_deviance_a = [&](long double s) {
+                            if (s == 0)
+                                return r_a * logl(p_a) * -2.0;
+
+                            return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
+                                    + r_a * (logl(r_a) - logl(p_a)))
+                                * 2.0;
+                        };
+
+                        auto get_deviance_b = [&](long double t) {
+                            if (t == 0)
+                                return r_b * logl(p_b) * -2.0;
+
+                            return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
+                                    + r_b * (logl(r_b) - logl(p_b)))
+                                * 2.0;
+                        };
+
+                        auto get_deviance = [&](long double s, long double t) {
+                            return get_deviance_a(s) + get_deviance_b(t);
+                        };
+
+                        long double dev0 = get_deviance(0, n);
+                        long double devn = get_deviance(n, 0);
+
+                        min_pval_b[n].first = 0.0;
+                        if (dev0 >= devn) {
+                            size_t s = 0;
+                            size_t t = n;
+                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                                 - lgammal(s + 1) - lgammal(t + 1))
+                                    / logl(2.0)
+                                + s * l1pa + t * l1pb;
+                            min_pval_b[n].first += exp2(base + sbase);
+                        }
+
+                        if (dev0 <= devn) {
+                            size_t s = n;
+                            size_t t = 0;
+                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                                 - lgammal(s + 1) - lgammal(t + 1))
+                                    / logl(2.0)
+                                + s * l1pa + t * l1pb;
+                            min_pval_b[n].first += exp2(base + sbase);
+                        }
+                    }
+                }
+                ++min_pval_b[n].second;
+            });
+            size_t max_size = 0;
+            for (const auto& min_pvals : min_pvals_b) {
+                max_size = std::max(max_size, min_pvals.size());
+            }
+            min_pvals.resize(max_size, std::make_pair(1.0L, 0));
+            for (const auto& min_pval_b : min_pvals_b) {
+                for (size_t n = 0; n < min_pval_b.size(); ++n) {
+                    min_pvals[n].first = std::min(min_pvals[n].first, min_pval_b[n].first);
+                    min_pvals[n].second += min_pval_b[n].second;
+                }
+            }
+        }
+
+        std::sort(min_pvals.rbegin(), min_pvals.rend());
+        long double harm = 0.0;
+        for (size_t i = 1; i <= num_tests; ++i) {
+            harm += 1.0L / i;
+        }
+        for (const auto& [pval, count] : min_pvals) {
+            if (!count)
+                continue;
+
+            // common::logger->trace("Trying:\tc: {}\tpval: {}\tcutoff: {}", num_tests, pval,
+            //                       config.family_wise_error_rate / harm);
+            if (pval >= config.family_wise_error_rate / harm) {
+                min_pval_cutoff = pval;
+                for (size_t i = num_tests; i > num_tests - count; --i) {
+                    harm -= 1.0L / i;
+                }
+                num_tests -= count;
+            }
+        }
+        common::logger->trace(
+            "Only running tests where min pval < {}. Keeping {} / {} tests",
+            min_pval_cutoff, num_tests, nelem);
+    }
 
     common::logger->trace("Starting tests");
     std::atomic_thread_fence(std::memory_order_release);
@@ -826,16 +987,7 @@ mask_nodes_by_label_dual(
         auto set_pval = [&](long double pval, long double eff_size) {
             size_t idx = kept.rank1(row_i) - 1;
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            Group group;
-            if (eff_size > 0) {
-                group = Group::IN;
-            } else if (eff_size < 0) {
-                group = Group::OUT;
-            } else {
-                group = Group::BOTH;
-            }
-
-            all_pvals[idx] = std::tie(pval, node, group, node);
+            all_pvals[idx] = std::tie(pval, node, eff_size, node);
         };
 
         long double eff_size = 0.0;
@@ -847,6 +999,19 @@ mask_nodes_by_label_dual(
                 n += static_cast<int64_t>(groups[j] != Group::OTHER)
                     + (groups[j] == Group::BOTH);
                 s += (groups[j] == Group::IN);
+            }
+
+            if (is_discrete) {
+                size_t front = n - std::min(n, num_labels_out);
+                size_t back = std::min(n, num_labels_in);
+                assert(s >= front);
+                long double pval0 = pb_pvals[n][front];
+                long double pvaln = pb_pvals[n][back];
+                long double min_pval
+                    = std::min(pval0, pvaln) * (1 + (pval0 == pvaln && front != back));
+
+                if (min_pval >= min_pval_cutoff)
+                    return;
             }
 
             pval = pb_pvals[n][s];
@@ -877,29 +1042,53 @@ mask_nodes_by_label_dual(
                 devs.emplace_back(get_deviance(s, mu1) + get_deviance(n - s, mu2));
             }
 
-            pval = 0.0;
+            if (is_discrete) {
+                long double dev0 = devs[0];
+                long double devn = devs[n];
 
-            size_t s = 0;
-            for (; s <= n; ++s) {
-                if (devs[s] < devs[in_sum])
-                    break;
+                long double min_pval = 0;
+
+                if (dev0 > devn) {
+                    min_pval = boost::math::pdf(bdist, 0);
+                } else if (dev0 < devn) {
+                    min_pval = boost::math::pdf(bdist, n);
+                } else {
+                    min_pval = boost::math::pdf(bdist, 0) + boost::math::pdf(bdist, n);
+                }
+
+                if (min_pval >= min_pval_cutoff)
+                    return;
             }
 
-            if (s > 0)
-                pval += boost::math::cdf(bdist, s - 1);
+            auto get_pval_eff_size = [&](int64_t in_sum, int64_t out_sum) {
+                long double pval = 0.0;
 
-            if (config.test_by_unitig || pval < config.family_wise_error_rate) {
-                size_t sp = n;
-                for (; sp >= s; --sp) {
-                    if (devs[sp] < devs[in_sum])
+                size_t s = 0;
+                for (; s <= n; ++s) {
+                    if (devs[s] < devs[in_sum])
                         break;
                 }
 
-                if (sp < n)
-                    pval += boost::math::cdf(boost::math::complement(bdist, sp));
-            }
+                if (s > 0)
+                    pval += boost::math::cdf(bdist, s - 1);
 
-            eff_size = static_cast<long double>(in_sum) - boost::math::mode(bdist);
+                if (config.test_by_unitig || pval < config.family_wise_error_rate) {
+                    size_t sp = n;
+                    for (; sp >= s; --sp) {
+                        if (devs[sp] < devs[in_sum])
+                            break;
+                    }
+
+                    if (sp < n)
+                        pval += boost::math::cdf(boost::math::complement(bdist, sp));
+                }
+
+                long double eff_size
+                    = static_cast<long double>(in_sum) - boost::math::mode(bdist);
+                return std::make_pair(pval, eff_size);
+            };
+
+            std::tie(pval, eff_size) = get_pval_eff_size(in_sum, out_sum);
 
         } else if (config.test_type == "nbinom_exact") {
             size_t n = 0;
@@ -956,7 +1145,36 @@ mask_nodes_by_label_dual(
                 double l1pa = log1pl(-p_a) / logl(2.0);
                 double l1pb = log1pl(-p_b) / logl(2.0);
 
-                {
+                if (is_discrete) {
+                    long double dev0 = get_deviance(0, n);
+                    long double devn = get_deviance(n, 0);
+
+                    long double min_pval = 0.0;
+                    if (dev0 >= devn) {
+                        size_t s = 0;
+                        size_t t = n;
+                        long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                             - lgammal(s + 1) - lgammal(t + 1))
+                                / logl(2.0)
+                            + s * l1pa + t * l1pb;
+                        min_pval += exp2(base + sbase);
+                    }
+
+                    if (dev0 <= devn) {
+                        size_t s = n;
+                        size_t t = 0;
+                        long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+                                             - lgammal(s + 1) - lgammal(t + 1))
+                                / logl(2.0)
+                            + s * l1pa + t * l1pb;
+                        min_pval += exp2(base + sbase);
+                    }
+
+                    if (min_pval >= min_pval_cutoff)
+                        return;
+                }
+
+                if (is_discrete) {
                     size_t s = 0;
                     size_t t = n;
                     long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
@@ -1086,17 +1304,15 @@ mask_nodes_by_label_dual(
     std::atomic_thread_fence(std::memory_order_acquire);
 
     if (config.test_type != "notest") {
-        uint64_t num_tests = nelem;
         if (config.test_by_unitig) {
             num_tests = 0;
             std::atomic_thread_fence(std::memory_order_release);
             clean_masked_graph->call_unitigs(
                 [&](const std::string&, const auto& path) {
+                    size_t cur_monotig_id
+                        = __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
                     std::vector<long double> pvals;
                     pvals.reserve(path.size());
-
-                    Group last_group = Group::BOTH;
-                    size_t last_i = 0;
 
                     std::vector<size_t> ranks;
                     ranks.reserve(path.size());
@@ -1105,36 +1321,22 @@ mask_nodes_by_label_dual(
                         ranks.emplace_back(kept.rank1(row_i) - 1);
                     }
 
+                    long double comb_eff_size = 0.0;
                     for (size_t i = 0; i < path.size(); ++i) {
                         size_t idx = ranks[i];
-                        const auto& [pval, monotig_id, group, stored_node] = all_pvals[idx];
-                        if (group != last_group) {
-                            if (pvals.size()) {
-                                uint64_t monotig_id
-                                    = __atomic_fetch_add(&num_tests, 1,
-                                                         std::memory_order_relaxed);
-                                long double comb_pval = combine_pvals(pvals);
-                                for (size_t j = last_i; j < i; ++j) {
-                                    size_t jdx = ranks[j];
-                                    std::get<0>(all_pvals[jdx]) = comb_pval;
-                                    std::get<1>(all_pvals[jdx]) = monotig_id;
-                                }
-                            }
-                            pvals.clear();
-                            last_group = group;
-                            last_i = i;
-                        }
+                        const auto& [pval, monotig_id, eff_size, stored_node]
+                            = all_pvals[idx];
                         pvals.emplace_back(pval);
+                        comb_eff_size += eff_size;
                     }
-                    if (pvals.size()) {
-                        uint64_t monotig_id
-                            = __atomic_fetch_add(&num_tests, 1, std::memory_order_relaxed);
-                        long double comb_pval = combine_pvals(pvals);
-                        for (size_t j = last_i; j < path.size(); ++j) {
-                            size_t jdx = ranks[j];
-                            std::get<0>(all_pvals[jdx]) = comb_pval;
-                            std::get<1>(all_pvals[jdx]) = monotig_id;
-                        }
+
+                    long double comb_pval = combine_pvals(pvals);
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        size_t idx = ranks[i];
+                        auto& [pval, monotig_id, eff_size, stored_node] = all_pvals[idx];
+                        pval = comb_pval;
+                        monotig_id = cur_monotig_id;
+                        eff_size = comb_eff_size;
                     }
                 },
                 num_threads);
@@ -1162,17 +1364,17 @@ mask_nodes_by_label_dual(
             common::logger->trace("Selecting significant k-mers");
             size_t last_tig_id = std::numeric_limits<size_t>::max();
             size_t cur_count = 0;
-            for (const auto& [pval, tig_id, group, node] : all_pvals) {
+            for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
                 if (tig_id != last_tig_id) {
                     ++cur_count;
                     last_tig_id = tig_id;
                 }
 
                 if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm) {
-                    if (group == Group::IN) {
+                    if (eff_size > 0) {
                         indicator_in[node] = true;
                         ++num_sig;
-                    } else if (group == Group::OUT) {
+                    } else if (eff_size < 0) {
                         indicator_out[node] = true;
                         ++num_sig;
                     }
