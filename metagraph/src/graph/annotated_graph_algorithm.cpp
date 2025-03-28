@@ -1249,7 +1249,8 @@ mask_nodes_by_label_dual(
 
             std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
 
-        } else if (config.test_type == "cmh" || config.test_type == "cmh_binary") {
+        } else if (config.test_type == "cmh" || config.test_type == "cmh_binary"
+                   || config.test_type == "fisher_binary") {
             int64_t in_sum = 0;
             int64_t out_sum = 0;
             if (config.test_type == "cmh") {
@@ -1274,7 +1275,7 @@ mask_nodes_by_label_dual(
                 }
             }
 
-            long double T = config.test_type == "cmh" ? total_kmers : nelem;
+            long double T = config.test_type == "cmh" ? total_kmers : in_nkmers + out_nkmers;
             long double a = in_sum;
             long double c = out_sum;
             int64_t ab = config.test_type == "cmh" ? in_kmers : in_nkmers;
@@ -1290,13 +1291,19 @@ mask_nodes_by_label_dual(
             }
 
             eff_size = log2l(a) + log2l(d) - log2l(b) - log2l(c);
-            long double chi_stat
-                = pow(a - ab * ac / T, 2.0) / ab / ac / cd / bd * T * T * (T - 1.0L);
+            if (config.test_type == "cmh" || config.test_type == "cmh_binary") {
+                long double chi_stat
+                    = pow(a - ab * ac / T, 2.0) / ab / ac / cd / bd * T * T * (T - 1.0L);
 
-            pval = chi_stat > 0
-                ? boost::math::cdf(
-                      boost::math::complement(boost::math::chi_squared(1), chi_stat))
-                : 1.0;
+                pval = chi_stat > 0
+                    ? boost::math::cdf(
+                          boost::math::complement(boost::math::chi_squared(1), chi_stat))
+                    : 1.0;
+            } else {
+                pval = expl(lgammal(ab + 1) + lgammal(cd + 1) + lgammal(ac + 1)
+                            + lgammal(bd + 1) - lgammal(a + 1) - lgammal(b + 1)
+                            - lgammal(c + 1) - lgammal(d + 1) - lgammal(T + 1));
+            }
         }
 
         set_pval(pval, eff_size);
@@ -1363,23 +1370,28 @@ mask_nodes_by_label_dual(
 
             common::logger->trace("Selecting significant k-mers");
             size_t last_tig_id = std::numeric_limits<size_t>::max();
-            size_t cur_count = 0;
-            for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+            size_t cur_count = num_tests + 1;
+            auto it = all_pvals.rbegin();
+            for (; it != all_pvals.rend(); ++it) {
+                const auto& [pval, tig_id, eff_size, node] = *it;
                 if (tig_id != last_tig_id) {
-                    ++cur_count;
+                    --cur_count;
                     last_tig_id = tig_id;
                 }
 
-                if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm) {
-                    if (eff_size > 0) {
-                        indicator_in[node] = true;
-                        ++num_sig;
-                    } else if (eff_size < 0) {
-                        indicator_out[node] = true;
-                        ++num_sig;
-                    }
-                }
+                if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm)
+                    break;
             }
+
+            std::for_each(it, all_pvals.rend(), [&](const auto& b) {
+                const auto& [pval, tig_id, eff_size, node] = b;
+                num_sig += (eff_size != 0);
+                if (eff_size > 0) {
+                    indicator_in[node] = true;
+                } else if (eff_size < 0) {
+                    indicator_out[node] = true;
+                }
+            });
         }
 
         common::logger->trace("Found {} / {} significant p-values.", num_sig, nelem);
