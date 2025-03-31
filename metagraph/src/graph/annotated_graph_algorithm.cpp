@@ -508,7 +508,6 @@ mask_nodes_by_label_dual(
     if (config.test_type == "nbinom_exact") {
         common::logger->trace("Fitting per-sample negative binomial distributions");
 
-
 #pragma omp parallel for num_threads(num_parallel_files)
         for (size_t j = 0; j < groups.size(); ++j) {
             const auto& hist = hists[j];
@@ -795,7 +794,7 @@ mask_nodes_by_label_dual(
 
     bool is_discrete = false && !config.test_by_unitig
         && (config.test_type == "poisson_binom" || config.test_type == "poisson_exact"
-            || config.test_type == "nbinom_exact");
+            || config.test_type == "nbinom_exact"); // || config.test_type == "mwu");
 
     uint64_t num_tests = nelem;
 
@@ -809,7 +808,7 @@ mask_nodes_by_label_dual(
                 size_t n = 0;
                 int64_t in_sum = 0;
                 int64_t out_sum = 0;
-                if (config.test_type == "poisson_binom") {
+                if (config.test_type == "mwu" || config.test_type == "poisson_binom") {
                     for (const auto& [j, c] : row) {
                         n += static_cast<int64_t>(groups[j] != Group::OTHER)
                             + (groups[j] == Group::BOTH);
@@ -914,6 +913,33 @@ mask_nodes_by_label_dual(
                                 + s * l1pa + t * l1pb;
                             min_pval_b[n].first += exp2(base + sbase);
                         }
+                    } else if (config.test_type == "mwu") {
+                        std::vector<size_t> vals(groups.size());
+                        auto it = vals.begin();
+                        for (size_t i = n; i > 0; --i, ++it) {
+                            *it = i;
+                        }
+                        auto generate_a_in = [&](const auto& callback) {
+                            std::for_each(vals.begin(), vals.begin() + n,
+                                          [&](size_t i) { callback(i); });
+                        };
+                        auto generate_b_in = [&](const auto& callback) {
+                            std::for_each(vals.begin() + n, vals.end(),
+                                          [&](size_t i) { callback(i); });
+                        };
+                        auto generate_a_out = [&](const auto& callback) {
+                            std::for_each(vals.begin() + n, vals.end(),
+                                          [&](size_t i) { callback(i); });
+                        };
+                        auto generate_b_out = [&](const auto& callback) {
+                            std::for_each(vals.begin(), vals.begin() + n,
+                                          [&](size_t i) { callback(i); });
+                        };
+
+                        long double pval0
+                            = mann_whitneyu(generate_a_out, generate_b_out).first;
+                        long double pvaln = mann_whitneyu(generate_a_in, generate_b_in).first;
+                        min_pval_b[n].first = std::min(pval0, pvaln);
                     }
                 }
                 ++min_pval_b[n].second;
@@ -932,21 +958,22 @@ mask_nodes_by_label_dual(
         }
 
         std::sort(min_pvals.rbegin(), min_pvals.rend());
-        long double harm = 0.0;
-        for (size_t i = 1; i <= num_tests; ++i) {
-            harm += 1.0L / i;
-        }
+        // long double harm = 0.0;
+        // for (size_t i = 1; i <= num_tests; ++i) {
+        //     harm += 1.0L / i;
+        // }
         for (const auto& [pval, count] : min_pvals) {
             if (!count)
                 continue;
 
             // common::logger->trace("Trying:\tc: {}\tpval: {}\tcutoff: {}", num_tests, pval,
             //                       config.family_wise_error_rate / harm);
-            if (pval >= config.family_wise_error_rate / harm) {
+            // if (pval >= config.family_wise_error_rate / harm) {
+            if (pval >= config.family_wise_error_rate / num_tests) {
                 min_pval_cutoff = pval;
-                for (size_t i = num_tests; i > num_tests - count; --i) {
-                    harm -= 1.0L / i;
-                }
+                // for (size_t i = num_tests; i > num_tests - count; --i) {
+                //     harm -= 1.0L / i;
+                // }
                 num_tests -= count;
             }
         }
@@ -961,12 +988,18 @@ mask_nodes_by_label_dual(
         if (config.test_type == "notest") {
             size_t count_in = 0;
             size_t count_out = 0;
+            long double rel_in_count = 0;
+            long double rel_out_count = 0;
             for (const auto& [j, c] : row) {
-                if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     ++count_out;
+                    rel_out_count += static_cast<long double>(c) / out_kmers;
+                }
 
-                if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                     ++count_in;
+                    rel_in_count += static_cast<long double>(c) / in_kmers;
+                }
             }
 
             bool in_kmer = count_in >= config.min_in_recurrence
@@ -975,10 +1008,10 @@ mask_nodes_by_label_dual(
                 && count_out <= config.max_out_recurrence;
 
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            if (in_kmer)
+            if (in_kmer && rel_in_count > rel_out_count)
                 set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
 
-            if (out_kmer)
+            if (out_kmer && rel_in_count < rel_out_count)
                 set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
 
             return;
@@ -1174,7 +1207,7 @@ mask_nodes_by_label_dual(
                         return;
                 }
 
-                if (is_discrete) {
+                {
                     size_t s = 0;
                     size_t t = n;
                     long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
@@ -1222,6 +1255,40 @@ mask_nodes_by_label_dual(
                 }
             }
         } else if (config.test_type == "mwu") {
+            if (is_discrete) {
+                size_t n = 0;
+                for (const auto& [j, c] : row) {
+                    n += static_cast<int64_t>(groups[j] != Group::OTHER)
+                        + (groups[j] == Group::BOTH);
+                }
+                std::vector<size_t> vals(groups.size());
+                auto it = vals.begin();
+                for (size_t i = n; i > 0; --i, ++it) {
+                    *it = i;
+                }
+                auto generate_a_in = [&](const auto& callback) {
+                    std::for_each(vals.begin(), vals.begin() + n,
+                                  [&](size_t i) { callback(i); });
+                };
+                auto generate_b_in = [&](const auto& callback) {
+                    std::for_each(vals.begin() + n, vals.end(),
+                                  [&](size_t i) { callback(i); });
+                };
+                auto generate_a_out = [&](const auto& callback) {
+                    std::for_each(vals.begin() + n, vals.end(),
+                                  [&](size_t i) { callback(i); });
+                };
+                auto generate_b_out = [&](const auto& callback) {
+                    std::for_each(vals.begin(), vals.begin() + n,
+                                  [&](size_t i) { callback(i); });
+                };
+
+                long double pval0 = mann_whitneyu(generate_a_out, generate_b_out).first;
+                long double pvaln = mann_whitneyu(generate_a_in, generate_b_in).first;
+
+                if (std::min(pval0, pvaln) >= min_pval_cutoff)
+                    return;
+            }
             auto generate_a = [&](const auto& callback) {
                 sdsl::bit_vector found(groups.size());
                 for (const auto& [j, c] : row) {
@@ -1363,13 +1430,16 @@ mask_nodes_by_label_dual(
 
         size_t num_sig = 0;
         if (all_pvals.size() && std::get<0>(all_pvals[0]) < config.family_wise_error_rate) {
+            common::logger->trace("Selecting significant k-mers");
+            common::logger->trace("Min observed p-value: {}", std::get<0>(all_pvals[0]));
+            size_t last_tig_id = std::numeric_limits<size_t>::max();
+
+            // Benjamini - Yekutieli
             long double harm = 0.0;
             for (size_t i = 1; i <= num_tests; ++i) {
                 harm += 1.0 / i;
             }
 
-            common::logger->trace("Selecting significant k-mers");
-            size_t last_tig_id = std::numeric_limits<size_t>::max();
             size_t cur_count = num_tests + 1;
             auto it = all_pvals.rbegin();
             for (; it != all_pvals.rend(); ++it) {
@@ -1379,7 +1449,15 @@ mask_nodes_by_label_dual(
                     last_tig_id = tig_id;
                 }
 
-                if (pval <= config.family_wise_error_rate * cur_count / num_tests / harm)
+                // Benjamini-Yekutieli
+                long double cutoff
+                    = config.family_wise_error_rate * cur_count / num_tests / harm;
+
+                // // Hochberg
+                // long double cutoff
+                //     = config.family_wise_error_rate / (num_tests + 1 - cur_count);
+
+                if (pval <= cutoff)
                     break;
             }
 
@@ -1392,6 +1470,51 @@ mask_nodes_by_label_dual(
                     indicator_out[node] = true;
                 }
             });
+
+            // Holm-Bonferroni or Sidak
+            // size_t cur_count = 0;
+            // common::logger->trace(
+            //     "First p-value cutoff: {}",
+            //     1.0L - pow(1.0L - config.family_wise_error_rate, 1.0L / num_tests));
+            // for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+            //     if (tig_id != last_tig_id) {
+            //         ++cur_count;
+            //         last_tig_id = tig_id;
+            //     }
+
+            //     // holm bonferroni
+            //     // long double cutoff = config.family_wise_error_rate / (num_tests + 1 - cur_count);
+
+            //     // Sidak
+            //     long double cutoff = 1.0L
+            //         - pow(1.0L - config.family_wise_error_rate,
+            //               1.0L / (num_tests + 1 - cur_count));
+
+            //     if (pval > cutoff)
+            //         break;
+
+            //     if (eff_size > 0) {
+            //         indicator_in[node] = true;
+            //         ++num_sig;
+            //     } else if (eff_size < 0) {
+            //         indicator_out[node] = true;
+            //         ++num_sig;
+            //     }
+            // }
+
+            // Bonferroni
+            // for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+            //     if (pval >= config.family_wise_error_rate / num_tests)
+            //         break;
+
+            //     if (eff_size > 0) {
+            //         indicator_in[node] = true;
+            //         ++num_sig;
+            //     } else if (eff_size < 0) {
+            //         indicator_out[node] = true;
+            //         ++num_sig;
+            //     }
+            // }
         }
 
         common::logger->trace("Found {} / {} significant p-values.", num_sig, nelem);
