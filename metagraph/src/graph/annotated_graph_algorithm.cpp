@@ -610,6 +610,7 @@ mask_nodes_by_label_dual(
     long double mu1 = static_cast<long double>(in_kmers) / nelem;
     long double mu2 = static_cast<long double>(out_kmers) / nelem;
     long double p = mu1 / (mu1 + mu2);
+    long double q = mu2 / (mu1 + mu2);
 
     // precompute p-values for poisson_binom test
     std::vector<std::vector<long double>> pb_pvals(num_labels_in + num_labels_out + 1);
@@ -1130,18 +1131,48 @@ mask_nodes_by_label_dual(
                         break;
                 }
 
-                if (s > 0)
-                    pval += boost::math::cdf(bdist, s - 1);
+                bool any_zero = false;
 
-                if (config.test_by_unitig || pval < config.family_wise_error_rate) {
-                    size_t sp = n;
+                if (s > 0) {
+                    pval = boost::math::cdf(bdist, s - 1);
+                    any_zero |= (pval == 0);
+                }
+
+                size_t sp = n;
+                if (!any_zero
+                    && (config.test_by_unitig || pval < config.family_wise_error_rate)) {
                     for (; sp >= s; --sp) {
                         if (devs[sp] < devs[in_sum])
                             break;
                     }
 
-                    if (sp < n)
-                        pval += boost::math::cdf(boost::math::complement(bdist, sp));
+                    if (sp < n) {
+                        long double pval_right
+                            = boost::math::cdf(boost::math::complement(bdist, sp));
+                        any_zero |= (pval_right == 0);
+                        pval += pval_right;
+                    }
+                }
+
+                if (any_zero) {
+                    std::ignore = q;
+                    // fall back to LRT
+                    auto poisson_log_prob = [&](long double k, long double lambda) {
+                        return lambda > 0 ? k * logl(lambda) - lambda - lgammal(k + 1) : 0.0L;
+                    };
+
+                    long double alt = poisson_log_prob(in_sum, in_sum)
+                        + poisson_log_prob(out_sum, out_sum);
+                    long double mn = static_cast<long double>(n) / total_kmers;
+                    long double null = poisson_log_prob(out_sum, mn * out_kmers)
+                        + poisson_log_prob(in_sum, mn * in_kmers);
+                    long double chi_stat = (alt - null) * 2.0L;
+                    pval = get_chi2_pval(1.0, chi_stat);
+                }
+
+                if (pval <= 0.0 || pval > 1.0) {
+                    common::logger->error("n: {}\t{},{}\tp: {}", n, in_sum, out_sum, pval);
+                    throw std::runtime_error("p-val fail, sum");
                 }
 
                 long double eff_size
