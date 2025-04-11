@@ -12,6 +12,7 @@
 #include <boost/math/distributions/students_t.hpp>
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/tools/minima.hpp>
+#include <boost/math/special_functions/gamma.hpp>
 #include <boost/math/special_functions/digamma.hpp>
 #include <boost/math/special_functions/trigamma.hpp>
 #include <boost/math/distributions/cauchy.hpp>
@@ -239,6 +240,33 @@ std::pair<long double, long double> mann_whitneyu(const G1& generate_a, const G2
 
     long double eff_size = R1 / n1 - R2 / n2;
     return std::make_pair(p, eff_size);
+}
+
+long double get_chi2_pval(long double nu, long double chi_stat) {
+    if (chi_stat <= 0)
+        return 0;
+
+    long double pval
+        = boost::math::cdf(boost::math::complement(boost::math::chi_squared(nu), chi_stat));
+
+    if (pval == 0) {
+        long double a = nu / 2.0L;
+        long double pval_num = boost::math::tgamma(a, chi_stat / 2.0L);
+        if (pval_num == 0) {
+            pval_num = gammal(a) - boost::math::tgamma_lower(a, chi_stat / 2.0L);
+        }
+        long double log_pval_num = logl(pval_num);
+        long double log_pval_den = lgammal(a);
+        long double log_pval = log_pval_num - log_pval_den;
+        pval = expl(log_pval);
+        if (pval == 0) {
+            common::logger->error("p-value underflow: {}\tlogpval: {} = {} - {}",
+                                  chi_stat, log_pval, log_pval_num, log_pval_den);
+            throw std::runtime_error("Chi sq underflow");
+        }
+    }
+
+    return pval;
 }
 
 long double combine_pvals(const std::vector<long double>& pvals) {
@@ -1362,10 +1390,7 @@ mask_nodes_by_label_dual(
                 long double chi_stat
                     = pow(a - ab * ac / T, 2.0) / ab / ac / cd / bd * T * T * (T - 1.0L);
 
-                pval = chi_stat > 0
-                    ? boost::math::cdf(
-                          boost::math::complement(boost::math::chi_squared(1), chi_stat))
-                    : 1.0;
+                pval = get_chi2_pval(1.0L, chi_stat);
             } else {
                 pval = expl(lgammal(ab + 1) + lgammal(cd + 1) + lgammal(ac + 1)
                             + lgammal(bd + 1) - lgammal(a + 1) - lgammal(b + 1)
