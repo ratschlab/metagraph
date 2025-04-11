@@ -1467,6 +1467,9 @@ mask_nodes_by_label_dual(
                     harm += 1.0 / i;
                 }
 
+                // Benjamini-Hochberg
+                harm = 1.0;
+
                 size_t cur_count = all_pvals.size() + 1;
                 auto it = all_pvals.rbegin();
                 for (; it != all_pvals.rend(); ++it) {
