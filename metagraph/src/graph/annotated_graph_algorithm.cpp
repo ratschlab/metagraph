@@ -1467,7 +1467,7 @@ mask_nodes_by_label_dual(
                     harm += 1.0 / i;
                 }
 
-                size_t cur_count = num_tests + 1;
+                size_t cur_count = all_pvals.size() + 1;
                 auto it = all_pvals.rbegin();
                 for (; it != all_pvals.rend(); ++it) {
                     const auto& [pval, tig_id, eff_size, node] = *it;
