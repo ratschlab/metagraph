@@ -246,22 +246,53 @@ long double get_chi2_pval(long double nu, long double chi_stat) {
     if (chi_stat <= 0)
         return 0;
 
+    if (nu == 1) {
+        long double pval
+            = expl(logl(std::erfcl(sqrtl(chi_stat))) - lgammal(0.5L) + 0.5L * logl(M_PI));
+        return pval;
+        // if (pval != pval || pval <= 0 || pval > 1.0) {
+        //     common::logger->error("0.5 p-value fail: {}\t{} / {}", chi_stat,
+        //                           std::erfcl(sqrtl(chi_stat)), tgammal(0.5L));
+        //     throw std::runtime_error("Chi sq underflow");
+        // }
+    }
+
+    // gamma_q(nu / 2, x / 2)
     long double pval
         = boost::math::cdf(boost::math::complement(boost::math::chi_squared(nu), chi_stat));
 
     if (pval == 0) {
         long double a = nu / 2.0L;
         long double pval_num = boost::math::tgamma(a, chi_stat / 2.0L);
-        if (pval_num == 0) {
-            pval_num = gammal(a) - boost::math::tgamma_lower(a, chi_stat / 2.0L);
+        long double log_pval_num;
+        long double log_pval_den;
+        if (pval_num != pval_num || pval_num == 0) {
+            pval_num = tgammal(a) - boost::math::tgamma_lower(a, chi_stat / 2.0L);
+            if (pval_num <= 0 || pval_num != pval_num) {
+                common::logger->error("D:\tnu: {}\tstat: {}\t{} - {} = {}", a, chi_stat,
+                                      tgammal(a),
+                                      boost::math::tgamma_lower(a, chi_stat / 2.0L),
+                                      pval_num);
+                throw std::runtime_error("DjFKKF");
+            } else {
+                log_pval_num = logl(pval_num);
+                log_pval_den = lgammal(a);
+            }
+            // log_pval = log1pl(-boost::math::gamma_p(a, chi_stat / 2.0L));
+        } else {
+            log_pval_num = logl(pval_num);
+            log_pval_den = lgammal(a);
         }
-        long double log_pval_num = logl(pval_num);
-        long double log_pval_den = lgammal(a);
         long double log_pval = log_pval_num - log_pval_den;
+        // if (pval_num != pval_num || pval_num == 0) {
+        //     pval_num = gammal(a) - boost::math::tgamma_lower(a, chi_stat / 2.0L);
+        // }
+        // long double log_pval_num = logl(pval_num);
         pval = expl(log_pval);
-        if (pval == 0) {
-            common::logger->error("p-value underflow: {}\tlogpval: {} = {} - {}",
-                                  chi_stat, log_pval, log_pval_num, log_pval_den);
+        if (pval != pval || pval <= 0 || pval > 1.0) {
+            common::logger->error("p-value fail: {}\tlogpval: {} = {} - {}\t{}\t{},{}",
+                                  chi_stat, log_pval, log_pval_num, log_pval_den, pval_num,
+                                  tgammal(a), boost::math::tgamma_lower(a, chi_stat / 2.0L));
             throw std::runtime_error("Chi sq underflow");
         }
     }
@@ -1168,12 +1199,19 @@ mask_nodes_by_label_dual(
                         + poisson_log_prob(in_sum, mn * in_kmers);
                     long double chi_stat = (alt - null) * 2.0L;
                     pval = get_chi2_pval(1.0, chi_stat);
+
+                    // if (chi_stat != chi_stat || pval != pval) {
+                    //     common::logger->error(
+                    //         "FF:\tn: {}\tin: {}\tout: {}\tstat: {}\tpval: {}", n,
+                    //         in_sum, out_sum, chi_stat, pval);
+                    //     throw std::runtime_error("pval fail");
+                    // }
                 }
 
-                if (pval <= 0.0 || pval > 1.0) {
-                    common::logger->error("n: {}\t{},{}\tp: {}", n, in_sum, out_sum, pval);
-                    throw std::runtime_error("p-val fail, sum");
-                }
+                // if (pval <= 0.0 || pval > 1.0) {
+                //     common::logger->error("n: {}\t{},{}\tp: {}", n, in_sum, out_sum,
+                //     pval); throw std::runtime_error("p-val fail, sum");
+                // }
 
                 long double eff_size
                     = static_cast<long double>(in_sum) - boost::math::mode(bdist);
@@ -1422,6 +1460,13 @@ mask_nodes_by_label_dual(
                     = pow(a - ab * ac / T, 2.0) / ab / ac / cd / bd * T * T * (T - 1.0L);
 
                 pval = get_chi2_pval(1.0L, chi_stat);
+
+                if (chi_stat != chi_stat || pval != pval) {
+                    common::logger->error(
+                        "FF:\tn: {}\tin: {}\tout: {}\tstat: {}\tpval: {}",
+                        in_sum + out_sum, in_sum, out_sum, chi_stat, pval);
+                    throw std::runtime_error("pval fail");
+                }
             } else {
                 pval = expl(lgammal(ab + 1) + lgammal(cd + 1) + lgammal(ac + 1)
                             + lgammal(bd + 1) - lgammal(a + 1) - lgammal(b + 1)
@@ -1498,8 +1543,8 @@ mask_nodes_by_label_dual(
                     harm += 1.0 / i;
                 }
 
-                // Benjamini-Hochberg
-                harm = 1.0;
+                // // Benjamini-Hochberg
+                // // harm = 1.0;
 
                 size_t cur_count = all_pvals.size() + 1;
                 auto it = all_pvals.rbegin();
@@ -1532,7 +1577,7 @@ mask_nodes_by_label_dual(
                     }
                 });
 
-                // Holm-Bonferroni or Sidak
+                // // Holm-Bonferroni or Sidak
                 // size_t cur_count = 0;
                 // common::logger->trace(
                 //     "First p-value cutoff: {}",
@@ -1544,7 +1589,8 @@ mask_nodes_by_label_dual(
                 //     }
 
                 //     // holm bonferroni
-                //     // long double cutoff = config.family_wise_error_rate / (num_tests + 1 - cur_count);
+                //     // long double cutoff
+                //     // = config.family_wise_error_rate / (num_tests + 1 - cur_count);
 
                 //     // Sidak
                 //     long double cutoff = 1.0L
