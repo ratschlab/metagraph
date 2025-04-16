@@ -5,16 +5,17 @@
 
 #include "../test_helpers.hpp"
 #include "../graph/all/test_dbg_helpers.hpp"
+#include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-
-#define protected public
-#define private public
 #include "annotation/annotation_converters.hpp"
-#include "test_annotated_dbg_helpers.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
 
 
 namespace {
@@ -78,14 +79,14 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         std::string sequence(100, 'A');
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(sequence,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(sequence,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
         ASSERT_EQ(k + 2, anno_graph.get_graph().num_nodes());
         EXPECT_EQ(1u, anno_graph.get_annotator().num_objects());
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         EXPECT_FALSE(anno_graph.label_exists("Label"));
@@ -139,11 +140,11 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -208,11 +209,11 @@ TEST(AnnotatedDBG, Transform) {
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph->get_graph().max_index() + 1, 0);
-        anno_graph->graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph->get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph->annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph->get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph->get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -226,8 +227,8 @@ TEST(AnnotatedDBG, Transform) {
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annot::convert<annot::RowFlatAnnotator>(
-                    std::move(dynamic_cast<annot::ColumnCompressed<>&>(
-                        *anno_graph->annotator_
+                    const_cast<annot::ColumnCompressed<>&&>(dynamic_cast<const annot::ColumnCompressed<>&>(
+                        anno_graph->get_annotator()
                     )
                 )).release()
             )
@@ -292,14 +293,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -409,14 +410,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -529,15 +530,15 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
+        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -653,15 +654,15 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
+        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -775,15 +776,15 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
+        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -898,15 +899,15 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        const_cast<DeBruijnGraph&>(anno_graph.get_graph()).add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
-        EXPECT_EQ(anno_graph.get_graph().max_index() + 1, inserted_nodes.size());
+        const_cast<AnnotatedDBG::Annotator&>(anno_graph.get_annotator()).insert_rows(edge_to_row_idx(inserted_nodes));
+        EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));

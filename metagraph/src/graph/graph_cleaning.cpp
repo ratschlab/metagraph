@@ -67,6 +67,138 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                         &false_pos_ptr, &false_neg_ptr);
 }
 
+// returns -1 if the automatic estimation fails
+uint64_t estimate_min_kmer_abundance_ztp(const DeBruijnGraph &graph,
+                                         const NodeWeights &node_weights,
+                                         uint64_t num_singleton_kmers) {
+    // set a cutoff that covers 95% of this distribution
+    double cdf_cutoff = 0.95;
+    size_t max_iter = 1000;
+
+    auto [mean_est, nzeros_est] = estimate_ztp_mean(
+        [&](const auto &callback) {
+            graph.call_nodes([&](DeBruijnGraph::node_index i) {
+                callback(node_weights[i], 1);
+            });
+        },
+        node_weights.get_data().width(),
+        num_singleton_kmers,
+        3 // estimate from the first 3 counts
+    );
+    double p_num = mean_est * exp(-mean_est);
+    double p_denom = 1;
+    double cdf = p_num;
+    double denom = 1.0 - exp(-mean_est);
+
+    uint64_t min_count = 1;
+    for (size_t i = 0; i < max_iter; ++i) {
+        if (cdf / denom >= cdf_cutoff)
+            break;
+
+        ++min_count;
+        p_num *= mean_est;
+        p_denom *= min_count;
+        cdf += p_num / p_denom;
+    }
+    return min_count + 1;
+}
+
+std::pair<double, double> estimate_ztp_mean(const std::function<void(const std::function<void(uint64_t, size_t)>&)> &generator,
+                                            uint8_t width,
+                                            uint64_t num_singleton_kmers,
+                                            size_t touse) {
+    std::vector<uint64_t> hist;
+    generator([&](uint64_t kmer_count, size_t occ) {
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
+        while (kmer_count >= hist.size()) {
+            hist.push_back(0);
+        }
+        hist[kmer_count] += occ;
+    });
+
+    if (num_singleton_kmers) {
+        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
+                     hist[1], num_singleton_kmers);
+        hist[1] = num_singleton_kmers;
+    }
+
+    if (hist.empty())
+        return {};
+
+    uint64_t max_size = 1llu << width;
+    if (hist.size() == max_size)
+        hist.pop_back();
+
+    // estimate a zero-truncated poisson from the first touse counts
+    // (from https://doi.org/10.1016/S0167-9473(99)00111-5)
+
+    size_t max_iter = 1000;
+
+    size_t nupto_c = 0;
+    uint64_t sumupto = 0;
+    touse = std::min(touse, hist.size() - 1);
+    for (size_t count = 1; count <= touse; ++count) {
+        uint64_t nkmers = hist[count];
+        nupto_c += nkmers;
+        sumupto += count * nkmers;
+    }
+
+    double sum = sumupto;
+    double nupto = nupto_c;
+    double mean_est = sum / nupto;
+    double total_est = nupto;
+
+    for (size_t i = 0; i < max_iter; ++i) {
+        double last_mean_est = mean_est;
+        total_est = nupto/(1.0-exp(-mean_est));
+        mean_est = sum / total_est;
+        if (abs(mean_est - last_mean_est)/mean_est < 1e-5) {
+            common::logger->trace("Fitted mean {} after {} iterations", mean_est, i + 1);
+            break;
+        }
+    }
+
+    return std::make_pair(mean_est, total_est - nupto);
+}
+
+std::tuple<int64_t,double,double>
+estimate_min_kmer_abundance(const bit_vector &idx,
+                            const sdsl::int_vector<> &values,
+                            uint64_t num_singleton_kmers,
+                            bool discard_last_count,
+                            double cleaning_threshold_percentile) {
+    std::vector<uint64_t> hist;
+    idx.call_ones([&](auto i) {
+        uint64_t kmer_count = values[idx.rank1(i) - 1];
+        assert(kmer_count && "All k-mers in graph must have non-zero counts");
+        while (kmer_count >= hist.size()) {
+            hist.push_back(0);
+        }
+        hist[kmer_count]++;
+    });
+
+    if (discard_last_count && hist.size() >= 10 && hist.back() > hist[hist.size() - 2])
+        hist.pop_back();
+
+    hist.resize(std::max((uint64_t)hist.size(), (uint64_t)10), 0);
+
+    if (num_singleton_kmers) {
+        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
+                     hist[1], num_singleton_kmers);
+        hist[1] = num_singleton_kmers;
+    }
+
+    double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
+    int64_t threshold = cleaning_pick_kmer_threshold(
+        hist.data(), hist.size(),
+        cleaning_threshold_percentile,
+        &alpha_est_ptr, &beta_est_ptr,
+        &false_pos_ptr, &false_neg_ptr
+    );
+
+    return std::make_tuple(threshold,alpha_est_ptr,beta_est_ptr);
+}
+
 
 /** The next routines were copied from:
  * https://github.com/mcveanlab/mccortex/blob/97aba198d632ee98ac1aa496db33d1a7a8cb7e51/src/tools/clean_graph.c
