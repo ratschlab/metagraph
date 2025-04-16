@@ -847,9 +847,9 @@ mask_nodes_by_label_dual(
     }
 
     common::logger->trace("Allocating p-value storage");
-    std::vector<std::tuple<long double, size_t, long double, node_index>> all_pvals;
+    std::vector<std::tuple<long double, size_t, long double, long double, node_index>> all_pvals;
     all_pvals.resize(nelem,
-                     std::make_tuple(1.0L, graph_ptr->max_index() + 1, Group::OTHER,
+                     std::make_tuple(1.0L, graph_ptr->max_index() + 1, 0.0L, 0.0L,
                                      graph_ptr->max_index() + 1));
 
     bool is_discrete = false && !config.test_by_unitig
@@ -1077,13 +1077,15 @@ mask_nodes_by_label_dual(
             return;
         }
 
-        auto set_pval = [&](long double pval, long double eff_size) {
-            size_t idx = kept.rank1(row_i) - 1;
-            node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            all_pvals[idx] = std::tie(pval, node, eff_size, node);
-        };
+        auto set_pval
+            = [&](long double pval, long double eff_size_in, long double eff_size_out) {
+                  size_t idx = kept.rank1(row_i) - 1;
+                  node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
+                  all_pvals[idx] = std::tie(pval, node, eff_size_in, eff_size_out, node);
+              };
 
-        long double eff_size = 0.0;
+        long double eff_size_in = 0.0;
+        long double eff_size_out = 0.0;
         long double pval = 1.0;
         if (config.test_type == "poisson_binom") {
             size_t n = 0;
@@ -1092,6 +1094,12 @@ mask_nodes_by_label_dual(
                 n += static_cast<int64_t>(groups[j] != Group::OTHER)
                     + (groups[j] == Group::BOTH);
                 s += (groups[j] == Group::IN);
+                if (groups[j] == Group::IN) {
+                    eff_size_in += 1.0L / n_kmers[j];
+                }
+                if (groups[j] == Group::OUT) {
+                    eff_size_out += 1.0L / n_kmers[j];
+                }
             }
 
             if (is_discrete) {
@@ -1108,18 +1116,22 @@ mask_nodes_by_label_dual(
             }
 
             pval = pb_pvals[n][s];
-            eff_size = static_cast<double>(s) - mid_points[n];
+            // eff_size = static_cast<double>(s) - mid_points[n];
         } else if (config.test_type == "poisson_exact") {
             size_t n = 0;
             int64_t in_sum = 0;
             int64_t out_sum = 0;
             for (const auto& [j, c] : row) {
                 n += c;
-                if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     out_sum += c;
+                    eff_size_out += static_cast<long double>(c) / sums[j];
+                }
 
-                if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                     in_sum += c;
+                    eff_size_in += static_cast<long double>(c) / sums[j];
+                }
             }
 
             boost::math::binomial bdist(n, p);
@@ -1218,7 +1230,7 @@ mask_nodes_by_label_dual(
                 return std::make_pair(pval, eff_size);
             };
 
-            std::tie(pval, eff_size) = get_pval_eff_size(in_sum, out_sum);
+            pval = get_pval_eff_size(in_sum, out_sum).first;
 
         } else if (config.test_type == "nbinom_exact") {
             size_t n = 0;
@@ -1228,10 +1240,12 @@ mask_nodes_by_label_dual(
                 n += c;
                 if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     out_sum += c;
+                    eff_size_out += static_cast<long double>(c) / sums[j];
                 }
 
                 if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                     in_sum += c;
+                    eff_size_in += static_cast<long double>(c) / sums[j];
                 }
             }
 
@@ -1268,7 +1282,7 @@ mask_nodes_by_label_dual(
             long double in_dev = get_deviance(in_sum, out_sum);
 
             if (in_dev > min_dev) {
-                eff_size = static_cast<long double>(in_sum) - midpoint;
+                // eff_size = static_cast<long double>(in_sum) - midpoint;
                 pval = 0.0;
                 long double base = nb_base
                     + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n)) / logl(2.0);
@@ -1386,6 +1400,7 @@ mask_nodes_by_label_dual(
                 if (std::min(pval0, pvaln) >= min_pval_cutoff)
                     return;
             }
+
             auto generate_a = [&](const auto& callback) {
                 sdsl::bit_vector found(groups.size());
                 for (const auto& [j, c] : row) {
@@ -1411,7 +1426,10 @@ mask_nodes_by_label_dual(
                 }
             };
 
-            std::tie(pval, eff_size) = mann_whitneyu(generate_a, generate_b);
+            generate_a([&](long double c) { eff_size_in += c; });
+            generate_b([&](long double c) { eff_size_out += c; });
+
+            pval = mann_whitneyu(generate_a, generate_b).first;
 
         } else if (config.test_type == "cmh" || config.test_type == "cmh_binary"
                    || config.test_type == "fisher_binary") {
@@ -1421,20 +1439,24 @@ mask_nodes_by_label_dual(
                 for (const auto& [j, c] : row) {
                     if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                         out_sum += c;
+                        eff_size_out += static_cast<long double>(c) / sums[j];
                     }
 
                     if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                         in_sum += c;
+                        eff_size_in += static_cast<long double>(c) / sums[j];
                     }
                 }
             } else {
                 for (const auto& [j, c] : row) {
                     if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                         ++out_sum;
+                        eff_size_out += 1.0L / sums[j];
                     }
 
                     if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                         ++in_sum;
+                        eff_size_in += 1.0L / sums[j];
                     }
                 }
             }
@@ -1454,7 +1476,7 @@ mask_nodes_by_label_dual(
                 throw std::runtime_error("Stat calc fail");
             }
 
-            eff_size = log2l(a) + log2l(d) - log2l(b) - log2l(c);
+            // eff_size = log2l(a) + log2l(d) - log2l(b) - log2l(c);
             if (config.test_type == "cmh" || config.test_type == "cmh_binary") {
                 long double chi_stat
                     = pow(a - ab * ac / T, 2.0) / ab / ac / cd / bd * T * T * (T - 1.0L);
@@ -1474,7 +1496,7 @@ mask_nodes_by_label_dual(
             }
         }
 
-        set_pval(pval, eff_size);
+        set_pval(pval, eff_size_in, eff_size_out);
     });
     std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -1496,22 +1518,26 @@ mask_nodes_by_label_dual(
                         ranks.emplace_back(kept.rank1(row_i) - 1);
                     }
 
-                    long double comb_eff_size = 0.0;
+                    long double comb_eff_size_in = 0.0;
+                    long double comb_eff_size_out = 0.0;
                     for (size_t i = 0; i < path.size(); ++i) {
                         size_t idx = ranks[i];
-                        const auto& [pval, monotig_id, eff_size, stored_node]
+                        const auto& [pval, monotig_id, eff_size_in, eff_size_out, stored_node]
                             = all_pvals[idx];
                         pvals.emplace_back(pval);
-                        comb_eff_size += eff_size;
+                        comb_eff_size_in += eff_size_in;
+                        comb_eff_size_out += eff_size_out;
                     }
 
                     long double comb_pval = combine_pvals(pvals);
                     for (size_t i = 0; i < path.size(); ++i) {
                         size_t idx = ranks[i];
-                        auto& [pval, monotig_id, eff_size, stored_node] = all_pvals[idx];
+                        auto& [pval, monotig_id, eff_size_in, eff_size_out, stored_node]
+                            = all_pvals[idx];
                         pval = comb_pval;
                         monotig_id = cur_monotig_id;
-                        eff_size = comb_eff_size;
+                        eff_size_in = comb_eff_size_in / path.size();
+                        eff_size_out = comb_eff_size_out / path.size();
                     }
                 },
                 num_threads);
@@ -1549,7 +1575,7 @@ mask_nodes_by_label_dual(
                 size_t cur_count = all_pvals.size() + 1;
                 auto it = all_pvals.rbegin();
                 for (; it != all_pvals.rend(); ++it) {
-                    const auto& [pval, tig_id, eff_size, node] = *it;
+                    const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = *it;
                     if (tig_id != last_tig_id) {
                         --cur_count;
                         last_tig_id = tig_id;
@@ -1568,7 +1594,9 @@ mask_nodes_by_label_dual(
                 }
 
                 std::for_each(it, all_pvals.rend(), [&](const auto& b) {
-                    const auto& [pval, tig_id, eff_size, node] = b;
+                    const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = b;
+                    long double eff_size
+                        = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
                     num_sig += (eff_size != 0);
                     if (eff_size > 0) {
                         indicator_in[node] = true;
@@ -1582,11 +1610,14 @@ mask_nodes_by_label_dual(
                 // common::logger->trace(
                 //     "First p-value cutoff: {}",
                 //     1.0L - pow(1.0L - config.family_wise_error_rate, 1.0L / num_tests));
-                // for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+                // for (const auto& [pval, tig_id, eff_size_in, eff_size_out, node] : all_pvals) {
                 //     if (tig_id != last_tig_id) {
                 //         ++cur_count;
                 //         last_tig_id = tig_id;
                 //     }
+
+                //     long double eff_size
+                //         = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
 
                 //     // holm bonferroni
                 //     // long double cutoff
@@ -1610,9 +1641,12 @@ mask_nodes_by_label_dual(
                 // }
 
                 // Bonferroni
-                // for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+                // for (const auto& [pval, tig_id, eff_size_in, eff_size_out, node] : all_pvals) {
                 //     if (pval >= config.family_wise_error_rate / num_tests)
                 //         break;
+
+                //     long double eff_size
+                //         = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
 
                 //     if (eff_size > 0) {
                 //         indicator_in[node] = true;
@@ -1624,45 +1658,45 @@ mask_nodes_by_label_dual(
                 // }
             }
         } else {
-            std::vector<long double> numer;
-            numer.reserve(all_pvals.size() + 1);
-            numer.emplace_back(0.0);
-            std::vector<long double> denom;
-            denom.reserve(all_pvals.size() + 1);
-            denom.emplace_back(0.0);
-            for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
-                numer.emplace_back(numer.back() + 1.0L / num_tests);
-                denom.emplace_back(denom.back() + 1.0L / num_tests / pval);
-            }
-            std::vector<std::pair<size_t, size_t>> stack;
-            stack.emplace_back(0, all_pvals.size());
-            while (stack.size()) {
-                auto [begin, end] = stack.back();
-                stack.pop_back();
-                if (end - begin <= 1) {
-                    const auto& [pval, tig_id, eff_size, node] = all_pvals[begin];
-                    if (eff_size > 0) {
-                        indicator_in[node] = true;
-                        ++num_sig;
-                    } else if (eff_size < 0) {
-                        indicator_out[node] = true;
-                        ++num_sig;
-                    }
-                    continue;
-                }
+            // std::vector<long double> numer;
+            // numer.reserve(all_pvals.size() + 1);
+            // numer.emplace_back(0.0);
+            // std::vector<long double> denom;
+            // denom.reserve(all_pvals.size() + 1);
+            // denom.emplace_back(0.0);
+            // for (const auto& [pval, tig_id, eff_size, node] : all_pvals) {
+            //     numer.emplace_back(numer.back() + 1.0L / num_tests);
+            //     denom.emplace_back(denom.back() + 1.0L / num_tests / pval);
+            // }
+            // std::vector<std::pair<size_t, size_t>> stack;
+            // stack.emplace_back(0, all_pvals.size());
+            // while (stack.size()) {
+            //     auto [begin, end] = stack.back();
+            //     stack.pop_back();
+            //     if (end - begin <= 1) {
+            //         const auto& [pval, tig_id, eff_size, node] = all_pvals[begin];
+            //         if (eff_size > 0) {
+            //             indicator_in[node] = true;
+            //             ++num_sig;
+            //         } else if (eff_size < 0) {
+            //             indicator_out[node] = true;
+            //             ++num_sig;
+            //         }
+            //         continue;
+            //     }
 
-                size_t mid = begin + (end - begin) / 2;
-                long double hmp_right
-                    = (numer[end] - numer[mid]) / (denom[end] - denom[mid]);
-                long double hmp_left
-                    = (numer[mid] - numer[begin]) / (denom[mid] - denom[begin]);
+            //     size_t mid = begin + (end - begin) / 2;
+            //     long double hmp_right
+            //         = (numer[end] - numer[mid]) / (denom[end] - denom[mid]);
+            //     long double hmp_left
+            //         = (numer[mid] - numer[begin]) / (denom[mid] - denom[begin]);
 
-                if (hmp_right <= config.family_wise_error_rate * (numer[end] - numer[mid]))
-                    stack.emplace_back(mid, end);
+            //     if (hmp_right <= config.family_wise_error_rate * (numer[end] - numer[mid]))
+            //         stack.emplace_back(mid, end);
 
-                if (hmp_left <= config.family_wise_error_rate * (numer[mid] - numer[begin]))
-                    stack.emplace_back(begin, mid);
-            }
+            //     if (hmp_left <= config.family_wise_error_rate * (numer[mid] - numer[begin]))
+            //         stack.emplace_back(begin, mid);
+            // }
         }
 
         common::logger->trace("Found {} / {} significant p-values.", num_sig, nelem);
