@@ -36,6 +36,8 @@ The indexing workflow in MetaGraph consists of two major steps: graph constructi
 Construct graph
 ---------------
 
+The following workflow can be executed from the `metagraph/metagraph/tests/data` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
+
 Basics
 ^^^^^^
 
