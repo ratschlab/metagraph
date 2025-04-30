@@ -347,11 +347,12 @@ Index k-mer counts
 MetaGraph supports indexing k-mer counts (k-mer abundances), e.g., to represent gene expression in RNA-seq data.
 
 The counts can supplement graphs in any representation.
-To construct a MetaGraph index with k-mer counts (Counting de Bruijn graph), construct a de Bruijn graph as usual (see :ref:`construct_weighted_graph`)
-and then add ``--count-kmers`` to the annotation command, e.g.::
+To index with k-mer counts (Counting de Bruijn graph), add ``--count-kmers`` to the annotation command, e.g.::
 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
                           -o annotation transcripts_1000.fa
+
+If the input sequences were assembled using the instructions for constructing weighted graphs (see :ref:`construct_weighted_graph`), then the counts will be retrieved from the auxiliary `.kmer_counts.gz`. Similarly, if the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input.
 
 Along with the normal (binary) graph annotation ``annotation.column.annodbg``, this command will also create an
 array of corresponding k-mer counts ``annotation.column.annodbg.counts``.
