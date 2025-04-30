@@ -352,7 +352,7 @@ To index with k-mer counts (Counting de Bruijn graph), add ``--count-kmers`` to 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
                           -o annotation transcripts_1000.fa
 
-If the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input. This step can be done more efficiently by pre-computing k-mer counts using MetaGraph (see :ref:`_annotate_with_precounting` below).
+If the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input. This step can be done more efficiently by pre-computing k-mer counts using MetaGraph (see :ref:`annotate_with_precounting` below).
 
 Along with the normal (binary) graph annotation ``annotation.column.annodbg``, this command will also create an
 array of corresponding k-mer counts ``annotation.column.annodbg.counts``.
