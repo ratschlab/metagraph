@@ -110,7 +110,7 @@ occurring at least 5 times in the input::
 
 .. _construct_weighted_graph:
 
-Construct weighted graph
+Construct weighted graph (i.e., a Counting De Bruijn graph)
 """"""""""""""""""""""""
 Since KMC does compute the exact counts of all k-mers from the input, this information can be taken into account when transforming into a de Bruijn graph.
 Specifically, a node weight (k-mer count) can be associated with every k-mer from the graph.
@@ -347,7 +347,7 @@ Index k-mer counts
 MetaGraph supports indexing k-mer counts (k-mer abundances), e.g., to represent gene expression in RNA-seq data.
 
 The counts can supplement graphs in any representation.
-To construct a MetaGraph index with k-mer counts (Counting de Bruijn graph), construct a de Bruijn graph as usual (see :ref:`construct graph`)
+To construct a MetaGraph index with k-mer counts (Counting de Bruijn graph), construct a de Bruijn graph as usual (see :ref:`_construct_weighted_graph`)
 and then add ``--count-kmers`` to the annotation command, e.g.::
 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
