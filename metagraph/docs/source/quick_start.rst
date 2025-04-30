@@ -110,7 +110,7 @@ occurring at least 5 times in the input::
 
 .. _construct_weighted_graph:
 
-Construct weighted graph (i.e., a Counting De Bruijn graph)
+Construct weighted graph
 """"""""""""""""""""""""
 Since KMC does compute the exact counts of all k-mers from the input, this information can be taken into account when transforming into a de Bruijn graph.
 Specifically, a node weight (k-mer count) can be associated with every k-mer from the graph.
@@ -343,7 +343,7 @@ To add a custom annotation label for all k-mers from an input file, add ``--anno
 .. _indexing counts:
 
 Index k-mer counts
-^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
 MetaGraph supports indexing k-mer counts (k-mer abundances), e.g., to represent gene expression in RNA-seq data.
 
 The counts can supplement graphs in any representation.
@@ -352,7 +352,7 @@ To index with k-mer counts (Counting de Bruijn graph), add ``--count-kmers`` to 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
                           -o annotation transcripts_1000.fa
 
-If the input sequences were assembled using the instructions for constructing weighted graphs (see :ref:`construct_weighted_graph`), then the counts will be retrieved from the auxiliary ``.kmer_counts.gz``. Similarly, if the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input.
+If the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input. This step can be done more efficiently by pre-computing k-mer counts using MetaGraph (see :ref:`_annotate_with_precounting` below).
 
 Along with the normal (binary) graph annotation ``annotation.column.annodbg``, this command will also create an
 array of corresponding k-mer counts ``annotation.column.annodbg.counts``.
@@ -376,8 +376,8 @@ For instance, type the following command to compute the *minimum* non-zero count
 
 .. _annotate_with_precounting:
 
-Annotate with pre-counting
-""""""""""""""""""""""""""
+Annotate with pre-counted counts
+""""""""""""""""""""""""""""""""
 Similarly to the case of simple binary annotations considered above, it is recommended to pre-count k-mers for each annotation
 label (typically, sequencing sample) before annotating it. This technique consists in first constructing a *weighted* de Bruijn graph
 (see :ref:`construct_weighted_graph` and note that it can be constructed from raw input sequences as well as from pre-computed KMC counters)
@@ -414,7 +414,7 @@ Note that if flag ``--query-mode counts`` is not passed, the index will be queri
 .. _indexing coordinates:
 
 Index k-mer coordinates
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 Besides indexing k-mer counts, MetaGraph supports indexing k-mer coordinates, that is, their positions in the source input.
 These may represent positions in a genome, positions of a k-mer in a raw SRA experiment (say, each read has 70 k-mers in it;
 then the second k-mer of the third read has coordinate 211). Depending on the target application and the final goal, it is
