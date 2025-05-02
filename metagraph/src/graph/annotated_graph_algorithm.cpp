@@ -564,82 +564,88 @@ mask_nodes_by_label_dual(
     std::pair<long double, long double> nb_params_b;
     std::pair<long double, long double> nb_params_null;
     long double nb_base = 0.0;
-    if (config.test_type == "nbinom_exact") {
-        common::logger->trace("Fitting per-sample negative binomial distributions");
+    //     if (config.test_type == "nbinom_exact") {
+    //         common::logger->trace("Fitting per-sample negative binomial distributions");
 
-#pragma omp parallel for num_threads(num_parallel_files)
-        for (size_t j = 0; j < groups.size(); ++j) {
-            const auto& hist = hists[j];
-            if (hist.size()) {
-                auto [r, p, mu, var] = get_rp([&](const auto& callback) {
-                    for (const auto& [k, c] : hist) {
-                        callback(k, c);
-                    }
-                });
-                nb_params[j] = std::make_pair(r, p);
-                common::logger->trace(
-                    "{}: size: {}\tmax_val: {}\tsample mean: {}\tsample var: "
-                    "{}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
-                    j, sums[j], (hist.end() - 1)->first, mu, var, r * (1 - p) / p,
-                    r * (1 - p) / p / p, r, p);
-            }
-        }
-        // based on this method for combining gamma distributions
-        // https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables
-        long double num_a = 0.0;
-        long double num_b = 0.0;
+    // #pragma omp parallel for num_threads(num_parallel_files)
+    //         for (size_t j = 0; j < groups.size(); ++j) {
+    //             const auto& hist = hists[j];
+    //             if (hist.size()) {
+    //                 auto [r, p, mu, var] = get_rp([&](const auto& callback) {
+    //                     for (const auto& [k, c] : hist) {
+    //                         callback(k, c);
+    //                     }
+    //                 });
+    //                 nb_params[j] = std::make_pair(r, p);
+    //                 common::logger->trace(
+    //                     "{}: size: {}\tmax_val: {}\tsample mean: {}\tsample var: "
+    //                     "{}\tmu: {}\tvar: {}\tmle: r: {}\tp: {}",
+    //                     j, sums[j], (hist.end() - 1)->first, mu, var, r * (1 - p) / p,
+    //                     r * (1 - p) / p / p, r, p);
+    //             }
+    //         }
+    //         // based on this method for combining gamma distributions
+    //         // https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables
+    //         long double num_a = 0.0;
+    //         long double num_b = 0.0;
 
-        long double denom_a = 0.0;
-        long double denom_b = 0.0;
+    //         long double denom_a = 0.0;
+    //         long double denom_b = 0.0;
 
-        for (size_t j = 0; j < groups.size(); ++j) {
-            const auto& [r, p] = nb_params[j];
-            long double theta = (1.0 - p) / p;
-            if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
-                num_b += theta * r;
-                denom_b += theta * theta * r;
-            }
+    //         for (size_t j = 0; j < groups.size(); ++j) {
+    //             const auto& [r, p] = nb_params[j];
+    //             long double theta = (1.0 - p) / p;
+    //             if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
+    //                 num_b += theta * r;
+    //                 denom_b += theta * theta * r;
+    //             }
 
-            if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
-                num_a += theta * r;
-                denom_a += theta * theta * r;
-            }
-        }
+    //             if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
+    //                 num_a += theta * r;
+    //                 denom_a += theta * theta * r;
+    //             }
+    //         }
 
-        long double r_a = num_a * num_a / denom_a;
-        long double theta_a = num_a / r_a;
+    //         long double r_a = num_a * num_a / denom_a;
+    //         long double theta_a = num_a / r_a;
 
-        long double r_b = num_b * num_b / denom_b;
-        long double theta_b = num_b / r_b;
+    //         long double r_b = num_b * num_b / denom_b;
+    //         long double theta_b = num_b / r_b;
 
-        long double r_null = pow(num_a + num_a, 2.0) / (denom_a + denom_b);
-        long double theta_null = (num_a + num_b) / r_null;
+    //         long double r_null = pow(num_a + num_a, 2.0) / (denom_a + denom_b);
+    //         long double theta_null = (num_a + num_b) / r_null;
 
-        nb_params_a.first = r_a;
-        nb_params_b.first = r_b;
-        nb_params_null.first = r_null;
+    //         nb_params_a.first = r_a;
+    //         nb_params_b.first = r_b;
+    //         nb_params_null.first = r_null;
 
-        nb_params_a.second = 1.0 / (theta_a + 1.0);
-        nb_params_b.second = 1.0 / (theta_b + 1.0);
-        nb_params_null.second = 1.0 / (theta_null + 1.0);
+    //         nb_params_a.second = 1.0 / (theta_a + 1.0);
+    //         nb_params_b.second = 1.0 / (theta_b + 1.0);
+    //         nb_params_null.second = 1.0 / (theta_null + 1.0);
 
-        common::logger->trace("In: r: {}\tp: {}", nb_params_a.first, nb_params_a.second);
+    //         common::logger->trace("In: r: {}\tp: {}", nb_params_a.first, nb_params_a.second);
 
-        common::logger->trace("Out: r: {}\tp: {}", nb_params_b.first, nb_params_b.second);
+    //         common::logger->trace("Out: r: {}\tp: {}", nb_params_b.first, nb_params_b.second);
 
-        common::logger->trace("Null: r: {}\tp: {}", nb_params_null.first,
-                              nb_params_null.second);
+    //         common::logger->trace("Null: r: {}\tp: {}", nb_params_null.first,
+    //                               nb_params_null.second);
 
-        nb_base = (lgammal(nb_params_null.first) - lgammal(nb_params_a.first)
-                   - lgammal(nb_params_b.first))
-            / logl(2.0);
-        nb_base += nb_params_a.first * log2l(nb_params_a.second)
-            + nb_params_b.first * log2l(nb_params_b.second)
-            - nb_params_null.first * log2l(nb_params_null.second);
-    }
+    //         nb_base = (lgammal(nb_params_null.first) - lgammal(nb_params_a.first)
+    //                    - lgammal(nb_params_b.first))
+    //             / logl(2.0);
+    //         nb_base += nb_params_a.first * log2l(nb_params_a.second)
+    //             + nb_params_b.first * log2l(nb_params_b.second)
+    //             - nb_params_null.first * log2l(nb_params_null.second);
+    //     }
 
     long double mu1 = static_cast<long double>(in_kmers) / nelem;
     long double mu2 = static_cast<long double>(out_kmers) / nelem;
+    // long double mun = mu1 + mu2;
+
+    // long double var1 = static_cast<long double>(in_sq_kmers) / nelem - mu1 * mu1;
+    // long double var2 = static_cast<long double>(out_sq_kmers) / nelem - mu2 * mu2;
+    // long double varn = static_cast<long double>(total_sq_kmers) / nelem - mun * mun;
+
     long double p = mu1 / (mu1 + mu2);
     long double q = mu2 / (mu1 + mu2);
 
@@ -1249,122 +1255,261 @@ mask_nodes_by_label_dual(
                 }
             }
 
-            auto [r_a, p_a] = nb_params_a;
-            auto [r_b, p_b] = nb_params_b;
-            auto [r_n, p_n] = nb_params_null;
+            // int max_bits = std::numeric_limits<int>::max();
+            int max_bits = 8;
 
-            long double midpoint = r_a * n / (r_a + r_b);
+            auto get_loglik = [&](long double k, long double mu) {
+                if (k == 0 && mu == 0)
+                    return std::make_pair(0.0L, 0.0L);
 
-            auto get_deviance_a = [&](long double s) {
-                if (s == 0)
-                    return r_a * logl(p_a) * -2.0;
+                long double lk = lgammal(k + 1);
+                auto nb_loglik = [&](long double r) {
+                    long double p = r / (r + mu);
+                    return lgammal(k + r) - lk - lgammal(r) + log1pl(-p) * k + r * logl(p);
+                };
 
-                return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
-                        + r_a * (logl(r_a) - logl(p_a)))
-                    * 2.0;
-            };
-
-            auto get_deviance_b = [&](long double t) {
-                if (t == 0)
-                    return r_b * logl(p_b) * -2.0;
-
-                return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
-                        + r_b * (logl(r_b) - logl(p_b)))
-                    * 2.0;
-            };
-
-            auto get_deviance = [&](long double s, long double t) {
-                return get_deviance_a(s) + get_deviance_b(t);
-            };
-
-            long double min_dev
-                = get_deviance(midpoint, static_cast<long double>(n) - midpoint);
-            long double in_dev = get_deviance(in_sum, out_sum);
-
-            if (in_dev > min_dev) {
-                // eff_size = static_cast<long double>(in_sum) - midpoint;
-                pval = 0.0;
-                long double base = nb_base
-                    + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n)) / logl(2.0);
-                double l1pa = log1pl(-p_a) / logl(2.0);
-                double l1pb = log1pl(-p_b) / logl(2.0);
-
-                if (is_discrete) {
-                    long double dev0 = get_deviance(0, n);
-                    long double devn = get_deviance(n, 0);
-
-                    long double min_pval = 0.0;
-                    if (dev0 >= devn) {
-                        size_t s = 0;
-                        size_t t = n;
-                        long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                             - lgammal(s + 1) - lgammal(t + 1))
-                                / logl(2.0)
-                            + s * l1pa + t * l1pb;
-                        min_pval += exp2(base + sbase);
+                long double v = std::numeric_limits<long double>::max();
+                long double r = 0.0L;
+                try {
+                    auto [rt, vt] = boost::math::tools::brent_find_minima(
+                        [&](long double r) { return -nb_loglik(r); },
+                        static_cast<long double>(std::numeric_limits<double>::min()),
+                        1.0L - std::numeric_limits<double>::min(), max_bits);
+                    if (vt < v) {
+                        v = vt;
+                        r = rt;
                     }
+                } catch (...) {
+                }
+                try {
+                    auto [at, vt] = boost::math::tools::brent_find_minima(
+                        [&](long double a) { return -nb_loglik(1.0L / a); },
+                        static_cast<long double>(std::numeric_limits<double>::min()),
+                        1.0L - std::numeric_limits<double>::min(), max_bits);
 
-                    if (dev0 <= devn) {
-                        size_t s = n;
-                        size_t t = 0;
-                        long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                             - lgammal(s + 1) - lgammal(t + 1))
-                                / logl(2.0)
-                            + s * l1pa + t * l1pb;
-                        min_pval += exp2(base + sbase);
+                    if (vt < v) {
+                        v = vt;
+                        r = 1.0L / at;
                     }
-
-                    if (min_pval >= min_pval_cutoff)
-                        return;
+                } catch (...) {
                 }
 
-                {
-                    size_t s = 0;
-                    size_t t = n;
-                    long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                         - lgammal(s + 1) - lgammal(t + 1))
-                            / logl(2.0)
-                        + s * l1pa + t * l1pb;
-                    pval += exp2(base + sbase);
-                    for (++s; s <= n; ++s) {
-                        long double dev = get_deviance(s, t - 1);
-                        if (dev >= in_dev) {
-                            sbase += log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
-                                + log2l(t + 1) + l1pa - l1pb;
-                            --t;
-                            pval += exp2(base + sbase);
-                            if (!config.test_by_unitig && pval >= config.family_wise_error_rate)
-                                break;
-                        } else {
-                            break;
-                        }
-                    }
-                }
+                return std::make_pair(-v, r);
+            };
 
-                if ((config.test_by_unitig || pval < config.family_wise_error_rate)
-                    && get_deviance(n, 0) >= in_dev) {
-                    size_t s = n;
-                    size_t t = 0;
-                    long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                         - lgammal(s + 1) - lgammal(t + 1))
-                            / logl(2.0)
-                        + s * l1pa + t * l1pb;
-                    pval += exp2(base + sbase);
-                    for (++t; t <= n; ++t) {
-                        long double dev = get_deviance(s - 1, t);
-                        if (dev >= in_dev) {
-                            sbase -= log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
-                                + log2l(t + 1) + l1pa - l1pb;
-                            --s;
-                            pval += exp2(base + sbase);
-                            if (!config.test_by_unitig && pval >= config.family_wise_error_rate)
-                                break;
-                        } else {
-                            break;
-                        }
-                    }
-                }
+            // wald test
+
+            // long double z_stat = 0.0;
+            // long double theta_a = static_cast<long double>(in_sum) / in_kmers;
+            // long double theta_b = static_cast<long double>(out_sum) / out_kmers;
+            // // long double theta_n = static_cast<long double>(n) / total_kmers;
+
+            auto get_wald_stat = [&](long double k, long double nl) {
+                if (k == 0)
+                    return std::make_pair(0.0L, 0.0L);
+
+                long double theta = k / nl;
+                long double r = get_loglik(k, k).second;
+                // long double var = theta / nl + theta * theta / r;
+                long double finf
+                    = r * nl * r * nl / (r + k) / (r + k) * (1.0L / k + 1.0L / r);
+                long double var = 1.0L / finf;
+                return std::make_pair(theta, var);
+                //     // long double var = theta_n / nl + theta_n * theta_n / r;
+                //     // return pow(theta - theta_n, 2.0) / var;
+            };
+
+            auto [theta_a, var_a] = get_wald_stat(in_sum, in_kmers);
+            auto [theta_b, var_b] = get_wald_stat(out_sum, out_kmers);
+            long double chi_stat = pow(theta_a - theta_b, 2.0) / (var_a + var_b);
+
+            // long double pval
+            //     = boost::math::cdf(
+            //           boost::math::complement(boost::math::normal_distribution(), wald_stat))
+            //     * 2;
+
+            // if (in_sum > 0)
+            //     chi_stat += get_wald_stat(in_sum, in_kmers);
+
+            // if (out_sum > 0)
+            //     chi_stat += get_wald_stat(out_sum, out_kmers);
+
+            // long double alt_loglik
+            //     = get_loglik(in_sum, in_sum).first + get_loglik(out_sum, out_sum).first;
+
+            // auto get_null_loglik = [&]() {
+            //     return -boost::math::tools::brent_find_minima(
+            //                 [&](long double theta) {
+            //                     return -get_loglik(in_sum, theta * in_kmers).first
+            //                         - get_loglik(out_sum, theta * out_kmers).first;
+            //                 },
+            //                 static_cast<long double>(std::numeric_limits<double>::min()),
+            //                 1.0L - std::numeric_limits<double>::min(), max_bits)
+            //                 .second;
+            //     // auto get_theta = [&](long double ra, long double rb, long double na,
+            //     //                      long double nb, long double xa, long double xb) {
+            //     //     long double a = na * nb * (ra + rb);
+            //     //     long double b = ra * nb * xa + na * rb * xb + ra * rb * (na + nb);
+            //     //     long double c = ra * rb * (xa + xb);
+            //     //     long double d = sqrtl(b * b - a * c * 4.0L);
+            //     //     long double r1 = (-b + d) / 2.0L / a;
+            //     //     long double r2 = (-b - d) / 2.0L / a;
+            //     //     if (r1 <= 0 && r2 <= 0) {
+            //     //         common::logger->error("r: {},{}\tx: {},{}\tn: {},{}", ra, rb, xa,
+            //     //                               xb, na, nb);
+            //     //         throw std::runtime_error("no lambda works");
+            //     //     }
+            //     //     return r1 > 0 ? r1 : r2;
+            //     // };
+
+            //     // long double theta = (static_cast<long double>(in_sum) / in_kmers
+            //     //                      + static_cast<long double>(out_sum) / out_kmers)
+            //     //     / 2;
+            //     // long double v = -std::numeric_limits<long double>::max();
+            //     // while (true) {
+            //     //     auto [va, ra] = get_loglik(in_sum, theta * in_kmers);
+            //     //     auto [vb, rb] = get_loglik(out_sum, theta * out_kmers);
+            //     //     theta = get_theta(ra, rb, in_kmers, out_kmers, in_sum, out_sum);
+            //     //     long double v_new = va + vb;
+            //     //     if (abs(v_new - v) / v_new < 1e-5)
+            //     //         break;
+
+            //     //     v = v_new;
+            //     // }
+
+            //     // return v;
+            // };
+
+            // long double null_loglik = get_null_loglik();
+            // long double chi_stat = (alt_loglik - null_loglik) * 2;
+
+            if (chi_stat <= 0.0) {
+                common::logger->error("{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
+                throw std::runtime_error("FOSDOF");
             }
+
+            pval = get_chi2_pval(1.0, chi_stat);
+
+            if (pval == 0) {
+                common::logger->error("{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
+            }
+
+            // auto [r_a, p_a] = nb_params_a;
+            // auto [r_b, p_b] = nb_params_b;
+            // auto [r_n, p_n] = nb_params_null;
+
+            // long double midpoint = r_a * n / (r_a + r_b);
+
+            // auto get_deviance_a = [&](long double s) {
+            //     if (s == 0)
+            //         return r_a * logl(p_a) * -2.0;
+
+            //     return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
+            //             + r_a * (logl(r_a) - logl(p_a)))
+            //         * 2.0;
+            // };
+
+            // auto get_deviance_b = [&](long double t) {
+            //     if (t == 0)
+            //         return r_b * logl(p_b) * -2.0;
+
+            //     return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
+            //             + r_b * (logl(r_b) - logl(p_b)))
+            //         * 2.0;
+            // };
+
+            // auto get_deviance = [&](long double s, long double t) {
+            //     return get_deviance_a(s) + get_deviance_b(t);
+            // };
+
+            // long double min_dev
+            //     = get_deviance(midpoint, static_cast<long double>(n) - midpoint);
+            // long double in_dev = get_deviance(in_sum, out_sum);
+
+            // if (in_dev > min_dev) {
+            //     // eff_size = static_cast<long double>(in_sum) - midpoint;
+            //     pval = 0.0;
+            //     long double base = nb_base
+            //         + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n)) / logl(2.0);
+            //     double l1pa = log1pl(-p_a) / logl(2.0);
+            //     double l1pb = log1pl(-p_b) / logl(2.0);
+
+            //     if (is_discrete) {
+            //         long double dev0 = get_deviance(0, n);
+            //         long double devn = get_deviance(n, 0);
+
+            //         long double min_pval = 0.0;
+            //         if (dev0 >= devn) {
+            //             size_t s = 0;
+            //             size_t t = n;
+            //             long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+            //                                  - lgammal(s + 1) - lgammal(t + 1))
+            //                     / logl(2.0)
+            //                 + s * l1pa + t * l1pb;
+            //             min_pval += exp2(base + sbase);
+            //         }
+
+            //         if (dev0 <= devn) {
+            //             size_t s = n;
+            //             size_t t = 0;
+            //             long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+            //                                  - lgammal(s + 1) - lgammal(t + 1))
+            //                     / logl(2.0)
+            //                 + s * l1pa + t * l1pb;
+            //             min_pval += exp2(base + sbase);
+            //         }
+
+            //         if (min_pval >= min_pval_cutoff)
+            //             return;
+            //     }
+
+            //     {
+            //         size_t s = 0;
+            //         size_t t = n;
+            //         long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+            //                              - lgammal(s + 1) - lgammal(t + 1))
+            //                 / logl(2.0)
+            //             + s * l1pa + t * l1pb;
+            //         pval += exp2(base + sbase);
+            //         for (++s; s <= n; ++s) {
+            //             long double dev = get_deviance(s, t - 1);
+            //             if (dev >= in_dev) {
+            //                 sbase += log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
+            //                     + log2l(t + 1) + l1pa - l1pb;
+            //                 --t;
+            //                 pval += exp2(base + sbase);
+            //                 if (!config.test_by_unitig && pval >= config.family_wise_error_rate)
+            //                     break;
+            //             } else {
+            //                 break;
+            //             }
+            //         }
+            //     }
+
+            //     if ((config.test_by_unitig || pval < config.family_wise_error_rate)
+            //         && get_deviance(n, 0) >= in_dev) {
+            //         size_t s = n;
+            //         size_t t = 0;
+            //         long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+            //                              - lgammal(s + 1) - lgammal(t + 1))
+            //                 / logl(2.0)
+            //             + s * l1pa + t * l1pb;
+            //         pval += exp2(base + sbase);
+            //         for (++t; t <= n; ++t) {
+            //             long double dev = get_deviance(s - 1, t);
+            //             if (dev >= in_dev) {
+            //                 sbase -= log2l(r_a + s) - log2l(r_b + t) - log2l(s + 1)
+            //                     + log2l(t + 1) + l1pa - l1pb;
+            //                 --s;
+            //                 pval += exp2(base + sbase);
+            //                 if (!config.test_by_unitig && pval >= config.family_wise_error_rate)
+            //                     break;
+            //             } else {
+            //                 break;
+            //             }
+            //         }
+            //     }
+            // }
         } else if (config.test_type == "mwu") {
             if (is_discrete) {
                 size_t n = 0;
@@ -1430,7 +1575,6 @@ mask_nodes_by_label_dual(
             generate_b([&](long double c) { eff_size_out += c; });
 
             pval = mann_whitneyu(generate_a, generate_b).first;
-
         } else if (config.test_type == "cmh" || config.test_type == "cmh_binary"
                    || config.test_type == "fisher_binary") {
             int64_t in_sum = 0;
