@@ -17,6 +17,7 @@
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/csr_matrix/csr_matrix_flat.hpp"
 #include "annotation/int_matrix/row_disk/int_row_disk.hpp"
 #include "annotation/int_matrix/row_disk/coord_row_disk.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
@@ -57,6 +58,8 @@ typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<matrix::BRWT,
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
+typedef StaticBinRelAnnotator<matrix::CSRMatrixFlat, std::string> IntRowFlatAnnotator;
+
 typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::string> IntRowDiffDiskAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string> RowDiffDiskCoordAnnotator;
@@ -96,6 +99,8 @@ template <>
 inline const std::string RowDiffDiskAnnotator::kExtension = ".row_diff_disk.annodbg";
 template <>
 inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
+template <>
+inline const std::string IntRowFlatAnnotator::kExtension = ".int_row_flat.annodbg";
 template <>
 inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
 template <>

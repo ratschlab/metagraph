@@ -35,6 +35,7 @@ class Config {
     bool enumerate_out_sequences = false;
     bool to_gfa = false;
     bool output_compacted = false;
+    bool output_pvals = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
@@ -61,6 +62,7 @@ class Config {
     bool aggregate_columns = false;
     bool coordinates = false;
     bool advanced = false;
+    bool clean_ztp = false;
 
     unsigned int k = 3;
 
@@ -209,6 +211,7 @@ class Config {
         RBFish,
         RbBRWT,
         IntBRWT,
+        IntRowFlat,
         IntRowDiffBRWT,
         IntRowDiffDisk,
         ColumnCoord,
