@@ -152,7 +152,7 @@ try_compile(MODE_TI
 )
 if(MODE_TI)
   add_definitions(-DMODE_TI)
-  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
   endif()
 endif()
