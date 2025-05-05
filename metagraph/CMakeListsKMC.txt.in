@@ -38,7 +38,7 @@ ${KMC_MAIN_DIR}/raduls_avx2.cpp
 ${KMC_MAIN_DIR}/raduls_avx.cpp
 )
 
-if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse2.cpp
     PROPERTIES COMPILE_FLAGS "-msse2")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse41.cpp
