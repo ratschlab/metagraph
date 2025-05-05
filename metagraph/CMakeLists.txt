@@ -334,6 +334,8 @@ target_compile_options(zlib
     -Wno-implicit-fallthrough
     -Wno-deprecated-non-prototype
     -Wno-unknown-warning-option
+    -Wno-unused-parameter
+    -Wno-maybe-uninitialized
 )
 
 add_library(progress_bar STATIC
