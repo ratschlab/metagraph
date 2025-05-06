@@ -8,6 +8,7 @@
 #include "bit_vector_dyn.hpp"
 #include "bit_vector_sd.hpp"
 #include "vector_algorithm.hpp"
+#include "common/threads/threading.hpp"
 
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
@@ -170,8 +171,9 @@ bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
         // sparse
         result = sdsl::bit_vector(size(), false);
 
+        #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t r = 1; r <= m; ++r) {
-            result[select1(r)] = true;
+            set_bit(result.data(), select1(r), true, std::memory_order_relaxed);
         }
 
     } else if ((size() - m)
@@ -180,22 +182,25 @@ bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
         result = sdsl::bit_vector(size(), true);
 
         uint64_t num_zeros = size() - m;
+
+        #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t r = 1; r <= num_zeros; ++r) {
-            result[select0(r)] = false;
+            unset_bit(result.data(), select0(r), true, std::memory_order_relaxed);
         }
 
     } else {
         // moderate density
         result.resize(size());
 
-        uint64_t i;
-        const uint64_t end = size();
         uint64_t *data = result.data();
-        for (i = 0; i + 64 <= end; i += 64, ++data) {
-            *data = get_int(i, 64);
+        size_t num_full_blocks = size() / 64;
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (size_t j = 0; j < num_full_blocks; ++j) {
+            *(data + j) = get_int(j * 64, 64);
         }
-        if (i < size()) {
-            *data = get_int(i, size() - i);
+        if (size() % 64) {
+            size_t i = num_full_blocks * 64;
+            *(data + num_full_blocks) = get_int(i, size() - i);
         }
     }
 
