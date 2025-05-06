@@ -164,6 +164,7 @@ void bit_vector::call_ones_adaptive(uint64_t begin, uint64_t end,
 
 sdsl::bit_vector
 bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
+    std::atomic_thread_fence(std::memory_order_release);
     sdsl::bit_vector result;
 
     const uint64_t m = num_set_bits();
@@ -203,6 +204,7 @@ bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
             *(data + num_full_blocks) = get_int(i, size() - i);
         }
     }
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     return result;
 }
