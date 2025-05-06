@@ -1680,8 +1680,8 @@ mask_nodes_by_label_dual(
                             = all_pvals[idx];
                         pval = comb_pval;
                         monotig_id = cur_monotig_id;
-                        eff_size_in = comb_eff_size_in / path.size();
-                        eff_size_out = comb_eff_size_out / path.size();
+                        eff_size_in = comb_eff_size_in;
+                        eff_size_out = comb_eff_size_out;
                     }
                 },
                 num_threads);
