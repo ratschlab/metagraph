@@ -1088,13 +1088,15 @@ std::string BOSS::decode(const std::vector<TAlphabet> &seq_encoded) const {
 
 template <class WaveletTree, class BitVector>
 void convert(wavelet_tree **W_, bit_vector **last_) {
-    wavelet_tree *W_new = new WaveletTree((*W_)->convert_to<WaveletTree>());
-    delete *W_;
-    *W_ = W_new;
-
+    common::logger->trace("Converting last");
     bit_vector *last_new = new BitVector((*last_)->convert_to<BitVector>());
     delete *last_;
     *last_ = last_new;
+
+    common::logger->trace("Converting W");
+    wavelet_tree *W_new = new WaveletTree((*W_)->convert_to<WaveletTree>());
+    delete *W_;
+    *W_ = W_new;
 }
 
 void BOSS::switch_state(State new_state) {
