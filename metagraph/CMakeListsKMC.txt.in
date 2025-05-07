@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 2.8.12)
 
 project(KMC)
 
-add_compile_options(-Wall -O3 -m64 -pthread -std=c++11)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|arm64)")
+  add_compile_options(-Wall -O3 -pthread -std=c++11)
+else()
+  add_compile_options(-Wall -O3 -m64 -pthread -std=c++11)
+endif()
 
 if(@BUILD_STATIC@)
 string(APPEND CMAKE_CXX_FLAGS " -static ")
@@ -38,7 +42,7 @@ ${KMC_MAIN_DIR}/raduls_avx2.cpp
 ${KMC_MAIN_DIR}/raduls_avx.cpp
 )
 
-if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse2.cpp
     PROPERTIES COMPILE_FLAGS "-msse2")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse41.cpp
