@@ -1106,12 +1106,12 @@ mask_nodes_by_label_dual(
             for (const auto& [j, c] : row) {
                 if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     ++count_out;
-                    rel_out_count += static_cast<long double>(c) / out_kmers;
+                    rel_out_count += static_cast<long double>(c) / sums[j];
                 }
 
                 if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                     ++count_in;
-                    rel_in_count += static_cast<long double>(c) / in_kmers;
+                    rel_in_count += static_cast<long double>(c) / sums[j];
                 }
             }
 
@@ -1121,10 +1121,10 @@ mask_nodes_by_label_dual(
                 && count_out <= config.max_out_recurrence;
 
             node_index node = AnnotatedDBG::anno_to_graph_index(row_i);
-            if (in_kmer && rel_in_count > rel_out_count)
+            if (in_kmer && rel_in_count / num_labels_in > rel_out_count / num_labels_out)
                 set_bit(indicator_in.data(), node, true, std::memory_order_relaxed);
 
-            if (out_kmer && rel_in_count < rel_out_count)
+            if (out_kmer && rel_in_count / num_labels_in < rel_out_count / num_labels_out)
                 set_bit(indicator_out.data(), node, true, std::memory_order_relaxed);
 
             return;
