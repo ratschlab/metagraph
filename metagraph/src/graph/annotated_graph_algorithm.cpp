@@ -98,7 +98,7 @@ void push_back(PValStorage& v, double val) {
 }
 
 template <typename Generator>
-std::tuple<long double, long double, long double, long double>
+std::tuple<long double, long double, long double, long double, long double>
 get_rp(const Generator& generate) {
     long double mu = 0;
     long double var = 0;
@@ -115,7 +115,7 @@ get_rp(const Generator& generate) {
     if (mu >= var) {
         common::logger->warn("Fit failed, falling back to Poisson: mu: {} >= var: {}", mu,
                              var);
-        return { 0.0, 1.0, mu, var };
+        return { 0.0, 1.0, mu, var, 0.0 };
     }
 
     auto get_l = [&](long double r) {
@@ -158,20 +158,31 @@ get_rp(const Generator& generate) {
     }
 
     long double r = 0.0;
+    long double ll = 0.0;
     if (r1 == 0 && r2 == 0) {
         throw std::runtime_error("Failed to fit");
     } else if (r1 == 0) {
         r = r2;
+        ll = get_l(r);
     } else if (r2 == 0) {
         r = r1;
+        ll = get_l(r);
     } else {
-        r = get_l(r1) > get_l(r2) ? r1 : r2;
+        long double ll1 = get_l(r1);
+        long double ll2 = get_l(r2);
+        if (ll1 > ll2) {
+            r = r1;
+            ll = ll1;
+        } else {
+            r = r2;
+            ll = ll2;
+        }
     }
 
     long double p = r / (r + mu);
     // long double p = 0.1;
     // r = p * mu / (1.0 - p);
-    return { r, p, mu, var };
+    return { r, p, mu, var, ll };
 };
 
 template <class G1, class G2>
@@ -498,6 +509,8 @@ mask_nodes_by_label_dual(
     std::vector<size_t> n_kmers(groups.size());
     std::vector<uint64_t> sums(groups.size());
     std::vector<uint64_t> sq_sums(groups.size());
+    std::vector<long double> means(groups.size());
+    std::vector<long double> vars(groups.size());
     uint64_t max_in_obs_val = 0.0;
     uint64_t max_out_obs_val = 0.0;
 
@@ -534,6 +547,9 @@ mask_nodes_by_label_dual(
         common::logger->trace(
             "{}: n_unique: {}\tsum: {}\tmax_obs: {}\tmin_cutoff: {}\tmax_cutof: {}", j,
             n_kmers[j], sums[j], max_obs_vals[j], min_counts[j], check_cutoff[j]);
+
+        means[j] = sums[j] / nelem;
+        vars[j] = sq_sums[j] / nelem - sums[j] * sums[j];
     }
 
     common::logger->trace("Number of kept unique k-mers: {}\tNumber of kept k-mers: {}",
@@ -559,11 +575,11 @@ mask_nodes_by_label_dual(
         true, is_primary ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC);
 
     // precompute negative binomial fits for poisson_bayes and nbinom_exact tests
-    std::vector<std::pair<long double, long double>> nb_params(groups.size());
-    std::pair<long double, long double> nb_params_a;
-    std::pair<long double, long double> nb_params_b;
-    std::pair<long double, long double> nb_params_null;
-    long double nb_base = 0.0;
+    // std::vector<std::pair<long double, long double>> nb_params(groups.size());
+    // std::pair<long double, long double> nb_params_a;
+    // std::pair<long double, long double> nb_params_b;
+    // std::pair<long double, long double> nb_params_null;
+    // long double nb_base = 0.0;
     //     if (config.test_type == "nbinom_exact") {
     //         common::logger->trace("Fitting per-sample negative binomial distributions");
 
@@ -645,6 +661,37 @@ mask_nodes_by_label_dual(
     // long double var1 = static_cast<long double>(in_sq_kmers) / nelem - mu1 * mu1;
     // long double var2 = static_cast<long double>(out_sq_kmers) / nelem - mu2 * mu2;
     // long double varn = static_cast<long double>(total_sq_kmers) / nelem - mun * mun;
+
+    std::vector<long double> scale_factors(groups.size(), 1.0);
+    std::vector<long double> scaled_sums(groups.size());
+    long double scaled_in_kmers = 0.0;
+    long double scaled_out_kmers = 0.0;
+    if (config.test_type == "nbinom_exact") {
+        long double target_p = 0.0;
+        for (size_t j = 0; j < groups.size(); ++j) {
+            long double p = means[j] / vars[j];
+            common::logger->trace("{}: p = {}", j, p);
+            target_p += 1.0L / p;
+        }
+        target_p = static_cast<long double>(groups.size()) / target_p;
+        common::logger->trace("Scaling distributions to p = {}", target_p);
+
+        for (size_t j = 0; j < groups.size(); ++j) {
+            long double p = means[j] / vars[j];
+            scale_factors[j] = p / target_p;
+            scaled_sums[j] = scale_factors[j] * sums[j];
+            if (groups[j] == Group::IN || groups[j] == Group::BOTH)
+                scaled_in_kmers += scaled_sums[j];
+
+            if (groups[j] == Group::OUT || groups[j] == Group::BOTH)
+                scaled_out_kmers += scaled_sums[j];
+        }
+
+        common::logger->trace("Scaling factors: {}", fmt::join(scale_factors, ","));
+    } else {
+        scaled_in_kmers = in_kmers;
+        scaled_out_kmers = out_kmers;
+    }
 
     long double p = mu1 / (mu1 + mu2);
     long double q = mu2 / (mu1 + mu2);
@@ -866,187 +913,187 @@ mask_nodes_by_label_dual(
 
     std::vector<std::pair<long double, size_t>> min_pvals;
     long double min_pval_cutoff = 1.0;
-    if (is_discrete) {
-        {
-            std::vector<std::vector<std::pair<long double, size_t>>> min_pvals_b(
-                num_threads + 1);
-            generate_clean_rows([&](uint64_t, const auto& row, uint64_t bucket_id) {
-                size_t n = 0;
-                int64_t in_sum = 0;
-                int64_t out_sum = 0;
-                if (config.test_type == "mwu" || config.test_type == "poisson_binom") {
-                    for (const auto& [j, c] : row) {
-                        n += static_cast<int64_t>(groups[j] != Group::OTHER)
-                            + (groups[j] == Group::BOTH);
-                    }
-                } else {
-                    for (const auto& [j, c] : row) {
-                        if (groups[j] == Group::IN || groups[j] == Group::OUT)
-                            in_sum += c;
+    // if (is_discrete) {
+    //     {
+    //         std::vector<std::vector<std::pair<long double, size_t>>> min_pvals_b(
+    //             num_threads + 1);
+    //         generate_clean_rows([&](uint64_t, const auto& row, uint64_t bucket_id) {
+    //             size_t n = 0;
+    //             int64_t in_sum = 0;
+    //             int64_t out_sum = 0;
+    //             if (config.test_type == "mwu" || config.test_type == "poisson_binom") {
+    //                 for (const auto& [j, c] : row) {
+    //                     n += static_cast<int64_t>(groups[j] != Group::OTHER)
+    //                         + (groups[j] == Group::BOTH);
+    //                 }
+    //             } else {
+    //                 for (const auto& [j, c] : row) {
+    //                     if (groups[j] == Group::IN || groups[j] == Group::OUT)
+    //                         in_sum += c;
 
-                        if (groups[j] == Group::OUT || groups[j] == Group::OUT)
-                            out_sum += c;
-                    }
-                    n = in_sum + out_sum;
-                }
+    //                     if (groups[j] == Group::OUT || groups[j] == Group::OUT)
+    //                         out_sum += c;
+    //                 }
+    //                 n = in_sum + out_sum;
+    //             }
 
-                auto& min_pval_b = min_pvals_b[bucket_id];
+    //             auto& min_pval_b = min_pvals_b[bucket_id];
 
-                if (min_pval_b.size() <= n)
-                    min_pval_b.resize(n + 1, std::make_pair(1.0L, 0));
+    //             if (min_pval_b.size() <= n)
+    //                 min_pval_b.resize(n + 1, std::make_pair(1.0L, 0));
 
-                if (!min_pval_b[n].second) {
-                    // compute the min-attainable p-value
-                    if (config.test_type == "poisson_binom") {
-                        size_t front = n - std::min(n, num_labels_out);
-                        size_t back = std::min(n, num_labels_in);
-                        assert(s >= front);
-                        long double pval0 = pb_pvals[n][front];
-                        long double pvaln = pb_pvals[n][back];
-                        min_pval_b[n].first = std::min(pval0, pvaln)
-                            * (1 + (pval0 == pvaln && front != back));
-                    } else if (config.test_type == "poisson_exact") {
-                        boost::math::binomial bdist(n, p);
-                        auto get_deviance = [&](long double y, long double mu) {
-                            y += 1e-8;
-                            mu += 1e-8;
-                            return 2 * (y * log(y / mu) - y + mu);
-                        };
+    //             if (!min_pval_b[n].second) {
+    //                 // compute the min-attainable p-value
+    //                 if (config.test_type == "poisson_binom") {
+    //                     size_t front = n - std::min(n, num_labels_out);
+    //                     size_t back = std::min(n, num_labels_in);
+    //                     assert(s >= front);
+    //                     long double pval0 = pb_pvals[n][front];
+    //                     long double pvaln = pb_pvals[n][back];
+    //                     min_pval_b[n].first = std::min(pval0, pvaln)
+    //                         * (1 + (pval0 == pvaln && front != back));
+    //                 } else if (config.test_type == "poisson_exact") {
+    //                     boost::math::binomial bdist(n, p);
+    //                     auto get_deviance = [&](long double y, long double mu) {
+    //                         y += 1e-8;
+    //                         mu += 1e-8;
+    //                         return 2 * (y * log(y / mu) - y + mu);
+    //                     };
 
-                        long double dev0 = get_deviance(0, mu1) + get_deviance(n, mu2);
-                        long double devn = get_deviance(n, mu1) + get_deviance(0, mu2);
+    //                     long double dev0 = get_deviance(0, mu1) + get_deviance(n, mu2);
+    //                     long double devn = get_deviance(n, mu1) + get_deviance(0, mu2);
 
-                        min_pval_b[n].first = 0.0L;
-                        if (dev0 >= devn)
-                            min_pval_b[n].first += boost::math::pdf(bdist, 0);
+    //                     min_pval_b[n].first = 0.0L;
+    //                     if (dev0 >= devn)
+    //                         min_pval_b[n].first += boost::math::pdf(bdist, 0);
 
-                        if (dev0 <= devn)
-                            min_pval_b[n].first += boost::math::pdf(bdist, n);
+    //                     if (dev0 <= devn)
+    //                         min_pval_b[n].first += boost::math::pdf(bdist, n);
 
-                    } else if (config.test_type == "nbinom_exact") {
-                        auto [r_a, p_a] = nb_params_a;
-                        auto [r_b, p_b] = nb_params_b;
-                        auto [r_n, p_n] = nb_params_null;
+    //                 } else if (config.test_type == "nbinom_exact") {
+    //                     auto [r_a, p_a] = nb_params_a;
+    //                     auto [r_b, p_b] = nb_params_b;
+    //                     auto [r_n, p_n] = nb_params_null;
 
-                        long double base = nb_base
-                            + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
-                                / logl(2.0);
-                        double l1pa = log1pl(-p_a) / logl(2.0);
-                        double l1pb = log1pl(-p_b) / logl(2.0);
+    //                     long double base = nb_base
+    //                         + (lgammal(n + 1) - lgammal(r_n + n) - n * log1pl(-p_n))
+    //                             / logl(2.0);
+    //                     double l1pa = log1pl(-p_a) / logl(2.0);
+    //                     double l1pb = log1pl(-p_b) / logl(2.0);
 
-                        auto get_deviance_a = [&](long double s) {
-                            if (s == 0)
-                                return r_a * logl(p_a) * -2.0;
+    //                     auto get_deviance_a = [&](long double s) {
+    //                         if (s == 0)
+    //                             return r_a * logl(p_a) * -2.0;
 
-                            return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
-                                    + r_a * (logl(r_a) - logl(p_a)))
-                                * 2.0;
-                        };
+    //                         return ((logl(s) - log1pl(-p_a)) * s - (r_a + s) * logl(r_a + s)
+    //                                 + r_a * (logl(r_a) - logl(p_a)))
+    //                             * 2.0;
+    //                     };
 
-                        auto get_deviance_b = [&](long double t) {
-                            if (t == 0)
-                                return r_b * logl(p_b) * -2.0;
+    //                     auto get_deviance_b = [&](long double t) {
+    //                         if (t == 0)
+    //                             return r_b * logl(p_b) * -2.0;
 
-                            return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
-                                    + r_b * (logl(r_b) - logl(p_b)))
-                                * 2.0;
-                        };
+    //                         return ((logl(t) - log1pl(-p_b)) * t - (r_b + t) * logl(r_b + t)
+    //                                 + r_b * (logl(r_b) - logl(p_b)))
+    //                             * 2.0;
+    //                     };
 
-                        auto get_deviance = [&](long double s, long double t) {
-                            return get_deviance_a(s) + get_deviance_b(t);
-                        };
+    //                     auto get_deviance = [&](long double s, long double t) {
+    //                         return get_deviance_a(s) + get_deviance_b(t);
+    //                     };
 
-                        long double dev0 = get_deviance(0, n);
-                        long double devn = get_deviance(n, 0);
+    //                     long double dev0 = get_deviance(0, n);
+    //                     long double devn = get_deviance(n, 0);
 
-                        min_pval_b[n].first = 0.0;
-                        if (dev0 >= devn) {
-                            size_t s = 0;
-                            size_t t = n;
-                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                 - lgammal(s + 1) - lgammal(t + 1))
-                                    / logl(2.0)
-                                + s * l1pa + t * l1pb;
-                            min_pval_b[n].first += exp2(base + sbase);
-                        }
+    //                     min_pval_b[n].first = 0.0;
+    //                     if (dev0 >= devn) {
+    //                         size_t s = 0;
+    //                         size_t t = n;
+    //                         long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+    //                                              - lgammal(s + 1) - lgammal(t + 1))
+    //                                 / logl(2.0)
+    //                             + s * l1pa + t * l1pb;
+    //                         min_pval_b[n].first += exp2(base + sbase);
+    //                     }
 
-                        if (dev0 <= devn) {
-                            size_t s = n;
-                            size_t t = 0;
-                            long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
-                                                 - lgammal(s + 1) - lgammal(t + 1))
-                                    / logl(2.0)
-                                + s * l1pa + t * l1pb;
-                            min_pval_b[n].first += exp2(base + sbase);
-                        }
-                    } else if (config.test_type == "mwu") {
-                        std::vector<size_t> vals(groups.size());
-                        auto it = vals.begin();
-                        for (size_t i = n; i > 0; --i, ++it) {
-                            *it = i;
-                        }
-                        auto generate_a_in = [&](const auto& callback) {
-                            std::for_each(vals.begin(), vals.begin() + n,
-                                          [&](size_t i) { callback(i); });
-                        };
-                        auto generate_b_in = [&](const auto& callback) {
-                            std::for_each(vals.begin() + n, vals.end(),
-                                          [&](size_t i) { callback(i); });
-                        };
-                        auto generate_a_out = [&](const auto& callback) {
-                            std::for_each(vals.begin() + n, vals.end(),
-                                          [&](size_t i) { callback(i); });
-                        };
-                        auto generate_b_out = [&](const auto& callback) {
-                            std::for_each(vals.begin(), vals.begin() + n,
-                                          [&](size_t i) { callback(i); });
-                        };
+    //                     if (dev0 <= devn) {
+    //                         size_t s = n;
+    //                         size_t t = 0;
+    //                         long double sbase = (lgammal(r_a + s) + lgammal(r_b + t)
+    //                                              - lgammal(s + 1) - lgammal(t + 1))
+    //                                 / logl(2.0)
+    //                             + s * l1pa + t * l1pb;
+    //                         min_pval_b[n].first += exp2(base + sbase);
+    //                     }
+    //                 } else if (config.test_type == "mwu") {
+    //                     std::vector<size_t> vals(groups.size());
+    //                     auto it = vals.begin();
+    //                     for (size_t i = n; i > 0; --i, ++it) {
+    //                         *it = i;
+    //                     }
+    //                     auto generate_a_in = [&](const auto& callback) {
+    //                         std::for_each(vals.begin(), vals.begin() + n,
+    //                                       [&](size_t i) { callback(i); });
+    //                     };
+    //                     auto generate_b_in = [&](const auto& callback) {
+    //                         std::for_each(vals.begin() + n, vals.end(),
+    //                                       [&](size_t i) { callback(i); });
+    //                     };
+    //                     auto generate_a_out = [&](const auto& callback) {
+    //                         std::for_each(vals.begin() + n, vals.end(),
+    //                                       [&](size_t i) { callback(i); });
+    //                     };
+    //                     auto generate_b_out = [&](const auto& callback) {
+    //                         std::for_each(vals.begin(), vals.begin() + n,
+    //                                       [&](size_t i) { callback(i); });
+    //                     };
 
-                        long double pval0
-                            = mann_whitneyu(generate_a_out, generate_b_out).first;
-                        long double pvaln = mann_whitneyu(generate_a_in, generate_b_in).first;
-                        min_pval_b[n].first = std::min(pval0, pvaln);
-                    }
-                }
-                ++min_pval_b[n].second;
-            });
-            size_t max_size = 0;
-            for (const auto& min_pvals : min_pvals_b) {
-                max_size = std::max(max_size, min_pvals.size());
-            }
-            min_pvals.resize(max_size, std::make_pair(1.0L, 0));
-            for (const auto& min_pval_b : min_pvals_b) {
-                for (size_t n = 0; n < min_pval_b.size(); ++n) {
-                    min_pvals[n].first = std::min(min_pvals[n].first, min_pval_b[n].first);
-                    min_pvals[n].second += min_pval_b[n].second;
-                }
-            }
-        }
+    //                     long double pval0
+    //                         = mann_whitneyu(generate_a_out, generate_b_out).first;
+    //                     long double pvaln = mann_whitneyu(generate_a_in, generate_b_in).first;
+    //                     min_pval_b[n].first = std::min(pval0, pvaln);
+    //                 }
+    //             }
+    //             ++min_pval_b[n].second;
+    //         });
+    //         size_t max_size = 0;
+    //         for (const auto& min_pvals : min_pvals_b) {
+    //             max_size = std::max(max_size, min_pvals.size());
+    //         }
+    //         min_pvals.resize(max_size, std::make_pair(1.0L, 0));
+    //         for (const auto& min_pval_b : min_pvals_b) {
+    //             for (size_t n = 0; n < min_pval_b.size(); ++n) {
+    //                 min_pvals[n].first = std::min(min_pvals[n].first, min_pval_b[n].first);
+    //                 min_pvals[n].second += min_pval_b[n].second;
+    //             }
+    //         }
+    //     }
 
-        std::sort(min_pvals.rbegin(), min_pvals.rend());
-        // long double harm = 0.0;
-        // for (size_t i = 1; i <= num_tests; ++i) {
-        //     harm += 1.0L / i;
-        // }
-        for (const auto& [pval, count] : min_pvals) {
-            if (!count)
-                continue;
+    //     std::sort(min_pvals.rbegin(), min_pvals.rend());
+    //     // long double harm = 0.0;
+    //     // for (size_t i = 1; i <= num_tests; ++i) {
+    //     //     harm += 1.0L / i;
+    //     // }
+    //     for (const auto& [pval, count] : min_pvals) {
+    //         if (!count)
+    //             continue;
 
-            // common::logger->trace("Trying:\tc: {}\tpval: {}\tcutoff: {}", num_tests, pval,
-            //                       config.family_wise_error_rate / harm);
-            // if (pval >= config.family_wise_error_rate / harm) {
-            if (pval >= config.family_wise_error_rate / num_tests) {
-                min_pval_cutoff = pval;
-                // for (size_t i = num_tests; i > num_tests - count; --i) {
-                //     harm -= 1.0L / i;
-                // }
-                num_tests -= count;
-            }
-        }
-        common::logger->trace(
-            "Only running tests where min pval < {}. Keeping {} / {} tests",
-            min_pval_cutoff, num_tests, nelem);
-    }
+    //         // common::logger->trace("Trying:\tc: {}\tpval: {}\tcutoff: {}", num_tests, pval,
+    //         //                       config.family_wise_error_rate / harm);
+    //         // if (pval >= config.family_wise_error_rate / harm) {
+    //         if (pval >= config.family_wise_error_rate / num_tests) {
+    //             min_pval_cutoff = pval;
+    //             // for (size_t i = num_tests; i > num_tests - count; --i) {
+    //             //     harm -= 1.0L / i;
+    //             // }
+    //             num_tests -= count;
+    //         }
+    //     }
+    //     common::logger->trace(
+    //         "Only running tests where min pval < {}. Keeping {} / {} tests",
+    //         min_pval_cutoff, num_tests, nelem);
+    // }
 
     common::logger->trace("Starting tests");
     std::atomic_thread_fence(std::memory_order_release);
@@ -1218,6 +1265,10 @@ mask_nodes_by_label_dual(
                     long double chi_stat = (alt - null) * 2.0L;
                     pval = get_chi2_pval(1.0, chi_stat);
 
+                    if (pval == 0) {
+                        common::logger->warn("pval = 0\t{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
+                    }
+
                     // if (chi_stat != chi_stat || pval != pval) {
                     //     common::logger->error(
                     //         "FF:\tn: {}\tin: {}\tout: {}\tstat: {}\tpval: {}", n,
@@ -1239,62 +1290,66 @@ mask_nodes_by_label_dual(
             pval = get_pval_eff_size(in_sum, out_sum).first;
 
         } else if (config.test_type == "nbinom_exact") {
-            size_t n = 0;
-            int64_t in_sum = 0;
-            int64_t out_sum = 0;
-            for (const auto& [j, c] : row) {
+            long double n = 0;
+            long double in_sum = 0;
+            long double out_sum = 0;
+            for (const auto& [j, raw_c] : row) {
+                long double c = scale_factors[j] * raw_c;
                 n += c;
                 if (groups[j] == Group::OUT || groups[j] == Group::BOTH) {
                     out_sum += c;
-                    eff_size_out += static_cast<long double>(c) / sums[j];
+                    eff_size_out += static_cast<long double>(raw_c) / sums[j];
                 }
 
                 if (groups[j] == Group::IN || groups[j] == Group::BOTH) {
                     in_sum += c;
-                    eff_size_in += static_cast<long double>(c) / sums[j];
+                    eff_size_in += static_cast<long double>(raw_c) / sums[j];
                 }
             }
-
-            // int max_bits = std::numeric_limits<int>::max();
-            int max_bits = 8;
 
             auto get_loglik = [&](long double k, long double mu) {
                 if (k == 0 && mu == 0)
                     return std::make_pair(0.0L, 0.0L);
 
-                long double lk = lgammal(k + 1);
-                auto nb_loglik = [&](long double r) {
-                    long double p = r / (r + mu);
-                    return lgammal(k + r) - lk - lgammal(r) + log1pl(-p) * k + r * logl(p);
-                };
+                auto [r, p, m, v, l] = get_rp([&](const auto &callback) { callback(k, 1); });
+                return std::make_pair(l, r);
 
-                long double v = std::numeric_limits<long double>::max();
-                long double r = 0.0L;
-                try {
-                    auto [rt, vt] = boost::math::tools::brent_find_minima(
-                        [&](long double r) { return -nb_loglik(r); },
-                        static_cast<long double>(std::numeric_limits<double>::min()),
-                        1.0L - std::numeric_limits<double>::min(), max_bits);
-                    if (vt < v) {
-                        v = vt;
-                        r = rt;
-                    }
-                } catch (...) {
-                }
-                try {
-                    auto [at, vt] = boost::math::tools::brent_find_minima(
-                        [&](long double a) { return -nb_loglik(1.0L / a); },
-                        static_cast<long double>(std::numeric_limits<double>::min()),
-                        1.0L - std::numeric_limits<double>::min(), max_bits);
+                // int max_bits = std::numeric_limits<int>::max();
+                // int max_bits = 8;
 
-                    if (vt < v) {
-                        v = vt;
-                        r = 1.0L / at;
-                    }
-                } catch (...) {
-                }
+                // long double lk = lgammal(k + 1);
+                // auto nb_loglik = [&](long double r) {
+                //     long double p = r / (r + mu);
+                //     return lgammal(k + r) - lk - lgammal(r) + log1pl(-p) * k + r * logl(p);
+                // };
 
-                return std::make_pair(-v, r);
+                // long double v = std::numeric_limits<long double>::max();
+                // long double r = 0.0L;
+                // try {
+                //     auto [rt, vt] = boost::math::tools::brent_find_minima(
+                //         [&](long double r) { return -nb_loglik(r); },
+                //         static_cast<long double>(std::numeric_limits<double>::min()),
+                //         1.0L - std::numeric_limits<double>::min(), max_bits);
+                //     if (vt < v) {
+                //         v = vt;
+                //         r = rt;
+                //     }
+                // } catch (...) {
+                // }
+                // try {
+                //     auto [at, vt] = boost::math::tools::brent_find_minima(
+                //         [&](long double a) { return -nb_loglik(1.0L / a); },
+                //         static_cast<long double>(std::numeric_limits<double>::min()),
+                //         1.0L - std::numeric_limits<double>::min(), max_bits);
+
+                //     if (vt < v) {
+                //         v = vt;
+                //         r = 1.0L / at;
+                //     }
+                // } catch (...) {
+                // }
+
+                // return std::make_pair(-v, r);
             };
 
             // wald test
@@ -1319,8 +1374,8 @@ mask_nodes_by_label_dual(
                 //     // return pow(theta - theta_n, 2.0) / var;
             };
 
-            auto [theta_a, var_a] = get_wald_stat(in_sum, in_kmers);
-            auto [theta_b, var_b] = get_wald_stat(out_sum, out_kmers);
+            auto [theta_a, var_a] = get_wald_stat(in_sum, scaled_in_kmers);
+            auto [theta_b, var_b] = get_wald_stat(out_sum, scaled_out_kmers);
             long double chi_stat = pow(theta_a - theta_b, 2.0) / (var_a + var_b);
 
             // long double pval
@@ -1391,7 +1446,7 @@ mask_nodes_by_label_dual(
             pval = get_chi2_pval(1.0, chi_stat);
 
             if (pval == 0) {
-                common::logger->error("{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
+                common::logger->warn("pval = 0\t{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
             }
 
             // auto [r_a, p_a] = nb_params_a;
