@@ -1365,13 +1365,8 @@ mask_nodes_by_label_dual(
 
                 long double theta = k / nl;
                 long double r = get_loglik(k, k).second;
-                // long double var = theta / nl + theta * theta / r;
-                long double finf
-                    = r * nl * r * nl / (r + k) / (r + k) * (1.0L / k + 1.0L / r);
-                long double var = 1.0L / finf;
+                long double var = theta / r / nl * (k + r);
                 return std::make_pair(theta, var);
-                //     // long double var = theta_n / nl + theta_n * theta_n / r;
-                //     // return pow(theta - theta_n, 2.0) / var;
             };
 
             auto [theta_a, var_a] = get_wald_stat(in_sum, scaled_in_kmers);
