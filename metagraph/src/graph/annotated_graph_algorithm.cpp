@@ -667,9 +667,20 @@ mask_nodes_by_label_dual(
     long double scaled_in_kmers = 0.0;
     long double scaled_out_kmers = 0.0;
     if (config.test_type == "nbinom_exact") {
+        common::logger->trace("Computing scaling factors");
+        std::vector<long double> sample_p(groups.size());
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (size_t j = 0; j < groups.size(); ++j) {
+            sample_p[j] = std::get<1>(get_rp([&](const auto &callback) {
+                const auto& hist = hists[j];
+                for (const auto& [k, c] : hist) {
+                    callback(k, c);
+                }
+            }));
+        }
         long double target_p = 0.0;
         for (size_t j = 0; j < groups.size(); ++j) {
-            long double p = means[j] / vars[j];
+            long double p = sample_p[j];
             common::logger->trace("{}: p = {}", j, p);
             target_p += 1.0L / p;
         }
@@ -677,7 +688,7 @@ mask_nodes_by_label_dual(
         common::logger->trace("Scaling distributions to p = {}", target_p);
 
         for (size_t j = 0; j < groups.size(); ++j) {
-            long double p = means[j] / vars[j];
+            long double p = sample_p[j];
             scale_factors[j] = p / target_p;
             scaled_sums[j] = scale_factors[j] * sums[j];
             if (groups[j] == Group::IN || groups[j] == Group::BOTH)
