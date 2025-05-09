@@ -1762,82 +1762,82 @@ mask_nodes_by_label_dual(
                 common::logger->trace("Min observed p-value: {}", std::get<0>(all_pvals[0]));
                 size_t last_tig_id = std::numeric_limits<size_t>::max();
 
-                // Benjamini - Yekutieli
-                long double harm = 0.0;
-                for (size_t i = 1; i <= num_tests; ++i) {
-                    harm += 1.0 / i;
-                }
+                // // Benjamini - Yekutieli
+                // long double harm = 0.0;
+                // for (size_t i = 1; i <= num_tests; ++i) {
+                //     harm += 1.0 / i;
+                // }
 
-                // // Benjamini-Hochberg
-                // // harm = 1.0;
+                // // // Benjamini-Hochberg
+                // // // harm = 1.0;
 
-                size_t cur_count = all_pvals.size() + 1;
-                auto it = all_pvals.rbegin();
-                for (; it != all_pvals.rend(); ++it) {
-                    const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = *it;
-                    if (tig_id != last_tig_id) {
-                        --cur_count;
-                        last_tig_id = tig_id;
-                    }
-
-                    // Benjamini-Yekutieli
-                    long double cutoff
-                        = config.family_wise_error_rate * cur_count / num_tests / harm;
-
-                    // // Hochberg
-                    // long double cutoff
-                    //     = config.family_wise_error_rate / (num_tests + 1 - cur_count);
-
-                    if (pval <= cutoff)
-                        break;
-                }
-
-                std::for_each(it, all_pvals.rend(), [&](const auto& b) {
-                    const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = b;
-                    long double eff_size
-                        = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
-                    num_sig += (eff_size != 0);
-                    if (eff_size > 0) {
-                        indicator_in[node] = true;
-                    } else if (eff_size < 0) {
-                        indicator_out[node] = true;
-                    }
-                });
-
-                // // Holm-Bonferroni or Sidak
-                // size_t cur_count = 0;
-                // common::logger->trace(
-                //     "First p-value cutoff: {}",
-                //     1.0L - pow(1.0L - config.family_wise_error_rate, 1.0L / num_tests));
-                // for (const auto& [pval, tig_id, eff_size_in, eff_size_out, node] : all_pvals) {
+                // size_t cur_count = all_pvals.size() + 1;
+                // auto it = all_pvals.rbegin();
+                // for (; it != all_pvals.rend(); ++it) {
+                //     const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = *it;
                 //     if (tig_id != last_tig_id) {
-                //         ++cur_count;
+                //         --cur_count;
                 //         last_tig_id = tig_id;
                 //     }
 
+                //     // Benjamini-Yekutieli
+                //     long double cutoff
+                //         = config.family_wise_error_rate * cur_count / num_tests / harm;
+
+                //     // // Hochberg
+                //     // long double cutoff
+                //     //     = config.family_wise_error_rate / (num_tests + 1 - cur_count);
+
+                //     if (pval <= cutoff)
+                //         break;
+                // }
+
+                // std::for_each(it, all_pvals.rend(), [&](const auto& b) {
+                //     const auto& [pval, tig_id, eff_size_in, eff_size_out, node] = b;
                 //     long double eff_size
                 //         = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
-
-                //     // holm bonferroni
-                //     // long double cutoff
-                //     // = config.family_wise_error_rate / (num_tests + 1 - cur_count);
-
-                //     // Sidak
-                //     long double cutoff = 1.0L
-                //         - pow(1.0L - config.family_wise_error_rate,
-                //               1.0L / (num_tests + 1 - cur_count));
-
-                //     if (pval > cutoff)
-                //         break;
-
+                //     num_sig += (eff_size != 0);
                 //     if (eff_size > 0) {
                 //         indicator_in[node] = true;
-                //         ++num_sig;
                 //     } else if (eff_size < 0) {
                 //         indicator_out[node] = true;
-                //         ++num_sig;
                 //     }
-                // }
+                // });
+
+                // Holm-Bonferroni or Sidak
+                size_t cur_count = 0;
+                common::logger->trace(
+                    "First p-value cutoff: {}",
+                    1.0L - pow(1.0L - config.family_wise_error_rate, 1.0L / num_tests));
+                for (const auto& [pval, tig_id, eff_size_in, eff_size_out, node] : all_pvals) {
+                    if (tig_id != last_tig_id) {
+                        ++cur_count;
+                        last_tig_id = tig_id;
+                    }
+
+                    long double eff_size
+                        = eff_size_in / num_labels_in - eff_size_out / num_labels_out;
+
+                    // holm bonferroni
+                    long double cutoff
+                    = config.family_wise_error_rate / (num_tests + 1 - cur_count);
+
+                    // Sidak
+                    // long double cutoff = 1.0L
+                    //     - pow(1.0L - config.family_wise_error_rate,
+                    //           1.0L / (num_tests + 1 - cur_count));
+
+                    if (pval > cutoff)
+                        break;
+
+                    if (eff_size > 0) {
+                        indicator_in[node] = true;
+                        ++num_sig;
+                    } else if (eff_size < 0) {
+                        indicator_out[node] = true;
+                        ++num_sig;
+                    }
+                }
 
                 // Bonferroni
                 // for (const auto& [pval, tig_id, eff_size_in, eff_size_out, node] : all_pvals) {
