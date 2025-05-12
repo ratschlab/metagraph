@@ -132,11 +132,12 @@ get_rp(const Generator& generate) {
     };
 
     auto get_dl_a = [&](long double a) {
-        long double dl = mu * mu * total / (1.0 + a * mu) + total * logl(1 + a * mu) / a / a
-            + total / a / a * boost::math::digamma(1.0 / a);
-        generate(
-            [&](auto k, auto c) { dl -= boost::math::digamma(k + 1.0 / a) / a / a * c; });
-        return dl;
+        return get_dl_r(1.0L / a);
+        // long double dl = mu * mu * total / (1.0 + a * mu) + total * logl(1 + a * mu) / a / a
+        //     + total / a / a * boost::math::digamma(1.0 / a);
+        // generate(
+        //     [&](auto k, auto c) { dl -= boost::math::digamma(k + 1.0 / a) / a / a * c; });
+        // return dl;
     };
 
     long double r1 = 0.0;
@@ -153,7 +154,7 @@ get_rp(const Generator& generate) {
         auto [a_min, a_max]
             = boost::math::tools::bisect(get_dl_a, std::numeric_limits<double>::min(), 1.0,
                                          boost::math::tools::eps_tolerance<long double>(5));
-        r2 = (1.0 / a_min + 1.0 / a_max) / 2.0;
+        r2 = (1.0L / a_min + 1.0L / a_max) / 2.0;
     } catch (boost::wrapexcept<boost::math::evaluation_error>& e) {
     }
 
@@ -183,7 +184,124 @@ get_rp(const Generator& generate) {
     // long double p = 0.1;
     // r = p * mu / (1.0 - p);
     return { r, p, mu, var, ll };
-};
+}
+
+std::tuple<long double, long double, long double, long double, long double>
+get_rp_theta(long double k, long double nl, long double theta_alpha, long double theta_theta) {
+    long double total = 1;
+
+    long double a = -nl / theta_theta;
+    auto get_theta = [&](long double r) {
+        long double b = nl * (theta_alpha - 1 - r) - r / theta_theta;
+        long double c = r * (k + theta_alpha - 1);
+        long double disc = b * b - 4.0L * a * c;
+        try {
+            if (disc < 0) {
+                // common::logger->error("Failed to fit on r: {}\tk: {}\tN: {} -> {},{},{} -> d: {}", r, k, nl, a,b,c, disc);
+                throw std::runtime_error("FIAJS");
+            }
+            disc = sqrtl(disc);
+            long double theta_pos = (-b + disc) / 2.0L / a;
+            long double theta_neg = (-b - disc) / 2.0L / a;
+            if (theta_pos <= 0 && theta_neg <= 0) {
+                // common::logger->error("No solutions for r: {}\tk: {}\tN: {} -> {},{}\t{},{},{} -> {}", r, k, nl, theta_pos, theta_neg, a, b, c, disc);
+                throw std::runtime_error("FIAJS");
+            }
+
+            if (theta_pos > 0 && theta_neg > 0) {
+                // common::logger->error("Two solutions for r: {}\tk: {}\tN: {} -> {},{}\t{},{},{} -> {}", r, k, nl, theta_pos, theta_neg,a,b,c,disc);
+                throw std::runtime_error("FIAJS");
+            }
+
+            return std::max(theta_pos, theta_neg);
+        } catch (std::runtime_error& e) {
+            if (r > 1e100)
+                return (k + theta_alpha - 1) / (nl + 1.0L / theta_theta);
+
+            if (r < 1e-100)
+                return theta_theta * (theta_alpha - 1.0L);
+
+            common::logger->error("Weird case for r: {}\tk: {}\tN: {}\t{},{},{} -> {}", r, k, nl, a,b,c,disc);
+            throw std::runtime_error("FHDKF");
+        }
+
+    };
+
+    auto get_l = [&](long double r) {
+        long double theta = get_theta(r);
+        long double mu = nl * theta;
+        long double p = r / (r + mu);
+        long double l = -lgammal(r) * total + mu * total * log1pl(-p) + total * r * logl(p) - lgammal(theta_alpha) - theta_alpha * logl(theta_theta) + (theta_alpha - 1) * logl(theta) - theta / theta_theta + lgammal(k + r);
+        return l;
+    };
+
+    auto get_dl_r = [&](long double r) {
+        long double mu = nl * get_theta(r);
+        long double dl = log(r) - log(r + mu) + 1.0L - boost::math::digamma(r) + boost::math::digamma(k + r) + (k + r) / (r + mu);
+        return dl;
+    };
+
+    auto get_dl_a = [&](long double a) {
+        return get_dl_r(1.0L / a);
+        // long double mu = nl * get_theta(r);
+        // long double dl = -r * r * (boost::math::digamma(k + r) - boost::math::digamma(r)) + r * r * logl(1 + mu / r) + k * r - (k + r) * mu / (1.0L + mu / r);
+        // return dl;
+    };
+
+    long double r1 = 0.0;
+    long double r2 = 0.0;
+    try {
+        auto [r_min, r_max]
+            = boost::math::tools::bisect(get_dl_r, std::numeric_limits<double>::min(), 1.0,
+                                         boost::math::tools::eps_tolerance<long double>(5));
+        r1 = (r_min + r_max) / 2.0;
+    } catch (boost::wrapexcept<boost::math::evaluation_error>& e) {
+    } catch (std::runtime_error& e) {
+    }
+
+    try {
+        auto [a_min, a_max]
+            = boost::math::tools::bisect(get_dl_a, std::numeric_limits<double>::min(), 1.0,
+                                         boost::math::tools::eps_tolerance<long double>(5));
+        r2 = (1.0L / a_min + 1.0L / a_max) / 2.0;
+    } catch (boost::wrapexcept<boost::math::evaluation_error>& e) {
+    } catch (std::runtime_error& e) {
+    }
+
+    long double r = 0.0;
+    long double ll = 0.0;
+    long double theta = 0.0;
+    if (r1 == 0 && r2 == 0) {
+        common::logger->error("Failed to fit k: {}\tN: {}", k, nl);
+        throw std::runtime_error("Failed to fit");
+    } else if (r1 == 0) {
+        r = r2;
+        ll = get_l(r);
+        theta = get_theta(r);
+    } else if (r2 == 0) {
+        r = r1;
+        ll = get_l(r);
+        theta = get_theta(r);
+    } else {
+        long double ll1 = get_l(r1);
+        long double ll2 = get_l(r2);
+        if (ll1 > ll2) {
+            r = r1;
+            ll = ll1;
+            theta = get_theta(r);
+        } else {
+            r = r2;
+            ll = ll2;
+            theta = get_theta(r);
+        }
+    }
+
+    long double mu = nl * theta;
+    long double p = r / (r + mu);
+    // long double p = 0.1;
+    // r = p * mu / (1.0 - p);
+    return { r, p, mu, ll, theta };
+}
 
 template <class G1, class G2>
 std::pair<long double, long double> mann_whitneyu(const G1& generate_a, const G2& generate_b) {
@@ -666,6 +784,8 @@ mask_nodes_by_label_dual(
     std::vector<long double> scaled_sums(groups.size());
     long double scaled_in_kmers = 0.0;
     long double scaled_out_kmers = 0.0;
+    // long double theta_theta = 0.0;
+    // long double theta_alpha = 0.0;
     if (config.test_type == "nbinom_exact") {
         common::logger->trace("Computing scaling factors");
         std::vector<long double> sample_p(groups.size());
@@ -699,6 +819,42 @@ mask_nodes_by_label_dual(
         }
 
         common::logger->trace("Scaling factors: {}", fmt::join(scale_factors, ","));
+
+        // long double scaled_total_kmers = scaled_in_kmers + scaled_out_kmers;
+
+        // std::vector<long double> xlnxs(num_threads + 1);
+        // std::vector<long double> lnxs(num_threads + 1);
+        // std::vector<long double> xs(num_threads + 1);
+        // generate_clean_rows([&](uint64_t, const auto& row, uint64_t bucket_idx) {
+        //     long double in_sum = 1.0L / nelem;
+        //     long double out_sum = 1.0L / nelem;
+        //     for (const auto &[j, raw_c] : row) {
+        //         if (groups[j] == Group::IN) {
+        //             in_sum += scale_factors[j] * raw_c;
+        //         }
+
+        //         if (groups[j] == Group::OUT) {
+        //             out_sum += scale_factors[j] * raw_c;
+        //         }
+        //     }
+
+        //     long double theta_a = in_sum / (scaled_in_kmers + 1);
+        //     long double theta_b = out_sum / (scaled_out_kmers + 1);
+        //     xs[bucket_idx] += theta_a + theta_b;
+        //     lnxs[bucket_idx] += logl(theta_a);
+        //     xlnxs[bucket_idx] += logl(theta_a) * theta_a;
+        //     lnxs[bucket_idx] += logl(theta_b);
+        //     xlnxs[bucket_idx] += logl(theta_b) * theta_b;
+        // });
+        // size_t count = nelem * 2;
+        // long double mean_x = std::accumulate(xs.begin(), xs.end(), 0.0L) / count;
+        // theta_theta = std::accumulate(xlnxs.begin(), xlnxs.end(), 0.0L) / count
+        //                 - mean_x * std::accumulate(lnxs.begin(), lnxs.end(), 0.0L) / count;
+        // theta_alpha = mean_x / theta_theta;
+        // common::logger->trace("Gamma fit to theta: alpha: {}\ttheta: {}", theta_alpha, theta_theta);
+        // if (theta_alpha <= 0 || theta_theta <= 0) {
+        //     throw std::runtime_error("Gamma fail");
+        // }
     } else {
         scaled_in_kmers = in_kmers;
         scaled_out_kmers = out_kmers;
@@ -1318,12 +1474,17 @@ mask_nodes_by_label_dual(
                 }
             }
 
-            auto get_loglik = [&](long double k, long double mu) {
-                if (k == 0 && mu == 0)
-                    return std::make_pair(0.0L, 0.0L);
+            auto get_loglik = [&](long double k, long double nl) {
+                // auto [r, p, m, l, theta] = get_rp_theta(k, nl, theta_alpha, theta_theta);
+                // long double ddl = -(k + theta_alpha - 1) / theta / theta + nl * nl * (k + r) / (r + nl * theta) / (r + nl * theta);
+                // long double var = -1.0L / ddl;
 
                 auto [r, p, m, v, l] = get_rp([&](const auto &callback) { callback(k, 1); });
-                return std::make_pair(l, r);
+                long double theta = k / nl;
+                long double var = theta / r / nl * (k + r);
+
+                return std::make_tuple(l, r, theta, var);
+                // return std::make_tuple(l, r, theta);
 
                 // int max_bits = std::numeric_limits<int>::max();
                 // int max_bits = 8;
@@ -1374,9 +1535,12 @@ mask_nodes_by_label_dual(
                 if (k == 0)
                     return std::make_pair(0.0L, 0.0L);
 
-                long double theta = k / nl;
-                long double r = get_loglik(k, k).second;
-                long double var = theta / r / nl * (k + r);
+                auto [l, r, theta, var] = get_loglik(k, nl);
+
+                // long double var = -(k + theta_alpha - 1) / theta / theta + nl * nl * (k + r) / (r + nl * theta) / (r + nl * theta);
+
+                // long double theta = k / nl;
+                // long double var = theta / r / nl * (k + r);
                 return std::make_pair(theta, var);
             };
 
@@ -1445,7 +1609,7 @@ mask_nodes_by_label_dual(
             // long double chi_stat = (alt_loglik - null_loglik) * 2;
 
             if (chi_stat <= 0.0) {
-                common::logger->error("{} = {} + {}\t->\t {}", n, in_sum, out_sum, chi_stat);
+                common::logger->error("{} = {} + {}\t->\t {}\t{},{}\t{},{}", n, in_sum, out_sum, chi_stat, theta_a, var_a, theta_b, var_b);
                 throw std::runtime_error("FOSDOF");
             }
 
