@@ -96,32 +96,10 @@ bool UniqueRowBinmat::load(std::istream &instream) {
         size_t num_unique_rows = load_number(instream);
         num_columns_ = load_number(instream);
         num_relations_ = load_number(instream);
-        unique_rows_.clear();
-        unique_rows_.shrink_to_fit();
         unique_rows_.resize(num_unique_rows);
-
-        sdsl::int_vector<> full_vector;
-        full_vector.load(instream);
-
-        SmallVector<uint64_t> row_buffer;
-        row_buffer.reserve(num_columns_);
-        for (size_t k = 0, i = 0; k < full_vector.size(); ++k) {
-            if (full_vector[k]) {
-                row_buffer.emplace_back(full_vector[k] - 1);
-                if (row_buffer.back() >= num_columns_)
-                    return false;
-            } else {
-                unique_rows_[i] = bit_vector_smart(
-                    [&](const auto &callback) {
-                        for (auto j : row_buffer) {
-                            callback(j);
-                        }
-                    },
-                    num_columns_,
-                    row_buffer.size()
-                );
-                i++;
-            }
+        unique_rows_.shrink_to_fit();
+        for (size_t i = 0; i < unique_rows_.size(); ++i) {
+            unique_rows_[i].load(instream);
         }
 
         return load_number_vector(instream, &row_rank_);
@@ -135,22 +113,9 @@ void UniqueRowBinmat::serialize(std::ostream &outstream) const {
     serialize_number(outstream, num_columns_);
     serialize_number(outstream, num_relations_);
 
-    uint64_t unique_rows_size = unique_rows_.size();
     for (const auto &row : unique_rows_) {
-        unique_rows_size += row.num_set_bits();
+        row.serialize(outstream);
     }
-
-    sdsl::int_vector<> full_vector(unique_rows_size, 0,
-                                   sdsl::bits::hi(num_columns()) + 1);
-
-    for (uint64_t i = 0, p = 0; i < unique_rows_.size(); ++i) {
-        unique_rows_[i].call_ones([&](uint64_t value) {
-            full_vector[p++] = value + 1;
-        });
-        full_vector[p++] = 0;
-    }
-
-    full_vector.serialize(outstream);
 
     serialize_number_vector(outstream, row_rank_);
 }
