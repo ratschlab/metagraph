@@ -49,8 +49,23 @@ class Rainbow : public RainbowMatrix {
     MatrixType reduced_matrix_;
 
     uint64_t get_code(Row row) const override;
-    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const override {
-        return reduced_matrix_.get_rows(rows);
+    std::vector<bit_vector_smart> codes_to_rows(const std::vector<uint64_t> &rows) const override {
+        auto ext_rows = reduced_matrix_.get_rows(rows);
+        std::vector<bit_vector_smart> result;
+        result.reserve(ext_rows.size());
+        for (const auto &row : ext_rows) {
+            result.emplace_back(
+                [&](const auto &callback) {
+                    for (auto j : row) {
+                        callback(j);
+                    }
+                },
+                num_columns(),
+                row.size()
+            );
+        }
+
+        return result;
     }
 };
 

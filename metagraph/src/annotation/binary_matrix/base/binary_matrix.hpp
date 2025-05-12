@@ -7,6 +7,7 @@
 #include <ostream>
 
 #include "common/vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 
 class bitmap;
@@ -33,8 +34,8 @@ class BinaryMatrix {
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const = 0;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
-    virtual std::vector<SetBitPositions> get_rows_dict(std::vector<Row> *rows,
-                                                       size_t num_threads = 1) const;
+    virtual std::vector<bit_vector_smart> get_rows_dict(std::vector<Row> *rows,
+                                                        size_t num_threads = 1) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
     // For each column id in columns, run callback on its respective index in columns
@@ -65,8 +66,8 @@ class RainbowMatrix : public BinaryMatrix {
 
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
-    virtual std::vector<SetBitPositions> get_rows_dict(std::vector<Row> *rows,
-                                                       size_t num_threads = 1) const final;
+    virtual std::vector<bit_vector_smart> get_rows_dict(std::vector<Row> *rows,
+                                                        size_t num_threads = 1) const final;
 
     // Return all columns for which counts are greater than or equal to |min_count|.
     virtual std::vector<std::pair<Column, size_t /* count */>>
@@ -77,7 +78,7 @@ class RainbowMatrix : public BinaryMatrix {
 
   private:
     virtual uint64_t get_code(Row row) const = 0;
-    virtual std::vector<SetBitPositions> codes_to_rows(const std::vector<Row> &rows) const = 0;
+    virtual std::vector<bit_vector_smart> codes_to_rows(const std::vector<Row> &rows) const = 0;
 };
 
 
