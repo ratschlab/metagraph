@@ -34,7 +34,7 @@ UniqueRowBinmat::UniqueRowBinmat(std::vector<bit_vector_smart>&& unique_rows,
         row_rank_(std::move(row_rank)) {
     // make sure there are no columns with indexes greater than num_labels
     assert(std::all_of(unique_rows_.begin(), unique_rows_.end(), [&](const auto &row) {
-        return row.size() == num_columns_
+        return row.size() == num_columns_;
     }));
 
     for (uint32_t r : row_rank_) {
