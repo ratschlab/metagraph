@@ -581,6 +581,42 @@ annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
     return new_encoder;
 }
 
+template<>
+annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
+                                      std::vector<bit_vector_smart> *rows) {
+    assert(rows);
+    annot::LabelEncoder<std::string> new_encoder;
+    tsl::hopscotch_map<size_t, size_t> old_to_new;
+    for (const auto &row : *rows) {
+        row.call_ones([&](uint64_t v) {
+            auto [it, inserted] = old_to_new.emplace(v, new_encoder.size());
+            if (inserted)
+                new_encoder.insert_and_encode(encoder.decode(v));
+
+            assert(encoder.decode(v) == new_encoder.decode(it->second));
+        });
+    }
+
+    for (auto &row : *rows) {
+        annot::matrix::BinaryMatrix::SetBitPositions pos;
+        pos.reserve(row.num_set_bits());
+        row.call_ones([&](uint64_t v) {
+            pos.emplace_back(old_to_new[v]);
+        });
+        std::sort(pos.begin(), pos.end());
+        row = bit_vector_smart(
+            [&](const auto &callback) {
+                for (auto j : pos) {
+                    callback(j);
+                }
+            },
+            new_encoder.size(),
+            pos.size()
+        );
+    }
+    return new_encoder;
+}
+
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
  *             from the full annotation matrix
@@ -644,7 +680,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     }
 
     // insert one empty row for representing unmatched rows
-    unique_rows.emplace_back();
+    unique_rows.emplace_back(full_annotation.get_matrix().num_columns(), 0);
     std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
     for (size_t i = 0; i < row_indexes.size(); ++i) {
         row_ids[full_to_small[i].second] = row_indexes[i];
