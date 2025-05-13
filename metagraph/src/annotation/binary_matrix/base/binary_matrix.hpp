@@ -36,6 +36,8 @@ class BinaryMatrix {
     // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<bit_vector_smart> get_rows_dict(std::vector<Row> *rows,
                                                         size_t num_threads = 1) const;
+    virtual void call_rows(const std::vector<Row> &rows,
+                           const std::function<void(size_t, const bitmap&)> &callback) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
     // For each column id in columns, run callback on its respective index in columns

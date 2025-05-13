@@ -26,6 +26,28 @@ struct BitmapHash {
     }
 };
 
+void BinaryMatrix::call_rows(const std::vector<Row> &rows,
+                             const std::function<void(size_t, const bitmap&)> &callback) const {
+
+    auto batch = get_rows(rows);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        std::sort(batch[i].begin(), batch[i].end());
+        size_t row_size = batch[i].size();
+        callback(
+            i,
+            bitmap_generator(
+                [row=std::move(batch[i])](const auto &callback) {
+                    for (auto j : row) {
+                        callback(j);
+                    }
+                },
+                num_columns(),
+                row_size
+            )
+        );
+    }
+}
+
 std::vector<bit_vector_smart>
 BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     VectorSet<bit_vector_smart, BitmapHash> unique_rows;
@@ -51,27 +73,17 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
             ids[i - begin] = row_to_index[i].first;
         }
 
-        auto batch = get_rows(ids);
-        for (uint64_t i = begin; i < end; ++i) {
-            std::sort(batch[i - begin].begin(), batch[i - begin].end());
-        }
-
-        #pragma omp critical
-        {
-            for (uint64_t i = begin; i < end; ++i) {
+        call_rows(ids, [&](size_t i, const bitmap &row) {
+            #pragma omp critical
+            {
                 auto it = unique_rows.emplace(
-                    [&](const auto &callback) {
-                        for (auto j : batch[i - begin]) {
-                            callback(j);
-                        }
-                    },
+                    [&](const auto &callback) { row.call_ones(callback); },
                     num_columns(),
-                    batch[i - begin].size()
+                    row.num_set_bits()
                 ).first;
-                batch[i - begin] = SetBitPositions();
-                (*rows)[row_to_index[i].second] = it - unique_rows.begin();
+                (*rows)[row_to_index[i + begin].second] = it - unique_rows.begin();
             }
-        }
+        });
     }
 
     return const_cast<std::vector<bit_vector_smart>&&>(unique_rows.values_container());
