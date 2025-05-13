@@ -53,7 +53,8 @@ class Rainbow : public RainbowMatrix {
         auto ext_rows = reduced_matrix_.get_rows(rows);
         std::vector<bit_vector_smart> result;
         result.reserve(ext_rows.size());
-        for (const auto &row : ext_rows) {
+        for (auto &row : ext_rows) {
+            std::sort(row.begin(), row.end());
             result.emplace_back(
                 [&](const auto &callback) {
                     for (auto j : row) {

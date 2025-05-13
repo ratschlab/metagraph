@@ -52,6 +52,8 @@ UniqueRowBinmat
 
     call_rows([&](const SetBitPositions &row) {
         num_relations_ += row.size();
+        SetBitPositions row_sorted = row;
+        std::sort(row_sorted.begin(), row_sorted.end());
         auto it = unique_rows.emplace(
             [&](const auto &callback) {
                 for (auto j : row) {

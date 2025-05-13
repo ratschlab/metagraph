@@ -56,6 +56,7 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         #pragma omp critical
         {
             for (uint64_t i = begin; i < end; ++i) {
+                std::sort(batch[i - begin].begin(), batch[i - begin].end());
                 auto it = unique_rows.emplace(
                     [&](const auto &callback) {
                         for (auto j : batch[i - begin]) {
@@ -64,7 +65,6 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
                     },
                     num_columns(),
                     batch[i - begin].size()
-                    // std::move(batch[i - begin])
                 ).first;
                 (*rows)[row_to_index[i].second] = it - unique_rows.begin();
             }

@@ -58,6 +58,7 @@ class Rainbowfish : public RainbowMatrix {
         result.reserve(rows.size());
         for (uint64_t c : rows) {
             auto rows_singleton = reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ });
+            std::sort(rows_singleton[0].begin(), rows_singleton[0].end());
             result.emplace_back(
                 [&](const auto &callback) {
                     for (auto j : rows_singleton[0]) {
@@ -66,7 +67,6 @@ class Rainbowfish : public RainbowMatrix {
                 },
                 num_columns(),
                 rows_singleton[0].size()
-                // reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ })[0]
             );
         }
         return result;
