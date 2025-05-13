@@ -598,15 +598,20 @@ annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
     }
 
     for (auto &row : *rows) {
-        bit_vector_smart orig_row = row;
+        annot::matrix::BinaryMatrix::SetBitPositions pos;
+        pos.reserve(row.num_set_bits());
+        row.call_ones([&](uint64_t v) {
+            pos.emplace_back(old_to_new[v]);
+        });
+        std::sort(pos.begin(), pos.end());
         row = bit_vector_smart(
             [&](const auto &callback) {
-                orig_row.call_ones([&](uint64_t v) {
-                    callback(old_to_new[v]);
-                });
+                for (auto j : pos) {
+                    callback(j);
+                }
             },
             new_encoder.size(),
-            orig_row.num_set_bits()
+            pos.size()
         );
     }
     return new_encoder;
