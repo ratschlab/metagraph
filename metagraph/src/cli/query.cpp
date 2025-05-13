@@ -587,20 +587,25 @@ annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
     assert(rows);
     annot::LabelEncoder<std::string> new_encoder;
     tsl::hopscotch_map<size_t, size_t> old_to_new;
+    for (const auto &row : *rows) {
+        row.call_ones([&](uint64_t v) {
+            auto [it, inserted] = old_to_new.emplace(v, new_encoder.size());
+            if (inserted)
+                new_encoder.insert_and_encode(encoder.decode(v));
+
+            assert(encoder.decode(v) == new_encoder.decode(it->second));
+        });
+    }
+
     for (auto &row : *rows) {
         bit_vector_smart orig_row = row;
         row = bit_vector_smart(
             [&](const auto &callback) {
                 orig_row.call_ones([&](uint64_t v) {
-                    auto [it, inserted] = old_to_new.emplace(v, new_encoder.size());
-                    if (inserted)
-                        new_encoder.insert_and_encode(encoder.decode(v));
-
-                    assert(encoder.decode(v) == new_encoder.decode(it->second));
-                    callback(it->second);
+                    callback(old_to_new[v]);
                 });
             },
-            orig_row.size(),
+            new_encoder.size(),
             orig_row.num_set_bits()
         );
     }
