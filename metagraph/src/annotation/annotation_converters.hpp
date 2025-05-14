@@ -80,6 +80,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t num_threads,
                          size_t mem_bytes);
 
+template <class RowDiffAnnotator>
+void convert_to_row_diff(const RowDiffBRWTAnnotator &anno,
+                         const std::string &outfbase);
+
 void merge_row_compressed(const std::vector<std::string> &filenames,
                           const std::string &outfile);
 
