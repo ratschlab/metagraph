@@ -82,7 +82,7 @@ function (findFolly)
 unset(FOLLY_FOUND PARENT_SCOPE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Jemalloc)
-find_package(Boost)
+find_package(Boost REQUIRED COMPONENTS iostreams)
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
@@ -109,7 +109,7 @@ if(Jemalloc_FOUND AND Boost_FOUND)
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
     ${PROJECT_SOURCE_DIR}/src/common
   )
-  target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES})
+  target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES} ${Boost_LIBRARIES})
   set(FOLLY_FOUND TRUE PARENT_SCOPE)
 endif()
 endfunction()
