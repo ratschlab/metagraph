@@ -14,7 +14,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-const size_t kNumRowsInBlock = 50'000;
+const size_t kNumRowsInBlock = 250'000;
 
 
 bool BRWT::get(Row row, Column column) const {
