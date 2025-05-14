@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev
+        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           sudo apt-get install libcurl4-openssl-dev
@@ -155,7 +155,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c zstd
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
