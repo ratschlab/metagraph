@@ -155,7 +155,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
