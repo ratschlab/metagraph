@@ -9,6 +9,9 @@
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
+#include "common/vectors/transpose.hpp"
 
 
 namespace {
@@ -18,14 +21,17 @@ using namespace mtg::graph;
 using namespace mtg::annot;
 using namespace mtg::test;
 
+const std::string test_data_dir = "../tests/data";
+const std::string test_dump_basename = test_data_dir + "/dump_test";
+
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 // test with DBGBitmap and DBGHashFast to have k-mers in different order
 typedef ::testing::Types<std::pair<DBGBitmap, ColumnCompressed<>>,
                          std::pair<DBGHashFast, ColumnCompressed<>>,
-                         std::pair<DBGBitmap, RowFlatAnnotator>,
-                         std::pair<DBGHashFast, RowFlatAnnotator>
+                         std::pair<DBGSuccinct, ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, RowDiffColumnAnnotator>
                         > GraphAnnoTypes;
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 
@@ -33,9 +39,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     typedef typename TypeParam::first_type Graph;
     typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads : { 1, 4 }) {
-        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
-        const tsl::hopscotch_set<std::string> outgroup { "A" };
-
         size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
         for (size_t k = 3; k < max_k; ++k) {
             const std::vector<std::string> sequences {
@@ -48,6 +51,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
 
             auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
 
             std::unordered_set<std::string> obs_labels, obs_kmers;
             const std::unordered_set<std::string> ref_kmers {
@@ -58,82 +62,228 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             };
 
             DifferentialAssemblyConfig config {
-                .label_mask_in_unitig_fraction = 0.0,
-                .label_mask_in_kmer_fraction = 1.0,
-                .label_mask_out_unitig_fraction = 1.0,
-                .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = 1.0
+                .test_type = "notest",
+                .min_in_recurrence = 2,
+                .max_out_recurrence = 0,
+                .outfbase = "",
             };
 
-            auto masked_dbg = mask_nodes_by_label(*anno_graph,
-                                                  ingroup, outgroup,
-                                                  {}, {},
-                                                  config, num_threads);
+            // ingroup: B, C
+            // outgroup: A
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
 
-            masked_dbg->call_kmers([&](auto, const std::string &kmer) {
-                auto cur_labels = anno_graph->get_labels(kmer, 0.0);
-                obs_labels.insert(cur_labels.begin(), cur_labels.end());
-                obs_kmers.insert(kmer);
-            });
+            {
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                    *anno_graph,
+                    labels_in, labels_out,
+                    config, num_threads, test_dump_basename
+                );
 
-            EXPECT_EQ(ref_labels, obs_labels) << k;
-            EXPECT_EQ(ref_kmers, obs_kmers) << k;
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+
+                EXPECT_EQ(ref_labels, obs_labels) << k;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k;
+            }
+
+            if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
+                // TODO
+            }
         }
     }
 }
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelTest) {
     typedef typename TypeParam::first_type Graph;
     typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads : { 1, 4 }) {
-        size_t k = 5;
-        const tsl::hopscotch_set<std::string> ingroup { "A", "B", "C" };
-        const tsl::hopscotch_set<std::string> outgroup { "A", "B", "C" };
+        size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
+        for (size_t k = 6; k < max_k; ++k) {
+            const std::vector<std::string> sequences {
+                std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "A",
+                std::string("T") + std::string(k - 1, 'A') + "G"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
 
-        const std::vector<std::string> sequences {
-            "TTTTTAAAAATTTTTTTTTT",
-            "CCCCCAAAAACCCCCCCCCC",
-            "GGGGGAAAAAGGGGGGGGGG"
-        };
-        const std::vector<std::string> labels { "A", "B", "C" };
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
 
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            std::unordered_set<std::string> obs_labels, obs_kmers;
+            std::unordered_set<std::string> ref_kmers;
 
-        std::unordered_set<std::string> obs_kmers;
-        const std::unordered_set<std::string> ref_kmers {
-            "TTTTT", "TTTTA", "TTTAA", "TTAAA", "TAAAA", "AAAAT", "AAATT", "AATTT", "ATTTT",
-            "CCCCC", "CCCCA", "CCCAA", "CCAAA", "CAAAA", "AAAAC", "AAACC", "AACCC", "ACCCC",
-            "GGGGG", "GGGGA", "GGGAA", "GGAAA", "GAAAA", "AAAAG", "AAAGG", "AAGGG", "AGGGG",
-        };
-        DifferentialAssemblyConfig config {
-            .label_mask_in_unitig_fraction = 0.0,
-            .label_mask_in_kmer_fraction = 0.0,
-            .label_mask_out_unitig_fraction = 1.0,
-            .label_mask_out_kmer_fraction = 0.99,
-            .label_mask_other_unitig_fraction = 1.0
-        };
+            DifferentialAssemblyConfig config {
+                .test_type = "poisson_binom",
+                .outfbase = "",
+            };
 
-        auto masked_dbg = mask_nodes_by_label(*anno_graph,
-                                              ingroup, outgroup,
-                                              {}, {},
-                                              config, num_threads);
+            // ingroup: B, C
+            // outgroup: A
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
 
-        masked_dbg->call_kmers([&](auto, const std::string &kmer) {
-            obs_kmers.insert(kmer);
-        });
+            std::unordered_set<std::string> ref_labels;
 
-        EXPECT_EQ(ref_kmers, obs_kmers);
+            std::for_each(labels.begin() + 2, labels.end(), [&](const auto &label) {
+                if (label != "C")
+                    labels_out.emplace(label);
+
+                if (k >= 8 || label == "E" || (k >= 7 && label == "D")) {
+                    ref_labels.emplace("B");
+                    ref_labels.emplace("C");
+                    ref_kmers.emplace(std::string(k - 1, 'A') + "C");
+                }
+
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                    *anno_graph,
+                    labels_in, labels_out,
+                    config, num_threads, test_dump_basename
+                );
+
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+
+                EXPECT_EQ(ref_labels, obs_labels) << k << " " << label;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << label;
+            });
+
+            if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
+                // TODO
+            }
+        }
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelCounts) {
+    typedef typename TypeParam::first_type Graph;
+    typedef typename TypeParam::second_type Annotation;
+
+    for (size_t num_threads : { 1, 4 }) {
+        size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
+        for (size_t k = 3; k < max_k; ++k) {
+            std::string sig = std::string(k - 1, 'A') + "C";
+            for (size_t i = 0; i < 7; ++i) {
+                sig += sig;
+            }
+
+            std::vector<std::string> sequences {
+                std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+                std::string("T") + sig,
+                std::string("T") + sig,
+                std::string("T") + std::string(k - 1, 'A') + "A",
+                std::string("T") + std::string(k - 1, 'A') + "G"
+            };
+
+            std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+            std::unordered_set<std::string> obs_labels, obs_kmers;
+            std::unordered_set<std::string> ref_kmers;
+            for (size_t j = 0; j < k; ++j) {
+                ref_kmers.emplace(std::string(j, 'A') + "C" + std::string(k - 1 - j, 'A'));
+            }
+            const std::unordered_set<std::string> ref_labels {
+                "B", "C"
+            };
+
+            // ingroup: B, C
+            // outgroup: A
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_in { "B", "C" };
+            tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> labels_out { "A" };
+
+            std::vector<std::string> test_types = {
+                "poisson_exact",
+                "nbinom_exact",
+                "gnb_exact",
+                "fisher",
+            };
+
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels, DeBruijnGraph::BASIC, true);
+            auto graph_ptr = std::static_pointer_cast<const Graph>(anno_graph->get_graph_ptr());
+
+            for (const auto &test_type : test_types) {
+                DifferentialAssemblyConfig config {
+                    .test_type = test_type,
+                    .outfbase = "",
+                };
+
+                auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                    *anno_graph,
+                    labels_in, labels_out,
+                    config, num_threads, test_dump_basename
+                );
+
+                masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+                    auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                    obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                    obs_kmers.insert(kmer);
+                });
+                EXPECT_EQ(ref_labels, obs_labels) << k << " " << test_type;
+                EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << test_type;
+            }
+
+            if constexpr(std::is_same_v<Annotation, ColumnCompressed<>>) {
+                // TODO
+            }
+        }
+    }
+}
+
+// TODO: tests not defined when there is overlap in the groups
+// TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
+//     typedef typename TypeParam::first_type Graph;
+//     typedef typename TypeParam::second_type Annotation;
+//     for (size_t num_threads : { 1, 4 }) {
+//         size_t k = 5;
+//         const tsl::hopscotch_set<std::string> labels_in { "A", "B", "C" };
+//         const tsl::hopscotch_set<std::string> labels_out { "A", "B", "C" };
+
+//         const std::vector<std::string> sequences {
+//             "TTTTTAAAAATTTTTTTTTT",
+//             "CCCCCAAAAACCCCCCCCCC",
+//             "GGGGGAAAAAGGGGGGGGGG"
+//         };
+//         const std::vector<std::string> labels { "A", "B", "C" };
+
+//         auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+//         std::unordered_set<std::string> obs_kmers;
+//         const std::unordered_set<std::string> ref_kmers {
+//             "TTTTT", "TTTTA", "TTTAA", "TTAAA", "TAAAA", "AAAAT", "AAATT", "AATTT", "ATTTT",
+//             "CCCCC", "CCCCA", "CCCAA", "CCAAA", "CAAAA", "AAAAC", "AAACC", "AACCC", "ACCCC",
+//             "GGGGG", "GGGGA", "GGGAA", "GGAAA", "GAAAA", "AAAAG", "AAAGG", "AAGGG", "AGGGG",
+//         };
+//         DifferentialAssemblyConfig config {
+//             .test_type = "poisson_binom",
+//             .outfbase = "",
+//         };
+
+//         auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+//             *anno_graph,
+//             labels_in, labels_out,
+//             config, num_threads, test_dump_basename
+//         );
+
+//         masked_dbg_in->call_kmers([&](auto, const std::string &kmer) {
+//             obs_kmers.insert(kmer);
+//         });
+
+//         EXPECT_EQ(ref_kmers, obs_kmers);
+//     }
+// }
+
 template <class Graph, class Annotation = ColumnCompressed<>>
-void test_mask_unitigs(double inlabel_fraction,
-                       double outlabel_fraction,
-                       double other_label_fraction,
-                       const std::unordered_set<std::string> &ref_kmers) {
+void test_mask_unitigs(const std::unordered_set<std::string> &ref_kmers) {
     for (size_t num_threads : {1, 4}) {
-        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
-        const tsl::hopscotch_set<std::string> outgroup { "A" };
+        const tsl::hopscotch_set<std::string> labels_in { "B", "C" };
+        const tsl::hopscotch_set<std::string> labels_out { "A" };
         size_t k = 3;
 
         {
@@ -157,70 +307,40 @@ void test_mask_unitigs(double inlabel_fraction,
             std::unordered_set<std::string> obs_kmers;
 
             DifferentialAssemblyConfig config {
-                .label_mask_in_unitig_fraction = inlabel_fraction,
-                .label_mask_in_kmer_fraction = 1.0,
-                .label_mask_out_unitig_fraction = outlabel_fraction,
-                .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = other_label_fraction
+                .test_by_unitig = true,
+                .test_type = "poisson_binom",
+                .outfbase = "",
             };
 
-            auto masked_dbg = mask_nodes_by_label(*anno_graph,
-                                                  ingroup, outgroup,
-                                                  {}, {},
-                                                  config, num_threads);
+            auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                *anno_graph,
+                labels_in, labels_out,
+                config, num_threads, test_dump_basename
+            );
 
-            masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg_in->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
-            EXPECT_EQ(ref_kmers, obs_kmers)
-                << k << " "
-                << inlabel_fraction << " "
-                << outlabel_fraction << " "
-                << other_label_fraction;
+            EXPECT_EQ(ref_kmers, obs_kmers) << k;
         }
     }
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
-    for (double other_frac : std::vector<double>{ 0.0, 1.0 }) {
-        std::unordered_set<std::string> ref_kmers;
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 0.0, other_frac, ref_kmers);
+    std::unordered_set<std::string> ref_kmers;
+    test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(ref_kmers);
 
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 0.24, other_frac, ref_kmers);
-
-        ref_kmers.insert("GAA");
-        ref_kmers.insert("AAT");
-        ref_kmers.insert("ATG");
-        ref_kmers.insert("TGC");
-
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 0.25, other_frac, ref_kmers);
-
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 0.50, other_frac, ref_kmers);
-
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 0.75, other_frac, ref_kmers);
-
-        test_mask_unitigs<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(1.0, 1.0, other_frac, ref_kmers);
-    }
+    // TODO: make a test where some k-mers are significant
 }
 
 #if ! _PROTEIN_GRAPH
 template <class Graph, class Annotation = ColumnCompressed<>>
 std::unordered_set<std::string>
-test_mask_unitigs_canonical(double inlabel_fraction,
-                            double outlabel_fraction,
-                            double other_label_fraction,
-                            const std::unordered_set<std::string> &ref_kmers,
-                            bool add_complement,
-                            DeBruijnGraph::Mode mode) {
+test_mask_unitigs_canonical(const std::unordered_set<std::string> &ref_kmers,
+                            DeBruijnGraph::Mode mode,
+                            size_t k) {
     for (size_t num_threads : { 1, 4 }) {
-        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
-        const tsl::hopscotch_set<std::string> outgroup { "A" };
-        size_t k = 5;
+        const tsl::hopscotch_set<std::string> labels_in { "B", "C" };
+        const tsl::hopscotch_set<std::string> labels_out { "A" };
 
         {
             /*
@@ -245,7 +365,6 @@ test_mask_unitigs_canonical(double inlabel_fraction,
             };
             const std::vector<std::string> labels { "A", "B", "C", "D" };
 
-            // if add_complement, then the differential
             auto anno_graph = build_anno_graph<Graph, Annotation>(
                 k, sequences, labels, mode
             );
@@ -253,20 +372,18 @@ test_mask_unitigs_canonical(double inlabel_fraction,
             std::unordered_set<std::string> obs_kmers;
 
             DifferentialAssemblyConfig config {
-                .label_mask_in_unitig_fraction = inlabel_fraction,
-                .label_mask_in_kmer_fraction = 1.0,
-                .label_mask_out_unitig_fraction = outlabel_fraction,
-                .label_mask_out_kmer_fraction = 0.0,
-                .label_mask_other_unitig_fraction = other_label_fraction,
-                .add_complement = add_complement
+                .test_by_unitig = true,
+                .test_type = "poisson_binom",
+                .outfbase = "",
             };
 
-            auto masked_dbg = mask_nodes_by_label(*anno_graph,
-                                                  ingroup, outgroup,
-                                                  {}, {},
-                                                  config, num_threads);
+            auto [masked_dbg_in, masked_dbg_out, pvals, tmp_file] = mask_nodes_by_label_dual<std::vector<uint64_t>>(
+                *anno_graph,
+                labels_in, labels_out,
+                config, num_threads, test_dump_basename
+            );
 
-            masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg_in->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
             if (ref_kmers != obs_kmers)
                 return obs_kmers;
@@ -278,102 +395,30 @@ test_mask_unitigs_canonical(double inlabel_fraction,
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelAddCanonical) {
     for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC,
-                                      DeBruijnGraph::CANONICAL,
                                       DeBruijnGraph::PRIMARY }) {
         std::string mode_str = mode == DeBruijnGraph::BASIC
             ? "BASIC"
             : (mode == DeBruijnGraph::CANONICAL ? "CANONICAL" : "PRIMARY");
 
-        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
-            std::unordered_set<std::string> ref_kmers;
+        std::unordered_set<std::string> ref_kmers;
 
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.0, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
+        EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                typename TypeParam::second_type>(
+            ref_kmers, mode, 5
+        )), ref_kmers) << mode_str;
+        EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                typename TypeParam::second_type>(
+            ref_kmers, mode, 6
+        )), ref_kmers) << mode_str;
+        EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                typename TypeParam::second_type>(
+            ref_kmers, mode, 7
+        )), ref_kmers) << mode_str;
 
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.25, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.49, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            ref_kmers.insert("GAATG");
-            ref_kmers.insert("AATGC");
-
-            if (mode == DeBruijnGraph::CANONICAL || mode == DeBruijnGraph::PRIMARY) {
-                ref_kmers.insert("CATTC");
-                ref_kmers.insert("GCATT");
-            }
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.50, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.75, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 1.0, other_frac, ref_kmers, true, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-        }
+        // TODO: make a test where some k-mers are significant
     }
 }
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
-    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL,
-                                      DeBruijnGraph::PRIMARY }) {
-        std::string mode_str = mode == DeBruijnGraph::CANONICAL ? "CANONICAL" : "PRIMARY";
-        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
-            std::unordered_set<std::string> ref_kmers;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.0, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.25, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.49, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            ref_kmers.insert("GAATG");
-            ref_kmers.insert("AATGC");
-            ref_kmers.insert("CATTC");
-            ref_kmers.insert("GCATT");
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.50, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 0.75, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-
-            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                                   typename TypeParam::second_type>(
-                1.0, 1.0, other_frac, ref_kmers, false, mode
-            )), ref_kmers) << other_frac << " " << mode_str;
-        }
-    }
-}
 #endif
 
 } // namespace

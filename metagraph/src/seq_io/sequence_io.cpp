@@ -114,7 +114,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
 
-    feature_gz_out_ = gzopen(filename.c_str(), "w");
+    feature_gz_out_ = gzopen(filename.c_str(), mode);
     if (feature_gz_out_ == Z_NULL
             || gzwrite(feature_gz_out_, &kmer_length_, 4) != sizeof(kmer_length_)) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
@@ -189,6 +189,7 @@ template class ExtendedFastaWriter<uint8_t>;
 template class ExtendedFastaWriter<uint16_t>;
 template class ExtendedFastaWriter<uint32_t>;
 template class ExtendedFastaWriter<uint64_t>;
+template class ExtendedFastaWriter<double>;
 
 
 bool write_fasta(gzFile gz_out, const kseq_t &kseq) {

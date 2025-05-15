@@ -13,7 +13,7 @@
 	url = https://github.com/karasikov/caches.git
 [submodule "metagraph/external-libraries/eigen"]
 	path = metagraph/external-libraries/eigen
-	url = https://github.com/eigenteam/eigen-git-mirror.git
+	url = https://gitlab.com/libeigen/eigen.git
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git

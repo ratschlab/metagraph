@@ -88,6 +88,15 @@ class DBGSSHash : public DeBruijnGraph {
 
     size_t indegree(node_index) const override;
 
+    bool has_no_outgoing(node_index node) const override;
+    bool has_single_outgoing(node_index node) const override;
+    bool has_multiple_outgoing(node_index node) const override;
+
+    bool has_no_incoming(node_index node) const override;
+    bool has_single_incoming(node_index node) const override;
+
+    void call_source_nodes(const std::function<void(node_index)>& callback) const override;
+
     node_index kmer_to_node(std::string_view kmer) const override;
 
     template <bool with_rc = true>

@@ -1,5 +1,7 @@
 #include "assemble.hpp"
 
+#include <variant>
+
 #include <json/json.h>
 #include <spdlog/fmt/fmt.h>
 #include <tsl/hopscotch_set.h>
@@ -11,6 +13,7 @@
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotation.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
@@ -41,78 +44,62 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
         exit(1);
 }
 
-DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
-                                                const DeBruijnGraph &graph) {
+DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.add_complement = graph.get_mode() == DeBruijnGraph::CANONICAL;
-    diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
-    diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
-    diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
-    diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
-    diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
-
-    logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
-    logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);
-    logger->trace("Per-kmer mask out fraction:\t\t{}", diff_config.label_mask_out_kmer_fraction);
-    logger->trace("Per-unitig mask out fraction:\t\t{}", diff_config.label_mask_out_unitig_fraction);
-    logger->trace("Per-unitig other label fraction:\t{}", diff_config.label_mask_other_unitig_fraction);
-    logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
-
+    diff_config.count_kmers = experiment.get("count_kmers", false).asBool();
+    diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
+    diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
+    diff_config.test_type = experiment.get("test_type", "nbinom_exact").asString();
+    diff_config.clean = experiment.get("clean", false).asBool();
+    diff_config.min_count = experiment.get("min_count", 0).asUInt64();
+    diff_config.min_recurrence = experiment.get("min_recurrence", 1).asUInt64();
+    diff_config.min_in_recurrence = experiment.get("min_in_recurrence", 0).asUInt64();
+    diff_config.min_out_recurrence = experiment.get("min_out_recurrence", 0).asUInt64();
+    diff_config.max_in_recurrence = experiment.get("max_in_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
+    diff_config.max_out_recurrence = experiment.get("max_out_recurrence", std::numeric_limits<uint64_t>::max()).asUInt64();
+    diff_config.assemble_shared = experiment.get("assemble_shared", false).asBool();
     return diff_config;
 }
 
-typedef std::function<void(const graph::MaskedDeBruijnGraph&,
+typedef std::function<void(const graph::DeBruijnGraph&,
                            const std::string& /* header */)> CallMaskedGraphHeader;
 
-void call_masked_graphs(const AnnotatedDBG &anno_graph,
+void call_masked_graphs(std::shared_ptr<DeBruijnGraph> graph_ptr,
                         Config *config,
                         const CallMaskedGraphHeader &callback) {
-    if (!std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()).get())
-        throw std::runtime_error("Masking only supported for DeBruijnGraph");
-
     assert(!config->assembly_config_file.empty());
 
     std::ifstream fin(config->assembly_config_file);
     if (!fin.good())
         throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
+    if (config->infbase_annotators.size() > 1) {
+        for (const auto &name : config->infbase_annotators) {
+            if (parse_annotation_type(name) != Config::ColumnCompressed) {
+                throw std::runtime_error("Multiple annotation files must be ColumnCompressed");
+            }
+        }
+    }
+
     size_t num_threads = std::max(1u, get_num_threads());
 
     Json::Value diff_json;
     fin >> diff_json;
 
-    tsl::hopscotch_set<std::string> foreground_labels;
-    tsl::hopscotch_set<std::string> background_labels;
-    tsl::hopscotch_set<std::string> shared_foreground_labels;
-    tsl::hopscotch_set<std::string> shared_background_labels;
-
     for (const Json::Value &group : diff_json["groups"]) {
-        if (group["shared_labels"]) {
-            shared_foreground_labels.clear();
-            shared_background_labels.clear();
-
-            for (const Json::Value &in_label : group["shared_labels"]["in"]) {
-                shared_foreground_labels.emplace(in_label.asString());
-            }
-
-            for (const Json::Value &out_label : group["shared_labels"]["out"]) {
-                shared_background_labels.emplace(out_label.asString());
-            }
-
-            check_labels(shared_foreground_labels, anno_graph);
-            check_labels(shared_background_labels, anno_graph);
-        }
-
         if (!group["experiments"])
             throw std::runtime_error("Missing experiments in group");
 
         for (const Json::Value &experiment : group["experiments"]) {
-            DifferentialAssemblyConfig diff_config = diff_assembly_config(
-                experiment, anno_graph.get_graph()
-            );
+            tsl::hopscotch_set<std::string> foreground_labels;
+            tsl::hopscotch_set<std::string> background_labels;
 
-            foreground_labels.clear();
-            background_labels.clear();
+            DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
+            diff_config.outfbase = config->outfbase;
+            diff_config.output_pvals = config->output_pvals;
+
+            std::string exp_name = experiment["name"].asString()
+                                    + (config->enumerate_out_sequences ? "." : "");
 
             for (const Json::Value &in_label : experiment["in"]) {
                 foreground_labels.emplace(in_label.asString());
@@ -122,20 +109,85 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 background_labels.emplace(out_label.asString());
             }
 
-            check_labels(foreground_labels, anno_graph);
-            check_labels(background_labels, anno_graph);
-
-            std::string exp_name = experiment["name"].asString()
-                                    + (config->enumerate_out_sequences ? "." : "");
-
             logger->trace("Running assembly: {}", exp_name);
 
-            callback(*mask_nodes_by_label(anno_graph,
-                                          foreground_labels,
-                                          background_labels,
-                                          shared_foreground_labels,
-                                          shared_background_labels,
-                                          diff_config, num_threads), exp_name);
+            std::shared_ptr<DeBruijnGraph> ingraph;
+            std::shared_ptr<DeBruijnGraph> outgraph;
+
+            std::variant<std::vector<uint64_t>, sdsl::int_vector_buffer<64>> pvals;
+            if (!diff_config.test_by_unitig) {
+                pvals = sdsl::int_vector_buffer<64>();
+            } else {
+                pvals = std::vector<uint64_t>();
+            }
+
+            std::tie(ingraph, outgraph) = std::visit([&](auto &pvals) {
+                using T = std::decay_t<decltype(pvals)>;
+                std::unique_ptr<utils::TempFile> tmp_file;
+                if (config->infbase_annotators.size() > 1
+                        || parse_annotation_type(config->infbase_annotators[0]) == Config::ColumnCompressed) {
+                    std::tie(ingraph, outgraph, pvals, tmp_file) = graph::mask_nodes_by_label_dual<T>(graph_ptr,
+                                            config->infbase_annotators,
+                                            foreground_labels,
+                                            background_labels,
+                                            diff_config, num_threads,
+                                            config->tmp_dir,
+                                            config->parallel_nodes);
+                } else {
+                    auto anno_graph = initialize_annotated_dbg(graph_ptr, *config);
+                    std::tie(ingraph, outgraph, pvals, tmp_file) = graph::mask_nodes_by_label_dual<T>(*anno_graph,
+                                            foreground_labels,
+                                            background_labels,
+                                            diff_config, num_threads,
+                                            config->tmp_dir);
+                }
+
+                if (config->output_pvals) {
+                    common::logger->trace("Writing p-values");
+                    std::ofstream fout_all(config->outfbase + ".all.pvals", ios::out | ios::app);
+                    for (uint64_t pval : pvals) {
+                        static_assert(sizeof(double) == sizeof(pval));
+                        double pval_d;
+                        memcpy(&pval_d, &pval, sizeof(pval));
+                        fout_all << pval_d << "\n";
+                    }
+                }
+
+                if constexpr(std::is_same_v<T, sdsl::int_vector_buffer<64>>) {
+                    pvals.close();
+                } else {
+                    pvals = T();
+                }
+
+                return std::make_pair(std::move(ingraph), std::move(outgraph));
+            }, pvals);
+
+            sdsl::bit_vector mask;
+            callback(*ingraph, exp_name + "in.");
+            if (diff_config.assemble_shared) {
+                if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(ingraph)) {
+                    std::unique_ptr<bitmap_vector> inmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                    mask = const_cast<sdsl::bit_vector&&>(inmask->data());
+                    inmask.reset();
+                }
+            }
+            ingraph.reset();
+
+            callback(*outgraph, exp_name + "out.");
+            if (diff_config.assemble_shared) {
+                if (auto masked_graph = std::dynamic_pointer_cast<MaskedDeBruijnGraph>(outgraph)) {
+                    std::unique_ptr<bitmap_vector> outmask(static_cast<bitmap_vector*>(masked_graph->release_mask()));
+                    outmask->add_to(&mask);
+                    outmask.reset();
+                    mask.flip();
+                    auto masked_graph_null = std::make_shared<MaskedDeBruijnGraph>(
+                        graph_ptr, std::make_unique<bitmap_vector>(std::move(mask)), true,
+                        graph_ptr->get_mode() == DeBruijnGraph::PRIMARY ? DeBruijnGraph::PRIMARY : DeBruijnGraph::BASIC
+                    );
+                    callback(*masked_graph_null, exp_name + "shared.");
+                }
+            }
+            outgraph.reset();
         }
     }
 }
@@ -143,9 +195,17 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 int assemble(Config *config) {
     assert(config);
 
+    if (config->infbase_annotators.size()) {
+        assert(config->assembly_config_file.size());
+        if (!std::filesystem::exists(config->assembly_config_file)) {
+            logger->error("Differential assembly config does not exist\n{}",
+                          config->assembly_config_file);
+            exit(1);
+        }
+    }
+
     const auto &files = config->fnames;
 
-    assert(files.size() == 1);
     assert(config->outfbase.size());
 
     Timer timer;
@@ -156,47 +216,50 @@ int assemble(Config *config) {
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
     if (config->infbase_annotators.size()) {
-        config->infbase = files.at(0);
-
-        assert(config->assembly_config_file.size());
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
-
         logger->trace("Generating masked graphs...");
+        std::mutex write_mutex;
+        size_t num_threads = std::max(1u, get_num_threads());
 
         std::filesystem::remove(
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
-        std::mutex write_mutex;
+        std::filesystem::remove(config->outfbase + ".pvals");
+        std::filesystem::remove(config->outfbase + ".all.pvals");
 
-        size_t num_threads = std::max(1u, get_num_threads());
+        auto graph_callback = [&](const graph::DeBruijnGraph &graph, const std::string &header) {
+            seq_io::FastaWriter writer(config->outfbase,
+                                       header,
+                                       config->enumerate_out_sequences,
+                                       num_threads > 1, /* async write */
+                                       "a" /* append mode */);
 
-        call_masked_graphs(*anno_graph, config,
-            [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
-                seq_io::FastaWriter writer(config->outfbase, header,
-                                           config->enumerate_out_sequences,
-                                           num_threads > 1, /* async write */
-                                           "a" /* append mode */);
-
-                if (config->unitigs || config->min_tip_size > 1) {
-                    graph.call_unitigs([&](const std::string &unitig, auto&&) {
-                                           std::lock_guard<std::mutex> lock(write_mutex);
-                                           writer.write(unitig);
-                                       },
-                                       num_threads, config->min_tip_size,
-                                       config->kmers_in_single_form);
-                } else {
-                    graph.call_sequences([&](const std::string &seq, auto&&) {
-                                             std::lock_guard<std::mutex> lock(write_mutex);
-                                             writer.write(seq);
-                                         },
-                                         num_threads, config->kmers_in_single_form);
-                }
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph.call_unitigs(
+                    [&](const std::string &unitig, auto&& path) {
+                        std::lock_guard<std::mutex> lock(write_mutex);
+                        writer.write(unitig);
+                    },
+                    num_threads, config->min_tip_size,
+                    config->kmers_in_single_form
+                );
+            } else {
+                graph.call_sequences(
+                    [&](const std::string &seq, auto&& path) {
+                        std::lock_guard<std::mutex> lock(write_mutex);
+                        writer.write(seq);
+                    },
+                    num_threads, config->kmers_in_single_form
+                );
             }
-        );
+        };
+
+        call_masked_graphs(graph, config, graph_callback);
 
         return 0;
     }
+
+    assert(files.size() == 1);
 
     logger->trace("Extracting sequences from graph...");
 
