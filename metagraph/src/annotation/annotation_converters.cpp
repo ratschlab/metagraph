@@ -381,6 +381,31 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
     logger->trace("Annotation converted");
 }
 
+
+template <>
+void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
+                                                  const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    anno.get_label_encoder().serialize(out);
+
+    // serialize RowDiff<RowFlat<>>
+    out.write("v2.0", 4);
+    anno.get_matrix().anchor().serialize(out);
+    anno.get_matrix().fork_succ().serialize(out);
+    out.close();
+
+    RowFlat<>::serialize([&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
+                         anno.get_matrix().diffs().num_columns(),
+                         anno.get_matrix().diffs().num_rows(),
+                         anno.get_matrix().diffs().num_relations(),
+                         fname, true);
+    logger->trace("Annotation converted");
+}
+
 template <>
 void convert_to_row_diff<RowDiffRowSparseAnnotator>(
             const std::vector<std::string> &files,
