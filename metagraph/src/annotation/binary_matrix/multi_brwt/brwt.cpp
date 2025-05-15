@@ -81,8 +81,7 @@ void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback
         #pragma omp ordered
         {
             Vector<Column> row;
-            auto row_begin = slice.begin();
-            for (size_t i = 0; i < end - begin; ++i) {
+            for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
                 // every row in `slice` ends with `-1`
                 auto row_end = std::find(row_begin, slice.end(),
                                          std::numeric_limits<Column>::max());
