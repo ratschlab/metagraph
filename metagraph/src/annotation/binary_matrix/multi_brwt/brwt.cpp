@@ -87,6 +87,7 @@ void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback
                 auto row_end = std::find(row_begin, slice.end(),
                                          std::numeric_limits<Column>::max());
                 row.assign(row_begin, row_end);
+                std::sort(row.begin(), row.end());
                 callback(row);
                 ++progress_bar;
                 row_begin = row_end + 1;
