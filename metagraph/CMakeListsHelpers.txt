@@ -83,6 +83,7 @@ unset(FOLLY_FOUND PARENT_SCOPE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Jemalloc)
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_package(Zstd REQUIRED)
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
@@ -91,7 +92,7 @@ if(Jemalloc_FOUND)
   endif()
 endif()
 
-if(Jemalloc_FOUND AND Boost_FOUND)
+if(Jemalloc_FOUND)
   message(STATUS "Configuring Folly")
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
