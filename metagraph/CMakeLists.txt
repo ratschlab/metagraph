@@ -310,6 +310,13 @@ else()
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
+if(ZSTD_FOUND)
+  include_directories(SYSTEM
+    ${ZSTD_INCLUDE_DIRS}
+  )
+  set(METALIBS ${METALIBS} ${ZSTD_LIBRARIES})
+endif()
+
 # makes ASIO not depend on boost
 add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 set(USE_STANDALONE_ASIO ON)
