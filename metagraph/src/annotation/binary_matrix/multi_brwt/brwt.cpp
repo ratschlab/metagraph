@@ -76,6 +76,7 @@ void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback
         uint64_t end = std::min(i + kNumRowsInBlock, num_rows());
         assert(begin <= end);
 
+        slice.resize(0);
         slice_rows(begin, end, &slice);
 
         #pragma omp ordered
