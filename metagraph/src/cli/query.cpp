@@ -1323,7 +1323,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
-                                    config_.batch_align ? aligner_config_.get() : NULL);
+                                     config_.batch_align ? aligner_config_.get() : NULL);
 
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);
@@ -1332,10 +1332,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             }
 
             logger->trace("Query graph constructed for batch of sequences"
-                        " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
-                        num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
-                        (double)num_bytes_read / query_graph->get_graph().num_nodes(),
-                        batch_timer.elapsed());
+                         " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+                         num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
+                         (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                         batch_timer.elapsed());
         }, std::move(seq_batch), num_bytes_read);
 
         num_bp += num_bytes_read;
