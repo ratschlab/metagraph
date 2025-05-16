@@ -939,17 +939,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
     std::mutex seq_mutex;
-    bool verbose = common::get_verbose();
-    // turn off verbose to hide the contig extraction progress bar
-    common::set_verbose(false);
     graph_init->call_sequences([&](const std::string &contig, const auto &) {
                                    std::lock_guard<std::mutex> lock(seq_mutex);
                                    contigs.emplace_back(contig, std::vector<node_index>{});
                                },
                                num_threads,
                                // pull only primary contigs when building canonical query graph
-                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
-    common::set_verbose(verbose);
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                               false);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
