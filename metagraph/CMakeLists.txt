@@ -352,6 +352,14 @@ add_library(sdust STATIC
 
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
+include(ExternalProject)
+ExternalProject_Add(HTSLIB
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+)
+link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
+include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
+
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
 foreach(DEF ${DIRECTORY_DEFINITIONS})
@@ -395,14 +403,6 @@ file(GLOB metagraph_cli_files
   "src/cli/*/*/*.cpp"
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-
-include(ExternalProject)
-ExternalProject_Add(HTSLIB
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
-)
-link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
-include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 add_dependencies(metagraph-core HTSLIB)
 
 add_executable(metagraph "src/main.cpp")
@@ -561,7 +561,7 @@ list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 
 add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
 
 target_compile_options(benchmarks PRIVATE)
 
