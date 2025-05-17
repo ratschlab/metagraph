@@ -108,7 +108,7 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     BaseMatrix& diffs() { return diffs_; }
 
   private:
-    static void add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row);
+    static void add_diff(const SetBitPositions &diff, SetBitPositions *row);
 
     BaseMatrix diffs_;
 };
@@ -210,14 +210,14 @@ void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
 }
 
 template <class BaseMatrix>
-void RowDiff<BaseMatrix>::add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row) {
+void RowDiff<BaseMatrix>::add_diff(const SetBitPositions &diff, SetBitPositions *row) {
     assert(std::is_sorted(row->begin(), row->end()));
     assert(std::is_sorted(diff.begin(), diff.end()));
 
     if (diff.empty())
         return;
 
-    Vector<uint64_t> result;
+    SetBitPositions result;
     result.reserve(row->size() + diff.size());
     std::set_symmetric_difference(row->begin(), row->end(),
                                   diff.begin(), diff.end(),

@@ -18,9 +18,9 @@ namespace matrix {
 class BinaryMatrix {
   public:
     typedef uint64_t Row;
-    typedef uint64_t Column;
+    typedef uint32_t Column;
 
-    typedef Vector<Column> SetBitPositions;
+    typedef SmallVector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
 

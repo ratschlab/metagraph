@@ -945,7 +945,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                },
                                num_threads,
                                // pull only primary contigs when building canonical query graph
-                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                               false);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();

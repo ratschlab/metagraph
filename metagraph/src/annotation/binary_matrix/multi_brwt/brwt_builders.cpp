@@ -63,7 +63,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     uint64_t num_columns = 0;
     Partition partition;
     for (const BRWT &submatrix : submatrices) {
-        partition.push_back(utils::arange(num_columns, submatrix.num_columns()));
+        partition.push_back(utils::arange<BRWT::Column, std::vector<BRWT::Column>>(num_columns, submatrix.num_columns()));
         num_columns += submatrix.num_columns();
     }
     parent.assignments_ = RangePartition(std::move(partition));
@@ -130,7 +130,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
     uint64_t num_columns = 0;
     Partition partition;
     for (const BRWT &submatrix : submatrices) {
-        partition.push_back(utils::arange(num_columns, submatrix.num_columns()));
+        partition.push_back(utils::arange<BRWT::Column, std::vector<BRWT::Column>>(num_columns, submatrix.num_columns()));
         num_columns += submatrix.num_columns();
     }
     parent.assignments_ = RangePartition(std::move(partition));
@@ -162,7 +162,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
 
 template <typename T>
 std::vector<T> subset(std::vector<T> *vector,
-                      const std::vector<uint64_t> indexes) {
+                      const std::vector<BRWT::Column> indexes) {
     assert(vector);
 
     std::vector<T> result;
@@ -195,7 +195,7 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
 // linkage[c] = {} for each c < num_columns
 BRWT BRWTBottomUpBuilder::build(
         const std::function<void(const CallColumn &)> &get_columns,
-        const std::vector<std::vector<uint64_t>> &linkage,
+        const std::vector<std::vector<BRWT::Column>> &linkage,
         const std::filesystem::path &tmp_path,
         size_t num_nodes_parallel,
         size_t num_threads) {
@@ -322,7 +322,7 @@ BRWT BRWTBottomUpBuilder::build(
 
     ThreadPool thread_pool(num_threads, 100'000 * num_threads);
 
-    std::vector<std::vector<uint64_t>> stored_columns(linkage.size());
+    std::vector<std::vector<BRWT::Column>> stored_columns(linkage.size());
 
     #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
     for (size_t i = num_leaves; i < linkage.size(); ++i) {
@@ -454,7 +454,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
     uint64_t num_columns_total = 0;
     Partition current_partition;
     for (const BRWT &node : nodes) {
-        current_partition.push_back(utils::arange(num_columns_total, node.num_columns()));
+        current_partition.push_back(utils::arange<BRWT::Column, std::vector<BRWT::Column>>(num_columns_total, node.num_columns()));
         num_columns_total += node.num_columns();
     }
 
@@ -572,7 +572,7 @@ void BRWTOptimizer::reassign(size_t node_rank, BRWT *parent, size_t num_threads)
 
     BRWT &node = dynamic_cast<BRWT&>(*parent->child_nodes_.at(node_rank));
 
-    std::vector<uint64_t> column_arrangement;
+    std::vector<BRWT::Column> column_arrangement;
     std::vector<size_t> group_sizes;
     for (size_t g = 0; g < parent->assignments_.num_groups(); ++g) {
         if (g == node_rank)

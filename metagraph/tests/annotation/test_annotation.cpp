@@ -45,8 +45,10 @@ TYPED_TEST(AnnotatorPresetTest, GetLabels) {
 }
 
 TYPED_TEST(AnnotatorPresetTest, CountLabels) {
+    using Column = mtg::annot::matrix::BinaryMatrix::Column;
+
     EXPECT_EQ(
-        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+        convert_to_set(std::vector<std::pair<Column, size_t>>({
             {0, 1}, {3, 2}, {1, 4}, {2, 2}
         })),
         convert_to_set(this->annotation->get_matrix().sum_rows(
@@ -57,7 +59,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
     );
 
     EXPECT_EQ(
-        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+        convert_to_set(std::vector<std::pair<Column, size_t>>({
             {0, 1}, {3, 2}, {1, 4}, {2, 2}
         })),
         convert_to_set(this->annotation->get_matrix().sum_rows(
@@ -68,7 +70,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
     );
 
     EXPECT_EQ(
-        convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
+        convert_to_set(std::vector<std::pair<Column, size_t>>({
             {3, 2}, {1, 4}, {2, 2}
         })),
         convert_to_set(this->annotation->get_matrix().sum_rows(

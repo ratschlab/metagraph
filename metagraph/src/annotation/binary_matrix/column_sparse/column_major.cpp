@@ -156,7 +156,7 @@ ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     if (total_sum_count < min_count)
         return {};
 
-    std::vector<std::pair<uint64_t, size_t>> result;
+    std::vector<std::pair<Column, size_t>> result;
     result.reserve(num_columns());
 
     for (size_t j = 0; j < num_columns(); ++j) {

@@ -2081,6 +2081,7 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
                       size_t num_threads,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,
+                      bool verbose,
                       const bitmap *subgraph_mask,
                       bool trim_sentinels) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
@@ -2106,7 +2107,7 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
-                             std::cerr, !common::get_verbose());
+                             std::cerr, !verbose);
 
     ThreadPool thread_pool(num_threads ? num_threads : 1, TASK_POOL_SIZE);
     bool async = true;
@@ -2693,6 +2694,7 @@ call_path(const BOSS &boss,
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                           size_t num_threads,
                           bool kmers_in_single_form,
+                          bool verbose,
                           const bitmap *subgraph_mask) const {
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
@@ -2705,7 +2707,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 
         callback(std::move(sequence), std::move(edges));
 
-    }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
+    }, num_threads, false, kmers_in_single_form, verbose, subgraph_mask, true);
 }
 
 // Reach all k-mers that merge into anchor |edge| by following their diff paths.
@@ -3046,7 +3048,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         // this is not a tip
         callback(std::move(sequence), std::move(edges));
 
-    }, num_threads, true, kmers_in_single_form, subgraph_mask, true);
+    }, num_threads, true, kmers_in_single_form, common::get_verbose(), subgraph_mask, true);
 }
 
 /**

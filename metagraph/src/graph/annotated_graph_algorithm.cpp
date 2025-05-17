@@ -365,7 +365,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         code_to_indicator[label_encoder.encode(label_out)] |= 2;
     }
 
-    std::vector<uint64_t> label_codes;
+    std::vector<annot::matrix::BinaryMatrix::Column> label_codes;
     label_codes.reserve(code_to_indicator.size());
     for (const auto &[code, indicator] : code_to_indicator) {
         label_codes.push_back(code);
