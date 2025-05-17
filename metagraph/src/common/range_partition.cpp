@@ -1,5 +1,6 @@
 #include "range_partition.hpp"
 
+#include <algorithm>
 #include <cassert>
 
 #include "common/serialization.hpp"
