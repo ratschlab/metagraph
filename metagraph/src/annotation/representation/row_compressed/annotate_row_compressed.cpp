@@ -285,9 +285,9 @@ RowType* StreamRows<RowType>::next_row() {
 
     while (i_ < inbuf_.size()) {
         auto value = inbuf_[i_++];
-        // if (value - 1 > std::numeric_limits<typename RowType::value_type>::max())
-        //     throw std::ifstream::failure("Integer overflow: trying to read too"
-        //                                  " large column index: " + std::to_string(value - 1));
+        if (value > std::numeric_limits<typename RowType::value_type>::max())
+            throw std::ifstream::failure("Integer overflow: trying to read too"
+                                         " large column index: " + std::to_string(value - 1));
         if (value) {
             row_.push_back(value - 1);
         } else {
