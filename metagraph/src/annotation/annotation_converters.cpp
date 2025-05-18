@@ -420,7 +420,7 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
-        const std::vector<std::vector<uint32_t>> &linkage,
+        const std::vector<std::vector<BRWT::Column>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path,
@@ -456,7 +456,7 @@ convert_to_BRWT(
 template <>
 std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::vector<std::string> &annotation_files,
-        const std::vector<std::vector<uint32_t>> &linkage,
+        const std::vector<std::vector<BRWT::Column>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path) {
@@ -487,7 +487,7 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
 template<>
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                         const std::vector<std::vector<uint32_t>> &linkage,
+                         const std::vector<std::vector<BRWT::Column>> &linkage,
                          size_t num_parallel_nodes,
                          size_t num_threads,
                          const fs::path &tmp_path) {

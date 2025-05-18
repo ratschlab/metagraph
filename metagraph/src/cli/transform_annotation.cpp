@@ -168,11 +168,10 @@ matrix::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
     }
 }
 
-std::vector<std::vector<uint32_t>>
-parse_linkage_matrix(const std::string &filename) {
+auto parse_linkage_matrix(const std::string &filename){
     std::ifstream in(filename);
 
-    std::vector<std::vector<uint32_t>> linkage;
+    std::vector<std::vector<matrix::BinaryMatrix::Column>> linkage;
     std::string line;
     while (std::getline(in, line)) {
         std::vector<std::string> parts = utils::split_string(line, " ");

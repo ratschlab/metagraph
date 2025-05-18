@@ -16,8 +16,8 @@ RangePartition::RangePartition(const std::vector<T> &arrangement,
         offset += group_size;
     }
 
-    assert(initialize_groups_and_ranks());
-    initialize_groups_and_ranks();
+    if (!initialize_groups_and_ranks())
+        throw std::runtime_error("Invalid partition");
 }
 
 RangePartition::RangePartition(std::vector<std::vector<T>>&& partition)
@@ -25,8 +25,8 @@ RangePartition::RangePartition(std::vector<std::vector<T>>&& partition)
     assert(std::all_of(partition_.begin(), partition_.end(),
                        [](const auto &group) { return !group.empty(); })
         && "partition blocks must not be empty");
-    assert(initialize_groups_and_ranks());
-    initialize_groups_and_ranks();
+    if (!initialize_groups_and_ranks())
+        throw std::runtime_error("Invalid partition");
 }
 
 bool RangePartition::initialize_groups_and_ranks() {

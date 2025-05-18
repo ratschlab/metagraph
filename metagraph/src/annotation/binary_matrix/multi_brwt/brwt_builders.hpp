@@ -18,7 +18,7 @@ namespace matrix {
 class BRWTBottomUpBuilder {
   public:
     typedef std::vector<const bit_vector *> VectorPtrs;
-    typedef std::vector<std::vector<BRWT::Column>> Partition;
+    typedef std::vector<std::vector<RangePartition::T>> Partition;
     typedef std::function<Partition(const VectorPtrs &)> Partitioner;
 
     static Partitioner get_basic_partitioner(size_t arity = 2);
