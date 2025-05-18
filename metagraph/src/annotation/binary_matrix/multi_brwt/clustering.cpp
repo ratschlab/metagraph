@@ -16,7 +16,7 @@ namespace matrix {
 
 using mtg::common::logger;
 
-typedef std::vector<std::vector<uint32_t>> Partition;
+typedef std::vector<std::vector<RangePartition::T>> Partition;
 typedef std::vector<const bit_vector *> VectorPtrs;
 
 
@@ -258,7 +258,7 @@ Partition greedy_matching(const std::vector<T> &columns, size_t num_threads) {
         ++progress_bar;
     }
 
-    for (uint32_t i = 0; i < columns.size(); ++i) {
+    for (RangePartition::T i = 0; i < columns.size(); ++i) {
         if (!matched[i])
             partition.push_back({ i });
     }

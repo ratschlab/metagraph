@@ -6,6 +6,7 @@
 #include <Eigen/Dense>
 
 #include "common/vectors/bit_vector.hpp"
+#include "common/range_partition.hpp"
 
 
 namespace mtg {
@@ -25,7 +26,7 @@ struct SparseColumn {
 // `SparseColumn` storing the column size and the positions of its set bits.
 // Output: a set of greedily matched column pairs.
 template <class T>
-std::vector<std::vector<uint32_t>>
+std::vector<std::vector<RangePartition::T>>
 greedy_matching(const std::vector<T> &columns, size_t num_threads = 1);
 
 // Format resembling the Z matrix from scipy.cluster.hierarchy.linkage
