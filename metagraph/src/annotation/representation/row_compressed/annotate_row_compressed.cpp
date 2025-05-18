@@ -37,8 +37,7 @@ RowCompressed<Label>::RowCompressed(Vector<RowType>&& annotation_rows,
     }
 }
 
-template RowCompressed<std::string>::RowCompressed(Vector<SmallVector<uint32_t>>&&, const std::vector<std::string> &);
-template RowCompressed<std::string>::RowCompressed(Vector<Vector<uint64_t>>&&, const std::vector<std::string> &);
+template RowCompressed<std::string>::RowCompressed(Vector<BinaryMatrix::SetBitPositions>&&, const std::vector<std::string> &);
 
 template <typename Label>
 void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
@@ -286,9 +285,9 @@ RowType* StreamRows<RowType>::next_row() {
 
     while (i_ < inbuf_.size()) {
         auto value = inbuf_[i_++];
-        if (value - 1 > std::numeric_limits<typename RowType::value_type>::max())
-            throw std::ifstream::failure("Integer overflow: trying to read too"
-                                         " large column index: " + std::to_string(value - 1));
+        // if (value - 1 > std::numeric_limits<typename RowType::value_type>::max())
+        //     throw std::ifstream::failure("Integer overflow: trying to read too"
+        //                                  " large column index: " + std::to_string(value - 1));
         if (value) {
             row_.push_back(value - 1);
         } else {
