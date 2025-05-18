@@ -1273,8 +1273,6 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     ThreadPool thread_pool(config_.parallel_each);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
     while (it != end) {
-        Timer batch_timer;
-
         uint64_t num_bytes_read = 0;
 
         // A generator that can be called multiple times until all sequences
@@ -1287,6 +1285,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
         }
 
         thread_pool.enqueue([&](std::vector<QuerySequence> seq_batch, uint64_t num_bytes_read) {
+            Timer batch_timer;
+
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
             if (aligner_config_ && !config_.batch_align) {
