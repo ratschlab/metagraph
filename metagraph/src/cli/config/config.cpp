@@ -1326,6 +1326,7 @@ if (advanced) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --batch-size [INT] \tquery batch size in bp (0 to disable batch query) [100'000'000]\n");
 if (advanced) {
+            fprintf(stderr, "\t   --threads-each [INT]\tnumber of parallel batches [1]\n");
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
             fprintf(stderr, "\n");
