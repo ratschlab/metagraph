@@ -100,6 +100,8 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     std::vector<Row> get_column(Column column) const override;
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
+    void call_rows(const std::vector<Row> &rows,
+                   const std::function<void(size_t, const bitmap&)> &callback) const override;
 
     bool load(std::istream &f) override;
     void serialize(std::ostream &f) const override;
@@ -172,6 +174,55 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
     return rows;
+}
+
+template <class BaseMatrix>
+void RowDiff<BaseMatrix>
+::call_rows(const std::vector<Row> &row_ids,
+            const std::function<void(size_t, const bitmap&)> &callback) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+
+    // get row-diff paths
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
+
+    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+    DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
+
+    rd_ids = std::vector<Row>();
+
+    // reconstruct annotation rows from row-diff
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        SetBitPositions result;
+        // propagate back and reconstruct full annotations for predecessors
+        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+            add_diff(rd_rows[*it], &result);
+            // replace diff row with full reconstructed annotation
+            if (--times_traversed[*it]) {
+                rd_rows[*it] = result;
+            } else {
+                // free memory
+                rd_rows[*it] = {};
+            }
+        }
+        size_t num_set_bits = result.size();
+        callback(
+            i,
+            bitmap_generator(
+                [row=std::move(result)](const auto &callback) {
+                    for (auto j : row) {
+                        callback(j);
+                    }
+                },
+                num_columns(),
+                num_set_bits
+            )
+        );
+    }
+    DEBUG_LOG("Reconstructed annotations for {} rows", row_ids.size());
+    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 }
 
 template <class BaseMatrix>
