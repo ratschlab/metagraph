@@ -837,8 +837,7 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
 }
 
 /**
- * Construct a de Bruijn graph from the query sequences
- * fetched in |call_sequences|.
+ * Construct contigs from the query sequences fetched in |call_sequences|.
  *
  *  Algorithm.
  *
@@ -854,22 +853,22 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
  *    (b, canonical) If the full graph is canonical, rebuild the query graph
  *                   in the canonical mode storing all k-mers found in the full
  *                   graph.
- *
- * 3. Extract annotation for the nodes of the query graph and return.
  */
-std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
-                      StringGenerator call_sequences,
-                      size_t num_threads,
-                      const Config *config) {
+std::pair<std::vector<std::pair<std::string, std::vector<node_index>>>, size_t>
+construct_contigs(const AnnotatedDBG &anno_graph,
+                  StringGenerator call_sequences,
+                  size_t num_threads,
+                  const Config *config,
+                  size_t *sub_k_ptr) {
     const auto &full_dbg = anno_graph.get_graph();
-    const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
 
-    size_t sub_k = full_dbg.get_k();
+    assert(sub_k_ptr);
+    auto &sub_k = *sub_k_ptr;
+    sub_k = full_dbg.get_k();
     size_t max_hull_forks = 0;
     size_t max_hull_depth = 0;
     size_t max_num_nodes_per_suffix = 1;
@@ -1002,10 +1001,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       contigs.size() - hull_contigs_begin, timer.elapsed());
     }
 
-    graph_init.reset();
+    return std::make_pair(std::move(contigs), (size_t)num_found_kmers);
+}
+
+/**
+ * Extract annotation for the nodes of the query graph (in input contigs) and
+ * construct a query graph.
+ */
+std::unique_ptr<AnnotatedDBG>
+construct_query_graph(const AnnotatedDBG &anno_graph,
+                      std::vector<std::pair<std::string, std::vector<node_index>>>&& contigs,
+                      size_t num_threads,
+                      size_t sub_k) {
+    const auto &full_dbg = anno_graph.get_graph();
+    const auto &full_annotation = anno_graph.get_annotator();
+    assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
+            && "primary graphs must be wrapped into canonical");
 
     logger->trace("[Query graph construction] Building the query graph...");
-    timer.reset();
+    Timer timer;
     std::shared_ptr<DeBruijnGraph> graph;
 
     // restrict nodes to those in the full graph
@@ -1058,7 +1072,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
                   timer.elapsed());
 
-    contigs = decltype(contigs)();
+    contigs.clear();
 
     for (auto &[first, second] : from_full_to_small) {
         assert(first && second);
@@ -1083,6 +1097,16 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+}
+
+std::unique_ptr<graph::AnnotatedDBG>
+construct_query_graph(const graph::AnnotatedDBG &anno_graph,
+                      StringGenerator call_sequences,
+                      size_t num_threads,
+                      const Config *config) {
+    size_t sub_k;
+    auto contigs = construct_contigs(anno_graph, call_sequences, num_threads, config, &sub_k).first;
+    return construct_query_graph(anno_graph, std::move(contigs), num_threads, sub_k);
 }
 
 
@@ -1277,6 +1301,12 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
     ThreadPool thread_pool(config_.parallel_each);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+
+    std::mutex mu;
+    std::vector<QuerySequence> seq_chunk;
+    std::vector<std::pair<std::string, std::vector<node_index>>> contigs_chunk;
+    size_t num_kmer_matches_chunk = 0;
+
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
@@ -1309,7 +1339,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             }
 
             // Construct the query graph for this batch
-            auto query_graph = construct_query_graph(
+            size_t sub_k;
+            auto [contigs, num_kmer_matches] = construct_contigs(
                 anno_graph_,
                 [&](auto callback) {
                     for (const auto &seq : seq_batch) {
@@ -1317,8 +1348,33 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     }
                 },
                 threads_per_batch,
-                aligner_config_ && config_.batch_align ? &config_ : NULL
+                aligner_config_ && config_.batch_align ? &config_ : NULL,
+                &sub_k
             );
+
+            // we accumulate batches until a certain number of k-mer matches to make query graph large enough
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                contigs_chunk.insert(contigs_chunk.end(),
+                                     std::make_move_iterator(contigs.begin()),
+                                     std::make_move_iterator(contigs.end()));
+                contigs.clear();
+                seq_chunk.insert(seq_chunk.end(),
+                             std::make_move_iterator(seq_batch.begin()),
+                             std::make_move_iterator(seq_batch.end()));
+                seq_batch.clear();
+                num_kmer_matches_chunk += num_kmer_matches;
+                num_kmer_matches = 0;
+                // if the current batch is too small and there are more batches in the queue, go to next
+                if (num_kmer_matches_chunk < batch_size / 2 && thread_pool.num_waiting_tasks())
+                    return;
+                std::swap(contigs, contigs_chunk);
+                std::swap(seq_batch, seq_chunk);
+                std::swap(num_kmer_matches, num_kmer_matches_chunk);
+                // seq_chunk, contigs_chunk, and num_kmer_matches_chunk are now reset
+            }
+            // work with seq_batch, contigs
+            auto query_graph = construct_query_graph(anno_graph_, std::move(contigs), threads_per_batch, sub_k);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
@@ -1344,6 +1400,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         num_bp += num_bytes_read;
     }
+    thread_pool.join();
 
     return num_bp;
 }
