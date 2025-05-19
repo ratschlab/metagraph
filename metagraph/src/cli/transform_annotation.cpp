@@ -168,11 +168,10 @@ matrix::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
     }
 }
 
-std::vector<std::vector<uint64_t>>
-parse_linkage_matrix(const std::string &filename) {
+auto parse_linkage_matrix(const std::string &filename){
     std::ifstream in(filename);
 
-    std::vector<std::vector<uint64_t>> linkage;
+    std::vector<std::vector<matrix::BinaryMatrix::Column>> linkage;
     std::string line;
     while (std::getline(in, line)) {
         std::vector<std::string> parts = utils::split_string(line, " ");
@@ -858,8 +857,7 @@ int transform_annotation(Config *config) {
                     logger->trace("Generated new linkage and saved to {}",
                                   config->linkage_file);
                 }
-                std::vector<std::vector<uint64_t>> linkage
-                        = parse_linkage_matrix(config->linkage_file);
+                auto linkage = parse_linkage_matrix(config->linkage_file);
                 logger->trace("Linkage loaded from {}", config->linkage_file);
 
                 auto brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(

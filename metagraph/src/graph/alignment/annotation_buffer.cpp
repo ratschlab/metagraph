@@ -181,7 +181,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
     } else {
         for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
             std::sort(labels.begin(), labels.end());
-            push_node_labels(node_it++, row_it++, std::move(labels));
+            push_node_labels(node_it++, row_it++, Columns(labels.begin(), labels.end()));
         }
     }
 

@@ -16,9 +16,9 @@ class RangePartition {
     typedef uint32_t R;
 
     RangePartition() {}
-    RangePartition(const std::vector<uint64_t> &arrangement,
+    RangePartition(const std::vector<T> &arrangement,
                    const std::vector<size_t> &group_sizes);
-    explicit RangePartition(std::vector<std::vector<uint64_t>>&& partition);
+    explicit RangePartition(std::vector<std::vector<T>>&& partition);
 
     // get group that contains value
     inline G group(T value) const;

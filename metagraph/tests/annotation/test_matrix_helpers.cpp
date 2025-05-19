@@ -203,7 +203,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
     for (size_t m : { size_t(0),
                       size_t(matrix.num_columns() / 2),
                       size_t(matrix.num_columns()) }) {
-        std::vector<uint64_t> indices(m);
+        std::vector<BinaryMatrix::Column> indices(m);
         std::iota(indices.begin(), indices.end(), 0);
 
         std::vector<std::vector<BinaryMatrix::Row>> column_map(m);

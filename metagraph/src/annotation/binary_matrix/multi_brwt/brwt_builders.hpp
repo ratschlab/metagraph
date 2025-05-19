@@ -18,7 +18,7 @@ namespace matrix {
 class BRWTBottomUpBuilder {
   public:
     typedef std::vector<const bit_vector *> VectorPtrs;
-    typedef std::vector<std::vector<BRWT::Column>> Partition;
+    typedef std::vector<std::vector<RangePartition::T>> Partition;
     typedef std::function<Partition(const VectorPtrs &)> Partitioner;
 
     static Partitioner get_basic_partitioner(size_t arity = 2);
@@ -33,7 +33,7 @@ class BRWTBottomUpBuilder {
         = std::function<void(uint64_t, std::unique_ptr<bit_vector>&&)>;
 
     static BRWT build(const std::function<void(const CallColumn &)> &get_columns,
-                      const std::vector<std::vector<uint64_t>> &linkage,
+                      const std::vector<std::vector<BRWT::Column>> &linkage,
                       const std::filesystem::path &tmp_dir,
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);

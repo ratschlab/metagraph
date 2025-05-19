@@ -34,7 +34,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
-    void call_rows(const std::function<void(const Vector<Column> &)> &callback,
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    bool show_progress = common::get_verbose()) const;
 
     bool load(std::istream &in) override;
