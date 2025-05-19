@@ -3,6 +3,8 @@
 #include <queue>
 #include <numeric>
 
+#include <progress_bar.hpp>
+
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
@@ -11,6 +13,9 @@
 namespace mtg {
 namespace annot {
 namespace matrix {
+
+const size_t kNumRowsInBlock = 250'000;
+
 
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());
@@ -53,6 +58,44 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
 
     return rows;
 }
+
+void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
+    // TODO: It may be faster if index columns are queried in ranges instead of with element-wise
+    // access queries.
+    slice_rows(utils::arange<Row>(begin, end - begin), slice);
+}
+
+void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback,
+                     bool show_progress) const {
+    Vector<Column> slice;
+    ProgressBar progress_bar(num_rows(), "Queried BRWT rows", std::cerr, !show_progress);
+
+    #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic) private(slice)
+    for (uint64_t i = 0; i < num_rows(); i += kNumRowsInBlock) {
+        uint64_t begin = i;
+        uint64_t end = std::min(i + kNumRowsInBlock, num_rows());
+        assert(begin <= end);
+
+        slice.resize(0);
+        slice_rows(begin, end, &slice);
+
+        #pragma omp ordered
+        {
+            Vector<Column> row;
+            for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
+                // every row in `slice` ends with `-1`
+                auto row_end = std::find(row_begin, slice.end(),
+                                         std::numeric_limits<Column>::max());
+                row.assign(row_begin, row_end);
+                std::sort(row.begin(), row.end());
+                callback(row);
+                ++progress_bar;
+                row_begin = row_end + 1;
+            }
+        }
+    }
+}
+
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
