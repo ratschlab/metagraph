@@ -1043,7 +1043,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
 
-    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
+    VectorMap<uint64_t, uint64_t> from_full_to_small_map;
+    from_full_to_small_map.reserve(graph->num_nodes());
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
@@ -1063,11 +1064,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             for (size_t j = 0; j < path.size(); ++j) {
                 if (nodes_in_full[j]) {
                     assert(path[j]);
-                    from_full_to_small.emplace_back(nodes_in_full[j], path[j]);
+                    from_full_to_small_map.try_emplace(nodes_in_full[j], path[j]);
                 }
             }
         }
     }
+
+    auto &from_full_to_small
+        = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(from_full_to_small_map.values_container());
 
     logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
                   timer.elapsed());
