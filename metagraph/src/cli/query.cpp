@@ -1381,6 +1381,12 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 std::swap(num_bytes_read, num_bytes_read_chunk);
                 // seq_chunk, contigs_chunk, and num_kmer_matches_chunk are now reset
             }
+            size_t contigs_total_bp = 0;
+            size_t contigs_total_kmers = 0;
+            for (size_t i = 0; i < contigs.size(); ++i) {
+                contigs_total_bp += contigs[i].first.length();
+                contigs_total_kmers += contigs[i].second.size();
+            }
             // work with seq_batch, contigs
             auto query_graph = construct_query_graph(anno_graph_, std::move(contigs), threads_per_batch, sub_k);
 
@@ -1400,9 +1406,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             }
 
             logger->trace("Query graph constructed for batch of sequences"
-                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, contigs total length: {} bp, k-mers in contigs in total: {}, queried in {:.5f} sec",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                          contigs_total_bp, contigs_total_kmers,
                           batch_timer.elapsed());
         }, std::move(seq_batch), num_bytes_read);
 
