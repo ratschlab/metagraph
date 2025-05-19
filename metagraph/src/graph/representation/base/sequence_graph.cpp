@@ -341,7 +341,8 @@ void call_sequences(const DeBruijnGraph &graph,
                     size_t num_threads,
                     bool call_unitigs,
                     uint64_t min_tip_size,
-                    bool kmers_in_single_form) {
+                    bool kmers_in_single_form,
+                    bool verbose = common::get_verbose()) {
     // TODO: port over the implementation from BOSS
     std::ignore = num_threads;
 
@@ -351,7 +352,7 @@ void call_sequences(const DeBruijnGraph &graph,
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
-                             std::cerr, !common::get_verbose());
+                             std::cerr, !verbose);
 
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
@@ -417,8 +418,9 @@ void call_sequences(const DeBruijnGraph &graph,
 
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
-                                   bool kmers_in_single_form) const {
-    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
+                                   bool kmers_in_single_form,
+                                   bool verbose) const {
+    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form, verbose);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
