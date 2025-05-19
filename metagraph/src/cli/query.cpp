@@ -945,21 +945,26 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                },
                                num_threads,
                                // pull only primary contigs when building canonical query graph
-                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                               false);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
     logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
+    std::atomic<uint64_t> num_kmers = 0;
+    std::atomic<uint64_t> num_found_kmers = 0;
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
-                              [&](node_index node) { contigs[i].second.push_back(node); });
+                              [&](node_index node) { contigs[i].second.push_back(node);
+                                                     num_found_kmers += node != DeBruijnGraph::npos; });
+        num_kmers += contigs[i].second.size();
     }
-    logger->trace("[Query graph construction] Contigs mapped to the full graph in {} sec",
-                  timer.elapsed());
+    logger->trace("[Query graph construction] Contigs mapped to the full graph (found {} / {} k-mers) in {} sec",
+                  num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
@@ -1071,8 +1076,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                        std::move(from_full_to_small),
                                        num_threads);
 
-    logger->trace("[Query graph construction] Query annotation with {} labels"
-                  " and {} set bits constructed in {} sec",
+    logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
+                  " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
 
@@ -1286,7 +1291,6 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         thread_pool.enqueue([&](std::vector<QuerySequence> seq_batch, uint64_t num_bytes_read) {
             Timer batch_timer;
-
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
             if (aligner_config_ && !config_.batch_align) {
@@ -1340,6 +1344,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         num_bp += num_bytes_read;
     }
+    thread_pool.join();
 
     return num_bp;
 }

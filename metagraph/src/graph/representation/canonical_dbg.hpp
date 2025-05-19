@@ -84,7 +84,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const override final;
+                                bool kmers_in_single_form = false,
+                                bool verbose = common::get_verbose()) const override final;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t num_threads = 1,

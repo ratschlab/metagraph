@@ -191,7 +191,8 @@ class DeBruijnGraph : public SequenceGraph {
      */
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const;
+                                bool kmers_in_single_form = false,
+                                bool verbose = common::get_verbose()) const;
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
