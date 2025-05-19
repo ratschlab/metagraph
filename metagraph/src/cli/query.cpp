@@ -1310,6 +1310,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     std::vector<QuerySequence> seq_chunk;
     std::vector<std::pair<std::string, std::vector<node_index>>> contigs_chunk;
     size_t num_kmer_matches_chunk = 0;
+    uint64_t num_bytes_read_chunk = 0;
 
     while (it != end) {
         uint64_t num_bytes_read = 0;
@@ -1369,12 +1370,15 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 seq_batch.clear();
                 num_kmer_matches_chunk += num_kmer_matches;
                 num_kmer_matches = 0;
+                num_bytes_read_chunk += num_bytes_read;
+                num_bytes_read = 0;
                 // if the current batch is too small and there are more batches in the queue, go to next
                 if (num_kmer_matches_chunk < batch_size / 2 && thread_pool.num_waiting_tasks())
                     return;
                 std::swap(contigs, contigs_chunk);
                 std::swap(seq_batch, seq_chunk);
                 std::swap(num_kmer_matches, num_kmer_matches_chunk);
+                std::swap(num_bytes_read, num_bytes_read_chunk);
                 // seq_chunk, contigs_chunk, and num_kmer_matches_chunk are now reset
             }
             // work with seq_batch, contigs
