@@ -65,7 +65,7 @@ void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
     slice_rows(utils::arange<Row>(begin, end - begin), slice);
 }
 
-void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback,
+void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
                      bool show_progress) const {
     Vector<Column> slice;
     ProgressBar progress_bar(num_rows(), "Queried BRWT rows", std::cerr, !show_progress);
@@ -81,7 +81,7 @@ void BRWT::call_rows(const std::function<void(const Vector<Column> &)> &callback
 
         #pragma omp ordered
         {
-            Vector<Column> row;
+            SetBitPositions row;
             for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
                 // every row in `slice` ends with `-1`
                 auto row_end = std::find(row_begin, slice.end(),

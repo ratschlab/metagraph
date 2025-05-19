@@ -17,7 +17,7 @@ typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
 
 // dummy index for an unfetched annotations
-static constexpr size_t nannot = std::numeric_limits<size_t>::max();
+static constexpr Column nannot = std::numeric_limits<Column>::max();
 
 template <class T1, class T2>
 bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, int64_t diff) {
