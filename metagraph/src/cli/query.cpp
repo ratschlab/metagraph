@@ -164,8 +164,134 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool verbose_output,
-                                     const graph::AnnotatedDBG &anno_graph) const {
+
+/**
+ * Helper functions for score_kmer_presence_mask
+ */
+
+std::array<AlignedVector<size_t>, 2>
+tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
+    std::array<AlignedVector<size_t>, 2> table;
+    table[0].reserve(presence.size());
+    table[1].reserve(presence.size());
+
+    if (!presence.size())
+        return table;
+
+    bool last_block = presence[0];
+    size_t last_size = 1;
+    size_t i = 1;
+
+    if (presence.size() >= 64) {
+        const auto word = *presence.data();
+        if (!word || word == 0xFFFFFFFFFFFFFFFF) {
+            last_size = 64;
+            i = 64;
+        }
+    }
+
+    for ( ; i < presence.size(); ++i) {
+        if (!(i & 0x3F) && i + 64 <= presence.size()) {
+            // if at a word boundary and the next word is either all zeros or
+            // all ones
+            const uint64_t word = presence.get_int(i);
+            if (!word || word == 0xFFFFFFFFFFFFFFFF) {
+                if ((!word && last_block) || (word == 0xFFFFFFFFFFFFFFFF && !last_block)) {
+                    table[last_block].push_back(last_size + correction);
+                    last_block = !last_block;
+                    last_size = 0;
+                }
+
+                last_size += 64;
+                i += 63;
+                continue;
+            }
+        }
+
+        if (last_block == presence[i]) {
+            ++last_size;
+        } else {
+            table[last_block].push_back(last_size + correction);
+            last_block = !last_block;
+            last_size = 1;
+        }
+    }
+
+    table[last_block].push_back(last_size);
+
+    assert(std::accumulate(table[0].begin(), table[0].end(), size_t(0))
+         + std::accumulate(table[1].begin(), table[1].end(), size_t(0))
+         - correction * (table[0].size() + table[1].size() - 1)
+        == presence.size());
+
+    assert(std::accumulate(table[1].begin(), table[1].end(), size_t(0))
+         - correction * (table[1].size() - last_block)
+        == sdsl::util::cnt_one_bits(presence));
+
+#ifndef NDEBUG
+    if (correction == 1) {
+        std::array<AlignedVector<size_t>, 2> check;
+
+        size_t cnt = 1;
+        for (size_t i = 0; i < presence.size(); ++i) {
+            if (i < presence.size() - 1) {
+                ++cnt;
+                if (presence[i] != presence[i + 1]) {
+                    check[presence[i]].push_back(cnt);
+                    cnt = 1;
+                }
+            } else {
+                check[presence[i]].push_back(cnt);
+            }
+        }
+
+        assert(check[0] == table[0]);
+        assert(check[1] == table[1]);
+    }
+#endif // NDEBUG
+
+    return table;
+}
+
+int32_t score_kmer_presence_mask(size_t k,
+                                 const sdsl::bit_vector &kmer_presence_mask,
+                                 int32_t match_score = 1,
+                                 int32_t mismatch_score = 2) {
+    if (!kmer_presence_mask.size())
+        return 0;
+
+    const int32_t kmer_adjust = 3;
+
+    const size_t sequence_length = kmer_presence_mask.size() + k - 1;
+    const int32_t SNP_t = k + kmer_adjust;
+
+    auto score_counter = tabulate_score(autocorrelate(kmer_presence_mask, kmer_adjust), 1);
+
+    double score = std::accumulate(score_counter[1].begin(),
+                                   score_counter[1].end(), 0) * match_score;
+    if (score == 0)
+        return 0;
+
+    if (score_counter[0].empty())
+        return score * sequence_length / kmer_presence_mask.size();
+
+    for (double count : score_counter[0]) {
+        // A penalty function used in BIGSI
+        double min_N_snps = count / SNP_t;
+        double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
+        double mean_N_snps = max_N_snps * 0.05 + min_N_snps;
+
+        assert(count >= mean_N_snps);
+
+        double mean_penalty = mean_N_snps * mismatch_score;
+        score += (count - mean_penalty) * match_score - mean_penalty;
+    }
+
+    return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
+}
+
+
+Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
     Json::Value root;
 
     // Add seq information
@@ -205,7 +331,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+            sig_obj["score"] = Json::Value(score_kmer_presence_mask(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
         }
@@ -270,7 +396,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
                                        bool verbose_output,
-                                       const graph::AnnotatedDBG &anno_graph) const {
+                                       size_t k) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
     // If empty and unlabeled sequences are supressed then return empty string
     if (suppress_unlabeled && !std::visit([] (auto&& vec) { return vec.size(); }, result_))
@@ -305,7 +431,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
-                                  anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+                                  score_kmer_presence_mask(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
@@ -1132,7 +1258,9 @@ int query_graph(Config *config) {
             initialize_aligner_config(*config, *graph)
         ));
     }
+    graph.reset();
 
+    size_t k = anno_graph->get_graph().get_k();
     QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
 
     // iterate over input files
@@ -1141,19 +1269,19 @@ int query_graph(Config *config) {
 
         // Callback, which captures the config pointer and a const reference to the anno_graph
         // instance pointed to by our unique_ptr...
-        auto query_callback = [config, &anno_graph=std::as_const(*anno_graph)](const SeqSearchResult &result) {
+        auto query_callback = [config, k](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
                                          || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                     anno_graph) << "\n";
+                                     k) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
                                                 || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                              anno_graph) + "\n";
+                                              k) + "\n";
             }
         };
         size_t num_bp = executor.query_fasta(file, query_callback);
