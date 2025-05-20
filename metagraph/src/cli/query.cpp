@@ -481,12 +481,12 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 }
 
 
-SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
-                                             QueryMode query_mode,
-                                             size_t num_top_labels,
-                                             double discovery_fraction,
-                                             double presence_fraction,
-                                             const graph::AnnotatedDBG &anno_graph) {
+SeqSearchResult execute_query(QuerySequence&& sequence,
+                              QueryMode query_mode,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction,
+                              const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
 
@@ -1342,7 +1342,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
         alignment = align_sequence(&sequence.sequence, anno_graph.get_graph(), *aligner_config);
 
     // Get sequence search result by executing query
-    SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
+    SeqSearchResult result = execute_query(std::move(sequence),
             config.query_mode,
             config.num_top_labels, config.discovery_fraction,
             config.presence_fraction, anno_graph);
@@ -1352,6 +1352,13 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 
     return result;
 }
+
+
+size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
+                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const Config &config,
+                           const graph::AnnotatedDBG &anno_graph,
+                           const graph::align::DBGAlignerConfig *aligner_config);
 
 
 size_t QueryExecutor::query_fasta(const string &file,
@@ -1390,7 +1397,7 @@ size_t QueryExecutor::query_fasta(const string &file,
     if (config_.query_batch_size) {
         if (config_.query_mode != COORDS) {
             // Construct a query graph and query against it
-            return batched_query_fasta(fasta_parser, callback);
+            return batched_query_fasta(fasta_parser, callback, config_, anno_graph_, aligner_config_.get());
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1416,19 +1423,21 @@ size_t QueryExecutor::query_fasta(const string &file,
     return num_bp;
 }
 
-size_t
-QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                                   const std::function<void(const SeqSearchResult &)> &callback) {
+size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
+                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const Config &config,
+                           const graph::AnnotatedDBG &anno_graph,
+                           const graph::align::DBGAlignerConfig *aligner_config) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
-    const uint64_t batch_size = config_.query_batch_size;
+    const uint64_t batch_size = config.query_batch_size;
 
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(config_.parallel_each);
-    size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+    ThreadPool thread_pool(config.parallel_each);
+    size_t threads_per_batch = get_num_threads() / config.parallel_each;
 
     std::mutex mu;
     std::vector<QuerySequence> seq_chunk;
@@ -1452,7 +1461,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
-            if (aligner_config_ && !config_.batch_align) {
+            if (aligner_config && !config.batch_align) {
                 alignments_batch.resize(seq_batch.size());
                 logger->trace("Aligning sequences from batch against the full graph...");
                 batch_timer.reset();
@@ -1461,7 +1470,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 for (size_t i = 0; i < seq_batch.size(); ++i) {
                     // Set alignment for this seq_batch
                     alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
-                                                         anno_graph_.get_graph(), *aligner_config_);
+                                                         anno_graph.get_graph(), *aligner_config);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
@@ -1470,14 +1479,14 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             size_t sub_k;
             auto [contigs, num_kmer_matches] = construct_contigs(
-                anno_graph_.get_graph(),
+                anno_graph.get_graph(),
                 [&](auto callback) {
                     for (const auto &seq : seq_batch) {
                         callback(seq.sequence);
                     }
                 },
                 threads_per_batch,
-                aligner_config_ && config_.batch_align ? &config_ : NULL,
+                aligner_config && config.batch_align ? &config : NULL,
                 &sub_k
             );
 
@@ -1497,7 +1506,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 num_bytes_read_chunk += num_bytes_read;
                 num_bytes_read = 0;
                 // if the current batch is too small and there are more batches in the queue, go to next
-                if (num_kmer_matches_chunk < batch_size * config_.batch_min_matches
+                if (num_kmer_matches_chunk < batch_size * config.batch_min_matches
                         && thread_pool.num_waiting_tasks())
                     return;
                 std::swap(contigs, contigs_chunk);
@@ -1513,8 +1522,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 contigs_total_kmers += contigs[i].second.size();
             }
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(anno_graph_.get_annotator(), std::move(contigs), threads_per_batch,
-                                                     anno_graph_.get_graph().get_k(), anno_graph_.get_graph().get_mode(), sub_k);
+            auto query_graph = construct_query_graph(anno_graph.get_annotator(), std::move(contigs), threads_per_batch,
+                                                     anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
@@ -1522,8 +1531,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
-                    = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
-                                     config_.batch_align ? aligner_config_.get() : NULL);
+                    = query_sequence(std::move(seq_batch[i]), *query_graph, config,
+                                     config.batch_align ? aligner_config : NULL);
 
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);

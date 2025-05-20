@@ -206,21 +206,11 @@ class QueryExecutor {
     size_t query_fasta(const std::string &file_path,
                        const std::function<void(const SeqSearchResult &)> &callback);
 
-    static SeqSearchResult execute_query(QuerySequence&& sequence,
-                                         QueryMode query_mode,
-                                         size_t num_top_labels,
-                                         double discovery_fraction,
-                                         double presence_fraction,
-                                         const graph::AnnotatedDBG &anno_graph);
-
   private:
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
-
-    size_t batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
-                               const std::function<void(const SeqSearchResult &)> &callback);
 };
 
 
