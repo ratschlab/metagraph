@@ -1140,7 +1140,7 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
                       size_t k,
                       DeBruijnGraph::Mode mode,
                       size_t sub_k) {
-    assert(graph_mode != DeBruijnGraph::PRIMARY && "primary graphs must be wrapped into canonical");
+    assert(mode != DeBruijnGraph::PRIMARY && "primary graphs must be wrapped into canonical");
 
     logger->trace("[Query graph construction] Building the query graph...");
     Timer timer;
