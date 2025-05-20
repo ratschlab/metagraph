@@ -855,12 +855,11 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
  *                   graph.
  */
 std::pair<std::vector<std::pair<std::string, std::vector<node_index>>>, size_t>
-construct_contigs(const AnnotatedDBG &anno_graph,
+construct_contigs(const DeBruijnGraph &full_dbg,
                   StringGenerator call_sequences,
                   size_t num_threads,
                   const Config *config,
                   size_t *sub_k_ptr) {
-    const auto &full_dbg = anno_graph.get_graph();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1009,31 +1008,28 @@ construct_contigs(const AnnotatedDBG &anno_graph,
  * construct a query graph.
  */
 std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
+construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
                       std::vector<std::pair<std::string, std::vector<node_index>>>&& contigs,
                       size_t num_threads,
+                      size_t k,
+                      DeBruijnGraph::Mode mode,
                       size_t sub_k) {
-    const auto &full_dbg = anno_graph.get_graph();
-    const auto &full_annotation = anno_graph.get_annotator();
-    assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
-            && "primary graphs must be wrapped into canonical");
+    assert(graph_mode != DeBruijnGraph::PRIMARY && "primary graphs must be wrapped into canonical");
 
     logger->trace("[Query graph construction] Building the query graph...");
     Timer timer;
     std::shared_ptr<DeBruijnGraph> graph;
 
     // restrict nodes to those in the full graph
-    if (sub_k < full_dbg.get_k()) {
-        BOSSConstructor constructor(full_dbg.get_k() - 1,
-                                    full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
-                                    0, "", num_threads);
-        add_to_graph(constructor, contigs, full_dbg.get_k());
+    if (sub_k < k) {
+        BOSSConstructor constructor(k - 1, mode == DeBruijnGraph::CANONICAL, 0, "", num_threads);
+        add_to_graph(constructor, contigs, k);
 
-        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), full_dbg.get_mode());
+        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), mode);
 
     } else {
-        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), full_dbg.get_mode());
-        add_to_graph(*graph, contigs, full_dbg.get_k());
+        graph = std::make_shared<DBGHashOrdered>(k, mode);
+        add_to_graph(*graph, contigs, k);
     }
 
     logger->trace("[Query graph construction] Query graph contains {} k-mers"
@@ -1109,8 +1105,9 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       size_t num_threads,
                       const Config *config) {
     size_t sub_k;
-    auto contigs = construct_contigs(anno_graph, call_sequences, num_threads, config, &sub_k).first;
-    return construct_query_graph(anno_graph, std::move(contigs), num_threads, sub_k);
+    auto contigs = construct_contigs(anno_graph.get_graph(), call_sequences, num_threads, config, &sub_k).first;
+    return construct_query_graph(anno_graph.get_annotator(), std::move(contigs), num_threads,
+                                 anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k);
 }
 
 
@@ -1174,15 +1171,14 @@ int query_graph(Config *config) {
  * alignment information (score and cigar string).
  *
  * @param seq               pointer to sequence string (which will be modified if alignment found)
- * @param anno_graph        reference to annotated DBG we align to
+ * @param graph             reference to DBG we align to
  * @param aligner_config    alignment config
  *
  * @return Alignment struct instance with score and cigar string
  */
 Alignment align_sequence(std::string *seq,
-                         const AnnotatedDBG &anno_graph,
+                         const DeBruijnGraph &graph,
                          const align::DBGAlignerConfig &aligner_config) {
-    const DeBruijnGraph &graph = anno_graph.get_graph();
     align::DBGAligner aligner(graph, aligner_config);
     const align::DBGAlignerConfig &revised_config = aligner.get_config();
     align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
@@ -1215,7 +1211,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
     // Align sequence and modify sequence struct to store alignment results
     std::optional<Alignment> alignment;
     if (aligner_config)
-        alignment = align_sequence(&sequence.sequence, anno_graph, *aligner_config);
+        alignment = align_sequence(&sequence.sequence, anno_graph.get_graph(), *aligner_config);
 
     // Get sequence search result by executing query
     SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
@@ -1337,7 +1333,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 for (size_t i = 0; i < seq_batch.size(); ++i) {
                     // Set alignment for this seq_batch
                     alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
-                                                         anno_graph_, *aligner_config_);
+                                                         anno_graph_.get_graph(), *aligner_config_);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
@@ -1346,7 +1342,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             size_t sub_k;
             auto [contigs, num_kmer_matches] = construct_contigs(
-                anno_graph_,
+                anno_graph_.get_graph(),
                 [&](auto callback) {
                     for (const auto &seq : seq_batch) {
                         callback(seq.sequence);
@@ -1389,7 +1385,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 contigs_total_kmers += contigs[i].second.size();
             }
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(anno_graph_, std::move(contigs), threads_per_batch, sub_k);
+            auto query_graph = construct_query_graph(anno_graph_.get_annotator(), std::move(contigs), threads_per_batch,
+                                                     anno_graph_.get_graph().get_k(), anno_graph_.get_graph().get_mode(), sub_k);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
