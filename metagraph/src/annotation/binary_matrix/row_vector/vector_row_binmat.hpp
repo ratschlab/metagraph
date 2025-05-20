@@ -11,7 +11,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-template <typename RowType = BinaryMatrix::SetBitPositions>
+template <typename RowType = SmallVector<uint32_t>>
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
   public:
     typedef RowType row_type;
