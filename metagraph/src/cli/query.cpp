@@ -1373,7 +1373,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 num_bytes_read_chunk += num_bytes_read;
                 num_bytes_read = 0;
                 // if the current batch is too small and there are more batches in the queue, go to next
-                if (num_kmer_matches_chunk < batch_size / 2 && thread_pool.num_waiting_tasks())
+                if (num_kmer_matches_chunk < batch_size * config_.batch_min_matches
+                        && thread_pool.num_waiting_tasks())
                     return;
                 std::swap(contigs, contigs_chunk);
                 std::swap(seq_batch, seq_chunk);
@@ -1405,8 +1406,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 callback(search_result);
             }
 
-            logger->trace("Query graph constructed for batch of sequences"
-                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, contigs total length: {} bp, k-mers in contigs in total: {}, queried in {:.5f} sec",
+            logger->trace("Query graph constructed for {} bp from '{}' in {:.5f} sec, "
+                          "query redundancy: {:.2f} bp/kmer, total bp/k-mers in contigs: {}/{}, queried in {:.5f} sec",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
                           contigs_total_bp, contigs_total_kmers,
