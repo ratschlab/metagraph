@@ -127,7 +127,7 @@ Json::Value process_search_request(const Json::Value &json,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
+        search_response.append(seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k()));
     }
 
     return search_response;

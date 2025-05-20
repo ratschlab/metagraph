@@ -166,8 +166,8 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool verbose_output,
-                                     const graph::AnnotatedDBG &anno_graph) const {
+
+Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
     Json::Value root;
 
     // Add seq information
@@ -207,7 +207,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(score_kmer_presence_mask(anno_graph.get_graph().get_k(), kmer_presence_mask));
+            sig_obj["score"] = Json::Value(score_kmer_presence_mask(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
@@ -272,7 +272,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
                                        bool verbose_output,
-                                       const graph::AnnotatedDBG &anno_graph) const {
+                                       size_t k) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
     // If empty and unlabeled sequences are supressed then return empty string
     if (suppress_unlabeled && !std::visit([] (auto&& vec) { return vec.size(); }, result_))
@@ -307,7 +307,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   count,
                                   sdsl::util::to_string(kmer_presence_mask),
-                                  score_kmer_presence_mask(anno_graph.get_graph().get_k(), kmer_presence_mask));
+                                  score_kmer_presence_mask(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
@@ -1118,7 +1118,9 @@ int query_graph(Config *config) {
             initialize_aligner_config(*config, *graph)
         ));
     }
+    graph.reset();
 
+    size_t k = anno_graph->get_graph().get_k();
     QueryExecutor executor(*config, *anno_graph, std::move(aligner_config));
 
     // iterate over input files
@@ -1127,19 +1129,19 @@ int query_graph(Config *config) {
 
         // Callback, which captures the config pointer and a const reference to the anno_graph
         // instance pointed to by our unique_ptr...
-        auto query_callback = [config, &anno_graph=std::as_const(*anno_graph)](const SeqSearchResult &result) {
+        auto query_callback = [config, k](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
                                          || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                     anno_graph) << "\n";
+                                     k) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
                                                 || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                              anno_graph) + "\n";
+                                              k) + "\n";
             }
         };
         size_t num_bp = executor.query_fasta(file, query_callback);
