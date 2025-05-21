@@ -1261,7 +1261,6 @@ int query_graph(Config *config) {
     graph.reset();
 
     size_t k = anno_graph->get_graph().get_k();
-    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
 
     // iterate over input files
     for (const auto &file : files) {
@@ -1284,7 +1283,7 @@ int query_graph(Config *config) {
                                               k) + "\n";
             }
         };
-        size_t num_bp = executor.query_fasta(file, query_callback);
+        size_t num_bp = query_fasta({ file }, query_callback, *config, *anno_graph, aligner_config.get(), thread_pool);
         auto time = curr_timer.elapsed();
         logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
@@ -1360,17 +1359,20 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                            const graph::AnnotatedDBG &anno_graph,
                            const graph::align::DBGAlignerConfig *aligner_config);
 
-
-size_t QueryExecutor::query_fasta(const string &file,
-                                  const std::function<void(const SeqSearchResult &)> &callback) {
+size_t query_fasta(const std::string &file,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   ThreadPool &thread_pool) {
     logger->trace("Parsing sequences from file '{}'", file);
 
-    seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
+    seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 
     // Only query_coords/count_kmers if using coord/count aware index.
-    if (config_.query_mode == COORDS
+    if (config.query_mode == COORDS
             && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                    &this->anno_graph_.get_annotator().get_matrix())) {
+                    &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}, {}).",
@@ -1382,9 +1384,9 @@ size_t QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if ((config_.query_mode == COUNTS || config_.query_mode == COUNTS_SUM)
+    if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
             && !dynamic_cast<const annot::matrix::IntMatrix *>(
-                    &this->anno_graph_.get_annotator().get_matrix())) {
+                    &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {}, {}, {}).",
@@ -1394,10 +1396,10 @@ size_t QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (config_.query_batch_size) {
-        if (config_.query_mode != COORDS) {
+    if (config.query_batch_size) {
+        if (config.query_mode != COORDS) {
             // Construct a query graph and query against it
-            return batched_query_fasta(fasta_parser, callback, config_, anno_graph_, aligner_config_.get());
+            return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1409,16 +1411,16 @@ size_t QueryExecutor::query_fasta(const string &file,
     size_t num_bp = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](QuerySequence &sequence) {
+        thread_pool.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph_,
-                                    config_, aligner_config_.get()));
+            callback(query_sequence(std::move(sequence), anno_graph,
+                                    config, aligner_config));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
 
     // wait while all threads finish processing the current file
-    thread_pool_.join();
+    thread_pool.join();
 
     return num_bp;
 }

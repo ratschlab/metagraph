@@ -182,37 +182,26 @@ enum QueryMode {
     SIGNATURE
 };
 
-class QueryExecutor {
-  public:
-    QueryExecutor(const Config &config,
-                  const graph::AnnotatedDBG &anno_graph,
-                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
-                  ThreadPool &thread_pool)
-      : config_(config), anno_graph_(anno_graph),
-        aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) {}
-
-    /**
-     * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
-     *
-     * Provide a callback which receives a reference to a SeqSearchResult instance which the
-     * callback function should use as desired (typically generate a string/JSON output).
-     *
-     * @param file_path     path to FASTA file
-     * @param callback      callback function
-     *
-     * @return the number of base pairs (characters) in query file
-     */
-    size_t query_fasta(const std::string &file_path,
-                       const std::function<void(const SeqSearchResult &)> &callback);
-
-  private:
-    const Config &config_;
-    const graph::AnnotatedDBG &anno_graph_;
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
-    ThreadPool &thread_pool_;
-};
-
+/**
+ * Query sequences from a FASTA files.
+ *
+ * Provide a callback which receives a reference to a SeqSearchResult instance which the
+ * callback function should use as desired (typically generate a string/JSON output).
+ *
+ * @param file_path     path to FASTA file
+ * @param callback      callback function
+ * @param config        config object
+ * @param anno_graph    annotated de Bruijn graph
+ * @param aligner_config alignment config
+ *
+ * @return the number of base pairs (characters) in query file
+ */
+size_t query_fasta(const std::string &file_path,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   ThreadPool &thread_pool);
 
 int query_graph(Config *config);
 
