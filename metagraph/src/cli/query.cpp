@@ -13,6 +13,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -1294,6 +1295,11 @@ int query_graph(Config *config) {
         // If there is a single file and it's a batch query, run a special mode that
         // loads the index in in parts, only when it's needed for query.
         if (files.size() == 1 && config->query_batch_size && config->query_mode != COORDS) {
+            if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+                graph = std::make_shared<graph::CanonicalDBG>(graph);
+                logger->trace("Primary graph wrapped into canonical");
+            }
+
             ThreadPool annotation_loader(1, 1);
             std::shared_future<std::unique_ptr<AnnotatedDBG::Annotator>> annotation = annotation_loader.enqueue([&]() {
                 auto anno = load_annotation(graph, *config);
@@ -1454,6 +1460,9 @@ size_t batched_query_fasta(const std::string &file,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            const DeBruijnGraph &graph,
                            const std::function<const annot::MultiLabelAnnotation<std::string> *()> &get_annotation) {
+    assert(graph.get_mode() != DeBruijnGraph::PRIMARY
+            && "Primary graphs must be wrapped into canonical");
+
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 
     auto it = fasta_parser.begin();
