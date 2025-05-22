@@ -1243,7 +1243,7 @@ size_t batched_query_fasta(const std::string &file,
                            const Config &config,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            const DeBruijnGraph &graph,
-                           const std::function<const annot::MultiLabelAnnotation<std::string> *()> &get_annotation);
+                           const std::function<const AnnotatedDBG::Annotator *()> &get_annotation);
 
 void check_annotation(const Config &config, const annot::matrix::BinaryMatrix &anno_matrix);
 
@@ -1459,7 +1459,7 @@ size_t batched_query_fasta(const std::string &file,
                            const Config &config,
                            const graph::align::DBGAlignerConfig *aligner_config,
                            const DeBruijnGraph &graph,
-                           const std::function<const annot::MultiLabelAnnotation<std::string> *()> &get_annotation) {
+                           const std::function<const AnnotatedDBG::Annotator *()> &get_annotation) {
     assert(graph.get_mode() != DeBruijnGraph::PRIMARY
             && "Primary graphs must be wrapped into canonical");
 
