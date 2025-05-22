@@ -20,9 +20,10 @@ using namespace mtg::graph;
 using mtg::common::logger;
 
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
-                                                       const Config &config,
-                                                       size_t max_chunks_open) {
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_ptr<DeBruijnGraph> graph,
+                const Config &config,
+                size_t max_chunks_open) {
     uint64_t max_index = graph->max_index();
 
     auto base_graph = graph;
@@ -65,9 +66,19 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
     }
 
-    // load graph
+    return annotation_temp;
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config,
+                                                       size_t max_chunks_open) {
+    return initialize_annotated_dbg(graph, load_annotation(graph, config, max_chunks_open));
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       std::unique_ptr<annot::MultiLabelAnnotation<std::string>>&& annotation) {
     auto anno_graph
-            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
+            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

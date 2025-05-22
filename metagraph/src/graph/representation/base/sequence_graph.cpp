@@ -344,7 +344,6 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool kmers_in_single_form,
                     bool verbose = common::get_verbose()) {
     // TODO: port over the implementation from BOSS
-    std::ignore = num_threads;
 
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
@@ -371,7 +370,7 @@ void call_sequences(const DeBruijnGraph &graph,
         //  .____  or  .____  or  ____.___
         //              \___      ___/
         //
-        #pragma omp parallel for num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(num_threads)
         for (uint64_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
             call_zeros(discovered,
                 begin,

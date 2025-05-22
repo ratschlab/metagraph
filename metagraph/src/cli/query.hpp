@@ -193,6 +193,7 @@ enum QueryMode {
  * @param config        config object
  * @param anno_graph    annotated de Bruijn graph
  * @param aligner_config alignment config
+ * @param thread_pool   thread pool to use for parallel processing
  *
  * @return the number of base pairs (characters) in query file
  */

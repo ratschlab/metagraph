@@ -1237,6 +1237,15 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
 }
 
 
+size_t batched_query_fasta(const std::string &file,
+                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const Config &config,
+                           const graph::align::DBGAlignerConfig *aligner_config,
+                           const DeBruijnGraph &graph,
+                           const std::function<const annot::MultiLabelAnnotation<std::string> *()> &get_annotation);
+
+void check_annotation(const Config &config, const annot::matrix::BinaryMatrix &anno_matrix);
+
 int query_graph(Config *config) {
     assert(config);
 
@@ -1245,7 +1254,6 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
-    std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
@@ -1258,32 +1266,50 @@ int query_graph(Config *config) {
             initialize_aligner_config(*config, *graph)
         ));
     }
-    graph.reset();
 
-    size_t k = anno_graph->get_graph().get_k();
+    auto query_callback = [config, k=graph->get_k()](const SeqSearchResult &result) {
+        if (config->output_json) {
+            std::ostringstream ss;
+            ss << result.to_json(config->verbose_output
+                                     || !(config->query_mode == COUNTS || config->query_mode == COORDS),
+                                 k) << "\n";
+            std::cout << ss.str();
+        } else {
+            std::cout << result.to_string(config->anno_labels_delimiter,
+                                          config->suppress_unlabeled,
+                                          config->verbose_output
+                                            || !(config->query_mode == COUNTS || config->query_mode == COORDS),
+                                          k) + "\n";
+        }
+    };
+
+    std::unique_ptr<graph::AnnotatedDBG> anno_graph;
 
     // iterate over input files
     for (const auto &file : files) {
+        logger->trace("Parsing sequences from file '{}'", file);
         Timer curr_timer;
+        size_t num_bp = 0;
 
-        // Callback, which captures the config pointer and a const reference to the anno_graph
-        // instance pointed to by our unique_ptr...
-        auto query_callback = [config, k](const SeqSearchResult &result) {
-            if (config->output_json) {
-                std::ostringstream ss;
-                ss << result.to_json(config->verbose_output
-                                         || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                     k) << "\n";
-                std::cout << ss.str();
-            } else {
-                std::cout << result.to_string(config->anno_labels_delimiter,
-                                              config->suppress_unlabeled,
-                                              config->verbose_output
-                                                || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                              k) + "\n";
-            }
-        };
-        size_t num_bp = query_fasta({ file }, query_callback, *config, *anno_graph, aligner_config.get(), thread_pool);
+        // If there is a single file and it's a batch query, run a special mode that
+        // loads the index in in parts, only when it's needed for query.
+        if (files.size() == 1 && config->query_batch_size && config->query_mode != COORDS) {
+            ThreadPool annotation_loader(1, 1);
+            std::shared_future<std::unique_ptr<AnnotatedDBG::Annotator>> annotation = annotation_loader.enqueue([&]() {
+                auto anno = load_annotation(graph, *config);
+                check_annotation(*config, anno->get_matrix());
+                return anno;
+            });
+
+            num_bp = batched_query_fasta(file, query_callback, *config, aligner_config.get(),
+                                         *graph, [&](){ return annotation.get().get(); }
+            );
+        } else {
+            if (!anno_graph)
+                anno_graph = initialize_annotated_dbg(std::move(graph), load_annotation(graph, *config));
+            num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get(), thread_pool);
+        }
+
         auto time = curr_timer.elapsed();
         logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
@@ -1353,26 +1379,11 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 }
 
 
-size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                           const std::function<void(const SeqSearchResult &)> &callback,
-                           const Config &config,
-                           const graph::AnnotatedDBG &anno_graph,
-                           const graph::align::DBGAlignerConfig *aligner_config);
-
-size_t query_fasta(const std::string &file,
-                   const std::function<void(const SeqSearchResult &)> &callback,
-                   const Config &config,
-                   const graph::AnnotatedDBG &anno_graph,
-                   const graph::align::DBGAlignerConfig *aligner_config,
-                   ThreadPool &thread_pool) {
-    logger->trace("Parsing sequences from file '{}'", file);
-
-    seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
-
+// Check the the annotation matrix stores the data required for the query mode
+void check_annotation(const Config &config, const annot::matrix::BinaryMatrix &anno_matrix) {
     // Only query_coords/count_kmers if using coord/count aware index.
     if (config.query_mode == COORDS
-            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                    &anno_graph.get_annotator().get_matrix())) {
+            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(&anno_matrix)) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}, {}).",
@@ -1385,8 +1396,7 @@ size_t query_fasta(const std::string &file,
     }
 
     if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
-            && !dynamic_cast<const annot::matrix::IntMatrix *>(
-                    &anno_graph.get_annotator().get_matrix())) {
+            && !dynamic_cast<const annot::matrix::IntMatrix *>(&anno_matrix)) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {}, {}, {}).",
@@ -1395,16 +1405,29 @@ size_t query_fasta(const std::string &file,
                       Config::annotype_to_string(Config::IntRowDiffBRWT));
         exit(1);
     }
+}
+
+size_t query_fasta(const std::string &file,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   ThreadPool &thread_pool) {
+    check_annotation(config, anno_graph.get_annotator().get_matrix());
 
     if (config.query_batch_size) {
         if (config.query_mode != COORDS) {
             // Construct a query graph and query against it
-            return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config);
+            return batched_query_fasta(file, callback, config, aligner_config,
+                                       anno_graph.get_graph(),
+                                       [&]() { return &anno_graph.get_annotator(); });
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
         }
     }
+
+    seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 
     // Query sequences independently
     size_t seq_count = 0;
@@ -1425,11 +1448,14 @@ size_t query_fasta(const std::string &file,
     return num_bp;
 }
 
-size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
+size_t batched_query_fasta(const std::string &file,
                            const std::function<void(const SeqSearchResult &)> &callback,
                            const Config &config,
-                           const graph::AnnotatedDBG &anno_graph,
-                           const graph::align::DBGAlignerConfig *aligner_config) {
+                           const graph::align::DBGAlignerConfig *aligner_config,
+                           const DeBruijnGraph &graph,
+                           const std::function<const annot::MultiLabelAnnotation<std::string> *()> &get_annotation) {
+    seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
+
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1471,8 +1497,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
                 for (size_t i = 0; i < seq_batch.size(); ++i) {
                     // Set alignment for this seq_batch
-                    alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
-                                                         anno_graph.get_graph(), *aligner_config);
+                    alignments_batch[i] = align_sequence(&seq_batch[i].sequence, graph, *aligner_config);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
@@ -1481,7 +1506,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             size_t sub_k;
             auto [contigs, num_kmer_matches] = construct_contigs(
-                anno_graph.get_graph(),
+                graph,
                 [&](auto callback) {
                     for (const auto &seq : seq_batch) {
                         callback(seq.sequence);
@@ -1524,8 +1549,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 contigs_total_kmers += contigs[i].second.size();
             }
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(anno_graph.get_annotator(), std::move(contigs), threads_per_batch,
-                                                     anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k);
+            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), threads_per_batch,
+                                                     graph.get_k(), graph.get_mode(), sub_k);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
