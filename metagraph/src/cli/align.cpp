@@ -77,11 +77,11 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
-    std::unique_ptr<std::ofstream> ofile;
-    if (config.outfbase.size())
-        ofile = std::make_unique<std::ofstream>(config.outfbase);
+    // std::unique_ptr<std::ofstream> ofile;
+    // if (config.outfbase.size())
+    //     ofile = std::make_unique<std::ofstream>(config.outfbase);
 
-    std::ostream *out = ofile ? ofile.get() : &std::cout;
+    // std::ostream *out = ofile ? ofile.get() : &std::cout;
 
     Timer data_reading_timer;
 
@@ -95,11 +95,11 @@ void map_sequences_in_file(const std::string &file,
                                     config.discovery_fraction);
 
             if (!config.filter_present) {
-                *out << found << "\n";
+                std::cout << found << "\n";
 
             } else if (found) {
-                *out << ">" << read_stream->name.s << "\n"
-                            << read_stream->seq.s << "\n";
+                std::cout << ">" << read_stream->name.s << "\n"
+                                 << read_stream->seq.s << "\n";
             }
 
             return;
@@ -141,10 +141,10 @@ void map_sequences_in_file(const std::string &file,
                 num_kmers - num_kmers * (1 - config.discovery_fraction);
             if (config.filter_present) {
                 if (num_discovered >= min_kmers_discovered)
-                    *out << ">" << read_stream->name.s << "\n"
-                                << read_stream->seq.s << "\n";
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
             } else {
-                *out << (num_discovered >= min_kmers_discovered) << "\n";
+                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
             }
             return;
         }
@@ -159,17 +159,17 @@ void map_sequences_in_file(const std::string &file,
 
                 prev = i;
             }
-            *out << fmt::format("{}\t{}/{}/{}\n", read_stream->name.s,
-                                num_discovered, num_kmers, num_unique_matching_kmers);
+            std::cout << fmt::format("{}\t{}/{}/{}\n", read_stream->name.s,
+                                     num_discovered, num_kmers, num_unique_matching_kmers);
             return;
         }
 
         // mapping of each k-mer to a graph node
         for (size_t i = 0; i < nodes.size(); ++i) {
             assert(i + config.alignment_length <= read_stream->seq.l);
-            *out << fmt::format("{}: {}\n", std::string_view(read_stream->seq.s + i,
+            std::cout << fmt::format("{}: {}\n", std::string_view(read_stream->seq.s + i,
                                                              config.alignment_length),
-                                            nodes[i]);
+                                                 nodes[i]);
         }
 
     }, config.forward_and_reverse);
@@ -299,10 +299,15 @@ int align_to_graph(Config *config) {
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
 
-    if (utils::ends_with(config->outfbase, ".gfa")) {
-        gfa_map_files(config, files, *graph);
-        return 0;
+    if (config->outfbase != "") {
+        common::logger->error("Specifying an output file is deprecated.");
+        return 1;
     }
+
+    // if (utils::ends_with(config->outfbase, ".gfa")) {
+    //     gfa_map_files(config, files, *graph);
+    //     return 0;
+    // }
 
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
@@ -312,7 +317,7 @@ int align_to_graph(Config *config) {
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
-    std::mutex print_mutex;
+    // std::mutex print_mutex;
 
     if (config->map_sequences) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -337,7 +342,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
+            map_sequences_in_file(file, *graph, *config, timer, &thread_pool);
         }
 
         thread_pool.join();
@@ -379,11 +384,11 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::unique_ptr<std::ofstream> ofile;
-        if (config->outfbase.size())
-            ofile = std::make_unique<std::ofstream>(config->outfbase);
+        // std::unique_ptr<std::ofstream> ofile;
+        // if (config->outfbase.size())
+        //     ofile = std::make_unique<std::ofstream>(config->outfbase);
 
-        std::ostream *out = ofile ? ofile.get() : &std::cout;
+        // std::ostream *out = ofile ? ofile.get() : &std::cout;
 
         const uint64_t batch_size = config->query_batch_size;
 
@@ -434,8 +439,7 @@ int align_to_graph(Config *config) {
                 aligner->align_batch(batch,
                     [&](const std::string &header, AlignmentResults&& paths) {
                         const auto &res = format_alignment(header, paths, *graph, *config);
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << res;
+                        std::cout << res;
                     }
                 );
             });
