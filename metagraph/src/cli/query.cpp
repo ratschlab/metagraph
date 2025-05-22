@@ -1482,6 +1482,8 @@ size_t batched_query_fasta(const std::string &file,
     size_t num_kmer_matches_chunk = 0;
     uint64_t num_bytes_read_chunk = 0;
 
+    std::mutex query_mu;
+
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
@@ -1557,14 +1559,16 @@ size_t batched_query_fasta(const std::string &file,
                 contigs_total_bp += contigs[i].first.length();
                 contigs_total_kmers += contigs[i].second.size();
             }
+
+            std::lock_guard<std::mutex> query_lock(query_mu);
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), threads_per_batch,
+            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), get_num_threads(),
                                                      graph.get_k(), graph.get_mode(), sub_k);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move(seq_batch[i]), *query_graph, config,
