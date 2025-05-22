@@ -1306,7 +1306,7 @@ int query_graph(Config *config) {
             );
         } else {
             if (!anno_graph)
-                anno_graph = initialize_annotated_dbg(std::move(graph), load_annotation(graph, *config));
+                anno_graph = initialize_annotated_dbg(graph, *config);
             num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get(), thread_pool);
         }
 

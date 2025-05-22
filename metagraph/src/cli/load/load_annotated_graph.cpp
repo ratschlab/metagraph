@@ -72,11 +72,8 @@ load_annotation(std::shared_ptr<DeBruijnGraph> graph,
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config,
                                                        size_t max_chunks_open) {
-    return initialize_annotated_dbg(graph, load_annotation(graph, config, max_chunks_open));
-}
+    auto annotation = load_annotation(graph, config, max_chunks_open);
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
-                                                       std::unique_ptr<annot::MultiLabelAnnotation<std::string>>&& annotation) {
     auto anno_graph
             = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation));
 

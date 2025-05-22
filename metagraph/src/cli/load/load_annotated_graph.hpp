@@ -30,10 +30,6 @@ load_annotation(std::shared_ptr<graph::DeBruijnGraph> graph,
                 const Config &config,
                 size_t max_chunks_open = 2000);
 
-std::unique_ptr<graph::AnnotatedDBG>
-initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
-                         std::unique_ptr<annot::MultiLabelAnnotation<std::string>>&& annotation);
-
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
 } // namespace cli
