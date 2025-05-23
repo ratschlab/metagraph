@@ -216,14 +216,14 @@ void LabeledExtender
 
     assert(annotation_buffer_.get_labels(node));
 
-    // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
-
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
+            // use the label set of the current node in the alignment tree as the basis
+            const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
@@ -250,6 +250,9 @@ void LabeledExtender
     size_t dist = next_offset - graph_->get_k() + 1;
 
     for (const auto &[next, c, score] : outgoing) {
+        // use the label set of the current node in the alignment tree as the basis
+        const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+
         const Columns *base_labels = &seed_->label_columns;
         const CoordinateSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
@@ -339,10 +342,15 @@ void LabeledExtender::call_alignments(score_t end_score,
                                               end_score, offset, extra_score);
     alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
-    auto [base_labels, base_coords]
-        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
-    assert(base_labels);
-    assert(base_labels->size());
+    auto get_base_labels = [&]() {
+        auto [base_labels, base_coords]
+            = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
+        assert(base_labels);
+        assert(base_labels->size());
+        return std::make_pair(base_labels, base_coords);
+    };
+
+    auto [base_labels, base_coords] = get_base_labels();
 
     if (!clipping)
         base_labels = &seed_->label_columns;
@@ -352,6 +360,10 @@ void LabeledExtender::call_alignments(score_t end_score,
         if (label_diff_.size() && label_diff_.back() == nannot) {
             label_diff_.pop_back();
             remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
+
+            // update pointers
+            std::tie(base_labels, base_coords) = get_base_labels();
+
             assert(remaining_labels_i_ != nannot);
             label_diff_ = Columns{};
         }
