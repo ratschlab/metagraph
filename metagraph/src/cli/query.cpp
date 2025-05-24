@@ -1140,7 +1140,8 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
                       size_t num_threads,
                       size_t k,
                       DeBruijnGraph::Mode mode,
-                      size_t sub_k) {
+                      size_t sub_k,
+                      std::mutex &mu) {
     assert(mode != DeBruijnGraph::PRIMARY && "primary graphs must be wrapped into canonical");
 
     logger->trace("[Query graph construction] Building the query graph...");
@@ -1168,6 +1169,8 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
 
     VectorMap<uint64_t, uint64_t> from_full_to_small_map;
     from_full_to_small_map.reserve(graph->num_nodes());
+
+    std::lock_guard<std::mutex> query_lock(mu);
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
@@ -1232,9 +1235,10 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       size_t num_threads,
                       const Config *config) {
     size_t sub_k;
+    std::mutex mu;
     auto contigs = construct_contigs(anno_graph.get_graph(), call_sequences, num_threads, config, &sub_k).first;
     return construct_query_graph(anno_graph.get_annotator(), std::move(contigs), num_threads,
-                                 anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k);
+                                 anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k, mu);
 }
 
 
@@ -1560,10 +1564,9 @@ size_t batched_query_fasta(const std::string &file,
                 contigs_total_kmers += contigs[i].second.size();
             }
 
-            std::lock_guard<std::mutex> query_lock(query_mu);
             // work with seq_batch, contigs
             auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), get_num_threads(),
-                                                     graph.get_k(), graph.get_mode(), sub_k);
+                                                     graph.get_k(), graph.get_mode(), sub_k, query_mu);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
