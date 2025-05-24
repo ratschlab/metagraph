@@ -20,15 +20,19 @@ using namespace mtg::graph;
 using mtg::common::logger;
 
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
-                                                       const Config &config,
-                                                       size_t max_chunks_open) {
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_ptr<DeBruijnGraph> graph,
+                const Config &config,
+                size_t max_chunks_open) {
     uint64_t max_index = graph->max_index();
 
-    auto base_graph = graph;
+    const auto *base_graph_ptr = graph.get();
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph wrapped into canonical");
+    } else if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get())) {
+        base_graph_ptr = &canonical->get_graph();
+        max_index = base_graph_ptr->max_index();
     }
 
     auto annotation_temp = config.infbase_annotators.size()
@@ -56,7 +60,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         using namespace annot::matrix;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            row_diff->set_graph(base_graph.get());
+            row_diff->set_graph(base_graph_ptr);
 
             if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
                 row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
@@ -65,9 +69,21 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
     }
 
-    // load graph
+    return annotation_temp;
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config,
+                                                       size_t max_chunks_open) {
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        graph = std::make_shared<CanonicalDBG>(graph);
+        logger->trace("Primary graph wrapped into canonical");
+    }
+
+    auto annotation = load_annotation(graph, config, max_chunks_open);
+
     auto anno_graph
-            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
+            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
