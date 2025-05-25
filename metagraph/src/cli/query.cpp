@@ -1170,7 +1170,6 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
     VectorMap<uint64_t, uint64_t> from_full_to_small_map;
     from_full_to_small_map.reserve(graph->num_nodes());
 
-    std::lock_guard<std::mutex> query_lock(mu);
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
@@ -1210,15 +1209,17 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
         second = AnnotatedDBG::graph_to_anno_index(second);
     }
 
+    std::lock_guard<std::mutex> query_lock(mu);
     logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
                   from_full_to_small.size());
 
+    timer.reset();
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
-                                       num_threads);
+                                       get_num_threads());
 
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
@@ -1565,13 +1566,13 @@ size_t batched_query_fasta(const std::string &file,
             }
 
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), get_num_threads(),
+            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), threads_per_batch,
                                                      graph.get_k(), graph.get_mode(), sub_k, query_mu);
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move(seq_batch[i]), *query_graph, config,
