@@ -795,7 +795,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
                                    bool check_reverse_complement) {
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
 
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs->size(); ++i) {
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, node_index>> added_nodes;
@@ -844,7 +844,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
     std::mutex mu;
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
 
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs->size(); ++i) {
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
@@ -1130,18 +1130,11 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     return std::make_pair(std::move(contigs), (size_t)num_found_kmers);
 }
 
-/**
- * Extract annotation for the nodes of the query graph (in input contigs) and
- * construct a query graph.
- */
-std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
-                      std::vector<std::pair<std::string, std::vector<node_index>>>&& contigs,
-                      size_t num_threads,
-                      size_t k,
-                      DeBruijnGraph::Mode mode,
-                      size_t sub_k,
-                      std::mutex &mu) {
+auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_index>>>&& contigs,
+                           size_t num_threads,
+                           size_t k,
+                           DeBruijnGraph::Mode mode,
+                           size_t sub_k) {
     assert(mode != DeBruijnGraph::PRIMARY && "primary graphs must be wrapped into canonical");
 
     logger->trace("[Query graph construction] Building the query graph...");
@@ -1209,11 +1202,15 @@ construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
         second = AnnotatedDBG::graph_to_anno_index(second);
     }
 
-    std::lock_guard<std::mutex> query_lock(mu);
+    return std::make_pair(std::move(graph), std::move(from_full_to_small));
+}
+
+std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
+                                                    std::vector<std::pair<uint64_t, uint64_t>>&& from_full_to_small,
+                                                    std::shared_ptr<DeBruijnGraph> graph) {
     logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
                   from_full_to_small.size());
-
-    timer.reset();
+    Timer timer;
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = slice_annotation(full_annotation,
@@ -1238,8 +1235,11 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
     size_t sub_k;
     std::mutex mu;
     auto contigs = construct_contigs(anno_graph.get_graph(), call_sequences, num_threads, config, &sub_k).first;
-    return construct_query_graph(anno_graph.get_annotator(), std::move(contigs), num_threads,
-                                 anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k, mu);
+    auto [query_graph, from_full_to_small] = construct_query_graph(
+        std::move(contigs), num_threads,
+        anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k
+    );
+    return construct_query_graph(anno_graph.get_annotator(), std::move(from_full_to_small), std::move(query_graph));
 }
 
 
@@ -1510,7 +1510,7 @@ size_t batched_query_fasta(const std::string &file,
                 logger->trace("Aligning sequences from batch against the full graph...");
                 batch_timer.reset();
 
-                #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+                #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic, 10)
                 for (size_t i = 0; i < seq_batch.size(); ++i) {
                     // Set alignment for this seq_batch
                     alignments_batch[i] = align_sequence(&seq_batch[i].sequence, graph, *aligner_config);
@@ -1566,13 +1566,17 @@ size_t batched_query_fasta(const std::string &file,
             }
 
             // work with seq_batch, contigs
-            auto query_graph = construct_query_graph(*get_annotation(), std::move(contigs), threads_per_batch,
-                                                     graph.get_k(), graph.get_mode(), sub_k, query_mu);
+            auto [small_graph, from_full_to_small] = construct_query_graph(std::move(contigs), threads_per_batch,
+                                                                           graph.get_k(), graph.get_mode(), sub_k);
+
+            std::lock_guard<std::mutex> query_lock(query_mu);
+
+            auto query_graph = construct_query_graph(*get_annotation(), std::move(from_full_to_small), std::move(small_graph));
 
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 10)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move(seq_batch[i]), *query_graph, config,
