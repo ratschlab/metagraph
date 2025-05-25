@@ -1076,7 +1076,6 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
@@ -1158,8 +1157,6 @@ auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_i
                   graph->num_nodes(), timer.elapsed());
     timer.reset();
 
-    logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
-
     VectorMap<uint64_t, uint64_t> from_full_to_small_map;
     from_full_to_small_map.reserve(graph->num_nodes());
 
@@ -1218,8 +1215,6 @@ auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_i
 std::unique_ptr<AnnotatedDBG> construct_query_graph(const AnnotatedDBG::Annotator &full_annotation,
                                                     std::vector<std::pair<uint64_t, uint64_t>>&& from_full_to_small,
                                                     std::shared_ptr<DeBruijnGraph> graph) {
-    logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
-                  from_full_to_small.size());
     Timer timer;
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
