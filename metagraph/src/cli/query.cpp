@@ -1080,7 +1080,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
@@ -1163,19 +1163,29 @@ auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_i
     VectorMap<uint64_t, uint64_t> from_full_to_small_map;
     from_full_to_small_map.reserve(graph->num_nodes());
 
-
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const std::vector<node_index> &nodes_in_full = contigs[i].second;
 
-        std::vector<uint64_t> path(nodes_in_full.size());
-        size_t j = 0;
-        // nodes in the query graph hull may overlap
-        graph->map_to_nodes(contig, [&](node_index node) {
-            path[j++] = node;
-        });
-        assert(j == nodes_in_full.size());
+        std::vector<uint64_t> path(nodes_in_full.size(), 0);
+        size_t begin = 0;
+        size_t end;
+        do {
+            end = std::find(nodes_in_full.begin() + begin,
+                            nodes_in_full.end(),
+                            DeBruijnGraph::npos)
+                    - nodes_in_full.begin();
+
+            if (begin != end) {
+                std::string_view segment(contig.data() + begin, end - begin + k - 1);
+                // nodes in the query graph hull may overlap
+                graph->map_to_nodes(segment, [&](node_index node) {
+                    path[begin++] = node;
+                });
+            }
+            begin = end + 1;
+        } while (end < nodes_in_full.size());
 
         #pragma omp critical
         {
