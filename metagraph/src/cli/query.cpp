@@ -1036,7 +1036,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &str = seq_batch[i].sequence;
-        std::vector<node_index> path(str.size() + k - 1, 0);
+        std::vector<node_index> path(str.size() - k + 1, 0);
         #pragma omp critical
         {
             // TODO: combine these two into one call when the callback in add_sequence calls indices
