@@ -1023,7 +1023,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
 
     // construct graph storing all k-mers in query
     size_t k = full_dbg.get_k();
-    auto graph_init = std::make_shared<DBGHashOrdered>(k);
+    auto graph_init = std::make_shared<DBGHashOrdered>(k, full_dbg.get_mode());
     size_t max_input_sequence_length = 0;
 
     logger->trace("[Query graph construction] Building the batch graph...");
@@ -1044,8 +1044,10 @@ construct_contigs(const DeBruijnGraph &full_dbg,
             uint64_t offset = graph_init->num_nodes();
 #endif
             graph_init->add_sequence(str, [](){ return false; }, [&](size_t i, node_index node) {
-                assert(node > offset);
-                path[i] = node;
+                if (i < path.size()) {
+                    assert(node > offset);
+                    path[i] = node;
+                }
             });
             if (max_input_sequence_length < str.length())
                 max_input_sequence_length = str.length();
@@ -1076,7 +1078,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
         num_found_kmers += (contigs[i].second.size()
                             - std::count(contigs[i].second.begin(), contigs[i].second.end(), 0));
     }
-    uint64_t num_kmers = graph_init->num_nodes();
+    uint64_t num_kmers = graph_init->num_nodes() / (graph_init->get_mode() == DeBruijnGraph::CANONICAL ? 2 : 1);
 
     max_hull_depth = std::min(
         max_hull_depth,
