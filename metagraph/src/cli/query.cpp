@@ -1040,13 +1040,16 @@ construct_contigs(const DeBruijnGraph &full_dbg,
         path.reserve(str.size() + k - 1);
         #pragma omp critical
         {
+            // TODO: combine these two into one call when the callback in add_sequence calls indices
             uint64_t offset = graph_init->num_nodes();
-            graph_init->add_sequence(str, [&](node_index node) {
+            graph_init->add_sequence(str);
+            graph_init->map_to_nodes(str, [&](node_index node) {
                 path.push_back(node > offset ? node : 0);
             });
             if (max_input_sequence_length < str.length())
                 max_input_sequence_length = str.length();
         }
+        assert(path.size() == str.size() - k + 1);
         if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size())
             continue;  // no new k-mers
 
