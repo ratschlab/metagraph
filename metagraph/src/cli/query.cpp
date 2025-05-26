@@ -1158,7 +1158,6 @@ auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_i
     VectorMap<uint64_t, uint64_t> from_full_to_small_map;
     from_full_to_small_map.reserve(graph->num_nodes());
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const std::vector<node_index> &nodes_in_full = contigs[i].second;
@@ -1182,13 +1181,10 @@ auto construct_query_graph(std::vector<std::pair<std::string, std::vector<node_i
             begin = end + 1;
         } while (end < nodes_in_full.size());
 
-        #pragma omp critical
-        {
-            for (size_t j = 0; j < path.size(); ++j) {
-                if (nodes_in_full[j]) {
-                    assert(path[j]);
-                    from_full_to_small_map.try_emplace(nodes_in_full[j], path[j]);
-                }
+        for (size_t j = 0; j < path.size(); ++j) {
+            if (nodes_in_full[j]) {
+                assert(path[j]);
+                from_full_to_small_map.try_emplace(nodes_in_full[j], path[j]);
             }
         }
     }
