@@ -1036,15 +1036,16 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &str = seq_batch[i].sequence;
-        std::vector<node_index> path;
-        path.reserve(str.size() + k - 1);
+        std::vector<node_index> path(str.size() + k - 1, 0);
         #pragma omp critical
         {
             // TODO: combine these two into one call when the callback in add_sequence calls indices
+#ifndef NDEBUG
             uint64_t offset = graph_init->num_nodes();
-            graph_init->add_sequence(str);
-            graph_init->map_to_nodes(str, [&](node_index node) {
-                path.push_back(node > offset ? node : 0);
+#endif
+            graph_init->add_sequence(str, [](){ return false; }, [&](size_t i, node_index node) {
+                assert(node > offset);
+                path[i] = node;
             });
             if (max_input_sequence_length < str.length())
                 max_input_sequence_length = str.length();

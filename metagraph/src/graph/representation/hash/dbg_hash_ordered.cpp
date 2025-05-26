@@ -41,7 +41,12 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
     void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      const std::function<void(node_index)> &on_insertion);
+                      const std::function<void(node_index)> &on_insertion) {
+        add_sequence(sequence, skip, [&](size_t, node_index node){ return on_insertion(node); });
+    }
+    void add_sequence(std::string_view sequence,
+                      const std::function<bool()> &skip,
+                      const std::function<void(size_t, node_index)> &on_insertion);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -128,7 +133,7 @@ DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
                                             const std::function<bool()> &skip,
-                                            const std::function<void(node_index)> &on_insertion) {
+                                            const std::function<void(size_t, node_index)> &on_insertion) {
     if (sequence.size() < get_k())
         return;
 
@@ -139,8 +144,8 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     node_index prev_pos = kmers_.size();
 #endif
 
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
-        skipped.push_back(skip() || !in_graph);
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
+        skipped.push_back(skip() || !valid);
         if (skipped.back())
             continue;
 
@@ -157,7 +162,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
 #endif
 
         if (index_insert.second) {
-            on_insertion(kmers_.size());
+            on_insertion(skipped.size() - 1, kmers_.size());
         } else {
             skipped.back() = true;
         }
@@ -170,9 +175,9 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     reverse_complement(rev_comp.begin(), rev_comp.end());
 
     auto it = skipped.end();
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(rev_comp)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(rev_comp)) {
         if (!*(--it) && kmers_.insert(kmer).second)
-            on_insertion(kmers_.size());
+            on_insertion(skipped.size(), kmers_.size());
     }
 }
 
@@ -190,12 +195,12 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
     node_index prev_index = n_nodes;
 #endif
 
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-        if (!in_graph) {
+        if (!valid) {
             prev_index = n_nodes;
             callback(npos);
         } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
@@ -205,7 +210,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
             callback(prev_index = get_index(kmer));
         }
 #else
-        callback(in_graph ? get_index(kmer) : npos);
+        callback(valid ? get_index(kmer) : npos);
 #endif
     }
 }
@@ -221,12 +226,12 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
     node_index prev_index = n_nodes;
 #endif
 
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-        if (!in_graph) {
+        if (!valid) {
             prev_index = n_nodes;
             callback(npos);
         } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
@@ -236,7 +241,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
             callback(prev_index = get_index(kmer));
         }
 #else
-        callback(in_graph ? get_index(kmer) : npos);
+        callback(valid ? get_index(kmer) : npos);
 #endif
     }
 }
