@@ -1029,8 +1029,6 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     logger->trace("[Query graph construction] Building the batch graph...");
 
     std::vector<std::pair<std::string, std::vector<node_index>>> contigs(seq_batch.size());
-    std::vector<node_index> small_to_full(0, 0);  // dummy mapped to dummy
-    small_to_full.reserve(seq_batch.size());
 
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_found_kmers = 0;
@@ -1040,23 +1038,16 @@ construct_contigs(const DeBruijnGraph &full_dbg,
         const auto &str = seq_batch[i].sequence;
         std::vector<node_index> path;
         path.reserve(str.size() + k - 1);
-        bool new_added = false;
         #pragma omp critical
         {
-            graph_init->add_sequence(str, [&](node_index node) { path.push_back(node); });
+            uint64_t offset = graph_init->num_nodes();
+            graph_init->add_sequence(str, [&](node_index node) {
+                path.push_back(node > offset ? node : 0);
+            });
             if (max_input_sequence_length < str.length())
                 max_input_sequence_length = str.length();
-
-            for (node_index &node : path) {
-                if (small_to_full.size() > node)
-                    node = 0;  // not new
-                while (small_to_full.size() <= node) {
-                    small_to_full.push_back(static_cast<node_index>(-1));  // -1 means new/uninitialized
-                    new_added = true;
-                }
-            }
         }
-        if (!new_added)
+        if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size())
             continue;  // no new k-mers
 
         contigs[i].first = str;
@@ -1077,14 +1068,6 @@ construct_contigs(const DeBruijnGraph &full_dbg,
             }
             begin = end + 1;
         } while (end < contigs[i].second.size());
-
-        #pragma omp critical
-        {
-            for (size_t j = 0; j < path.size(); ++j) {
-                if (path[j])
-                    small_to_full[path[j]] = contigs[i].second[j];
-            }
-        }
 
         num_found_kmers += (contigs[i].second.size()
                             - std::count(contigs[i].second.begin(), contigs[i].second.end(), 0));
