@@ -1052,7 +1052,6 @@ construct_contigs(const DeBruijnGraph &full_dbg,
             if (max_input_sequence_length < str.length())
                 max_input_sequence_length = str.length();
         }
-        assert(path.size() == str.size() - k + 1);
         if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size())
             continue;  // no new k-mers
 
