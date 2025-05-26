@@ -27,7 +27,6 @@
 namespace mtg {
 namespace cli {
 
-const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using namespace mtg::graph;
@@ -964,7 +963,7 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
 }
 
 /**
- * Construct contigs from the query sequences fetched in |call_sequences|.
+ * Construct contigs from the query sequences.
  *
  *  Algorithm.
  *
@@ -983,7 +982,7 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
  */
 std::pair<std::vector<std::pair<std::string, std::vector<node_index>>>, size_t>
 construct_contigs(const DeBruijnGraph &full_dbg,
-                  StringGenerator call_sequences,
+                  const std::vector<QuerySequence> &seq_batch,
                   size_t num_threads,
                   const Config *config,
                   size_t *sub_k_ptr) {
@@ -1023,72 +1022,83 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k());
+    size_t k = full_dbg.get_k();
+    auto graph_init = std::make_shared<DBGHashOrdered>(k);
     size_t max_input_sequence_length = 0;
 
     logger->trace("[Query graph construction] Building the batch graph...");
 
-    if (kPrefilterWithBloom && dbg_succ && sub_k == full_dbg.get_k()) {
-        if (dbg_succ->get_bloom_filter())
-            logger->trace(
-                    "[Query graph construction] Started indexing k-mers pre-filtered "
-                    "with Bloom filter");
+    std::vector<std::pair<std::string, std::vector<node_index>>> contigs(seq_batch.size());
+    std::vector<node_index> small_to_full(0, 0);  // dummy mapped to dummy
+    small_to_full.reserve(seq_batch.size());
 
-        call_sequences([&](const std::string &sequence) {
-            // TODO: implement add_sequence with filter for all graph representations
-            graph_init->add_sequence(
-                sequence,
-                get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
-            );
-            if (max_input_sequence_length < sequence.length())
-                max_input_sequence_length = sequence.length();
-        });
-    } else {
-        call_sequences([&](const std::string &sequence) {
-            graph_init->add_sequence(sequence);
-            if (max_input_sequence_length < sequence.length())
-                max_input_sequence_length = sequence.length();
-        });
+    // map from nodes in query graph to full graph
+    std::atomic<uint64_t> num_found_kmers = 0;
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+    for (size_t i = 0; i < seq_batch.size(); ++i) {
+        const auto &str = seq_batch[i].sequence;
+        std::vector<node_index> path;
+        path.reserve(str.size() + k - 1);
+        bool new_added = false;
+        #pragma omp critical
+        {
+            graph_init->add_sequence(str, [&](node_index node) { path.push_back(node); });
+            if (max_input_sequence_length < str.length())
+                max_input_sequence_length = str.length();
+
+            for (node_index &node : path) {
+                if (small_to_full.size() > node)
+                    node = 0;  // not new
+                while (small_to_full.size() <= node) {
+                    small_to_full.push_back(static_cast<node_index>(-1));  // -1 means new/uninitialized
+                    new_added = true;
+                }
+            }
+        }
+        if (!new_added)
+            continue;  // no new k-mers
+
+        contigs[i].first = str;
+        contigs[i].second.assign(path.size(), 0);
+
+        size_t begin = 0;
+        size_t end;
+        do {
+            for (end = begin; end < contigs[i].second.size() && path[end]; ++end) {
+            }
+
+            if (begin != end) {
+                std::string_view segment(str.data() + begin, end - begin + k - 1);
+                // nodes in the query graph hull may overlap
+                full_dbg.map_to_nodes(segment, [&](node_index node) {
+                    contigs[i].second[begin++] = node;
+                });
+            }
+            begin = end + 1;
+        } while (end < contigs[i].second.size());
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < path.size(); ++j) {
+                if (path[j])
+                    small_to_full[path[j]] = contigs[i].second[j];
+            }
+        }
+
+        num_found_kmers += (contigs[i].second.size()
+                            - std::count(contigs[i].second.begin(), contigs[i].second.end(), 0));
     }
+    uint64_t num_kmers = graph_init->num_nodes();
 
     max_hull_depth = std::min(
         max_hull_depth,
         static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
     );
 
-    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
+    logger->trace("[Query graph construction] Batch graph contains {} k-mers (found in full {} / {} k-mers)"
                   " and took {} sec to construct",
-                  graph_init->num_nodes(), timer.elapsed());
-    timer.reset();
-
-    // pull contigs from query graph
-    std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
-    std::mutex seq_mutex;
-    graph_init->call_sequences([&](const std::string &contig, const auto &) {
-                                   std::lock_guard<std::mutex> lock(seq_mutex);
-                                   contigs.emplace_back(contig, std::vector<node_index>{});
-                               },
-                               num_threads,
-                               // pull only primary contigs when building canonical query graph
-                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
-                               false);
-
-    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
-    timer.reset();
-
-    // map from nodes in query graph to full graph
-    std::atomic<uint64_t> num_kmers = 0;
-    std::atomic<uint64_t> num_found_kmers = 0;
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-    for (size_t i = 0; i < contigs.size(); ++i) {
-        contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
-        full_dbg.map_to_nodes(contigs[i].first,
-                              [&](node_index node) { contigs[i].second.push_back(node);
-                                                     num_found_kmers += node != DeBruijnGraph::npos; });
-        num_kmers += contigs[i].second.size();
-    }
-    logger->trace("[Query graph construction] Contigs mapped to the full graph (found {} / {} k-mers) in {} sec",
-                  num_found_kmers, num_kmers, timer.elapsed());
+                  graph_init->num_nodes(), num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
@@ -1239,7 +1249,9 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       const Config *config) {
     size_t sub_k;
     std::mutex mu;
-    auto contigs = construct_contigs(anno_graph.get_graph(), call_sequences, num_threads, config, &sub_k).first;
+    std::vector<QuerySequence> seq_batch;
+    call_sequences([&](const auto &seq) { seq_batch.push_back(QuerySequence{ 0, "", seq }); });
+    auto contigs = construct_contigs(anno_graph.get_graph(), seq_batch, num_threads, config, &sub_k).first;
     auto [query_graph, from_full_to_small] = construct_query_graph(
         std::move(contigs), num_threads,
         anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k
@@ -1527,13 +1539,7 @@ size_t batched_query_fasta(const std::string &file,
             // Construct the query graph for this batch
             size_t sub_k;
             auto [contigs, num_kmer_matches] = construct_contigs(
-                graph,
-                [&](auto callback) {
-                    for (const auto &seq : seq_batch) {
-                        callback(seq.sequence);
-                    }
-                },
-                threads_per_batch,
+                graph, seq_batch, threads_per_batch,
                 aligner_config && config.batch_align ? &config : NULL,
                 &sub_k
             );
