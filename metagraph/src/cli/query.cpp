@@ -1033,49 +1033,50 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_found_kmers = 0;
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &str = seq_batch[i].sequence;
-        std::vector<node_index> path(str.size() - k + 1, 0);
-        #pragma omp critical
-        {
-            // TODO: combine these two into one call when the callback in add_sequence calls indices
-#ifndef NDEBUG
-            uint64_t offset = graph_init->num_nodes();
-#endif
-            graph_init->add_sequence(str, [](){ return false; }, [&](size_t i, node_index node) {
-                if (i < path.size()) {
-                    assert(node > offset);
-                    path[i] = node;
-                }
-            });
-            if (max_input_sequence_length < str.length())
-                max_input_sequence_length = str.length();
-        }
-        if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size())
-            continue;  // no new k-mers
-
         contigs[i].first = str;
-        contigs[i].second.assign(path.size(), 0);
+        auto &path = contigs[i].second;
+        path.assign(str.size() - k + 1, 0);
+#ifndef NDEBUG
+        uint64_t offset = graph_init->num_nodes();
+#endif
+        graph_init->add_sequence(str, [](){ return false; }, [&](size_t i, node_index node) {
+            if (i < path.size()) {
+                assert(node > offset);
+                path[i] = node;
+            }
+        });
+        if (max_input_sequence_length < str.length())
+            max_input_sequence_length = str.length();
+    }
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        const auto &str = contigs[i].first;
+        auto &path = contigs[i].second;
+        if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size()) {
+            path = std::vector<node_index>{};
+            continue;  // no new k-mers
+        }
 
         size_t begin = 0;
         size_t end;
         do {
-            for (end = begin; end < contigs[i].second.size() && path[end]; ++end) {
+            for (end = begin; end < path.size() && path[end]; ++end) {
             }
 
             if (begin != end) {
                 std::string_view segment(str.data() + begin, end - begin + k - 1);
                 // nodes in the query graph hull may overlap
                 full_dbg.map_to_nodes(segment, [&](node_index node) {
-                    contigs[i].second[begin++] = node;
+                    path[begin++] = node;
                 });
             }
             begin = end + 1;
-        } while (end < contigs[i].second.size());
+        } while (end < path.size());
 
-        num_found_kmers += (contigs[i].second.size()
-                            - std::count(contigs[i].second.begin(), contigs[i].second.end(), 0));
+        num_found_kmers += (path.size() - std::count(path.begin(), path.end(), 0));
     }
     uint64_t num_kmers = graph_init->num_nodes() / (graph_init->get_mode() == DeBruijnGraph::CANONICAL ? 2 : 1);
 
