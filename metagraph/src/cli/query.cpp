@@ -1050,6 +1050,17 @@ construct_contigs(const DeBruijnGraph &full_dbg,
         if (max_input_sequence_length < str.length())
             max_input_sequence_length = str.length();
     }
+    uint64_t num_kmers = graph_init->num_nodes() / (graph_init->get_mode() == DeBruijnGraph::CANONICAL ? 2 : 1);
+
+    max_hull_depth = std::min(
+        max_hull_depth,
+        static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
+    );
+
+    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
+                  " and took {} sec to construct",
+                  graph_init->num_nodes(), timer.elapsed());
+    timer.reset();
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
@@ -1078,16 +1089,8 @@ construct_contigs(const DeBruijnGraph &full_dbg,
 
         num_found_kmers += (path.size() - std::count(path.begin(), path.end(), 0));
     }
-    uint64_t num_kmers = graph_init->num_nodes() / (graph_init->get_mode() == DeBruijnGraph::CANONICAL ? 2 : 1);
-
-    max_hull_depth = std::min(
-        max_hull_depth,
-        static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
-    );
-
-    logger->trace("[Query graph construction] Batch graph contains {} k-mers (found in full {} / {} k-mers)"
-                  " and took {} sec to construct",
-                  graph_init->num_nodes(), num_found_kmers, num_kmers, timer.elapsed());
+    logger->trace("[Query graph construction] All mapped to the full graph (found {} / {} k-mers) in {} sec",
+                  num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
