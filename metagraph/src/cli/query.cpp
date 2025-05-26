@@ -985,8 +985,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
                   const std::vector<QuerySequence> &seq_batch,
                   size_t num_threads,
                   const Config *config,
-                  size_t *sub_k_ptr,
-                  std::mutex &mu) {
+                  size_t *sub_k_ptr) {
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1072,9 +1071,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
                   graph_init->num_nodes(), timer.elapsed());
     timer.reset();
 
-    std::lock_guard<std::mutex> query_lock(mu);
-
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 10)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
         const auto &str = contigs[i].first;
         auto &path = contigs[i].second;
@@ -1251,7 +1248,7 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
     std::mutex mu;
     std::vector<QuerySequence> seq_batch;
     call_sequences([&](const auto &seq) { seq_batch.push_back(QuerySequence{ 0, "", seq }); });
-    auto contigs = construct_contigs(anno_graph.get_graph(), seq_batch, num_threads, config, &sub_k, mu).first;
+    auto contigs = construct_contigs(anno_graph.get_graph(), seq_batch, num_threads, config, &sub_k).first;
     auto [query_graph, from_full_to_small] = construct_query_graph(
         std::move(contigs), num_threads,
         anno_graph.get_graph().get_k(), anno_graph.get_graph().get_mode(), sub_k
@@ -1541,7 +1538,7 @@ size_t batched_query_fasta(const std::string &file,
             auto [contigs, num_kmer_matches] = construct_contigs(
                 graph, seq_batch, threads_per_batch,
                 aligner_config && config.batch_align ? &config : NULL,
-                &sub_k, query_mu
+                &sub_k
             );
 
             // we accumulate batches until a certain number of k-mer matches to make query graph large enough
