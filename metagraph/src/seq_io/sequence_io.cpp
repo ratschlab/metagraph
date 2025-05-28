@@ -16,12 +16,12 @@ namespace mtg {
 namespace seq_io {
 
 // subset of KSTREAM_INIT
-__KS_BASIC(/**/, gzFile, 16384)
-__KS_GETUNTIL(/**/, gzread)
-__KS_INLINED(gzread)
+__KS_BASIC(/**/, compFile, 16384)
+__KS_GETUNTIL(/**/, compFile::read)
+__KS_INLINED(compFile::read)
 
 // subset of KSEQ_INIT
-__KSEQ_BASIC(/**/, gzFile)
+__KSEQ_BASIC(/**/, compFile)
 __KSEQ_READ(/**/)
 
 const char kDefaultFastQualityChar = 'I';
@@ -268,17 +268,17 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
         filename_ = other.filename_;
 
         // close the old file descriptor
-        gzclose(read_stream_->f->f);
+        read_stream_->f->f.close();
 
         // open a new file descriptor
-        read_stream_->f->f = gzopen(filename_.c_str(), "r");
-        if (read_stream_->f->f == Z_NULL) {
+        read_stream_->f->f = compFile::open_read(filename_.c_str());
+        if (!read_stream_->f->f.good()) {
             std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
             exit(1);
         }
     }
 
-    gzseek(read_stream_->f->f, gztell(other.read_stream_->f->f), SEEK_SET);
+    read_stream_->f->f.match_offset(other.read_stream_->f->f);
 
 #define KSTRING_COPY(kstr, other_kstr) \
             kstr.l = other_kstr.l; \
@@ -336,8 +336,8 @@ FastaParser::iterator::iterator(const std::string &filename,
                                 bool with_reverse_complement)
       : filename_(filename),
         with_reverse_complement_(with_reverse_complement) {
-    gzFile input_p = gzopen(filename_.c_str(), "r");
-    if (input_p == Z_NULL) {
+    compFile input_p = compFile::open_read(filename_.c_str());
+    if (!input_p.good()) {
         std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
         exit(1);
     }
@@ -355,19 +355,19 @@ FastaParser::iterator::iterator(const std::string &filename,
 
 void FastaParser::iterator::deinit_stream() {
     if (read_stream_) {
-        gzFile input_p = read_stream_->f->f;
+        compFile input_p = read_stream_->f->f;
         kseq_destroy(read_stream_);
-        gzclose(input_p);
+        input_p.close();
     }
     read_stream_ = NULL;
 }
 
 
 template <class Callback>
-void read_fasta_file_critical(gzFile input_p,
+void read_fasta_file_critical(compFile input_p,
                               Callback callback,
                               bool with_reverse) {
-    if (input_p == Z_NULL) {
+    if (!input_p.good()) {
         std::cerr << "ERROR: Null file descriptor" << std::endl;
         exit(1);
     }
@@ -392,15 +392,15 @@ void read_fasta_file_critical(gzFile input_p,
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
                               bool with_reverse) {
-    gzFile input_p = gzopen(filename.c_str(), "r");
-    if (input_p == Z_NULL) {
+    compFile input_p = compFile::open_read(filename.c_str());
+    if (!input_p.good()) {
         std::cerr << "ERROR: Cannot read file " << filename << std::endl;
         exit(1);
     }
 
     read_fasta_file_critical(input_p, callback, with_reverse);
 
-    gzclose(input_p);
+    input_p.close();
 }
 
 template <typename T>
@@ -412,8 +412,8 @@ void read_extended_fasta_file_critical(const std::string &filebase,
 
     auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
-    gzFile fasta_p = gzopen(filename.c_str(), "r");
-    if (fasta_p == Z_NULL) {
+    compFile fasta_p = compFile::open_read(filename.c_str());
+    if (!fasta_p.good()) {
         std::cerr << "ERROR: Cannot read from file " << filename << std::endl;
         exit(1);
     }
@@ -458,12 +458,12 @@ void read_extended_fasta_file_critical(const std::string &filebase,
         false
     );
 
-    if (!gzeof(fasta_p) || gzgetc(features_p) != -1 || !gzeof(features_p)) {
+    if (!fasta_p.eof() || gzgetc(features_p) != -1 || !gzeof(features_p)) {
         std::cerr << "ERROR: There are features left in extension unread" << std::endl;
         exit(1);
     }
 
-    gzclose(fasta_p);
+    fasta_p.close();
     gzclose(features_p);
 }
 
@@ -514,8 +514,8 @@ void read_fasta_from_string(const std::string &fasta_flat,
     });
 
     // gzFile from pipe
-    gzFile input_p = gzdopen(p[0], "r");
-    if (input_p == Z_NULL) {
+    compFile input_p = compFile::dopen_read<gzFile>(p[0]);
+    if (!input_p.good()) {
         std::cerr << "ERROR: opening for reading from pipe failed" << std::endl;
         close(p[0]);
         exit(1);
@@ -525,7 +525,7 @@ void read_fasta_from_string(const std::string &fasta_flat,
 
     writer.join();
 
-    gzclose(input_p);
+    input_p.close();
     close(p[0]);
 }
 

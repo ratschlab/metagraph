@@ -4,6 +4,10 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <variant>
+#include <boost/iostreams/device/file_descriptor.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/zstd.hpp>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -16,7 +20,122 @@
 namespace mtg {
 namespace seq_io {
 
-KSEQ_DECLARE(gzFile);
+struct compFile {
+    using bfio = boost::iostreams::filtering_istream;
+
+    bool good() const {
+        return std::visit([&](const auto &f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return f != Z_NULL;
+            } else {
+                return f && f->good();
+            }
+        }, f_);
+    }
+
+    void match_offset(const compFile &other) {
+        auto offset = std::visit([&](const auto &f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return static_cast<std::streampos>(gztell(f));
+            } else {
+                return f->tellg();
+            }
+        }, f_);
+        std::visit([&](auto f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                gzseek(f, offset, SEEK_SET);
+            } else {
+                f->seekg(offset, std::ios::beg);
+            }
+        }, f_);
+    }
+
+    std::streamsize read(voidp buf, unsigned len) {
+        return std::visit([&](auto f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return static_cast<std::streamsize>(gzread(f, buf, len));
+            } else {
+                f->read(reinterpret_cast<char*>(buf), len);
+                return f->gcount();
+            }
+        }, f_);
+    }
+
+    int close() {
+        return std::visit([&](auto f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return gzclose(f);
+            } else {
+                try {
+                    f.reset();
+                    if (cf_) {
+                        int ret_val = fclose(cf_);
+                        cf_ = NULL;
+                        return ret_val;
+                    }
+
+                    return Z_OK;
+                } catch (...) {
+                    return Z_ERRNO;
+                }
+            }
+        }, f_);
+    }
+
+    bool eof() const {
+        return std::visit([&](const auto &f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return static_cast<bool>(gzeof(f));
+            } else {
+                return f->eof();
+            }
+        }, f_);
+    }
+
+    static int read(compFile f, voidp buf, unsigned len) {
+        return f.read(buf, len);
+    }
+
+    static compFile open_read(const char *path) {
+        compFile f;
+        const char *dotpos = strrchr(path, '.');
+        if (dotpos == NULL)
+            throw std::runtime_error("No file extension");
+
+        std::string ext(dotpos);
+
+        if (ext == ".zst") {
+            auto fio = std::make_shared<bfio>();
+            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(boost::iostreams::file_descriptor(path));
+            f.f_ = fio;
+        } else {
+            f.f_ = gzopen(path, "r");
+        }
+
+        return f;
+    }
+
+    template <typename T>
+    static compFile dopen_read(int fd) {
+        compFile f;
+        if constexpr(std::is_same_v<T, gzFile>) {
+            f.f_ = gzdopen(fd, "r");
+        } else {
+            auto fio = std::make_shared<bfio>();
+            f.cf_ = fdopen(fd, "r");
+            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(f.cf_);
+            f.f_ = fio;
+        }
+        return f;
+    }
+
+    std::variant<gzFile, std::shared_ptr<bfio>> f_;
+    FILE *cf_ = NULL;
+};
+
+KSEQ_DECLARE(compFile);
 
 
 class FastaWriter {
