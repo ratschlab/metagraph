@@ -1266,6 +1266,12 @@ int query_graph(Config *config) {
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
 
+    ThreadPool graph_loader(1, 1);
+    std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future = graph_loader.enqueue([&]() {
+        std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
+        return graph;
+    });
+
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
@@ -1274,11 +1280,12 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(*config, *graph)
+            initialize_aligner_config(*config, *graph_future.get())
         ));
     }
 
-    auto query_callback = [config, k=graph->get_k()](const SeqSearchResult &result) {
+    size_t k = 0;
+    auto query_callback = [config, &k](const SeqSearchResult &result) {
         if (config->output_json) {
             std::ostringstream ss;
             ss << result.to_json(config->verbose_output
@@ -1305,22 +1312,25 @@ int query_graph(Config *config) {
         // If there is a single file and it's a batch query, run a special mode that
         // loads the index in in parts, only when it's needed for query.
         if (files.size() == 1 && config->query_batch_size && config->query_mode != COORDS) {
+            ThreadPool annotation_loader(1, 1);
+            std::shared_future<std::unique_ptr<AnnotatedDBG::Annotator>> annotation = annotation_loader.enqueue([&]() {
+                auto anno = load_annotation(graph_future, *config);
+                check_annotation(*config, anno->get_matrix());
+                return anno;
+            });
+            auto graph = graph_future.get();
+            k = graph->get_k();
             if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
                 graph = std::make_shared<graph::CanonicalDBG>(graph);
                 logger->trace("Primary graph wrapped into canonical");
             }
 
-            ThreadPool annotation_loader(1, 1);
-            std::shared_future<std::unique_ptr<AnnotatedDBG::Annotator>> annotation = annotation_loader.enqueue([&]() {
-                auto anno = load_annotation(graph, *config);
-                check_annotation(*config, anno->get_matrix());
-                return anno;
-            });
-
             num_bp = batched_query_fasta(file, query_callback, *config, aligner_config.get(),
                                          *graph, [&](){ return annotation.get().get(); }
             );
         } else {
+            auto graph = graph_future.get();
+            k = graph->get_k();
             if (!anno_graph)
                 anno_graph = initialize_annotated_dbg(graph, *config);
             num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get(), thread_pool);

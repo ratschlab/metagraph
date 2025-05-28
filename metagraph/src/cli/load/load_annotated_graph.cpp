@@ -24,6 +24,20 @@ std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
 load_annotation(std::shared_ptr<DeBruijnGraph> graph,
                 const Config &config,
                 size_t max_chunks_open) {
+    std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future = std::async(std::launch::async, [graph]{ return graph; });
+    return load_annotation(graph_future, config, max_chunks_open);
+}
+
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
+                const Config &config,
+                size_t max_chunks_open) {
+
+    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation_temp;
+    if (config.infbase_annotators.size())
+        annotation_temp = initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open);
+
+    std::shared_ptr<DeBruijnGraph> graph = graph_future.get();
     uint64_t max_index = graph->max_index();
 
     const auto *base_graph_ptr = graph.get();
@@ -35,9 +49,10 @@ load_annotation(std::shared_ptr<DeBruijnGraph> graph,
         max_index = base_graph_ptr->max_index();
     }
 
-    auto annotation_temp = config.infbase_annotators.size()
-            ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
-            : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
+    if (!config.infbase_annotators.size())
+        annotation_temp = initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
+
+    assert(annotation_temp);
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
