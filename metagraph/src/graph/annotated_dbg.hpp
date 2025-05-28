@@ -157,10 +157,6 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                              double discovery_fraction = 0.0,
                              double presence_fraction = 0.0) const;
 
-    int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
-                                     int32_t match_score = 1,
-                                     int32_t mismatch_score = 2) const;
-
   private:
     DeBruijnGraph &dbg_;
 };
