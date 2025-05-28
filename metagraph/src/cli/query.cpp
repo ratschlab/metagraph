@@ -1070,10 +1070,6 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     for (size_t i = 0; i < contigs.size(); ++i) {
         const auto &seq = contigs[i].first;
         auto &path = contigs[i].second;
-        if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size()) {
-            path = std::vector<node_index>{};
-            continue;  // no new k-mers
-        }
 
         size_t begin = 0;
         size_t end;
