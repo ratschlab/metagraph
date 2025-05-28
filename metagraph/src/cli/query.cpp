@@ -1264,8 +1264,6 @@ int query_graph(Config *config) {
 
     assert(config->infbase_annotators.size() == 1);
 
-    std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
-
     ThreadPool graph_loader(1, 1);
     std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future = graph_loader.enqueue([&]() {
         std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
