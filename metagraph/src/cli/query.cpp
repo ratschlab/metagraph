@@ -1034,21 +1034,25 @@ construct_contigs(const DeBruijnGraph &full_dbg,
     std::atomic<uint64_t> num_found_kmers = 0;
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
-        const auto &str = seq_batch[i].sequence;
-        contigs[i].first = str;
-        auto &path = contigs[i].second;
-        path.assign(str.size() - k + 1, 0);
+        const auto &seq = seq_batch[i].sequence;
+        if (seq.size() < k)
+            continue;
+        std::vector<node_index> path(seq.size() - k + 1, 0);
 #ifndef NDEBUG
         uint64_t offset = graph_init->num_nodes();
 #endif
-        graph_init->add_sequence(str, [](){ return false; }, [&](size_t i, node_index node) {
+        graph_init->add_sequence(seq, [](){ return false; }, [&](size_t i, node_index node) {
             if (i < path.size()) {
                 assert(node > offset);
                 path[i] = node;
             }
         });
-        if (max_input_sequence_length < str.length())
-            max_input_sequence_length = str.length();
+        if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) != path.size()) { // at least one k-mer is new
+            contigs[i].first = seq;
+            contigs[i].second.swap(path);
+        }
+        if (max_input_sequence_length < seq.length())
+            max_input_sequence_length = seq.length();
     }
     uint64_t num_kmers = graph_init->num_nodes() / (graph_init->get_mode() == DeBruijnGraph::CANONICAL ? 2 : 1);
 
@@ -1064,7 +1068,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
-        const auto &str = contigs[i].first;
+        const auto &seq = contigs[i].first;
         auto &path = contigs[i].second;
         if (static_cast<size_t>(std::count(path.begin(), path.end(), 0)) == path.size()) {
             path = std::vector<node_index>{};
@@ -1078,7 +1082,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
             }
 
             if (begin != end) {
-                std::string_view segment(str.data() + begin, end - begin + k - 1);
+                std::string_view segment(seq.data() + begin, end - begin + k - 1);
                 // nodes in the query graph hull may overlap
                 full_dbg.map_to_nodes(segment, [&](node_index node) {
                     path[begin++] = node;
