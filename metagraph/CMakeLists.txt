@@ -297,13 +297,6 @@ target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(zstd REQUIRED)
 
-if(ZSTD_FOUND)
-  include_directories(SYSTEM
-    ${ZSTD_INCLUDE_DIRS}
-  )
-  set(METALIBS ${METALIBS} zstd::zstd)
-endif()
-
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 
@@ -433,6 +426,7 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
+  zstd::zstd
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
