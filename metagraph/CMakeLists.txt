@@ -314,7 +314,7 @@ if(ZSTD_FOUND)
   include_directories(SYSTEM
     ${ZSTD_INCLUDE_DIRS}
   )
-  set(METALIBS ${METALIBS} ${ZSTD_LIBRARIES})
+  set(METALIBS ${METALIBS} zstd::zstd)
 endif()
 
 # makes ASIO not depend on boost
