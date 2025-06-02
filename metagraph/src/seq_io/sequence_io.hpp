@@ -40,7 +40,7 @@ struct compFile {
             } else {
                 return f->tellg();
             }
-        }, f_);
+        }, other.f_);
         std::visit([&](auto f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
                 gzseek(f, offset, SEEK_SET);
