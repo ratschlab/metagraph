@@ -83,7 +83,7 @@ unset(FOLLY_FOUND PARENT_SCOPE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Jemalloc)
 find_package(Boost REQUIRED COMPONENTS iostreams)
-find_package(Zstd REQUIRED)
+find_package(zstd REQUIRED)
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
