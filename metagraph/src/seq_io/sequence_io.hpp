@@ -21,7 +21,10 @@ namespace mtg {
 namespace seq_io {
 
 struct compFile {
-    using bfio = boost::iostreams::filtering_istream;
+    using bfi = boost::iostreams::filtering_istream;
+    using bfo = boost::iostreams::filtering_ostream;
+
+    ~compFile() { close(); }
 
     bool good() const {
         return std::visit([&](const auto &f) {
@@ -34,35 +37,82 @@ struct compFile {
     }
 
     void match_offset(const compFile &other) {
-        auto offset = std::visit([&](const auto &f) {
+        if (f_.index() != other.f_.index()) {
+            throw std::runtime_error("Matching offsets for different stream types");
+        }
+
+        std::visit([&](auto &f) {
+            std::visit([&](const auto &other_f) {
+                if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                    if constexpr(std::is_same_v<std::decay_t<decltype(other_f)>, gzFile>) {
+                        gzseek(f, gztell(other_f), SEEK_SET);
+                    } else {
+                        assert(false && "Matching offsets for different stream types");
+                    }
+                } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfi>>) {
+                    if constexpr(std::is_same_v<std::decay_t<decltype(other_f)>, std::shared_ptr<bfi>>) {
+                        f->seekg(other_f->tellg(), std::ios::beg);
+                    } else {
+                        assert(false && "Matching offsets for different stream types");
+                    }
+                }
+            }, other.f_);
+        }, f_);
+    }
+
+    int put(char c) {
+        return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
-                return static_cast<std::streampos>(gztell(f));
+                return gzputc(f, c);
+            } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfo>>) {
+                f->put(c);
+                return !f->eof() ? c : f->eof();
             } else {
-                return f->tellg();
+                return -1;
             }
-        }, other.f_);
-        std::visit([&](auto f) {
+        }, f_);
+    }
+
+    int get() {
+        return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
-                gzseek(f, offset, SEEK_SET);
+                return gzgetc(f);
+            } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfi>>) {
+                return f->get();
             } else {
-                f->seekg(offset, std::ios::beg);
+                return -1;
             }
         }, f_);
     }
 
     std::streamsize read(voidp buf, unsigned len) {
-        return std::visit([&](auto f) {
+        return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
                 return static_cast<std::streamsize>(gzread(f, buf, len));
-            } else {
+            } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfi>>) {
                 f->read(reinterpret_cast<char*>(buf), len);
                 return f->gcount();
+            } else {
+                return std::streamsize(0);
+            }
+        }, f_);
+    }
+
+    std::streamsize write(voidpc buf, unsigned len) {
+        return std::visit([&](auto &f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return static_cast<std::streamsize>(gzwrite(f, buf, len));
+            } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfo>>) {
+                f->write(reinterpret_cast<const char*>(buf), len);
+                return static_cast<std::streamsize>(len);
+            } else {
+                return std::streamsize(0);
             }
         }, f_);
     }
 
     int close() {
-        return std::visit([&](auto f) {
+        return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
                 return gzclose(f);
             } else {
@@ -92,8 +142,23 @@ struct compFile {
         }, f_);
     }
 
-    static int read(compFile f, voidp buf, unsigned len) {
+    std::string error() const {
+        return std::visit([&](const auto &f) {
+            int err_state;
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                return gzerror(f, &err_state);
+            }
+
+            return "";
+        }, f_);
+    }
+
+    static int read(compFile &f, voidp buf, unsigned len) {
         return f.read(buf, len);
+    }
+
+    static int write(compFile &f, voidpc buf, unsigned len) {
+        return f.write(buf, len);
     }
 
     static compFile open_read(const char *path) {
@@ -105,12 +170,32 @@ struct compFile {
         std::string ext(dotpos);
 
         if (ext == ".zst") {
-            auto fio = std::make_shared<bfio>();
+            auto fio = std::make_shared<bfi>();
             fio->push(boost::iostreams::zstd_decompressor());
             fio->push(boost::iostreams::file_descriptor(path));
             f.f_ = fio;
         } else {
             f.f_ = gzopen(path, "r");
+        }
+
+        return f;
+    }
+
+    static compFile open_write(const char *path) {
+        compFile f;
+        const char *dotpos = strrchr(path, '.');
+        if (dotpos == NULL)
+            throw std::runtime_error("No file extension");
+
+        std::string ext(dotpos);
+
+        if (ext == ".zst") {
+            auto fio = std::make_shared<bfo>();
+            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(boost::iostreams::file_descriptor(path));
+            f.f_ = fio;
+        } else {
+            f.f_ = gzopen(path, "w");
         }
 
         return f;
@@ -122,7 +207,7 @@ struct compFile {
         if constexpr(std::is_same_v<T, gzFile>) {
             f.f_ = gzdopen(fd, "r");
         } else {
-            auto fio = std::make_shared<bfio>();
+            auto fio = std::make_shared<bfi>();
             f.cf_ = fdopen(fd, "r");
             fio->push(boost::iostreams::zstd_decompressor());
             fio->push(f.cf_);
@@ -131,7 +216,7 @@ struct compFile {
         return f;
     }
 
-    std::variant<gzFile, std::shared_ptr<bfio>> f_;
+    std::variant<gzFile, std::shared_ptr<bfi>, std::shared_ptr<bfo>> f_;
     FILE *cf_ = NULL;
 };
 
@@ -144,7 +229,8 @@ class FastaWriter {
                 const std::string &header = "",
                 bool enumerate_sequences = false,
                 bool async = false,
-                const char *mode = "w");
+                const char *mode = "w",
+                bool zstd = false);
 
     ~FastaWriter();
 
@@ -159,7 +245,7 @@ class FastaWriter {
     void write_to_disk(const std::string &sequence);
 
     std::string fname_;
-    gzFile gz_out_;
+    compFile out_;
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
@@ -187,7 +273,8 @@ class ExtendedFastaWriter {
                         const std::string &header = "",
                         bool enumerate_sequences = false,
                         bool async = false,
-                        const char *mode = "w");
+                        const char *mode = "w",
+                        bool zstd = false);
 
     ~ExtendedFastaWriter();
 
@@ -207,8 +294,8 @@ class ExtendedFastaWriter {
     void write_to_disk(const value_type &value_pair);
 
     std::string fasta_fname_;
-    gzFile fasta_gz_out_;
-    gzFile feature_gz_out_;
+    compFile fasta_out_;
+    compFile feature_out_;
     uint32_t kmer_length_;
     const std::string header_;
     bool enumerate_sequences_;
@@ -217,12 +304,12 @@ class ExtendedFastaWriter {
     BatchAccumulator<value_type> batcher_;
 };
 
-bool write_fasta(gzFile gz_out, const kseq_t &kseq);
+bool write_fasta(compFile &out, const kseq_t &kseq);
 
-bool write_fasta(gzFile gz_out, const std::string &header,
+bool write_fasta(compFile &out, const std::string &header,
                                 const std::string &sequence);
 
-bool write_fastq(gzFile gz_out, const kseq_t &kseq);
+bool write_fastq(compFile &out, const kseq_t &kseq);
 
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,

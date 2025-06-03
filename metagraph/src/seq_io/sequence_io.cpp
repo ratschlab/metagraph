@@ -35,14 +35,16 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
                          bool enumerate_sequences,
                          bool async,
-                         const char *mode)
+                         const char *mode,
+                         bool zstd)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
-    fname_ = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+    std::string comp_type = zstd ? ".zst" : ".gz";
+    fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
 
-    gz_out_ = gzopen(fname_.c_str(), mode);
-    if (gz_out_ == Z_NULL) {
+    out_ = compFile::open_write(fname_.c_str());
+    if (!out_.good()) {
         std::cerr << "ERROR: Can't write to " << fname_ << std::endl;
         exit(1);
     }
@@ -61,10 +63,7 @@ FastaWriter::FastaWriter(const std::string &filebase,
     );
 }
 
-FastaWriter::~FastaWriter() {
-    flush();
-    gzclose(gz_out_);
-}
+FastaWriter::~FastaWriter() { flush(); }
 
 void FastaWriter::flush() {
     batcher_.process_all_buffered();
@@ -80,7 +79,7 @@ void FastaWriter::write(std::string&& sequence) {
 }
 
 void FastaWriter::write_to_disk(const std::string &sequence) {
-    if (!write_fasta(gz_out_,
+    if (!write_fasta(out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,
                      sequence)) {
@@ -97,26 +96,28 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &header,
                                             bool enumerate_sequences,
                                             bool async,
-                                            const char *mode)
+                                            const char *mode,
+                                            bool zstd)
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
     assert(feature_name.size());
+    std::string comp_type = zstd ? ".zst" : ".gz";
 
-    fasta_fname_ = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+    fasta_fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
 
-    fasta_gz_out_ = gzopen(fasta_fname_.c_str(), mode);
-    if (fasta_gz_out_ == Z_NULL) {
+    fasta_out_ = compFile::open_write(fasta_fname_.c_str());
+    if (!fasta_out_.good()) {
         std::cerr << "ERROR: Can't write to " << fasta_fname_ << std::endl;
         exit(1);
     }
 
-    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+    auto filename = utils::remove_suffix(filebase, comp_type, ".fasta") + "." + feature_name + comp_type;
 
-    feature_gz_out_ = gzopen(filename.c_str(), "w");
-    if (feature_gz_out_ == Z_NULL
-            || gzwrite(feature_gz_out_, &kmer_length_, 4) != sizeof(kmer_length_)) {
+    feature_out_ = compFile::open_write(filename.c_str());
+    if (!feature_out_.good()
+            || feature_out_.write(&kmer_length_, 4) != sizeof(kmer_length_)) {
         std::cerr << "ERROR: Can't write to " << filename << std::endl;
         exit(1);
     }
@@ -136,11 +137,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 }
 
 template <typename T>
-ExtendedFastaWriter<T>::~ExtendedFastaWriter() {
-    flush();
-    gzclose(fasta_gz_out_);
-    gzclose(feature_gz_out_);
-}
+ExtendedFastaWriter<T>::~ExtendedFastaWriter() { flush(); }
 
 template <typename T>
 void ExtendedFastaWriter<T>::flush() {
@@ -169,7 +166,7 @@ void ExtendedFastaWriter<T>::write(std::string&& sequence,
 template <typename T>
 void ExtendedFastaWriter<T>::write_to_disk(const value_type &value_pair) {
     const auto &[sequence, kmer_features] = value_pair;
-    if (!write_fasta(fasta_gz_out_,
+    if (!write_fasta(fasta_out_,
                      enumerate_sequences_ ? header_ + std::to_string(++count_)
                                           : header_,
                      sequence)) {
@@ -177,8 +174,8 @@ void ExtendedFastaWriter<T>::write_to_disk(const value_type &value_pair) {
         exit(1);
     }
 
-    if (gzwrite(feature_gz_out_, kmer_features.data(),
-                                 kmer_features.size() * sizeof(feature_type))
+    if (feature_out_.write(kmer_features.data(),
+                           kmer_features.size() * sizeof(feature_type))
             != static_cast<int>(kmer_features.size() * sizeof(feature_type))) {
         std::cerr << "ERROR: ExtendedFastaWriter::write failed. Can't dump k-mer features" << std::endl;
         exit(1);
@@ -191,59 +188,53 @@ template class ExtendedFastaWriter<uint32_t>;
 template class ExtendedFastaWriter<uint64_t>;
 
 
-bool write_fasta(gzFile gz_out, const kseq_t &kseq) {
-    return gzputc(gz_out, '>') == '>'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
+bool write_fasta(compFile &out, const kseq_t &kseq) {
+    return out.put('>') == '>'
+        && out.write(kseq.name.s, kseq.name.l) == static_cast<int>(kseq.name.l)
         && (!kseq.comment.l
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
+            || (out.put(' ') == ' '
+                && out.write(kseq.comment.s, kseq.comment.l)
                                     == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, kseq.seq.s, kseq.seq.l)
-                        == static_cast<int>(kseq.seq.l)
-        && gzputc(gz_out, '\n') == '\n';
+        && out.put('\n') == '\n'
+        && out.write(kseq.seq.s, kseq.seq.l) == static_cast<int>(kseq.seq.l)
+        && out.put('\n') == '\n';
 }
 
-bool write_fasta(gzFile gz_out, const std::string &header,
+bool write_fasta(compFile &out, const std::string &header,
                                 const std::string &sequence) {
-    return gzputc(gz_out, '>') == '>'
-        && gzwrite(gz_out, header.data(), header.length())
+    return out.put('>') == '>'
+        && out.write(header.data(), header.length())
                         == static_cast<int>(header.length())
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, sequence.data(), sequence.length())
+        && out.put('\n') == '\n'
+        && out.write(sequence.data(), sequence.length())
                         == static_cast<int>(sequence.length())
-        && gzputc(gz_out, '\n') == '\n';
+        && out.put('\n') == '\n';
 }
 
-bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
+bool write_fastq(compFile &out, const kseq_t &kseq) {
     std::string qual(kseq.qual.s, kseq.qual.l);
 
     if (!kseq.qual.l && kseq.seq.l)
         qual.assign(kseq.seq.l, kDefaultFastQualityChar);
 
-    return gzputc(gz_out, '@') == '@'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
+    return out.put('@') == '@'
+        && out.write(kseq.name.s, kseq.name.l) == static_cast<int>(kseq.name.l)
         && (kseq.comment.l == 0
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
+            || (out.put(' ') == ' '
+                && out.write(kseq.comment.s, kseq.comment.l)
                                     == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, kseq.seq.s, kseq.seq.l)
-                        == static_cast<int>(kseq.seq.l)
-        && gzputc(gz_out, '\n') == '\n'
-        && gzputc(gz_out, '+') == '+'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
+        && out.put('\n') == '\n'
+        && out.write(kseq.seq.s, kseq.seq.l) == static_cast<int>(kseq.seq.l)
+        && out.put('\n') == '\n'
+        && out.put('+') == '+'
+        && out.write(kseq.name.s, kseq.name.l) == static_cast<int>(kseq.name.l)
         && (kseq.comment.l == 0
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
+            || (out.put(' ') == ' '
+                && out.write(kseq.comment.s, kseq.comment.l)
                                     == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, qual.data(), qual.size())
-                        == static_cast<int>(qual.size())
-        && gzputc(gz_out, '\n') == '\n';
+        && out.put('\n') == '\n'
+        && out.write(qual.data(), qual.size()) == static_cast<int>(qual.size())
+        && out.put('\n') == '\n';
 }
 
 
@@ -266,9 +257,6 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
         // Thus, we need to open a new descriptor and seek to the target position.
 
         filename_ = other.filename_;
-
-        // close the old file descriptor
-        read_stream_->f->f.close();
 
         // open a new file descriptor
         read_stream_->f->f = compFile::open_read(filename_.c_str());
@@ -410,7 +398,23 @@ void read_extended_fasta_file_critical(const std::string &filebase,
                                        bool with_reverse) {
     assert(feature_name.size());
 
-    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+    const char *dirpos = strrchr(filebase.c_str(), '/');
+    const char *dotpos = strrchr(filebase.c_str(), '.');
+
+    std::string ext = (dotpos == NULL || (dirpos != NULL && dirpos > dotpos))
+        ? ".gz"
+        : dotpos;
+
+    auto filename = filebase;
+
+    if (ext != ".zst" && ext != ".gz") {
+        ext = "";
+    } else {
+        filename = utils::remove_suffix(filename, ext);
+    }
+
+    auto feature_base = utils::remove_suffix(filebase, ".fasta");
+    filename = feature_base + ".fasta" + ext;
 
     compFile fasta_p = compFile::open_read(filename.c_str());
     if (!fasta_p.good()) {
@@ -418,12 +422,12 @@ void read_extended_fasta_file_critical(const std::string &filebase,
         exit(1);
     }
 
-    filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+    filename = feature_base + "." + feature_name + ext;
     uint32_t kmer_length;
 
-    gzFile features_p = gzopen(filename.c_str(), "r");
-    if (features_p == Z_NULL
-            || gzread(features_p, &kmer_length, 4) != sizeof(kmer_length)) {
+    compFile features_p = compFile::open_read(filename.c_str());
+    if (!features_p.good()
+            || features_p.read(&kmer_length, 4) != sizeof(kmer_length)) {
         std::cerr << "ERROR: Cannot read from file " << filename << std::endl;
         exit(1);
     }
@@ -439,11 +443,10 @@ void read_extended_fasta_file_critical(const std::string &filebase,
             }
             counts.resize(read_stream->seq.l - kmer_length + 1);
             // read the features of k-mers in sequence |read_stream|
-            if (gzread(features_p, counts.data(), sizeof(T) * counts.size())
+            if (features_p.read(counts.data(), sizeof(T) * counts.size())
                     != static_cast<int>(sizeof(T) * counts.size())) {
                 std::cerr << "ERROR: Cannot read k-mer features from file " << filename << std::endl;
-                int gz_err;
-                std::cerr << "ERROR: " << gzerror(features_p, &gz_err) << std::endl;
+                std::cerr << "ERROR: " << features_p.error() << std::endl;
                 exit(1);
             }
 
@@ -458,13 +461,10 @@ void read_extended_fasta_file_critical(const std::string &filebase,
         false
     );
 
-    if (!fasta_p.eof() || gzgetc(features_p) != -1 || !gzeof(features_p)) {
+    if (!fasta_p.eof() || !features_p.eof()) {
         std::cerr << "ERROR: There are features left in extension unread" << std::endl;
         exit(1);
     }
-
-    fasta_p.close();
-    gzclose(features_p);
 }
 
 template
@@ -514,6 +514,7 @@ void read_fasta_from_string(const std::string &fasta_flat,
     });
 
     // gzFile from pipe
+    // TODO: switch to zstd?
     compFile input_p = compFile::dopen_read<gzFile>(p[0]);
     if (!input_p.good()) {
         std::cerr << "ERROR: opening for reading from pipe failed" << std::endl;
@@ -525,7 +526,6 @@ void read_fasta_from_string(const std::string &fasta_flat,
 
     writer.join();
 
-    input_p.close();
     close(p[0]);
 }
 
