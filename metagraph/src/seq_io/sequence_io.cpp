@@ -323,12 +323,9 @@ FastaParser::iterator::iterator(const std::string &filename,
         exit(1);
     }
 
-    if (kseq_read(read_stream_.get()) < 0) {
-        std::cerr << "init failed or empty file" << std::endl;
+    if (kseq_read(read_stream_.get()) < 0)
         *this = iterator();
-    }
 
-    std::cerr << "init worked" << std::endl;
 }
 
 void FastaParser::iterator::deinit_stream::operator()(kseq_t *read_stream) {
@@ -343,7 +340,7 @@ void FastaParser::iterator::deinit_stream::operator()(kseq_t *read_stream) {
 
 
 template <class Callback>
-void read_fasta_file_critical(compFile input_p,
+void read_fasta_file_critical(compFile &input_p,
                               Callback callback,
                               bool with_reverse) {
     if (!input_p.good()) {
@@ -495,26 +492,21 @@ void read_fasta_from_string(const std::string &fasta_flat,
 
         if (sent != static_cast<int64_t>(fasta_flat.length())) {
             std::cerr << "ERROR: writing to pipe failed" << std::endl;
-
-            close(p[0]);
             exit(1);
         }
     });
 
     // gzFile from pipe
     // TODO: switch to zstd?
-    compFile input_p = compFile::dopen_read<gzFile>(p[0]);
+    auto input_p = compFile::dopen_read<boost::iostreams::gzip_decompressor>(p[0]);
     if (!input_p.good()) {
         std::cerr << "ERROR: opening for reading from pipe failed" << std::endl;
-        close(p[0]);
         exit(1);
     }
 
     read_fasta_file_critical(input_p, callback, with_reverse);
 
     writer.join();
-
-    close(p[0]);
 }
 
 
