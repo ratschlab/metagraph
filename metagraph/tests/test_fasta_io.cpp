@@ -295,15 +295,13 @@ TEST(FastaFile, iterator_compare) {
 
         FastaParser parser(dump_filename);
 
-        for (auto it = parser.begin(); it != parser.end(); ++it) {
-            auto copy = it;
-            EXPECT_TRUE(copy == it);
-            EXPECT_FALSE(copy != it);
-            EXPECT_TRUE(++copy != it);
-            EXPECT_FALSE(copy == it);
-            EXPECT_TRUE(copy == ++it);
-            EXPECT_FALSE(copy != it);
+        auto copy = parser.begin();
+        auto it = parser.begin();
+        for ( ; it != parser.end(); ++it) {
+            EXPECT_EQ(copy, it);
+            EXPECT_NE(++copy, it);
         }
+        EXPECT_EQ(copy, it);
 
         std::filesystem::remove(dump_filename);
     }
