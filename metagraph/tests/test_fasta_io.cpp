@@ -21,12 +21,16 @@ const std::vector<std::string> dump_filename_exts { ".gz", ".zst" };
 TEST(FastaFile, iterator_read) {
     size_t num_records = 0;
     size_t total_size = 0;
+    std::cerr << "start" << std::endl;
     for (const auto &record : FastaParser(test_fasta)) {
+        std::cerr << "fsdf" << std::endl;
         num_records++;
         total_size += record.seq.l;
+        std::cerr << "FOF" << std::endl;
     }
     EXPECT_EQ(1000u, num_records);
     EXPECT_EQ(1490627u, total_size);
+    std::cerr << "FSASDF" << std::endl;
 }
 
 TEST(FastaFile, full_iterator_read_empty) {

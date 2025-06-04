@@ -5,11 +5,12 @@
 #include <vector>
 #include <string>
 #include <variant>
+#include <iostream>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/zstd.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
 
-#include <zlib.h>
 #include <htslib/kseq.h>
 
 #include "common/batch_accumulator.hpp"
@@ -24,7 +25,19 @@ struct compFile {
     using bfi = boost::iostreams::filtering_istream;
     using bfo = boost::iostreams::filtering_ostream;
 
-    ~compFile() { close(); }
+    ~compFile() {
+        std::cerr << "closing" << std::endl;
+        std::visit([&](auto &f) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
+                gzclose(f);
+            } else {
+                f.reset();
+                if (cf_)
+                    fclose(cf_);
+            }
+        }, f_);
+        std::cerr << "done closing" << std::endl;
+    }
 
     bool good() const {
         return std::visit([&](const auto &f) {
@@ -85,49 +98,38 @@ struct compFile {
         }, f_);
     }
 
-    std::streamsize read(voidp buf, unsigned len) {
+    int read(voidp buf, unsigned len) {
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
-                return static_cast<std::streamsize>(gzread(f, buf, len));
+                int ret_val = gzread(f, buf, len);
+                if (ret_val < 0) {
+                    int state;
+                    std::cerr << "error: " << ret_val << "\t" << gzerror(f, &state) << std::endl;
+                } else {
+                    std::cerr << "worked: " << ret_val << std::endl;
+                }
+                return ret_val;
             } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfi>>) {
+                if (f->eof())
+                    return 0;
+
                 f->read(reinterpret_cast<char*>(buf), len);
-                return f->gcount();
+                return f->good() ? static_cast<int>(f->gcount()) : -1;
             } else {
-                return std::streamsize(0);
+                return -1;
             }
         }, f_);
     }
 
-    std::streamsize write(voidpc buf, unsigned len) {
+    int write(voidpc buf, unsigned len) {
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
-                return static_cast<std::streamsize>(gzwrite(f, buf, len));
+                return gzwrite(f, buf, len);
             } else if constexpr(std::is_same_v<std::decay_t<decltype(f)>, std::shared_ptr<bfo>>) {
                 f->write(reinterpret_cast<const char*>(buf), len);
-                return static_cast<std::streamsize>(len);
+                return f->good() ? static_cast<int>(len) : -1;
             } else {
-                return std::streamsize(0);
-            }
-        }, f_);
-    }
-
-    int close() {
-        return std::visit([&](auto &f) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, gzFile>) {
-                return gzclose(f);
-            } else {
-                try {
-                    f.reset();
-                    if (cf_) {
-                        int ret_val = fclose(cf_);
-                        cf_ = NULL;
-                        return ret_val;
-                    }
-
-                    return Z_OK;
-                } catch (...) {
-                    return Z_ERRNO;
-                }
+                return -1;
             }
         }, f_);
     }
@@ -365,28 +367,29 @@ class FastaParser {
 class FastaParser::iterator {
     friend FastaParser;
 
+    struct deinit_stream { void operator()(kseq_t *read_stream); };
+
   public:
     using iterator_category = std::input_iterator_tag;
-    using value_type = kseq_t;
+    using stream_type = std::unique_ptr<kseq_t, deinit_stream>;
+    using value_type = stream_type::element_type;
     using difference_type = size_t;
-    using pointer = kseq_t*;
-    using reference = kseq_t&;
+    using pointer = stream_type::pointer;
+    using reference = stream_type::element_type&;
 
     iterator() {}
 
     iterator(const iterator &other) { *this = other; }
-    iterator(iterator&& other) { *this = std::move(other); }
+    iterator(iterator&& other) = default;
 
     iterator& operator=(const iterator &other);
-    iterator& operator=(iterator&& other);
-
-    ~iterator() { deinit_stream(); }
+    iterator& operator=(iterator&& other) = default;
 
     kseq_t& operator*() { return *read_stream_; }
     const kseq_t& operator*() const { return *read_stream_; }
 
-    kseq_t* operator->() { return read_stream_; }
-    const kseq_t* operator->() const { return read_stream_; }
+    kseq_t* operator->() { return read_stream_.get(); }
+    const kseq_t* operator->() const { return read_stream_.get(); }
 
     iterator& operator++() {
         if (with_reverse_complement_ && !is_reverse_complement_) {
@@ -395,15 +398,16 @@ class FastaParser::iterator {
             return *this;
         }
 
-        if (kseq_read(read_stream_) < 0) {
-            deinit_stream();
+        if (kseq_read(read_stream_.get()) < 0) {
+            read_stream_.reset();
         }
+
         is_reverse_complement_ = false;
         return *this;
     }
 
     bool operator==(const iterator &other) const {
-        return (read_stream_ && other.read_stream_
+        return (read_stream_.get() && other.read_stream_.get()
                     && is_reverse_complement_ == other.is_reverse_complement_
                     && read_stream_->f->seek_pos == other.read_stream_->f->seek_pos
                     && with_reverse_complement_ == other.with_reverse_complement_
@@ -417,19 +421,24 @@ class FastaParser::iterator {
 
   private:
     iterator(const std::string &filename, bool with_reverse_complement);
-    void deinit_stream();
 
     std::string filename_;
     bool with_reverse_complement_;
-    kseq_t *read_stream_ = NULL;
+    stream_type read_stream_;
     bool is_reverse_complement_ = false;
 };
 
 FastaParser::iterator
-FastaParser::begin() const { return iterator(filename_, with_reverse_complement_); }
+FastaParser::begin() const {
+    std::cerr << "begin" << std::endl;
+    return iterator(filename_, with_reverse_complement_);
+}
 
 FastaParser::iterator
-FastaParser::end() const { return iterator(); }
+FastaParser::end() const {
+    std::cerr << "end" << std::endl;
+    return iterator();
+}
 
 } // namespace seq_io
 } // namespace mtg

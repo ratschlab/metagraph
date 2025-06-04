@@ -241,11 +241,7 @@ bool write_fastq(compFile &out, const kseq_t &kseq) {
 FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     if (!other.read_stream_) {
         // free memory, reset members and return
-        deinit_stream();
-        filename_.clear();
-        with_reverse_complement_ = false;
-        read_stream_ = NULL;
-        is_reverse_complement_ = false;
+        *this = iterator();
         return *this;
     }
 
@@ -311,15 +307,6 @@ FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
     return *this;
 }
 
-FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
-    std::swap(filename_, other.filename_);
-    with_reverse_complement_ = other.with_reverse_complement_;
-    std::swap(read_stream_, other.read_stream_);
-    is_reverse_complement_ = other.is_reverse_complement_;
-    // the destructor in |other| will be responsible for freeing the memory now
-    return *this;
-}
-
 FastaParser::iterator::iterator(const std::string &filename,
                                 bool with_reverse_complement)
       : filename_(filename),
@@ -330,24 +317,28 @@ FastaParser::iterator::iterator(const std::string &filename,
         exit(1);
     }
 
-    read_stream_ = kseq_init(input_p);
-    if (read_stream_ == NULL) {
+    read_stream_.reset(kseq_init(input_p));
+    if (!read_stream_) {
         std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
         exit(1);
     }
 
-    if (kseq_read(read_stream_) < 0) {
-        deinit_stream();
+    if (kseq_read(read_stream_.get()) < 0) {
+        std::cerr << "init failed or empty file" << std::endl;
+        *this = iterator();
     }
+
+    std::cerr << "init worked" << std::endl;
 }
 
-void FastaParser::iterator::deinit_stream() {
-    if (read_stream_) {
-        compFile input_p = read_stream_->f->f;
-        kseq_destroy(read_stream_);
-        input_p.close();
+void FastaParser::iterator::deinit_stream::operator()(kseq_t *read_stream) {
+    if (read_stream) {
+        // move the input file so it can be destroyed at the end of this scope
+        // by ~compFile
+        compFile input_p = std::move(read_stream->f->f);
+
+        kseq_destroy(read_stream);
     }
-    read_stream_ = NULL;
 }
 
 
@@ -360,21 +351,20 @@ void read_fasta_file_critical(compFile input_p,
         exit(1);
     }
     //TODO: handle read_stream->qual
-    kseq_t *read_stream = kseq_init(input_p);
-    if (read_stream == NULL) {
+    FastaParser::iterator::stream_type read_stream;
+    read_stream.reset(kseq_init(input_p));
+    if (!read_stream) {
         std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
         exit(1);
     }
 
-    while (kseq_read(read_stream) >= 0) {
-        callback(read_stream);
+    while (kseq_read(read_stream.get()) >= 0) {
+        callback(read_stream.get());
         if (with_reverse) {
             reverse_complement(read_stream->seq);
-            callback(read_stream);
+            callback(read_stream.get());
         }
     }
-
-    kseq_destroy(read_stream);
 }
 
 void read_fasta_file_critical(const std::string &filename,
@@ -387,8 +377,6 @@ void read_fasta_file_critical(const std::string &filename,
     }
 
     read_fasta_file_critical(input_p, callback, with_reverse);
-
-    input_p.close();
 }
 
 template <typename T>
