@@ -27,19 +27,23 @@ struct compFile {
 
     bool good() const { return std::visit([&](const auto &f) { return f.good(); }, *f_); }
 
-    void match_offset(const compFile &other) {
+    void match_offset(compFile &other) {
         if (f_->index() != other.f_->index()) {
             throw std::runtime_error("Matching offsets for different stream types");
         }
 
         std::visit([&](auto &f) {
-            std::visit([&](const auto &other_f) {
-                if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                    if constexpr(std::is_same_v<std::decay_t<decltype(other_f)>, const bfi>) {
+            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
+                std::visit([&](auto &other_f) {
+                    if constexpr(std::is_same_v<std::decay_t<decltype(other_f)>, bfi>) {
                         f.seekg(other_f.tellg(), std::ios::beg);
+                    } else {
+                        throw std::runtime_error("Other cast failed");
                     }
-                }
-            }, *other.f_);
+                }, *other.f_);
+            } else {
+                throw std::runtime_error("Main cast failed");
+            }
         }, *f_);
     }
 
@@ -67,9 +71,6 @@ struct compFile {
     int read(void *buf, unsigned len) {
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                if (f.eof())
-                    return 0;
-
                 f.read(reinterpret_cast<char*>(buf), len);
                 return f.eof() || f.good() ? static_cast<int>(f.gcount()) : -1;
             } else {
