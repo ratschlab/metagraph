@@ -6,7 +6,7 @@
 #include <string>
 #include <variant>
 #include <iostream>
-#include <boost/iostreams/device/file_descriptor.hpp>
+#include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/zstd.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
@@ -116,13 +116,17 @@ struct compFile {
         f.f_ = std::make_shared<std::variant<bfi, bfo>>();
         f.f_->emplace<bfi>();
         std::visit([&](auto &fio) {
-            if (ext == ".zst") {
-                fio.push(boost::iostreams::zstd_decompressor());
-            } else if (ext == ".gz") {
-                fio.push(boost::iostreams::gzip_decompressor());
+            if constexpr(std::is_same_v<std::decay_t<decltype(fio)>, bfi>) {
+                if (ext == ".zst") {
+                    fio.push(boost::iostreams::zstd_decompressor());
+                    fio.push(boost::iostreams::file_source(path, std::ios::binary));
+                } else if (ext == ".gz") {
+                    fio.push(boost::iostreams::gzip_decompressor());
+                    fio.push(boost::iostreams::file_source(path, std::ios::binary));
+                } else {
+                    fio.push(boost::iostreams::file_source(path));
+                }
             }
-
-            fio.push(boost::iostreams::file_descriptor(path));
         }, *f.f_);
 
         return f;
@@ -139,13 +143,17 @@ struct compFile {
         f.f_ = std::make_shared<std::variant<bfi, bfo>>();
         f.f_->emplace<bfo>();
         std::visit([&](auto &foo) {
-            if (ext == ".zst") {
-                foo.push(boost::iostreams::zstd_compressor());
-            } else if (ext == ".gz") {
-                foo.push(boost::iostreams::gzip_compressor());
+            if constexpr(std::is_same_v<std::decay_t<decltype(foo)>, bfo>) {
+                if (ext == ".zst") {
+                    foo.push(boost::iostreams::zstd_compressor());
+                    foo.push(boost::iostreams::file_sink(path, std::ios::binary));
+                } else if (ext == ".gz") {
+                    foo.push(boost::iostreams::gzip_compressor());
+                    foo.push(boost::iostreams::file_sink(path, std::ios::binary));
+                } else {
+                    foo.push(boost::iostreams::file_sink(path));
+                }
             }
-
-            foo.push(boost::iostreams::file_descriptor(path));
         }, *f.f_);
 
         return f;
@@ -179,8 +187,7 @@ class FastaWriter {
                 const std::string &header = "",
                 bool enumerate_sequences = false,
                 bool async = false,
-                const char *mode = "w",
-                bool zstd = false);
+                const char *mode = "w");
 
     ~FastaWriter();
 
@@ -223,8 +230,7 @@ class ExtendedFastaWriter {
                         const std::string &header = "",
                         bool enumerate_sequences = false,
                         bool async = false,
-                        const char *mode = "w",
-                        bool zstd = false);
+                        const char *mode = "w");
 
     ~ExtendedFastaWriter();
 

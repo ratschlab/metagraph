@@ -35,12 +35,14 @@ FastaWriter::FastaWriter(const std::string &filebase,
                          const std::string &header,
                          bool enumerate_sequences,
                          bool async,
-                         const char *mode,
-                         bool zstd)
+                         const char *mode)
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
+    fname_ = utils::remove_suffix(filebase, ".zst");
+    bool zstd = (fname_.size() < filebase.size());
     std::string comp_type = zstd ? ".zst" : ".gz";
+
     fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
 
     out_ = compFile::open_write(fname_.c_str());
@@ -96,13 +98,15 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
                                             const std::string &header,
                                             bool enumerate_sequences,
                                             bool async,
-                                            const char *mode,
-                                            bool zstd)
+                                            const char *mode)
       : kmer_length_(kmer_length),
         header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
     assert(feature_name.size());
+
+    fasta_fname_ = utils::remove_suffix(filebase, ".zst");
+    bool zstd = (fasta_fname_.size() < filebase.size());
     std::string comp_type = zstd ? ".zst" : ".gz";
 
     fasta_fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
