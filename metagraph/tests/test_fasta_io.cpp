@@ -121,6 +121,7 @@ TEST(FastaFile, full_iterator_read_100K_async) {
 // test that seek works fast so we can copy an iterator very quickly
 TEST(FastaFile, full_iterator_read_100K_fast_copy) {
     for (const auto &ext : dump_filename_exts) {
+        std::cerr << "start\t" << ext << std::endl;
         auto dump_filename = dump_filename_base + ext;
         {
             FastaWriter writer(dump_filename, "seq", true);
@@ -128,6 +129,8 @@ TEST(FastaFile, full_iterator_read_100K_fast_copy) {
                 writer.write(std::string(i % 1'000, 'A'));
             }
         }
+
+        std::cerr << "reading\t" << ext << std::endl;
 
         FastaParser fasta_parser(dump_filename);
         FastaParser::iterator copy;
@@ -139,8 +142,11 @@ TEST(FastaFile, full_iterator_read_100K_fast_copy) {
             for (size_t i = 0; i < 20; ++i) {
                 copy = it;
                 total_size += copy->seq.l;
+                // std::cerr << total_size << std::endl;
             }
+            // std::cerr << "check" << ext << std::endl;
         }
+        std::cerr << "done\t" << ext << std::endl;
 
         EXPECT_EQ(49'950'000u * 20, total_size);
 

@@ -50,43 +50,55 @@ struct compFile {
     int put(char c) {
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfo>) {
+                if (!f)
+                    return -1;
+
                 f.put(c);
-                return !f.eof() ? c : f.eof();
-            } else {
-                return -1;
+                return !f ? -1 : c;
             }
+
+            return -1;
         }, *f_);
     }
 
     int get() {
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                return f.get();
-            } else {
-                return -1;
+                return !f ? -1 : f.get();
             }
+
+            return -1;
         }, *f_);
     }
 
     int read(void *buf, unsigned len) {
-        return std::visit([&](auto &f) {
+        return std::visit([&](auto &f) -> int {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                f.read(reinterpret_cast<char*>(buf), len);
-                return f.eof() || f.good() ? static_cast<int>(f.gcount()) : -1;
-            } else {
-                return -1;
+                if (f.eof())
+                    return 0;
+
+                if (f.good()) {
+                    f.read(reinterpret_cast<char*>(buf), len);
+                    if (f.good() || f.eof())
+                        return f.gcount();
+                }
             }
+
+            return -1;
         }, *f_);
     }
 
     int write(const void *buf, unsigned len) {
-        return std::visit([&](auto &f) {
+        return std::visit([&](auto &f) -> int {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfo>) {
-                f.write(reinterpret_cast<const char*>(buf), len);
-                return f.good() ? static_cast<int>(len) : -1;
-            } else {
-                return -1;
+                if (f) {
+                    f.write(reinterpret_cast<const char*>(buf), len);
+                    if (f)
+                        return static_cast<int>(len);
+                }
             }
+
+            return -1;
         }, *f_);
     }
 
@@ -353,7 +365,9 @@ class FastaParser::iterator {
             return *this;
         }
 
-        if (kseq_read(read_stream_.get()) < 0) {
+        int ret_val = kseq_read(read_stream_.get());
+        std::cerr << "retval\t" << ret_val << std::endl;
+        if (ret_val < 0) {
             *this = iterator();
         }
 
