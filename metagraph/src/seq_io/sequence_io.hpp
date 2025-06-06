@@ -124,7 +124,7 @@ struct compFile {
                 if (ext == ".zst") {
                     fio.push(boost::iostreams::zstd_decompressor());
                     fio.push(boost::iostreams::file_source(path, std::ios::binary));
-                } else if (ext == ".gz") {
+                } else if (ext == ".gz" || ext == ".bgz") {
                     fio.push(boost::iostreams::gzip_decompressor());
                     fio.push(boost::iostreams::file_source(path, std::ios::binary));
                 } else {
