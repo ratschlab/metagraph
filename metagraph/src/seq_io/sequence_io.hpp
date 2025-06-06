@@ -20,86 +20,90 @@
 namespace mtg {
 namespace seq_io {
 
-struct compFile {
-    using bfi = boost::iostreams::filtering_istream;
-    using bfo = boost::iostreams::filtering_ostream;
-
-    bool good() const { return std::visit([&](const auto &f) { return f.good(); }, *f_); }
+class compFile {
+  public:
+    bool good() const {
+        return std::visit([&](const auto &f) {
+            return f && f->good();
+        }, f_);
+    }
 
     int put(char c) {
-        if (!f_)
-            return -1;
-
         return std::visit([&](auto &f) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfo>) {
-                if (!f)
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::ostream, std::decay_t<decltype(*f)>>) {
+                if (!*f)
                     return -1;
 
-                f.put(c);
-                return !f ? -1 : c;
+                f->put(c);
+                return !*f ? -1 : c;
             }
 
             return -1;
-        }, *f_);
+        }, f_);
     }
 
     int get() {
-        if (!f_)
-            return -1;
-
         return std::visit([&](auto &f) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                return !f ? -1 : f.get();
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::istream, std::decay_t<decltype(*f)>>) {
+                return !*f ? -1 : f->get();
             }
 
             return -1;
-        }, *f_);
+        }, f_);
     }
 
     int read(void *buf, unsigned len) {
-        if (!f_)
-            return -1;
-
         return std::visit([&](auto &f) -> int {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                if (f.eof())
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::istream, std::decay_t<decltype(*f)>>) {
+                if (f->eof())
                     return 0;
 
-                if (f.bad() || f.fail())
+                if (f->bad() || f->fail())
                     return -1;
 
-                f.read(reinterpret_cast<char*>(buf), len);
-                int ret_val = f.gcount();
-                if (f.good() || f.eof())
+                f->read(reinterpret_cast<char*>(buf), len);
+                int ret_val = f->gcount();
+                if (f->good() || f->eof())
                     return ret_val;
             }
 
             return -1;
-        }, *f_);
+        }, f_);
     }
 
     int write(const void *buf, unsigned len) {
-        if (!f_)
-            return -1;
-
         return std::visit([&](auto &f) -> int {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfo>) {
-                if (f) {
-                    f.write(reinterpret_cast<const char*>(buf), len);
-                    if (f)
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::ostream, std::decay_t<decltype(*f)>>) {
+                if (*f) {
+                    f->write(reinterpret_cast<const char*>(buf), len);
+                    if (*f)
                         return static_cast<int>(len);
                 }
             }
 
             return -1;
-        }, *f_);
+        }, f_);
     }
 
-    bool eof() const { return f_ ? std::visit([&](const auto &f) { return f.eof(); }, *f_) : false; }
-
-    std::string error() const {
-        return "";
+    bool eof() const {
+        return std::visit([&](const auto &f) {
+            return f && f->eof();
+        }, f_);
     }
+
+    std::string error() const { return ""; }
 
     static int read(compFile &f, void *buf, unsigned len) {
         return f.read(buf, len);
@@ -110,6 +114,8 @@ struct compFile {
     }
 
     static compFile open_read(const char *path) {
+        using bfi = boost::iostreams::filtering_istream;
+
         compFile f;
         const char *dotpos = strrchr(path, '.');
         if (dotpos == NULL)
@@ -117,26 +123,25 @@ struct compFile {
 
         std::string ext(dotpos);
 
-        f.f_ = std::make_shared<std::variant<bfi, bfo>>();
-        f.f_->emplace<bfi>();
-        std::visit([&](auto &fio) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(fio)>, bfi>) {
-                if (ext == ".zst") {
-                    fio.push(boost::iostreams::zstd_decompressor());
-                    fio.push(boost::iostreams::file_source(path, std::ios::binary));
-                } else if (ext == ".gz" || ext == ".bgz") {
-                    fio.push(boost::iostreams::gzip_decompressor());
-                    fio.push(boost::iostreams::file_source(path, std::ios::binary));
-                } else {
-                    fio.push(boost::iostreams::file_source(path));
-                }
-            }
-        }, *f.f_);
+        auto fio = std::make_shared<bfi>();
+        if (ext == ".zst") {
+            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+        } else if (ext == ".gz" || ext == ".bgz") {
+            fio->push(boost::iostreams::gzip_decompressor());
+            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+        } else {
+            fio->push(boost::iostreams::file_source(path));
+        }
+
+        f.f_.emplace<std::shared_ptr<std::istream>>(fio);
 
         return f;
     }
 
     static compFile open_write(const char *path) {
+        using bfo = boost::iostreams::filtering_ostream;
+
         compFile f;
         const char *dotpos = strrchr(path, '.');
         if (dotpos == NULL)
@@ -144,42 +149,36 @@ struct compFile {
 
         std::string ext(dotpos);
 
-        f.f_ = std::make_shared<std::variant<bfi, bfo>>();
-        f.f_->emplace<bfo>();
-        std::visit([&](auto &foo) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(foo)>, bfo>) {
-                if (ext == ".zst") {
-                    foo.push(boost::iostreams::zstd_compressor());
-                    foo.push(boost::iostreams::file_sink(path, std::ios::binary));
-                } else if (ext == ".gz") {
-                    foo.push(boost::iostreams::gzip_compressor());
-                    foo.push(boost::iostreams::file_sink(path, std::ios::binary));
-                } else {
-                    foo.push(boost::iostreams::file_sink(path));
-                }
-            }
-        }, *f.f_);
+        auto foo = std::make_shared<bfo>();
+        if (ext == ".zst") {
+            foo->push(boost::iostreams::zstd_compressor());
+            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+        } else if (ext == ".gz") {
+            foo->push(boost::iostreams::gzip_compressor());
+            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+        } else {
+            foo->push(boost::iostreams::file_sink(path));
+        }
+
+        f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
 
         return f;
     }
 
-    template <typename T>
-    static compFile dopen_read(int fd) {
+    static compFile open_read(std::istream &in) {
         compFile f;
-
-        f.f_ = std::make_shared<std::variant<bfi, bfo>>();
-        f.f_->emplace<bfi>();
-        std::visit([&](auto &fio) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                fio.push(T());
-                fio.push(fd);
-            }
-        }, *f.f_);
-
+        f.f_ = std::shared_ptr<std::istream>(std::shared_ptr<std::istream>{}, &in);
         return f;
     }
 
-    std::shared_ptr<std::variant<bfi, bfo>> f_;
+    std::shared_ptr<std::ios> data() {
+        return std::visit([&](auto &f) -> std::shared_ptr<std::ios> {
+            return f;
+        }, f_);
+    }
+
+  private:
+    std::variant<std::shared_ptr<std::istream>, std::shared_ptr<std::ostream>> f_;
 };
 
 KSEQ_DECLARE(compFile);
@@ -351,7 +350,7 @@ class FastaParser::iterator {
     const kseq_t* operator->() const { return read_stream_.get(); }
 
     iterator& operator++() {
-        if (!read_stream_ || !read_stream_->f->f.f_) {
+        if (!read_stream_ || !read_stream_->f->f.data()) {
             *this = iterator();
             return *this;
         }
