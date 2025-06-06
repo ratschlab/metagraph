@@ -352,7 +352,7 @@ class FastaParser::iterator {
 
     iterator& operator++() {
         if (!read_stream_ || !read_stream_->f->f.f_) {
-            reset();
+            *this = iterator();
             return *this;
         }
 
@@ -363,7 +363,7 @@ class FastaParser::iterator {
         }
 
         if (kseq_read(read_stream_.get()) < 0)
-            reset();
+            *this = iterator();
 
         is_reverse_complement_ = false;
         return *this;
@@ -380,13 +380,6 @@ class FastaParser::iterator {
 
     bool operator!=(const iterator &other) const {
         return !(*this == other);
-    }
-
-    void reset() {
-        filename_ = "";
-        with_reverse_complement_ = false;
-        read_stream_.reset();
-        is_reverse_complement_ = false;
     }
 
   private:
