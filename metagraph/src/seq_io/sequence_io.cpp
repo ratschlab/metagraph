@@ -241,76 +241,6 @@ bool write_fastq(compFile &out, const kseq_t &kseq) {
         && out.put('\n') == '\n';
 }
 
-
-FastaParser::iterator& FastaParser::iterator::operator=(const iterator &other) {
-    if (!other.read_stream_) {
-        // free memory, reset members and return
-        *this = iterator();
-        return *this;
-    }
-
-    if (!read_stream_) {
-        *this = iterator(other.filename_, other.with_reverse_complement_);
-
-    } else if (filename_ != other.filename_) {
-        // The current iterator doesn't point to the target fasta file.
-        // Thus, we need to open a new descriptor and seek to the target position.
-
-        filename_ = other.filename_;
-
-        // open a new file descriptor
-        read_stream_->f->f = compFile::open_read(filename_.c_str());
-        if (!read_stream_->f->f.good()) {
-            std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
-            exit(1);
-        }
-    }
-
-    read_stream_->f->f.match_offset(other.read_stream_->f->f);
-
-#define KSTRING_COPY(kstr, other_kstr) \
-            kstr.l = other_kstr.l; \
-            if (kstr.m != other_kstr.m) { \
-                kstr.m = other_kstr.m; \
-                kstr.s = (char*)realloc(kstr.s, kstr.m); \
-                if (!kstr.s) { \
-                    std::cerr << "ERROR: realloc failed" << std::endl; \
-                    exit(1); \
-                } \
-            } \
-            memcpy(kstr.s, other_kstr.s, other_kstr.m); \
-
-    // copy last cached record
-    KSTRING_COPY(read_stream_->name, other.read_stream_->name);
-    KSTRING_COPY(read_stream_->comment, other.read_stream_->comment);
-    KSTRING_COPY(read_stream_->seq, other.read_stream_->seq);
-    KSTRING_COPY(read_stream_->qual, other.read_stream_->qual);
-
-    read_stream_->last_char = other.read_stream_->last_char;
-
-    // copy stream state
-    kstream_t *f = read_stream_->f;
-    kstream_t *other_f = other.read_stream_->f;
-
-    f->begin = other_f->begin;
-    f->end = other_f->end;
-    f->is_eof = other_f->is_eof;
-    f->seek_pos = other_f->seek_pos;
-    if (f->bufsize != other_f->bufsize) {
-        f->bufsize = other_f->bufsize;
-        f->buf = (unsigned char*)realloc(f->buf, f->bufsize);
-        if (!f->buf) {
-            std::cerr << "ERROR: realloc failed" << std::endl;
-            exit(1);
-        }
-    }
-    memcpy(f->buf, other_f->buf, other_f->bufsize);
-
-    is_reverse_complement_ = other.is_reverse_complement_;
-
-    return *this;
-}
-
 FastaParser::iterator::iterator(const std::string &filename,
                                 bool with_reverse_complement)
       : filename_(filename),
@@ -327,21 +257,8 @@ FastaParser::iterator::iterator(const std::string &filename,
         exit(1);
     }
 
-    std::visit([&](auto &f) {
-        std::cerr << "ist\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-    }, *read_stream_->f->f.f_);
-
-    if (kseq_read(read_stream_.get()) < 0) {
-        std::visit([&](auto &f) {
-            std::cerr << "iendt\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-        }, *read_stream_->f->f.f_);
-        *this = iterator();
-    } else {
-        std::visit([&](auto &f) {
-            std::cerr << "iet\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-        }, *read_stream_->f->f.f_);
-    }
-
+    if (kseq_read(read_stream_.get()) < 0)
+        reset();
 }
 
 void FastaParser::iterator::deinit_stream::operator()(kseq_t *read_stream) {

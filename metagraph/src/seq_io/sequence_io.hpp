@@ -5,7 +5,6 @@
 #include <vector>
 #include <string>
 #include <variant>
-#include <iostream>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/zstd.hpp>
@@ -27,34 +26,6 @@ struct compFile {
 
     bool good() const { return std::visit([&](const auto &f) { return f.good(); }, *f_); }
 
-    void match_offset(compFile &other) {
-        if (!f_)
-            return;
-
-        if (f_->index() != other.f_->index()) {
-            throw std::runtime_error("Matching offsets for different stream types");
-        }
-
-        std::visit([&](auto &f) {
-            if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                std::visit([&](auto &other_f) {
-                    if constexpr(std::is_same_v<std::decay_t<decltype(other_f)>, bfi>) {
-                        std::cerr << "prematch\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-                        std::cerr << "otherpre\tg: " << other_f.good() << "\tf: " << other_f.fail() << "\tb: " << other_f.bad() << "\teof: " << other_f.eof() << std::endl;
-                        std::streampos offset = other_f.tellg();
-                        std::cerr << "otherpost\tg: " << other_f.good() << "\tf: " << other_f.fail() << "\tb: " << other_f.bad() << "\teof: " << other_f.eof() << "\toff: " << offset << " ?= " << std::streampos(-1) << std::endl;
-                        f.seekg(offset, std::ios::beg);
-                        std::cerr << "postmatch\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-                    } else {
-                        throw std::runtime_error("Other cast failed");
-                    }
-                }, *other.f_);
-            } else {
-                throw std::runtime_error("Main cast failed");
-            }
-        }, *f_);
-    }
-
     int put(char c) {
         if (!f_)
             return -1;
@@ -73,61 +44,36 @@ struct compFile {
     }
 
     int get() {
-        std::cerr << "getreadptr\t" << static_cast<bool>(f_) << std::endl;
         if (!f_)
             return -1;
 
         return std::visit([&](auto &f) {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                std::cerr << "\tget\tg: " << f.good() << "\tb: " << f.bad() << "\tf: " << f.fail() << "\teof: " << f.eof() << std::endl;
-                if (!f)
-                    return -1;
-
-                int ret_val = f.get();
-                std::cerr << "\t\t\tg: " << f.good() << "\tb: " << f.bad() << "\tf: " << f.fail() << "\teof: " << f.eof() << "\trv: " << ret_val << std::endl;
-                return ret_val;
+                return !f ? -1 : f.get();
             }
 
-            std::cerr << "getext-1" << std::endl;
             return -1;
         }, *f_);
     }
 
     int read(void *buf, unsigned len) {
-        std::cerr << "readptr\t" << static_cast<bool>(f_) << std::endl;
         if (!f_)
             return -1;
 
         return std::visit([&](auto &f) -> int {
             if constexpr(std::is_same_v<std::decay_t<decltype(f)>, bfi>) {
-                std::cerr << "\tread\tg: " << f.good() << "\tb: " << f.bad() << "\tf: " << f.fail() << "\teof: " << f.eof() << std::endl;
-                if (f.eof()) {
-                    std::cerr << "\t\t\teof0" << std::endl;
+                if (f.eof())
                     return 0;
-                }
 
-                if (f.bad() || f.fail()) {
-                    std::cerr << "\t\t\tbad-1" << std::endl;
+                if (f.bad() || f.fail())
                     return -1;
-                }
 
                 f.read(reinterpret_cast<char*>(buf), len);
                 int ret_val = f.gcount();
-                std::cerr << "\t\t\tg: " << f.good() << "\tb: " << f.bad() << "\tf: " << f.fail() << "\teof: " << f.eof() << "\trv: " << ret_val << std::endl;
                 if (f.good() || f.eof())
                     return ret_val;
-
-                // if (f.eof())
-                //     return 0;
-
-                // if (f.good()) {
-                //     f.read(reinterpret_cast<char*>(buf), len);
-                //     if (f.good() || f.eof())
-                //         return f.gcount();
-                // }
             }
 
-            std::cerr << "ext\t-1" << std::endl;
             return -1;
         }, *f_);
     }
@@ -391,11 +337,12 @@ class FastaParser::iterator {
 
     iterator() {}
 
-    iterator(const iterator &other) { *this = other; }
-    iterator(iterator&& other) = default;
+    // some fasta formats are not random access, so we can't copy iterators
+    iterator& operator=(const iterator&) = delete;
+    iterator(const iterator&) = delete;
 
-    iterator& operator=(const iterator &other);
-    iterator& operator=(iterator&& other) = default;
+    iterator& operator=(iterator&&) = default;
+    iterator(iterator&&) = default;
 
     kseq_t& operator*() { return *read_stream_; }
     const kseq_t& operator*() const { return *read_stream_; }
@@ -405,13 +352,9 @@ class FastaParser::iterator {
 
     iterator& operator++() {
         if (!read_stream_ || !read_stream_->f->f.f_) {
-            *this = iterator();
+            reset();
             return *this;
         }
-
-        std::visit([&](auto &f) {
-            std::cerr << "st\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-        }, *read_stream_->f->f.f_);
 
         if (with_reverse_complement_ && !is_reverse_complement_) {
             reverse_complement(read_stream_->seq);
@@ -419,17 +362,8 @@ class FastaParser::iterator {
             return *this;
         }
 
-        std::cerr << "startread" << std::endl;
-        int ret_val = kseq_read(read_stream_.get());
-        std::cerr << "\tretval\t" << ret_val << std::endl;
-
-        std::visit([&](auto &f) {
-            std::cerr << "et\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
-        }, *read_stream_->f->f.f_);
-
-        if (ret_val < 0) {
-            *this = iterator();
-        }
+        if (kseq_read(read_stream_.get()) < 0)
+            reset();
 
         is_reverse_complement_ = false;
         return *this;
@@ -446,6 +380,13 @@ class FastaParser::iterator {
 
     bool operator!=(const iterator &other) const {
         return !(*this == other);
+    }
+
+    void reset() {
+        filename_ = "";
+        with_reverse_complement_ = false;
+        read_stream_.reset();
+        is_reverse_complement_ = false;
     }
 
   private:
