@@ -4,8 +4,13 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <variant>
+#include <fstream>
+#include <boost/iostreams/device/file.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/zstd.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
 
-#include <zlib.h>
 #include <htslib/kseq.h>
 
 #include "common/batch_accumulator.hpp"
@@ -16,7 +21,170 @@
 namespace mtg {
 namespace seq_io {
 
-KSEQ_DECLARE(gzFile);
+class compFile {
+  public:
+    bool good() const {
+        return std::visit([&](const auto &f) {
+            return f && f->good();
+        }, f_);
+    }
+
+    int put(char c) {
+        return std::visit([&](auto &f) {
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::ostream, std::decay_t<decltype(*f)>>) {
+                if (!*f)
+                    return -1;
+
+                f->put(c);
+                return !*f ? -1 : c;
+            }
+
+            return -1;
+        }, f_);
+    }
+
+    int get() {
+        return std::visit([&](auto &f) {
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::istream, std::decay_t<decltype(*f)>>) {
+                return !*f ? -1 : f->get();
+            }
+
+            return -1;
+        }, f_);
+    }
+
+    int read(void *buf, unsigned len) {
+        return std::visit([&](auto &f) -> int {
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::istream, std::decay_t<decltype(*f)>>) {
+                if (f->eof())
+                    return 0;
+
+                if (f->bad() || f->fail())
+                    return -1;
+
+                f->read(reinterpret_cast<char*>(buf), len);
+                int ret_val = f->gcount();
+                if (f->good() || f->eof())
+                    return ret_val;
+            }
+
+            return -1;
+        }, f_);
+    }
+
+    int write(const void *buf, unsigned len) {
+        return std::visit([&](auto &f) -> int {
+            if (!f)
+                return -1;
+
+            if constexpr(std::is_base_of_v<std::ostream, std::decay_t<decltype(*f)>>) {
+                if (*f) {
+                    f->write(reinterpret_cast<const char*>(buf), len);
+                    if (*f)
+                        return static_cast<int>(len);
+                }
+            }
+
+            return -1;
+        }, f_);
+    }
+
+    bool eof() const {
+        return std::visit([&](const auto &f) {
+            return f && f->eof();
+        }, f_);
+    }
+
+    std::string error() const { return ""; }
+
+    static int read(compFile &f, void *buf, unsigned len) {
+        return f.read(buf, len);
+    }
+
+    static int write(compFile &f, const void *buf, unsigned len) {
+        return f.write(buf, len);
+    }
+
+    static compFile open_read(const char *path) {
+        compFile f;
+        const char *dotpos = strrchr(path, '.');
+        if (dotpos == NULL)
+            throw std::runtime_error("No file extension");
+
+        std::string ext(dotpos);
+
+        if (ext == ".zst") {
+            auto fio = std::make_shared<boost::iostreams::filtering_istream>();
+            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+            f.f_.emplace<std::shared_ptr<std::istream>>(fio);
+        } else if (ext == ".gz" || ext == ".bgz") {
+            auto fio = std::make_shared<boost::iostreams::filtering_istream>();
+            fio->push(boost::iostreams::gzip_decompressor());
+            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+            f.f_.emplace<std::shared_ptr<std::istream>>(fio);
+        } else {
+            f.f_.emplace<std::shared_ptr<std::istream>>(
+                std::make_shared<std::ifstream>(path)
+            );
+        }
+
+        return f;
+    }
+
+    static compFile open_write(const char *path) {
+        compFile f;
+        const char *dotpos = strrchr(path, '.');
+        if (dotpos == NULL)
+            throw std::runtime_error("No file extension");
+
+        std::string ext(dotpos);
+
+        if (ext == ".zst") {
+            auto foo = std::make_shared<boost::iostreams::filtering_ostream>();
+            foo->push(boost::iostreams::zstd_compressor());
+            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+            f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
+        } else if (ext == ".gz") {
+            auto foo = std::make_shared<boost::iostreams::filtering_ostream>();
+            foo->push(boost::iostreams::gzip_compressor());
+            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+            f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
+        } else {
+            f.f_.emplace<std::shared_ptr<std::ostream>>(
+                std::make_shared<std::ofstream>(path)
+            );
+        }
+
+        return f;
+    }
+
+    static compFile open_read(std::istream &in) {
+        compFile f;
+        f.f_ = std::shared_ptr<std::istream>(std::shared_ptr<std::istream>{}, &in);
+        return f;
+    }
+
+    std::shared_ptr<std::ios> data() {
+        return std::visit([&](auto &f) -> std::shared_ptr<std::ios> {
+            return f;
+        }, f_);
+    }
+
+  private:
+    std::variant<std::shared_ptr<std::istream>, std::shared_ptr<std::ostream>> f_;
+};
+
+KSEQ_DECLARE(compFile);
 
 
 class FastaWriter {
@@ -40,7 +208,7 @@ class FastaWriter {
     void write_to_disk(const std::string &sequence);
 
     std::string fname_;
-    gzFile gz_out_;
+    compFile out_;
     const std::string header_;
     bool enumerate_sequences_;
     uint64_t count_ = 0;
@@ -88,8 +256,8 @@ class ExtendedFastaWriter {
     void write_to_disk(const value_type &value_pair);
 
     std::string fasta_fname_;
-    gzFile fasta_gz_out_;
-    gzFile feature_gz_out_;
+    compFile fasta_out_;
+    compFile feature_out_;
     uint32_t kmer_length_;
     const std::string header_;
     bool enumerate_sequences_;
@@ -98,12 +266,12 @@ class ExtendedFastaWriter {
     BatchAccumulator<value_type> batcher_;
 };
 
-bool write_fasta(gzFile gz_out, const kseq_t &kseq);
+bool write_fasta(compFile &out, const kseq_t &kseq);
 
-bool write_fasta(gzFile gz_out, const std::string &header,
+bool write_fasta(compFile &out, const std::string &header,
                                 const std::string &sequence);
 
-bool write_fastq(gzFile gz_out, const kseq_t &kseq);
+bool write_fastq(compFile &out, const kseq_t &kseq);
 
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
@@ -159,45 +327,52 @@ class FastaParser {
 class FastaParser::iterator {
     friend FastaParser;
 
+    struct deinit_stream { void operator()(kseq_t *read_stream); };
+
   public:
     using iterator_category = std::input_iterator_tag;
-    using value_type = kseq_t;
+    using stream_type = std::unique_ptr<kseq_t, deinit_stream>;
+    using value_type = stream_type::element_type;
     using difference_type = size_t;
-    using pointer = kseq_t*;
-    using reference = kseq_t&;
+    using pointer = stream_type::pointer;
+    using reference = stream_type::element_type&;
 
     iterator() {}
 
-    iterator(const iterator &other) { *this = other; }
-    iterator(iterator&& other) { *this = std::move(other); }
+    // some fasta formats are not random access, so we can't copy iterators
+    iterator& operator=(const iterator&) = delete;
+    iterator(const iterator&) = delete;
 
-    iterator& operator=(const iterator &other);
-    iterator& operator=(iterator&& other);
-
-    ~iterator() { deinit_stream(); }
+    iterator& operator=(iterator&&) = default;
+    iterator(iterator&&) = default;
 
     kseq_t& operator*() { return *read_stream_; }
     const kseq_t& operator*() const { return *read_stream_; }
 
-    kseq_t* operator->() { return read_stream_; }
-    const kseq_t* operator->() const { return read_stream_; }
+    kseq_t* operator->() { return read_stream_.get(); }
+    const kseq_t* operator->() const { return read_stream_.get(); }
 
     iterator& operator++() {
+        if (!read_stream_ || !read_stream_->f->f.data()) {
+            *this = iterator();
+            return *this;
+        }
+
         if (with_reverse_complement_ && !is_reverse_complement_) {
             reverse_complement(read_stream_->seq);
             is_reverse_complement_ = true;
             return *this;
         }
 
-        if (kseq_read(read_stream_) < 0) {
-            deinit_stream();
-        }
+        if (kseq_read(read_stream_.get()) < 0)
+            *this = iterator();
+
         is_reverse_complement_ = false;
         return *this;
     }
 
     bool operator==(const iterator &other) const {
-        return (read_stream_ && other.read_stream_
+        return (read_stream_.get() && other.read_stream_.get()
                     && is_reverse_complement_ == other.is_reverse_complement_
                     && read_stream_->f->seek_pos == other.read_stream_->f->seek_pos
                     && with_reverse_complement_ == other.with_reverse_complement_
@@ -211,19 +386,17 @@ class FastaParser::iterator {
 
   private:
     iterator(const std::string &filename, bool with_reverse_complement);
-    void deinit_stream();
 
     std::string filename_;
     bool with_reverse_complement_;
-    kseq_t *read_stream_ = NULL;
+    stream_type read_stream_;
     bool is_reverse_complement_ = false;
 };
 
 FastaParser::iterator
 FastaParser::begin() const { return iterator(filename_, with_reverse_complement_); }
 
-FastaParser::iterator
-FastaParser::end() const { return iterator(); }
+FastaParser::iterator FastaParser::end() const { return iterator(); }
 
 } // namespace seq_io
 } // namespace mtg
