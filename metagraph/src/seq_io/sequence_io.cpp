@@ -327,8 +327,20 @@ FastaParser::iterator::iterator(const std::string &filename,
         exit(1);
     }
 
-    if (kseq_read(read_stream_.get()) < 0)
+    std::visit([&](auto &f) {
+        std::cerr << "ist\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
+    }, *read_stream_->f->f.f_);
+
+    if (kseq_read(read_stream_.get()) < 0) {
+        std::visit([&](auto &f) {
+            std::cerr << "iendt\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
+        }, *read_stream_->f->f.f_);
         *this = iterator();
+    } else {
+        std::visit([&](auto &f) {
+            std::cerr << "iet\tg: " << f.good() << "\tf: " << f.fail() << "\tb: " << f.bad() << "\teof: " << f.eof() << std::endl;
+        }, *read_stream_->f->f.f_);
+    }
 
 }
 
