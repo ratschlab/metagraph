@@ -45,7 +45,8 @@ FastaWriter::FastaWriter(const std::string &filebase,
 
     fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
 
-    out_ = compFile::open_write(fname_.c_str());
+    out_ = compFile::open_write(fname_.c_str(),
+                                static_cast<bool>(strchr(mode, 'a')));
     if (!out_.good()) {
         std::cerr << "ERROR: Can't write to " << fname_ << std::endl;
         exit(1);
@@ -112,7 +113,8 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
 
     fasta_fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
 
-    fasta_out_ = compFile::open_write(fasta_fname_.c_str());
+    fasta_out_ = compFile::open_write(fasta_fname_.c_str(),
+                                      static_cast<bool>(strchr(mode, 'a')));
     if (!fasta_out_.good()) {
         std::cerr << "ERROR: Can't write to " << fasta_fname_ << std::endl;
         exit(1);

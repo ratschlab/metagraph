@@ -150,7 +150,7 @@ class compFile {
         return f;
     }
 
-    static compFile open_write(const char *path) {
+    static compFile open_write(const char *path, bool append = false) {
         compFile f;
         const char *dotpos = strrchr(path, '.');
         if (dotpos == NULL)
@@ -158,7 +158,10 @@ class compFile {
 
         std::string ext(dotpos);
 
+        std::ios_base::openmode mode = append ? std::ios::app : std::ios::out;
+
         if (ext == ".zst") {
+            mode = mode | std::ios::binary;
             std::shared_ptr<boost::iostreams::filtering_ostream> foo(
                 new boost::iostreams::filtering_ostream(),
                 [](boost::iostreams::filtering_ostream *f) {
@@ -167,9 +170,10 @@ class compFile {
                 }
             );
             foo->push(boost::iostreams::zstd_compressor());
-            foo->push(boost::iostreams::file_sink(path, std::ios::out | std::ios::binary));
+            foo->push(boost::iostreams::file_sink(path, mode));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else if (ext == ".gz") {
+            mode = mode | std::ios::binary;
             std::shared_ptr<boost::iostreams::filtering_ostream> foo(
                 new boost::iostreams::filtering_ostream(),
                 [](boost::iostreams::filtering_ostream *f) {
@@ -178,11 +182,11 @@ class compFile {
                 }
             );
             foo->push(boost::iostreams::gzip_compressor());
-            foo->push(boost::iostreams::file_sink(path, std::ios::out | std::ios::binary));
+            foo->push(boost::iostreams::file_sink(path, mode));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else {
             f.f_.emplace<std::shared_ptr<std::ostream>>(
-                std::make_shared<std::ofstream>(path)
+                std::make_shared<std::ofstream>(path, mode)
             );
         }
 
