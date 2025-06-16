@@ -111,7 +111,8 @@ class compFile {
         return f.write(buf, len);
     }
 
-    static compFile open_read(const char *path) {
+    static compFile open_read(const char *path,
+                              size_t buffer_size = 8192) {
         compFile f;
         const char *dotpos = strrchr(path, '.');
         if (dotpos == NULL)
@@ -127,7 +128,7 @@ class compFile {
                     f->pop();
                 }
             );
-            fio->push(boost::iostreams::zstd_decompressor());
+            fio->push(boost::iostreams::zstd_decompressor(), buffer_size);
             fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::istream>>(fio);
         } else if (ext == ".gz" || ext == ".bgz") {
@@ -138,7 +139,7 @@ class compFile {
                     f->pop();
                 }
             );
-            fio->push(boost::iostreams::gzip_decompressor());
+            fio->push(boost::iostreams::gzip_decompressor(), buffer_size);
             fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::istream>>(fio);
         } else {
@@ -150,7 +151,9 @@ class compFile {
         return f;
     }
 
-    static compFile open_write(const char *path, bool append = false) {
+    static compFile open_write(const char *path,
+                               bool append = false,
+                               size_t buffer_size = 8192) {
         compFile f;
         const char *dotpos = strrchr(path, '.');
         if (dotpos == NULL)
@@ -169,7 +172,7 @@ class compFile {
                     f->pop();
                 }
             );
-            foo->push(boost::iostreams::zstd_compressor());
+            foo->push(boost::iostreams::zstd_compressor(), buffer_size);
             foo->push(boost::iostreams::file_sink(path, mode));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else if (ext == ".gz") {
@@ -181,7 +184,7 @@ class compFile {
                     f->pop();
                 }
             );
-            foo->push(boost::iostreams::gzip_compressor());
+            foo->push(boost::iostreams::gzip_compressor(), buffer_size);
             foo->push(boost::iostreams::file_sink(path, mode));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else {
