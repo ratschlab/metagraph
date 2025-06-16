@@ -104,6 +104,7 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
     assert(feature_name.size());
+    static_assert(sizeof(kmer_length_) == 4);
 
     fasta_fname_ = utils::remove_suffix(filebase, ".zst");
     bool zstd = (fasta_fname_.size() < filebase.size());
@@ -325,13 +326,13 @@ void read_extended_fasta_file_critical(const std::string &filebase,
 
     auto filename = filebase;
 
-    if (ext != ".zst" && ext != ".gz") {
+    if (ext != ".zst" && ext != ".gz" && ext != ".bgz") {
         ext = "";
     } else {
         filename = utils::remove_suffix(filename, ext);
     }
 
-    auto feature_base = utils::remove_suffix(filebase, ".fasta");
+    auto feature_base = utils::remove_suffix(filename, ".fasta");
     filename = feature_base + ".fasta" + ext;
 
     compFile fasta_p = compFile::open_read(filename.c_str());
@@ -342,6 +343,7 @@ void read_extended_fasta_file_critical(const std::string &filebase,
 
     filename = feature_base + "." + feature_name + ext;
     uint32_t kmer_length;
+    static_assert(sizeof(kmer_length) == 4);
 
     compFile features_p = compFile::open_read(filename.c_str());
     if (!features_p.good()
@@ -359,6 +361,7 @@ void read_extended_fasta_file_critical(const std::string &filebase,
                              " than k-mer length " << kmer_length << std::endl;
                 exit(1);
             }
+
             counts.resize(read_stream->seq.l - kmer_length + 1);
             // read the features of k-mers in sequence |read_stream|
             if (features_p.read(counts.data(), sizeof(T) * counts.size())
@@ -379,8 +382,25 @@ void read_extended_fasta_file_critical(const std::string &filebase,
         false
     );
 
-    if (!fasta_p.eof() || !features_p.eof()) {
+    char extra_char;
+    if (!fasta_p.eof() && fasta_p.read(&extra_char, 1)) {
+        std::cerr << "ERROR: There are sequences left unread" << std::endl;
+        exit(1);
+    }
+
+    if (!fasta_p.eof()) {
+        std::cerr << "ERROR: Sequence end not reached" << std::endl;
+        exit(1);
+    }
+
+    T extra_feature;
+    if (!features_p.eof() && features_p.read(&extra_feature, sizeof(T))) {
         std::cerr << "ERROR: There are features left in extension unread" << std::endl;
+        exit(1);
+    }
+
+    if (!features_p.eof()) {
+        std::cerr << "ERROR: Feature end not reached" << std::endl;
         exit(1);
     }
 }

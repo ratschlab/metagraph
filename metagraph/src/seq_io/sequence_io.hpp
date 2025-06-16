@@ -72,9 +72,8 @@ class compFile {
                     return -1;
 
                 f->read(reinterpret_cast<char*>(buf), len);
-                int ret_val = f->gcount();
                 if (f->good() || f->eof())
-                    return ret_val;
+                    return f->gcount();
             }
 
             return -1;
@@ -87,11 +86,9 @@ class compFile {
                 return -1;
 
             if constexpr(std::is_base_of_v<std::ostream, std::decay_t<decltype(*f)>>) {
-                if (*f) {
-                    f->write(reinterpret_cast<const char*>(buf), len);
-                    if (*f)
-                        return static_cast<int>(len);
-                }
+                f->write(reinterpret_cast<const char*>(buf), len);
+                if (*f)
+                    return static_cast<int>(len);
             }
 
             return -1;
@@ -123,14 +120,26 @@ class compFile {
         std::string ext(dotpos);
 
         if (ext == ".zst") {
-            auto fio = std::make_shared<boost::iostreams::filtering_istream>();
+            std::shared_ptr<boost::iostreams::filtering_istream> fio(
+                new boost::iostreams::filtering_istream(),
+                [](boost::iostreams::filtering_istream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
             fio->push(boost::iostreams::zstd_decompressor());
-            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+            fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::istream>>(fio);
         } else if (ext == ".gz" || ext == ".bgz") {
-            auto fio = std::make_shared<boost::iostreams::filtering_istream>();
+            std::shared_ptr<boost::iostreams::filtering_istream> fio(
+                new boost::iostreams::filtering_istream(),
+                [](boost::iostreams::filtering_istream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
             fio->push(boost::iostreams::gzip_decompressor());
-            fio->push(boost::iostreams::file_source(path, std::ios::binary));
+            fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::istream>>(fio);
         } else {
             f.f_.emplace<std::shared_ptr<std::istream>>(
@@ -150,14 +159,26 @@ class compFile {
         std::string ext(dotpos);
 
         if (ext == ".zst") {
-            auto foo = std::make_shared<boost::iostreams::filtering_ostream>();
+            std::shared_ptr<boost::iostreams::filtering_ostream> foo(
+                new boost::iostreams::filtering_ostream(),
+                [](boost::iostreams::filtering_ostream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
             foo->push(boost::iostreams::zstd_compressor());
-            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+            foo->push(boost::iostreams::file_sink(path, std::ios::out | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else if (ext == ".gz") {
-            auto foo = std::make_shared<boost::iostreams::filtering_ostream>();
+            std::shared_ptr<boost::iostreams::filtering_ostream> foo(
+                new boost::iostreams::filtering_ostream(),
+                [](boost::iostreams::filtering_ostream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
             foo->push(boost::iostreams::gzip_compressor());
-            foo->push(boost::iostreams::file_sink(path, std::ios::binary));
+            foo->push(boost::iostreams::file_sink(path, std::ios::out | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
         } else {
             f.f_.emplace<std::shared_ptr<std::ostream>>(
