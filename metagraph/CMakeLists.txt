@@ -300,7 +300,12 @@ target_include_directories(eigen INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
-find_package(zstd REQUIRED)
+find_package(zstd)
+if(ZSTD_FOUND)
+  add_definitions(-D_SUPPORT_ZSTD)
+else()
+  message(WARNING "Disabling zstd support.")
+endif()
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)

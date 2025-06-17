@@ -41,6 +41,12 @@ FastaWriter::FastaWriter(const std::string &filebase,
         worker_(async, kWorkerQueueSize) {
     fname_ = utils::remove_suffix(filebase, ".zst");
     bool zstd = (fname_.size() < filebase.size());
+#if ! _SUPPORT_ZSTD
+    if (zstd) {
+        std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
+        exit(1);
+    }
+#endif
     std::string comp_type = zstd ? ".zst" : ".gz";
 
     fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
@@ -108,7 +114,14 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
     static_assert(sizeof(kmer_length_) == 4);
 
     fasta_fname_ = utils::remove_suffix(filebase, ".zst");
+#if _SUPPORT_ZSTD
     bool zstd = (fasta_fname_.size() < filebase.size());
+#else
+    if (zstd) {
+        std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
+        exit(1);
+    }
+#endif
     std::string comp_type = zstd ? ".zst" : ".gz";
 
     fasta_fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
@@ -333,6 +346,13 @@ void read_extended_fasta_file_critical(const std::string &filebase,
     } else {
         filename = utils::remove_suffix(filename, ext);
     }
+
+#if ! _SUPPORT_ZSTD
+    if (ext == ".zst") {
+        std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
+        exit(1);
+    }
+#endif
 
     auto feature_base = utils::remove_suffix(filename, ".fasta");
     filename = feature_base + ".fasta" + ext;
