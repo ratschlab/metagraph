@@ -8,8 +8,11 @@
 #include <fstream>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
-#include <boost/iostreams/filter/zstd.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+
+#if _SUPPORT_ZSTD
+#include <boost/iostreams/filter/zstd.hpp>
+#endif
 
 #include <htslib/kseq.h>
 
@@ -120,18 +123,7 @@ class compFile {
 
         std::string ext(dotpos);
 
-        if (ext == ".zst") {
-            std::shared_ptr<boost::iostreams::filtering_istream> fio(
-                new boost::iostreams::filtering_istream(),
-                [](boost::iostreams::filtering_istream *f) {
-                    f->pop();
-                    f->pop();
-                }
-            );
-            fio->push(boost::iostreams::zstd_decompressor(), buffer_size);
-            fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
-            f.f_.emplace<std::shared_ptr<std::istream>>(fio);
-        } else if (ext == ".gz" || ext == ".bgz") {
+        if (ext == ".gz" || ext == ".bgz") {
             std::shared_ptr<boost::iostreams::filtering_istream> fio(
                 new boost::iostreams::filtering_istream(),
                 [](boost::iostreams::filtering_istream *f) {
@@ -142,6 +134,22 @@ class compFile {
             fio->push(boost::iostreams::gzip_decompressor(), buffer_size);
             fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
             f.f_.emplace<std::shared_ptr<std::istream>>(fio);
+        } else if (ext == ".zst") {
+#if _SUPPORT_ZSTD
+            std::shared_ptr<boost::iostreams::filtering_istream> fio(
+                new boost::iostreams::filtering_istream(),
+                [](boost::iostreams::filtering_istream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
+            fio->push(boost::iostreams::zstd_decompressor(), buffer_size);
+            fio->push(boost::iostreams::file_source(path, std::ios::in | std::ios::binary));
+            f.f_.emplace<std::shared_ptr<std::istream>>(fio);
+#else
+            std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
+            exit(1);
+#endif
         } else {
             f.f_.emplace<std::shared_ptr<std::istream>>(
                 std::make_shared<std::ifstream>(path)
@@ -163,19 +171,7 @@ class compFile {
 
         std::ios_base::openmode mode = append ? std::ios::app : std::ios::out;
 
-        if (ext == ".zst") {
-            mode = mode | std::ios::binary;
-            std::shared_ptr<boost::iostreams::filtering_ostream> foo(
-                new boost::iostreams::filtering_ostream(),
-                [](boost::iostreams::filtering_ostream *f) {
-                    f->pop();
-                    f->pop();
-                }
-            );
-            foo->push(boost::iostreams::zstd_compressor(), buffer_size);
-            foo->push(boost::iostreams::file_sink(path, mode));
-            f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
-        } else if (ext == ".gz") {
+        if (ext == ".gz") {
             mode = mode | std::ios::binary;
             std::shared_ptr<boost::iostreams::filtering_ostream> foo(
                 new boost::iostreams::filtering_ostream(),
@@ -187,6 +183,22 @@ class compFile {
             foo->push(boost::iostreams::gzip_compressor(), buffer_size);
             foo->push(boost::iostreams::file_sink(path, mode));
             f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
+        } else if (ext == ".zst") {
+#if _SUPPORT_ZSTD
+            mode = mode | std::ios::binary;
+            std::shared_ptr<boost::iostreams::filtering_ostream> foo(
+                new boost::iostreams::filtering_ostream(),
+                [](boost::iostreams::filtering_ostream *f) {
+                    f->pop();
+                    f->pop();
+                }
+            );
+            foo->push(boost::iostreams::zstd_compressor(), buffer_size);
+            foo->push(boost::iostreams::file_sink(path, mode));
+            f.f_.emplace<std::shared_ptr<std::ostream>>(foo);
+#else
+            std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
+#endif
         } else {
             f.f_.emplace<std::shared_ptr<std::ostream>>(
                 std::make_shared<std::ofstream>(path, mode)
