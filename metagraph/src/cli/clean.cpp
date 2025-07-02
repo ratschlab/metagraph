@@ -82,7 +82,8 @@ int clean_graph(Config *config) {
 
             uint64_t cutoff
                 = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->num_singleton_kmers);
+                                              config->num_singleton_kmers,
+                                              config->cleaning_threshold_percentile);
 
             if (cutoff != static_cast<uint64_t>(-1)) {
                 config->min_unitig_median_kmer_abundance = cutoff;

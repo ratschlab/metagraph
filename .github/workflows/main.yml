@@ -7,8 +7,6 @@ on:
     tags:
       - 'v*'
   pull_request:
-    branches:
-      - master
 
 env:
   REGISTRY: ghcr.io
@@ -18,43 +16,43 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
-        compiler: [g++-8, g++-9, g++-10, g++-11]
+        compiler: [g++-11, g++-12, g++-13]
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-8
-            cxx: g++-8
-            cc: gcc-8
-
-          - compiler: g++-9
-            cxx: g++-9
-            cc: gcc-9
-
-          - compiler: g++-10
-            cxx: g++-10
-            cc: gcc-10
-
           - compiler: g++-11
             cxx: g++-11
             cc: gcc-11
 
+          - compiler: g++-12
+            cxx: g++-12
+            cc: gcc-12
+
+          - compiler: g++-13
+            cxx: g++-13
+            cc: gcc-13
+
         exclude:
           - alphabet: Protein
-            compiler: g++-9
-          - compiler: g++-8
+            compiler: g++-11
+          - alphabet: Protein
+            compiler: g++-12
+          - compiler: g++-11
             build_static: ON
-          - compiler: g++-9
-            build_static: ON
-          - compiler: g++-10
+          - compiler: g++-12
             build_static: ON
           - build_type: Debug
             build_static: ON
+          - build_type: Debug
+            compiler: g++-11
+          - build_type: Debug
+            compiler: g++-12
           - with_avx: OFF
             build_static: OFF
 
@@ -75,17 +73,10 @@ jobs:
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev
+        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          # for static builds, compile curl ourselves
-          git clone https://github.com/curl/curl.git
-          mkdir curl/_build
-          cd curl/_build
-          cmake -DBUILD_SHARED_LIBS=off ..
-          make -j 2
-          sudo make install
-          cd ..
+          sudo apt-get install libcurl4-openssl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
@@ -126,7 +117,7 @@ jobs:
       if: matrix.with_avx == 'OFF'
       run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
     - name: upload static binary
-      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-11' }}
+      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-13' }}
       uses: actions/upload-artifact@v4
       with:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
@@ -164,7 +155,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c zstd
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
@@ -201,16 +192,16 @@ jobs:
 
   Metagraph-Workflows:
     name: Test metagraph workflows
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [Linux]
 
     steps:
         - uses: actions/checkout@v2
 
-        - name: Set up Python 3.8
+        - name: Set up Python 3.10.18
           uses: actions/setup-python@v1
           with:
-              python-version: 3.8
+              python-version: 3.10.18
 
         - name: fetch static binary
           uses: actions/download-artifact@v4
@@ -234,12 +225,10 @@ jobs:
               cd metagraph/workflows
               pytest
 
-
   Build-and-Push-Docker:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
-    if: github.event_name != 'pull_request'
     needs: [Linux, Metagraph-Workflows]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
@@ -264,7 +253,16 @@ jobs:
       with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
+    - name: Build Docker image
+      uses: docker/build-push-action@v2
+      with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
     - name: Build and push Docker image
+      if: github.event_name != 'pull_request'
       uses: docker/build-push-action@v2
       with:
           context: .
@@ -276,7 +274,7 @@ jobs:
   Release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [Linux, Metagraph-Workflows]
     steps:
       - uses: actions/checkout@v1

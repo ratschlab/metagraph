@@ -8,6 +8,7 @@
 #include "sd_vector_builder_disk.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
+#include "common/threads/threading.hpp"
 
 
 class bit_vector_sd : public bit_vector {
@@ -307,9 +308,19 @@ inline void bit_vector_sd::serialize(
 sdsl::bit_vector bit_vector_sd::to_vector() const {
     sdsl::bit_vector vector(size(), inverted_);
     uint64_t max_rank = rk1_(size());
-    for (uint64_t i = 1; i <= max_rank; ++i) {
-        vector[slct1_(i)] = !inverted_;
+    std::atomic_thread_fence(std::memory_order_release);
+    if (inverted_) {
+        #pragma omp parallel num_threads(get_num_threads())
+        for (uint64_t i = 1; i <= max_rank; ++i) {
+            unset_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
+        }
+    } else {
+        #pragma omp parallel num_threads(get_num_threads())
+        for (uint64_t i = 1; i <= max_rank; ++i) {
+            set_bit(vector.data(), slct1_(i), true, std::memory_order_relaxed);
+        }
     }
+    std::atomic_thread_fence(std::memory_order_acquire);
     return vector;
 }
 

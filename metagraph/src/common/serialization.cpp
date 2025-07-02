@@ -22,6 +22,7 @@
 
 #endif
 
+#include <boost/locale.hpp>
 #include <tsl/hopscotch_map.h>
 #include <sdsl/int_vector.hpp>
 
@@ -171,9 +172,7 @@ template bool load_number_vector<bool>(std::istream &in, std::vector<bool> *);
 void encode_utf8(uint32_t num, std::ostream &out) {
     if (num > 0x7FFFFFFF)
         throw std::runtime_error("Encoding value out of range for code.");
-
-    std::string enc = std::wstring_convert<std::codecvt_utf8<char32_t>,
-                                           char32_t>().to_bytes(num);
+    std::string enc = boost::locale::conv::utf_to_utf<char>(std::u32string(1, num));
     out.write(enc.c_str(), enc.size());
 }
 

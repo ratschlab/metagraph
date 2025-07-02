@@ -168,11 +168,10 @@ matrix::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
     }
 }
 
-std::vector<std::vector<uint64_t>>
-parse_linkage_matrix(const std::string &filename) {
+auto parse_linkage_matrix(const std::string &filename){
     std::ifstream in(filename);
 
-    std::vector<std::vector<uint64_t>> linkage;
+    std::vector<std::vector<matrix::BinaryMatrix::Column>> linkage;
     std::string line;
     while (std::getline(in, line)) {
         std::vector<std::string> parts = utils::split_string(line, " ");
@@ -858,8 +857,7 @@ int transform_annotation(Config *config) {
                     logger->trace("Generated new linkage and saved to {}",
                                   config->linkage_file);
                 }
-                std::vector<std::vector<uint64_t>> linkage
-                        = parse_linkage_matrix(config->linkage_file);
+                auto linkage = parse_linkage_matrix(config->linkage_file);
                 logger->trace("Linkage loaded from {}", config->linkage_file);
 
                 auto brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
@@ -894,6 +892,17 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
             }
         }
+    } else if (input_anno_type == Config::RowDiffBRWT && config->anno_type == Config::RowDiffRowFlat) {
+        if (files.size() != 1) {
+            logger->error("Can only convert row_diff_brwt annotations one at a time");
+            exit(1);
+        }
+        RowDiffBRWTAnnotator annotator;
+        annotator.load(files[0]);
+
+        convert_to_row_diff<RowDiffRowFlatAnnotator>(annotator, config->outfbase);
+        logger->trace("Serialized to {}", config->outfbase);
+
     } else {
         logger->error(
                 "Conversion to other representations is not implemented for {} "

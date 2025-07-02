@@ -28,7 +28,7 @@ inline std::string decode(const std::vector<TAlphabet> &sequence,
 }
 
 template <typename TAlphabet>
-inline TAlphabet encode(char s, const TAlphabet kCharToNucleotide[]) {
+inline TAlphabet encode(int8_t s, const TAlphabet kCharToNucleotide[]) {
     return s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
                   : kCharToNucleotide[0];
 }

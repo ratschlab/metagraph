@@ -36,6 +36,8 @@ The indexing workflow in MetaGraph consists of two major steps: graph constructi
 Construct graph
 ---------------
 
+The following workflow can be executed from the `metagraph/metagraph/tests/data` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
+
 Basics
 ^^^^^^
 
@@ -92,9 +94,12 @@ input and deduplicate/count/filter the input k-mers.
 For example, the following commands can be used to construct a graph only from k-mers
 occurring at least 5 times in the input::
 
+    # download the input reads
+    wget -nc ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR403/SRR403017/SRR403017.fastq.gz
+
     K=31
     # count k-mers with KMC
-    ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
+    ./KMC/kmc -ci5 -t4 -k$K -m5 -fq SRR403017.fastq.gz SRR403017.cutoff_5 ./KMC
     # build graph with MetaGraph
     metagraph build -v -p 4 -k $K -o graph SRR403017.cutoff_5.kmc_pre
 
@@ -121,7 +126,7 @@ with pre-counting (see :ref:`annotate_with_precounting`).
 .. note::
     A weighted graph can also be constructed directly from raw input sequences, without pre-counting with KMC, e.g.,::
 
-        metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.fasta.gz
+        metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.fastq.gz
 
     This should be used when pre-processing with KMC is complicated or impossible, e.g., when indexing protein sequences.
 
@@ -338,15 +343,16 @@ To add a custom annotation label for all k-mers from an input file, add ``--anno
 .. _indexing counts:
 
 Index k-mer counts
-^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
 MetaGraph supports indexing k-mer counts (k-mer abundances), e.g., to represent gene expression in RNA-seq data.
 
 The counts can supplement graphs in any representation.
-To construct a MetaGraph index with k-mer counts (Counting de Bruijn graph), construct a de Bruijn graph as usual (see :ref:`construct graph`)
-and then add ``--count-kmers`` to the annotation command, e.g.::
+To index with k-mer counts (Counting de Bruijn graph), add ``--count-kmers`` to the annotation command, e.g.::
 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
                           -o annotation transcripts_1000.fa
+
+If the input sequences are drawn from a KMC output file, the k-mer counts will be drawn from that file. Otherwise, a count of 1 will be added for each k-mer occurrence in the input. This step can be done more efficiently by pre-computing k-mer counts using MetaGraph (see :ref:`annotate_with_precounting` below).
 
 Along with the normal (binary) graph annotation ``annotation.column.annodbg``, this command will also create an
 array of corresponding k-mer counts ``annotation.column.annodbg.counts``.
@@ -370,8 +376,8 @@ For instance, type the following command to compute the *minimum* non-zero count
 
 .. _annotate_with_precounting:
 
-Annotate with pre-counting
-""""""""""""""""""""""""""
+Annotate with pre-counted counts
+""""""""""""""""""""""""""""""""
 Similarly to the case of simple binary annotations considered above, it is recommended to pre-count k-mers for each annotation
 label (typically, sequencing sample) before annotating it. This technique consists in first constructing a *weighted* de Bruijn graph
 (see :ref:`construct_weighted_graph` and note that it can be constructed from raw input sequences as well as from pre-computed KMC counters)
@@ -408,7 +414,7 @@ Note that if flag ``--query-mode counts`` is not passed, the index will be queri
 .. _indexing coordinates:
 
 Index k-mer coordinates
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 Besides indexing k-mer counts, MetaGraph supports indexing k-mer coordinates, that is, their positions in the source input.
 These may represent positions in a genome, positions of a k-mer in a raw SRA experiment (say, each read has 70 k-mers in it;
 then the second k-mer of the third read has coordinate 211). Depending on the target application and the final goal, it is

@@ -136,6 +136,7 @@ class BOSS {
                     size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
+                    bool verbose = common::get_verbose(),
                     const bitmap *subgraph_mask = NULL,
                     bool trim_sentinels = false) const;
 
@@ -145,6 +146,7 @@ class BOSS {
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
+                        bool verbose = common::get_verbose(),
                         const bitmap *subgraph_mask = NULL) const;
 
     /**
@@ -168,6 +170,7 @@ class BOSS {
         // pick the row-diff successor
         if (&rd_succ != last_ && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
+                assert(edge > 0);
                 edge--;
                 assert(!get_last(edge) && "a row-diff successor must exist");
             }

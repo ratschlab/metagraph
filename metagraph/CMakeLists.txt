@@ -111,6 +111,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(
     -Wno-exit-time-destructors
     -Wno-deprecated-declarations
+    -Wno-vla-extension
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
@@ -129,6 +130,11 @@ if(APPLE)
   link_directories(/usr/local/lib)
   if(EXISTS /opt/homebrew/lib)
     link_directories(/opt/homebrew/lib)
+  endif()
+  if(EXISTS /opt/homebrew/opt/icu4c/lib)
+    link_directories(/opt/homebrew/opt/icu4c/lib)
+  else()
+    message(FATAL_ERROR "ICU libs not found")
   endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
@@ -151,7 +157,7 @@ try_compile(MODE_TI
 )
 if(MODE_TI)
   add_definitions(-DMODE_TI)
-  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
   endif()
 endif()
@@ -293,8 +299,17 @@ add_library(eigen INTERFACE)
 target_include_directories(eigen INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+find_package(zstd)
+if(ZSTD_FOUND)
+  add_definitions(-D_SUPPORT_ZSTD)
+else()
+  message(WARNING "Disabling zstd support.")
+endif()
 
 set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost REQUIRED COMPONENTS iostreams)
+
 findFolly()
 if(FOLLY_FOUND)
   add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
@@ -305,7 +320,7 @@ if(FOLLY_FOUND)
   set(METALIBS ${METALIBS} fbvector)
 else()
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost and jemalloc to compile with folly and enable various"
+  " Install jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
@@ -333,6 +348,8 @@ target_compile_options(zlib
     -Wno-implicit-fallthrough
     -Wno-deprecated-non-prototype
     -Wno-unknown-warning-option
+    -Wno-unused-parameter
+    -Wno-maybe-uninitialized
 )
 
 add_library(progress_bar STATIC
@@ -407,7 +424,10 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts zlib deflate
+  -lhts
+  Boost::iostreams
+  zlib
+  deflate
   -lsdsl
   jsoncpp_lib
   progress_bar
@@ -419,6 +439,7 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
+  zstd::zstd
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})

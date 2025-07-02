@@ -550,7 +550,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             // the node is present in the underlying graph, so use
             // lower-level methods
             const auto &boss = dbg_succ.get_boss();
-            boss::BOSS::edge_index edge = dbg_succ.kmer_to_boss_index(nodes_[0]);
+            boss::BOSS::edge_index edge = nodes_[0];
             boss::BOSS::TAlphabet edge_label = boss.get_W(edge) % boss.alph_size;
 
             // TODO: This picks the node which is found by always traversing
@@ -565,7 +565,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
                     return;
                 }
 
-                nodes_[0] = dbg_succ.boss_to_kmer_index(edge);
+                nodes_[0] = dbg_succ.validate_edge(edge);
                 assert(nodes_[0]);
                 sequence_.push_back(boss.decode(edge_label));
                 assert(graph.get_node_sequence(nodes_[0])
@@ -1304,7 +1304,7 @@ AlignmentResults::AlignmentResults(std::string_view query) {
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
     std::transform(query.begin(), query.end(), std::back_inserter(query_),
-                   [](char c) { return c >= 0 ? toupper(c) : 127; });
+                   [](int8_t c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
     memset(query_.data() + query.size(), '\0', query_.capacity() - query.size());

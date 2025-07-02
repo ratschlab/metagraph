@@ -1,6 +1,6 @@
 ARG CODE_BASE="/opt/metagraph"
 
-FROM ubuntu:20.04 AS metagraph_dev_env
+FROM ubuntu:22.04 AS metagraph_dev_env
 
 # contains all dependencies to build metagraph. Can also be used during development by mounting the code base and
 # build dir on the host (this is done in `make build-metagraph env=docker`)
@@ -11,8 +11,10 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     binutils-dev \
     ccache \
     curl \
-    g++-10 \
+    g++-11 \
     git \
+    cmake \
+    libcurl4-gnutls-dev \
     libboost-all-dev \
     libbrotli-dev \
     libbz2-dev \
@@ -25,6 +27,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libjemalloc-dev \
     liblz4-dev \
     liblzma-dev \
+    libzstd-dev \
     libsnappy-dev \
     libssl-dev \
     libtool \
@@ -39,33 +42,10 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install parameterized==0.7.1 "cmake>=3.19"
-
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ENV CC /usr/bin/gcc-10
-ENV CXX /usr/bin/g++-10
-
-### Compile our own libcurl (compiling from source to avoid linking issues in static builds)
-RUN git clone https://github.com/curl/curl.git \
-    && mkdir curl/_build \
-    && cd curl/_build \
-    && cmake -DBUILD_SHARED_LIBS=on .. \
-    && make -j $(nproc) \
-    && make install \
-    && cmake -DBUILD_SHARED_LIBS=off .. \
-    && make -j $(nproc) \
-    && make install \
-    && cd /opt && rm -rf curl
-
-### Installing htslib (compiling from source to avoid linking issues in static builds)
-ARG HTSLIB_VERSION=1.10.2
-RUN wget https://github.com/samtools/htslib/releases/download/$HTSLIB_VERSION/htslib-$HTSLIB_VERSION.tar.bz2 \
-    && tar -vxjf htslib-$HTSLIB_VERSION.tar.bz2 \
-    && cd htslib-$HTSLIB_VERSION \
-    && make -j $(nproc) \
-    && make install \
-    && cd /opt && rm -rf htslib-$HTSLIB_VERSION htslib-${HTSLIB_VERSION}.tar.bz2
+ENV CC /usr/bin/gcc-11
+ENV CXX /usr/bin/g++-11
 
 RUN mkdir -p /opt/metagraph/build_docker /opt/ccache_docker
 RUN chmod o+rwx /opt/metagraph /opt/ccache_docker
@@ -82,7 +62,7 @@ RUN make build-sdsl-lite \
     && make build-metagraph alphabet=Protein \
     && make build-metagraph alphabet=DNA
 
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 ARG CODE_BASE
 
 # the image used in production. It contains a basic runtime environment for metagraph without build tools along with
@@ -90,14 +70,14 @@ ARG CODE_BASE
 
 RUN apt-get update && apt-get install -y \
     libatomic1 \
-    libcurl4-nss-dev \
+    libcurl4-gnutls-dev \
     libdeflate-dev \
+    libzstd-dev \
     libgomp1 \
-    libhts-dev \
     libjemalloc2 \
     python3 \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/* && pip3 install -U "pip>=22.1"
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/metagraph_* /usr/local/bin/
 

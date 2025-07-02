@@ -19,6 +19,13 @@ using namespace mtg;
 using namespace mtg::annot;
 using namespace ::testing;
 
+static auto graph_to_anno_index(graph::DeBruijnGraph::node_index node) {
+    return graph::AnnotatedDBG::graph_to_anno_index(node);
+}
+static auto anno_to_graph_index(graph::AnnotatedDBG::row_index row) {
+    return graph::AnnotatedDBG::anno_to_graph_index(row);
+}
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
@@ -189,9 +196,9 @@ TEST(RowDiff, succ) {
      */
 
     const std::vector<uint64_t> expected_succ = { 3, 0, 4, 2 };
-    const std::vector<bool> expected_succ_boundary = { 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<bool> expected_succ_boundary = { 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1 };
     const std::vector<uint64_t> expected_pred = { 2, 4, 1, 3 };
-    const std::vector<bool> expected_pred_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<bool> expected_pred_boundary = { 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
@@ -211,7 +218,10 @@ TEST(RowDiff, succ) {
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
         ASSERT_EQ(expected_succ.size(), succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;
+            EXPECT_EQ(
+                anno_to_graph_index(expected_succ[i]),
+                graph->rank_node(anno_to_graph_index(succ[i]))
+            ) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
@@ -223,7 +233,10 @@ TEST(RowDiff, succ) {
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
         EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
-            EXPECT_EQ(expected_pred[i], pred[i]) << max_depth << " " << i;
+            EXPECT_EQ(
+                anno_to_graph_index(expected_pred[i]),
+                graph->rank_node(anno_to_graph_index(pred[i]))
+            ) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);
@@ -279,8 +292,10 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAC" });
             graph->serialize(graph_fname);
 
-            ColumnCompressed source_annot(5);
-            source_annot.add_labels({ 0, 1, 2, 3, 4 }, labels);
+            ColumnCompressed source_annot(graph->max_index());
+            std::vector<uint64_t> edges(graph->max_index());
+            std::iota(begin(edges), end(edges), 0);
+            source_annot.add_labels(edges, labels);
             source_annot.serialize(annot_fname);
 
             convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
@@ -293,13 +308,13 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
                     .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
 
             ASSERT_EQ(labels.size(), annotator.num_labels());
-            ASSERT_EQ(5u, annotator.num_objects());
+            ASSERT_EQ(graph->max_index(), annotator.num_objects());
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
                       annotator.num_relations());
 
-            for (uint32 i = 0; i < annotator.num_objects(); ++i) {
-                ASSERT_THAT(annotator.get_labels(i), ContainerEq(labels));
-            }
+            graph->call_nodes([&](uint32_t node_idx) {
+                ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)), ContainerEq(labels));
+            });
         }
     }
     std::filesystem::remove_all(dst_dir);
@@ -326,8 +341,10 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
 
             std::vector<std::string> sources;
             for (const std::string &label : labels) {
-                ColumnCompressed source_annot(5);
-                source_annot.add_labels({ 0, 1, 2, 3, 4 }, { label });
+                ColumnCompressed source_annot(graph->max_index());
+                std::vector<uint64_t> edges(graph->max_index());
+                std::iota(begin(edges), end(edges), 0);
+                source_annot.add_labels(edges, { label });
                 const std::string annot_fname
                         = dst_dir/(label + ColumnCompressed<>::kExtension);
                 source_annot.serialize(annot_fname);
@@ -346,12 +363,12 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                         .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
 
                 ASSERT_EQ(1, annotator.num_labels());
-                ASSERT_EQ(5u, annotator.num_objects());
+                ASSERT_EQ(graph->max_index(), annotator.num_objects());
                 EXPECT_EQ(expected_relations[max_depth - 1], annotator.num_relations());
 
-                for (uint32 idx = 0; idx < annotator.num_objects(); ++idx) {
-                    ASSERT_THAT(annotator.get_labels(idx), ElementsAre(labels[i]));
-                }
+                graph->call_nodes([&](uint32_t node_idx) {
+                    ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)), ElementsAre(labels[i]));
+                });
             }
         }
     }
@@ -382,13 +399,13 @@ void test_row_diff(uint32_t k,
     graph->mask_dummy_kmers(1, false);
     graph->serialize(graph_fname);
 
-    ColumnCompressed initial_annotation(graph->num_nodes());
+    ColumnCompressed initial_annotation(graph->max_index());
     std::unordered_set<std::string> all_labels;
-    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        const std::vector<std::string> &labels = annotations[anno_idx];
-        initial_annotation.add_labels({anno_idx}, labels);
+    graph->call_nodes([&](uint32_t node_idx) {
+        const auto &labels = annotations[graph_to_anno_index(graph->rank_node(node_idx))];
+        initial_annotation.add_labels({graph_to_anno_index(node_idx)}, labels);
         std::for_each(labels.begin(), labels.end(), [&](auto l) { all_labels.insert(l); });
-    }
+    });
 
     initial_annotation.serialize(annot_fname);
 
@@ -402,12 +419,12 @@ void test_row_diff(uint32_t k,
             .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
 
     ASSERT_EQ(all_labels.size(), annotator.num_labels());
-    ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
+    ASSERT_EQ(graph->max_index(), annotator.num_objects());
 
-    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        ASSERT_THAT(annotator.get_labels(anno_idx),
-                    UnorderedElementsAreArray(annotations[anno_idx]));
-    }
+    graph->call_nodes([&](uint32_t node_idx) {
+        ASSERT_THAT(annotator.get_labels(graph_to_anno_index(node_idx)),
+                    UnorderedElementsAreArray(annotations[graph_to_anno_index(graph->rank_node(node_idx))]));
+    });
 
     std::filesystem::remove_all(dst_dir);
 }
@@ -433,14 +450,14 @@ void test_row_diff_separate_columns(uint32_t k,
     graph->serialize(graph_fname);
 
     std::map<std::string, std::vector<uint64_t>> col_annotations;
-    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        for (const auto &label : annotations[anno_idx]) {
-            col_annotations[label].push_back(anno_idx);
+    graph->call_nodes([&](auto node_idx) {
+        for (const auto &label : annotations[graph_to_anno_index(graph->rank_node(node_idx))]) {
+            col_annotations[label].push_back(graph_to_anno_index(node_idx));
         }
-    }
+    });
 
     for (const auto& [label, indices] : col_annotations) {
-        ColumnCompressed initial_annotation(graph->num_nodes());
+        ColumnCompressed initial_annotation(graph->max_index());
         initial_annotation.add_labels(indices, {label});
         std::string annot_fname
                 = dst_dir/("anno_" + label + ColumnCompressed<>::kExtension);
@@ -460,7 +477,7 @@ void test_row_diff_separate_columns(uint32_t k,
         const_cast<matrix::RowDiff<matrix::ColumnMajor> &>(annotator.get_matrix())
                 .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
 
-        ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
+        ASSERT_EQ(graph->max_index(), annotator.num_objects());
 
         std::vector<uint64_t> actual_indices;
         annotator.call_objects(label,

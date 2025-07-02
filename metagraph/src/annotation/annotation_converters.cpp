@@ -10,6 +10,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "row_diff_builder.hpp"
+#include "cli/load/load_graph.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
@@ -213,7 +214,7 @@ convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
-    const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
+    const graph::DeBruijnGraph* graph = annotator.get_matrix().graph();
 
     auto matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(annotator.release_matrix()->diffs().data()),
@@ -380,6 +381,31 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
     logger->trace("Annotation converted");
 }
 
+
+template <>
+void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
+                                                  const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    anno.get_label_encoder().serialize(out);
+
+    // serialize RowDiff<RowFlat<>>
+    out.write("v2.0", 4);
+    anno.get_matrix().anchor().serialize(out);
+    anno.get_matrix().fork_succ().serialize(out);
+    out.close();
+
+    RowFlat<>::serialize([&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
+                         anno.get_matrix().diffs().num_columns(),
+                         anno.get_matrix().diffs().num_rows(),
+                         anno.get_matrix().diffs().num_relations(),
+                         fname, true);
+    logger->trace("Annotation converted");
+}
+
 template <>
 void convert_to_row_diff<RowDiffRowSparseAnnotator>(
             const std::vector<std::string> &files,
@@ -419,7 +445,7 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
-        const std::vector<std::vector<uint64_t>> &linkage,
+        const std::vector<std::vector<BRWT::Column>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path,
@@ -455,7 +481,7 @@ convert_to_BRWT(
 template <>
 std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::vector<std::string> &annotation_files,
-        const std::vector<std::vector<uint64_t>> &linkage,
+        const std::vector<std::vector<BRWT::Column>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path) {
@@ -486,7 +512,7 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
 template<>
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                         const std::vector<std::vector<uint64_t>> &linkage,
+                         const std::vector<std::vector<BRWT::Column>> &linkage,
                          size_t num_parallel_nodes,
                          size_t num_threads,
                          const fs::path &tmp_path) {
@@ -1539,12 +1565,13 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     if (out_dir.empty())
         out_dir = "./";
 
+    auto graph = cli::load_critical_dbg(graph_fname);
     if (construction_stage != RowDiffStage::COUNT_LABELS)
-        build_pred_succ(graph_fname, graph_fname, out_dir,
+        build_pred_succ(*graph, graph_fname, out_dir,
                         ".row_count", get_num_threads());
 
     if (construction_stage == RowDiffStage::CONVERT) {
-        assign_anchors(graph_fname, graph_fname, out_dir, max_path_length,
+        assign_anchors(*graph, graph_fname, out_dir, max_path_length,
                        ".row_reduction", get_num_threads());
 
         const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;

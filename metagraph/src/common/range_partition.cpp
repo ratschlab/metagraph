@@ -1,11 +1,12 @@
 #include "range_partition.hpp"
 
+#include <algorithm>
 #include <cassert>
 
 #include "common/serialization.hpp"
 
 
-RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
+RangePartition::RangePartition(const std::vector<T> &arrangement,
                                const std::vector<size_t> &group_sizes) {
     size_t offset = 0;
     for (size_t group_size : group_sizes) {
@@ -15,21 +16,17 @@ RangePartition::RangePartition(const std::vector<uint64_t> &arrangement,
         offset += group_size;
     }
 
-    assert(initialize_groups_and_ranks());
-    initialize_groups_and_ranks();
+    if (!initialize_groups_and_ranks())
+        throw std::runtime_error("Invalid partition");
 }
 
-RangePartition::RangePartition(std::vector<std::vector<uint64_t>>&& partition) {
-    partition_.reserve(partition.size());
-    for (auto &group : partition) {
-        assert(group.size() && "partition blocks must not be empty");
-        partition_.emplace_back(group.begin(), group.end());
-        group.clear();
-    }
-    partition.clear();
-
-    assert(initialize_groups_and_ranks());
-    initialize_groups_and_ranks();
+RangePartition::RangePartition(std::vector<std::vector<T>>&& partition)
+    : partition_(std::move(partition)) {
+    assert(std::all_of(partition_.begin(), partition_.end(),
+                       [](const auto &group) { return !group.empty(); })
+        && "partition blocks must not be empty");
+    if (!initialize_groups_and_ranks())
+        throw std::runtime_error("Invalid partition");
 }
 
 bool RangePartition::initialize_groups_and_ranks() {

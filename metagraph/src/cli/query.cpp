@@ -983,21 +983,26 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                },
                                num_threads,
                                // pull only primary contigs when building canonical query graph
-                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                               false);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
     logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
+    std::atomic<uint64_t> num_kmers = 0;
+    std::atomic<uint64_t> num_found_kmers = 0;
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
-                              [&](node_index node) { contigs[i].second.push_back(node); });
+                              [&](node_index node) { contigs[i].second.push_back(node);
+                                                     num_found_kmers += node != DeBruijnGraph::npos; });
+        num_kmers += contigs[i].second.size();
     }
-    logger->trace("[Query graph construction] Contigs mapped to the full graph in {} sec",
-                  timer.elapsed());
+    logger->trace("[Query graph construction] Contigs mapped to the full graph (found {} / {} k-mers) in {} sec",
+                  num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
@@ -1109,8 +1114,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                        std::move(from_full_to_small),
                                        num_threads);
 
-    logger->trace("[Query graph construction] Query annotation with {} labels"
-                  " and {} set bits constructed in {} sec",
+    logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
+                  " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
 
@@ -1308,73 +1313,76 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    ThreadPool thread_pool(config_.parallel_each);
+    size_t threads_per_batch = get_num_threads() / config_.parallel_each;
     while (it != end) {
-        Timer batch_timer;
-
         uint64_t num_bytes_read = 0;
 
         // A generator that can be called multiple times until all sequences
         // are called
         std::vector<QuerySequence> seq_batch;
-        std::vector<Alignment> alignments_batch;
-        num_bytes_read = 0;
 
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
             seq_batch.push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
             num_bytes_read += it->seq.l;
         }
 
-        // Align sequences ahead of time on full graph if we don't have batch_align
-        if (aligner_config_ && !config_.batch_align) {
-            alignments_batch.resize(seq_batch.size());
-            logger->trace("Aligning sequences from batch against the full graph...");
-            batch_timer.reset();
+        thread_pool.enqueue([&](std::vector<QuerySequence> seq_batch, uint64_t num_bytes_read) {
+            Timer batch_timer;
+            std::vector<Alignment> alignments_batch;
+            // Align sequences ahead of time on full graph if we don't have batch_align
+            if (aligner_config_ && !config_.batch_align) {
+                alignments_batch.resize(seq_batch.size());
+                logger->trace("Aligning sequences from batch against the full graph...");
+                batch_timer.reset();
 
-            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-            for (size_t i = 0; i < seq_batch.size(); ++i) {
-                // Set alignment for this seq_batch
-                alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
-                                                     anno_graph_, *aligner_config_);
-            }
-            logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
-            batch_timer.reset();
-        }
-
-        // Construct the query graph for this batch
-        auto query_graph = construct_query_graph(
-            anno_graph_,
-            [&](auto callback) {
-                for (const auto &seq : seq_batch) {
-                    callback(seq.sequence);
+                #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+                for (size_t i = 0; i < seq_batch.size(); ++i) {
+                    // Set alignment for this seq_batch
+                    alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
+                                                         anno_graph_, *aligner_config_);
                 }
-            },
-            get_num_threads(),
-            aligner_config_ && config_.batch_align ? &config_ : NULL
-        );
+                logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
+                batch_timer.reset();
+            }
 
-        auto query_graph_construction = batch_timer.elapsed();
-        batch_timer.reset();
+            // Construct the query graph for this batch
+            auto query_graph = construct_query_graph(
+                anno_graph_,
+                [&](auto callback) {
+                    for (const auto &seq : seq_batch) {
+                        callback(seq.sequence);
+                    }
+                },
+                threads_per_batch,
+                aligner_config_ && config_.batch_align ? &config_ : NULL
+            );
 
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < seq_batch.size(); ++i) {
-            SeqSearchResult search_result
-                = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
-                                 config_.batch_align ? aligner_config_.get() : NULL);
+            auto query_graph_construction = batch_timer.elapsed();
+            batch_timer.reset();
 
-            if (alignments_batch.size())
-                search_result.get_alignment() = std::move(alignments_batch[i]);
+            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+            for (size_t i = 0; i < seq_batch.size(); ++i) {
+                SeqSearchResult search_result
+                    = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
+                                     config_.batch_align ? aligner_config_.get() : NULL);
 
-            callback(search_result);
-        }
+                if (alignments_batch.size())
+                    search_result.get_alignment() = std::move(alignments_batch[i]);
 
-        logger->trace("Query graph constructed for batch of sequences"
-                      " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
-                      num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
-                      (double)num_bytes_read / query_graph->get_graph().num_nodes(),
-                      batch_timer.elapsed());
+                callback(search_result);
+            }
+
+            logger->trace("Query graph constructed for batch of sequences"
+                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+                          num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
+                          (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                          batch_timer.elapsed());
+        }, std::move(seq_batch), num_bytes_read);
 
         num_bp += num_bytes_read;
     }
+    thread_pool.join();
 
     return num_bp;
 }

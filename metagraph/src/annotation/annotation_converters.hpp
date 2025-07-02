@@ -60,7 +60,7 @@ convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(const std::vector<std::string> &annotation_files,
-                const std::vector<std::vector<uint64_t>> &linkage_matrix,
+                const std::vector<std::vector<matrix::BRWT::Column>> &linkage_matrix,
                 size_t num_parallel_nodes = 1,
                 size_t num_threads = 1,
                 const std::filesystem::path &tmp_dir = "");
@@ -79,6 +79,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &outfbase,
                          size_t num_threads,
                          size_t mem_bytes);
+
+template <class RowDiffAnnotator>
+void convert_to_row_diff(const RowDiffBRWTAnnotator &anno,
+                         const std::string &outfbase);
 
 void merge_row_compressed(const std::vector<std::string> &filenames,
                           const std::string &outfile);
