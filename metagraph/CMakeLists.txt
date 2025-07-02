@@ -300,7 +300,13 @@ target_include_directories(eigen INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
-find_package(zstd)
+
+if(NO_ZSTD)
+  set(ZSTD_FOUND FALSE)
+else()
+  find_package(zstd)
+endif()
+
 if(ZSTD_FOUND)
   add_definitions(-D_SUPPORT_ZSTD)
 else()
@@ -425,9 +431,9 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts
-  Boost::iostreams
   zlib
   deflate
+  Boost::iostreams
   -lsdsl
   jsoncpp_lib
   progress_bar
@@ -439,13 +445,16 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
-  zstd::zstd
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
 endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
+endif()
+
+if(ZSTD_FOUND)
+  set(METALIBS ${METALIBS} zstd::zstd)
 endif()
 
 if(BUILD_STATIC AND NOT APPLE)

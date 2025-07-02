@@ -6,6 +6,7 @@
 #include <string>
 #include <variant>
 #include <fstream>
+#include <iostream>
 #include <boost/iostreams/device/file.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
