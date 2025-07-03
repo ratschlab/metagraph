@@ -21,7 +21,7 @@ class AnnotationBuffer {
     typedef DeBruijnGraph::node_index node_index;
     using Column = annot::matrix::BinaryMatrix::Column;
     using Tuple = SmallVector<int64_t>;
-    using Columns = Vector<Column>;
+    using Columns = annot::matrix::BinaryMatrix::SetBitPositions;
     using CoordinateSet = Vector<Tuple>;
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);

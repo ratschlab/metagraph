@@ -73,9 +73,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     if (suffix.size() + match_size == k - 1) {
                         assert(first == last || !boss.get_last(first));
                         assert(boss.succ_last(first) == last);
-                        for (edge_index e = first; e <= last; ++e) {
-                            if (auto node = dbg_succ->boss_to_kmer_index(e)) {
-                                char c = boss.decode(boss.get_W(e) % boss.alph_size);
+                        for (edge_index node = first; node <= last; ++node) {
+                            if (dbg_succ->in_graph(node)) {
+                                char c = boss.decode(boss.get_W(node) % boss.alph_size);
                                 if (c != boss::BOSS::kSentinel) {
                                     anchors.emplace_back(this_query,
                                                         i, i + match_size,
