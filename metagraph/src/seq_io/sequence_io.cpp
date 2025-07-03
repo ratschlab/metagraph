@@ -1,7 +1,6 @@
 #include "sequence_io.hpp"
 
 #include <algorithm>
-#include <iostream>
 #include <thread>
 #include <sstream>
 
@@ -114,14 +113,15 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
     static_assert(sizeof(kmer_length_) == 4);
 
     fasta_fname_ = utils::remove_suffix(filebase, ".zst");
-#if _SUPPORT_ZSTD
     bool zstd = (fasta_fname_.size() < filebase.size());
-#else
+
+#if ! _SUPPORT_ZSTD
     if (zstd) {
         std::cerr << "ERROR: zstd not supported. Recompile with zstd support." << std::endl;
         exit(1);
     }
 #endif
+
     std::string comp_type = zstd ? ".zst" : ".gz";
 
     fasta_fname_ = utils::remove_suffix(filebase, comp_type, ".fasta") + ".fasta" + comp_type;
