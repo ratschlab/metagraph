@@ -22,11 +22,6 @@ static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits
 static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 #endif
 
-using parser_t = std::variant<
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt64>>,
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt128>>,
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt256>>>;
-
 template <typename T>
 struct template_parameter;
 
@@ -216,11 +211,12 @@ void DBGSSHash::add_sequence(std::string_view sequence,
 }
 
 template <bool with_rc, class Dict>
-void map_to_nodes_with_rc_impl(size_t k,
+void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
                                const Dict& dict,
                                std::string_view sequence,
                                const std::function<void(sshash::lookup_result)>& callback,
                                const std::function<bool()>& terminate) {
+    size_t k = graph.get_k();
     size_t n = sequence.size();
     if (terminate() || n < k)
         return;
@@ -238,7 +234,10 @@ void map_to_nodes_with_rc_impl(size_t k,
         // TODO: the streaming parser only works for odd k (because of palindromes?)
         auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
-            callback(parser.lookup_advanced(sequence.data() + i));
+            auto ret_val = parser.lookup_advanced(sequence.data() + i);
+            assert(sshash::equal_lookup_result(ret_val,
+                                               dict.lookup_advanced(sequence.data() + i, with_rc)));
+            callback(ret_val);
         }
     } else {
         std::vector<bool> invalid_char(n);
@@ -248,13 +247,28 @@ void map_to_nodes_with_rc_impl(size_t k,
 
         auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
-        kmer_t uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data(), k - 1);
-        uint_kmer.pad_char();
-        for (size_t i = k - 1; i < n && !terminate(); ++i) {
-            uint_kmer.drop_char();
-            uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i]));
-            callback(invalid_kmer[i] ? sshash::lookup_result()
-                                     : dict.lookup_advanced_uint(uint_kmer, with_rc));
+        bool begin = true;
+        kmer_t uint_kmer;
+        for (size_t i = 0; i + k <= n && !terminate(); ++i) {
+            sshash::lookup_result ret_val;
+            if (invalid_kmer[i + k - 1]) {
+                begin = true;
+                callback(ret_val);
+                continue;
+            }
+
+            if (begin) {
+                begin = false;
+                uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data() + i, k);
+            } else {
+                uint_kmer.drop_char();
+                uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
+            }
+            ret_val = dict.lookup_advanced_uint(uint_kmer, with_rc);
+
+            assert(sshash::equal_lookup_result(ret_val,
+                                               dict.lookup_advanced(sequence.data() + i, with_rc)));
+            callback(ret_val);
         }
     }
 }
@@ -266,10 +280,11 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
     std::visit(
             [&](const auto& dict) {
                 map_to_nodes_with_rc_impl<with_rc>(
-                        k_, dict, sequence,
+                        *this, dict, sequence,
                         [&](sshash::lookup_result res) {
-                            callback(sshash_to_graph_index(res.kmer_id),
-                                     res.kmer_orientation);
+                            auto node = sshash_to_graph_index(res.kmer_id);
+                            assert(!node || in_graph(node));
+                            callback(node, res.kmer_orientation);
                         },
                         terminate);
             },
