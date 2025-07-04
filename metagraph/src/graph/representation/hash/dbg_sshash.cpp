@@ -22,11 +22,6 @@ static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits
 static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 #endif
 
-using parser_t = std::variant<
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt64>>,
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt128>>,
-        sshash::streaming_query_regular_parsing<DBGSSHash::kmer_t<DBGSSHash::KmerInt256>>>;
-
 template <typename T>
 struct template_parameter;
 
@@ -242,6 +237,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
             auto ret_val = parser.lookup_advanced(sequence.data() + i);
             assert(sshash::equal_lookup_result(ret_val,
                                                dict.lookup_advanced(sequence.data() + i, with_rc)));
+            callback(ret_val);
         }
     } else {
         std::vector<bool> invalid_char(n);
