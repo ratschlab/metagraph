@@ -266,24 +266,8 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
             }
             ret_val = dict.lookup_advanced_uint(uint_kmer, with_rc);
 
-            if (!sshash::equal_lookup_result(ret_val,
-                                               dict.lookup_advanced(sequence.data() + i, with_rc))) {
-                std::cerr << std::string_view(sequence.data() + i, k);
-
-                std::string str_kmer(k, '$');
-                if (ret_val.kmer_id != sshash::constants::invalid_uint64)
-                    dict.access(ret_val.kmer_id, str_kmer.data());
-                std::cerr << "\t" << str_kmer << "," << ret_val.kmer_orientation;
-
-                str_kmer.assign(k, '$');
-
-                auto ad_hoc = dict.lookup_advanced(sequence.data() + i, with_rc);
-                if (ad_hoc.kmer_id != sshash::constants::invalid_uint64)
-                    dict.access(ad_hoc.kmer_id, str_kmer.data());
-                std::cerr << "\t" << str_kmer << "," << ad_hoc.kmer_orientation;
-                std::cerr << "\n";
-                assert(false);
-            }
+            assert(sshash::equal_lookup_result(ret_val,
+                                               dict.lookup_advanced(sequence.data() + i, with_rc)));
             callback(ret_val);
         }
     }
@@ -298,8 +282,9 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                 map_to_nodes_with_rc_impl<with_rc>(
                         *this, dict, sequence,
                         [&](sshash::lookup_result res) {
-                            callback(sshash_to_graph_index(res.kmer_id),
-                                     res.kmer_orientation);
+                            auto node = sshash_to_graph_index(res.kmer_id);
+                            assert(!node || in_graph(node));
+                            callback(node, res.kmer_orientation);
                         },
                         terminate);
             },
