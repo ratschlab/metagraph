@@ -641,39 +641,39 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 // }
 
 // TODO: this test is currently too slow
-// TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
-//     size_t k = 6;
-//     std::vector<std::string> seqs;
-//     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
-//                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-//     auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
+TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
+    size_t k = 6;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
 
-//     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGA";
-//     std::string match = "TCGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAAT"
-//                         "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
-//                         "TCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAAT"
-//                         "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
-//                         "TCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAAT"
-//                         "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
-//                         "CGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAATCGATCAAT"
-//                         "CGATCAATCGATCAATCGATC";
+    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGA";
+    std::string match = "TCGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "TCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "TCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "CGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATC";
 
-//     EXPECT_TRUE(graph->find(match, 1.0));
+    EXPECT_TRUE(graph->find(match, 1.0));
 
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//     config.gap_opening_penalty = -5;
-//     config.gap_extension_penalty = -2;
-//     config.min_seed_length = 8;
-//     run_alignment(*graph, config, query, { match }, { "" });
-// }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.min_seed_length = 8;
+    run_alignment(*graph, config, query, { match }, { "" });
+}
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     size_t k = 31;
@@ -780,32 +780,32 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 // }
 
 // TODO: this test is too slow
-// TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
-//     size_t k = 6;
-//     std::vector<std::string> seqs;
-//     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
-//                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-//     auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
+TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
+    size_t k = 6;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
 
-//     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-//                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
-//                         "CGATCGATCGATCGATCGATCGA";
+    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGA";
 
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-//     config.gap_opening_penalty = -5;
-//     config.gap_extension_penalty = -2;
-//     config.xdrop = 27;
-//     config.min_exact_match = 0.0;
-//     config.max_nodes_per_seq_char = 10.0;
-//     config.num_alternative_paths = 3;
-//     run_alignment(*graph, config, query, { "" }, { "30=2D2=1X2=1X6=" });
-// }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.xdrop = 27;
+    config.min_exact_match = 0.0;
+    config.max_nodes_per_seq_char = 10.0;
+    config.num_alternative_paths = 3;
+    run_alignment(*graph, config, query, { "" }, { "30=2D2=1X2=1X6=" });
+}
 #endif
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {

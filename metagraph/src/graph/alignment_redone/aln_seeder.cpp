@@ -1004,37 +1004,31 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
-    // common::logger->info("Anchoring seeds");
     std::vector<Anchor> anchors = get_anchors();
-    // common::logger->info("Computing alignments between {} anchors", anchors.size());
-    auto connections = get_connections(anchors);
-    // common::logger->info("DONE");
-    std::vector<Alignment> alignments;
+
+    if (anchors.empty())
+        return {};
 
     using AnchorIt = std::vector<Anchor>::iterator;
-
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
+
+    sdsl::bit_vector selected(anchors.size(), false);
+
     bool first_chain = true;
     DBGAlignerConfig::score_t first_chain_score = DBGAlignerConfig::ninf;
+    size_t num_chains = 0;
+
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
-        [this,&connections](const Anchor &a_j,
-                            ssize_t max_dist,
-                            AnchorIt begin,
-                            AnchorIt end,
-                            typename ChainScores<AnchorIt>::iterator chain_scores,
-                            const ScoreUpdater<AnchorIt> &update_score) {
-            // std::cerr << "Anchor: " << a_j << "\n";
-            auto find_j = connections.find(a_j);
-            if (find_j == connections.end())
-                return;
-
-            // std::cerr << "End Anchor: " << a_j << "\n";
-
-            // const DeBruijnGraph &graph = query_.get_graph();
+        [this](const Anchor &a_j,
+               ssize_t max_dist,
+               AnchorIt begin,
+               AnchorIt end,
+               typename ChainScores<AnchorIt>::iterator chain_scores,
+               const ScoreUpdater<AnchorIt> &update_score) {
             std::string_view query_j = a_j.get_seed();
-            // const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
+            const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
 
-            for (auto it = begin; it != end; ++it) {
+            for (auto it = begin; it != end; ++it, ++chain_scores) {
                 const Anchor &a_i = *it;
                 assert(a_i.get_label_class() == a_j.get_label_class());
                 assert(a_i.get_orientation() == a_j.get_orientation());
@@ -1043,62 +1037,18 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 DBGAlignerConfig::score_t dist = query_j.end() - query_i.end();
 
-                if (dist <= 0 || query_i.begin() >= query_j.begin()) {
-                    ++chain_scores;
+                if (dist <= 0 || query_i.begin() >= query_j.begin())
                     continue;
-                }
-
-                // std::cerr << "checking connect " << a_i << " -> " << a_j << "\n";
-
-                auto find_i = find_j->second.find(a_i);
-                if (find_i == find_j->second.end() || find_i->second.empty()) {
-                    ++chain_scores;
-                    continue;
-                }
-                // std::cerr << "\tfound!\n";
 
                 DBGAlignerConfig::score_t base_score = std::get<0>(*chain_scores);
 
-                DBGAlignerConfig::score_t score = DBGAlignerConfig::ninf;
-                DBGAlignerConfig::score_t coord_dist = dist;
-                // size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
-                // size_t a_j_chars = a_j.get_spelling().size();
-                bool updated = false;
-                // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
-                for (const auto &[i, added_score, path, cigar] : find_i->second) {
-                    // std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
-                    // size_t query_dist = cigar.get_num_query();
-                    // size_t path_dist = path.size();
-                    // assert(path_dist == cigar.get_num_ref());
-                    // query_dist is the distance from the front of a_j to the ith node of a_i
-                    // ssize_t offset = a_j.get_seed().size() + i;
-                    // offset -= a_i.get_seed().size();
-                    // DBGAlignerConfig::score_t cur_dist = query_dist + offset;
-                    // std::cerr << "\t\tp: " << path_dist << "\tq: " << query_dist << "\ti: " << i << "\t-> " << cur_dist;
+                auto added_seq_start = std::max(query_j.begin(), query_i.end());
+                std::string_view added_seq(added_seq_start, query_j.end() - added_seq_start);
 
-                    std::string_view a_i_front(a_i.get_seed().begin() + i, a_i.get_seed().size() - i);
-                    DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front);
+                DBGAlignerConfig::score_t score = base_score + config_.match_score(added_seq);
 
-                    if (base_score + added_score - front_score + a_j.get_score() > score) {
-                        // DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
-                        // std::cerr << "," << cur_coord_dist;
-
-                        score = base_score + added_score - front_score + a_j.get_score();
-                        coord_dist = path.size() + i + a_j.get_seed().size() - a_i.get_seed().size();
-                        updated = true;
-                        // std::cerr << "\tworked\t" << coord_dist << "\t" << base_score << "+" << added_score << "-" << front_score << "+" << a_j.get_score() << "=" << score << "\n";
-                    }
-                    // std::cerr << "\n";
-                }
-
-                // std::cerr << "connect " << a_i << "\t->\t" << a_j << "\t"
-                //                         << fmt::format("{}", fmt::join(find_i->second, ",")) << "\t" << score << "\t" << dist << "," << coord_dist << std::endl;
-
-                // std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << updated << "\t" << base_score << "->" << score << " vs. " << std::get<0>(*(chain_scores + (end - begin))) << "\t" << dist << "," << coord_dist << "\n";
-                if (updated)
-                    update_score(score, it, coord_dist);
-
-                ++chain_scores;
+                if (score >= score_j)
+                    update_score(score, it, dist);
             }
         },
         [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
@@ -1109,84 +1059,215 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 assert(score_traceback.front() <= score_traceback.back());
             }
 
-            bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
+            bool ret_val = (first_chain
+                            || score_traceback.back() >= first_chain_score * config_.rel_score_cutoff
+                            || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
             first_chain = false;
 
-            // if (ret_val) {
+            if (ret_val) {
+                ++num_chains;
                 // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                // for (const auto &[it, dist] : chain) {
-                //     std::cerr << "\t" << *it << "\t" << dist;
-                // }
+                for (const auto &[it, dist] : chain) {
+                    selected[it - anchors.begin()] = true;
+                    // std::cerr << "\t" << *it << "\t" << dist;
+                }
                 // std::cerr << std::endl;
-            // }
+            }
 
             return ret_val;
         },
-        [this,&connections](AnchorIt last,
-                            AnchorIt next,
-                            Alignment&& aln,
-                            size_t last_to_next_dist,
-                            DBGAlignerConfig::score_t score_up_to_now,
-                            const AlignmentCallback &callback) {
-            auto find_j = connections.find(*last);
-            assert(find_j != connections.end());
-            auto find_i = find_j->second.find(*next);
-            assert(find_i != find_j->second.end() && find_i->second.size());
-
-            Cigar base_cigar(Cigar::CLIPPED, next->get_clipping());
-
-            Cigar aln_cigar = aln.get_cigar();
-            aln_cigar.trim_clipping();
-
-            for (const auto &[i, added_score, bt_path, bt_cigar] : find_i->second) {
-                // std::cerr << "try\t" << *next << "\t->\t" << bt_cigar.to_string() << "\t->\t" << aln << std::endl;
-                size_t coord_dist = bt_path.size() + i + last->get_seed().size() - next->get_seed().size();
-                // size_t path_dist = bt_path.size();
-                // assert(path_dist == bt_cigar.get_num_ref());
-
-                // size_t offset = path_dist + last->get_seed().size() - i;
-                // size_t cur_coord_dist = offset - next->get_seed().size();
-
-                if (coord_dist == last_to_next_dist) {
-                    // std::cerr << "\tconnected\n";
-                    std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().begin() + i);
-                    path.insert(path.end(), bt_path.begin(), bt_path.end());
-                    path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
-
-                    auto cigar = base_cigar;
-                    cigar.append(Cigar::MATCH, i);
-                    cigar.append(Cigar(bt_cigar));
-                    cigar.append(Cigar(aln_cigar));
-
-                    Alignment next_aln(query_.get_graph(),
-                                    aln.get_query(),
-                                    aln.get_orientation(),
-                                    std::move(path),
-                                    config_,
-                                    std::move(cigar),
-                                    aln.get_end_trim());
-                    // std::cerr << "\tworked!\t" << next_aln << "\n";
-                    callback(std::move(next_aln));
-                }
-            }
-        },
-        [&alignments](Alignment&& alignment) {
-            // std::cerr << "final aln\t" << alignment << "\n";
-            alignments.emplace_back(std::move(alignment));
-        }
+        [](AnchorIt, AnchorIt, Alignment&&, size_t,
+           DBGAlignerConfig::score_t, const AlignmentCallback&) {},
+        [](Alignment&&) {}
     );
 
-    if (alignments.size()) {
-        std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
-            return std::make_pair(a.get_score(), b.get_orientation())
-                 > std::make_pair(b.get_score(), a.get_orientation());
-        });
+    common::logger->info("Selected {} / {} anchors from {} chains",
+                         sdsl::util::cnt_one_bits(selected),
+                         selected.size(),
+                         num_chains);
 
-        alignments.resize(1);
-    }
+    return {};
+    // // common::logger->info("Computing alignments between {} anchors", anchors.size());
+    // auto connections = get_connections(anchors);
+    // // common::logger->info("DONE");
+    // std::vector<Alignment> alignments;
 
-    // std::cerr << "done\n";
-    return alignments;
+    // using AnchorIt = std::vector<Anchor>::iterator;
+
+    // std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
+    // bool first_chain = true;
+    // DBGAlignerConfig::score_t first_chain_score = DBGAlignerConfig::ninf;
+    // chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
+    //     [this,&connections](const Anchor &a_j,
+    //                         ssize_t max_dist,
+    //                         AnchorIt begin,
+    //                         AnchorIt end,
+    //                         typename ChainScores<AnchorIt>::iterator chain_scores,
+    //                         const ScoreUpdater<AnchorIt> &update_score) {
+    //         // std::cerr << "Anchor: " << a_j << "\n";
+    //         auto find_j = connections.find(a_j);
+    //         if (find_j == connections.end())
+    //             return;
+
+    //         // std::cerr << "End Anchor: " << a_j << "\n";
+
+    //         // const DeBruijnGraph &graph = query_.get_graph();
+    //         std::string_view query_j = a_j.get_seed();
+    //         // const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
+
+    //         for (auto it = begin; it != end; ++it) {
+    //             const Anchor &a_i = *it;
+    //             assert(a_i.get_label_class() == a_j.get_label_class());
+    //             assert(a_i.get_orientation() == a_j.get_orientation());
+
+    //             std::string_view query_i = a_i.get_seed();
+
+    //             DBGAlignerConfig::score_t dist = query_j.end() - query_i.end();
+
+    //             if (dist <= 0 || query_i.begin() >= query_j.begin()) {
+    //                 ++chain_scores;
+    //                 continue;
+    //             }
+
+    //             // std::cerr << "checking connect " << a_i << " -> " << a_j << "\n";
+
+    //             auto find_i = find_j->second.find(a_i);
+    //             if (find_i == find_j->second.end() || find_i->second.empty()) {
+    //                 ++chain_scores;
+    //                 continue;
+    //             }
+    //             // std::cerr << "\tfound!\n";
+
+    //             DBGAlignerConfig::score_t base_score = std::get<0>(*chain_scores);
+
+    //             DBGAlignerConfig::score_t score = DBGAlignerConfig::ninf;
+    //             DBGAlignerConfig::score_t coord_dist = dist;
+    //             // size_t a_i_chars = graph.get_k() - a_i.get_end_trim();
+    //             // size_t a_j_chars = a_j.get_spelling().size();
+    //             bool updated = false;
+    //             // std::cerr << "Q: " << dist << "\tcd: " << coord_dist << "\n";
+    //             for (const auto &[i, added_score, path, cigar] : find_i->second) {
+    //                 // std::cerr << "check\t" << a_i << "\t->\t" << cigar.to_string() << "\t->\t" << a_j << "\n";
+    //                 // size_t query_dist = cigar.get_num_query();
+    //                 // size_t path_dist = path.size();
+    //                 // assert(path_dist == cigar.get_num_ref());
+    //                 // query_dist is the distance from the front of a_j to the ith node of a_i
+    //                 // ssize_t offset = a_j.get_seed().size() + i;
+    //                 // offset -= a_i.get_seed().size();
+    //                 // DBGAlignerConfig::score_t cur_dist = query_dist + offset;
+    //                 // std::cerr << "\t\tp: " << path_dist << "\tq: " << query_dist << "\ti: " << i << "\t-> " << cur_dist;
+
+    //                 std::string_view a_i_front(a_i.get_seed().begin() + i, a_i.get_seed().size() - i);
+    //                 DBGAlignerConfig::score_t front_score = config_.match_score(a_i_front);
+
+    //                 if (base_score + added_score - front_score + a_j.get_score() > score) {
+    //                     // DBGAlignerConfig::score_t cur_coord_dist = path_dist + offset;
+    //                     // std::cerr << "," << cur_coord_dist;
+
+    //                     score = base_score + added_score - front_score + a_j.get_score();
+    //                     coord_dist = path.size() + i + a_j.get_seed().size() - a_i.get_seed().size();
+    //                     updated = true;
+    //                     // std::cerr << "\tworked\t" << coord_dist << "\t" << base_score << "+" << added_score << "-" << front_score << "+" << a_j.get_score() << "=" << score << "\n";
+    //                 }
+    //                 // std::cerr << "\n";
+    //             }
+
+    //             // std::cerr << "connect " << a_i << "\t->\t" << a_j << "\t"
+    //             //                         << fmt::format("{}", fmt::join(find_i->second, ",")) << "\t" << score << "\t" << dist << "," << coord_dist << std::endl;
+
+    //             // std::cerr << "checking connect2 " << a_i << " -> " << a_j << "\t" << updated << "\t" << base_score << "->" << score << " vs. " << std::get<0>(*(chain_scores + (end - begin))) << "\t" << dist << "," << coord_dist << "\n";
+    //             if (updated)
+    //                 update_score(score, it, coord_dist);
+
+    //             ++chain_scores;
+    //         }
+    //     },
+    //     [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
+    //         assert(chain.size());
+
+    //         if (first_chain) {
+    //             first_chain_score = score_traceback.back();
+    //             assert(score_traceback.front() <= score_traceback.back());
+    //         }
+
+    //         bool ret_val = (first_chain || score_traceback.back() == first_chain_score || chain.size() > 1 || chain[0].first->get_seed().size() > config_.min_seed_length || (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping()));
+    //         first_chain = false;
+
+    //         // if (ret_val) {
+    //             // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+    //             // for (const auto &[it, dist] : chain) {
+    //             //     std::cerr << "\t" << *it << "\t" << dist;
+    //             // }
+    //             // std::cerr << std::endl;
+    //         // }
+
+    //         return ret_val;
+    //     },
+    //     [this,&connections](AnchorIt last,
+    //                         AnchorIt next,
+    //                         Alignment&& aln,
+    //                         size_t last_to_next_dist,
+    //                         DBGAlignerConfig::score_t score_up_to_now,
+    //                         const AlignmentCallback &callback) {
+    //         auto find_j = connections.find(*last);
+    //         assert(find_j != connections.end());
+    //         auto find_i = find_j->second.find(*next);
+    //         assert(find_i != find_j->second.end() && find_i->second.size());
+
+    //         Cigar base_cigar(Cigar::CLIPPED, next->get_clipping());
+
+    //         Cigar aln_cigar = aln.get_cigar();
+    //         aln_cigar.trim_clipping();
+
+    //         for (const auto &[i, added_score, bt_path, bt_cigar] : find_i->second) {
+    //             // std::cerr << "try\t" << *next << "\t->\t" << bt_cigar.to_string() << "\t->\t" << aln << std::endl;
+    //             size_t coord_dist = bt_path.size() + i + last->get_seed().size() - next->get_seed().size();
+    //             // size_t path_dist = bt_path.size();
+    //             // assert(path_dist == bt_cigar.get_num_ref());
+
+    //             // size_t offset = path_dist + last->get_seed().size() - i;
+    //             // size_t cur_coord_dist = offset - next->get_seed().size();
+
+    //             if (coord_dist == last_to_next_dist) {
+    //                 // std::cerr << "\tconnected\n";
+    //                 std::vector<DeBruijnGraph::node_index> path(next->get_path().begin(), next->get_path().begin() + i);
+    //                 path.insert(path.end(), bt_path.begin(), bt_path.end());
+    //                 path.insert(path.end(), aln.get_path().begin(), aln.get_path().end());
+
+    //                 auto cigar = base_cigar;
+    //                 cigar.append(Cigar::MATCH, i);
+    //                 cigar.append(Cigar(bt_cigar));
+    //                 cigar.append(Cigar(aln_cigar));
+
+    //                 Alignment next_aln(query_.get_graph(),
+    //                                 aln.get_query(),
+    //                                 aln.get_orientation(),
+    //                                 std::move(path),
+    //                                 config_,
+    //                                 std::move(cigar),
+    //                                 aln.get_end_trim());
+    //                 // std::cerr << "\tworked!\t" << next_aln << "\n";
+    //                 callback(std::move(next_aln));
+    //             }
+    //         }
+    //     },
+    //     [&alignments](Alignment&& alignment) {
+    //         // std::cerr << "final aln\t" << alignment << "\n";
+    //         alignments.emplace_back(std::move(alignment));
+    //     }
+    // );
+
+    // if (alignments.size()) {
+    //     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
+    //         return std::make_pair(a.get_score(), b.get_orientation())
+    //              > std::make_pair(b.get_score(), a.get_orientation());
+    //     });
+
+    //     alignments.resize(1);
+    // }
+
+    // // std::cerr << "done\n";
+    // return alignments;
 }
 
 auto ExactSeeder::get_connections(std::vector<Anchor> &anchors) const -> Connections {
