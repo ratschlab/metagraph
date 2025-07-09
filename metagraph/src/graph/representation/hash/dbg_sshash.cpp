@@ -184,6 +184,8 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
                          uint64_t(k - 2) })
             | 1;
 
+    common::logger->trace("Mininizer size: {}", build_config.m);
+
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
 
