@@ -608,18 +608,18 @@ add_custom_target(install_test_environment
 )
 
 # --- integration tests ---
-add_custom_target(check
+add_custom_target(check_integration
   COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
   DEPENDS metagraph
   DEPENDS install_test_environment
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
-  COMMAND make check
+  COMMAND make check_integration
   COMMAND unit_tests
-  DEPENDS check unit_tests
+  DEPENDS check_integration unit_tests
 )
-add_test(NAME integration_tests COMMAND make check)
+add_test(NAME integration_tests COMMAND make check_integration)
 add_test(NAME unit_tests COMMAND unit_tests)
 
 # --- integration tests runner ---
