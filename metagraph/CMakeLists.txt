@@ -286,7 +286,11 @@ include_directories(
   external-libraries/sshash
   external-libraries/sshash/include
   external-libraries/sshash/external/pthash
-  external-libraries/sshash/external/pthash/external/essentials/include
+  external-libraries/sshash/external/pthash/include
+  external-libraries/sshash/external/pthash/external/bits/external/essentials/include
+  external-libraries/sshash/external/pthash/external/fastmod
+  external-libraries/sshash/external/pthash/external/bits/include
+  external-libraries/sshash/external/pthash/external/mm_file/include
 )
 
 add_library(ips4o INTERFACE)
@@ -344,6 +348,7 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+
 add_subdirectory(external-libraries/sshash SYSTEM)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)

@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include <query/streaming_query_regular_parsing.hpp>
+#include <streaming_query.hpp>
 #include <progress_bar.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
@@ -12,7 +12,6 @@
 #include "common/threads/threading.hpp"
 #include "kmer/kmer_extractor.hpp"
 
-
 namespace mtg {
 namespace graph {
 
@@ -21,6 +20,7 @@ static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits
 #else
 static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
 #endif
+
 
 template <typename T>
 struct template_parameter;
@@ -50,11 +50,11 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     size_t odd_k = (k_ | 1);
 
     if (odd_k * bits_per_char <= 64) {
-        dict_.emplace<sshash::dictionary<kmer_t<KmerInt64>>>();
+        dict_.emplace<Dict64>();
     } else if (odd_k * bits_per_char <= 128) {
-        dict_.emplace<sshash::dictionary<kmer_t<KmerInt128>>>();
+        dict_.emplace<Dict128>();
     } else if (odd_k * bits_per_char <= 256) {
-        dict_.emplace<sshash::dictionary<kmer_t<KmerInt256>>>();
+        dict_.emplace<Dict256>();
     } else {
         common::logger->error("k too big: {} > {}", odd_k, 256 / bits_per_char);
         throw std::length_error("k fail");
@@ -122,7 +122,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
                             kmer.drop_char();
-                            kmer.kth_char_or(graph.get_k() - 1, found_i);
+                            kmer.set(graph.get_k() - 1, found_i);
                         }
 
                         bool found_bw = false;
@@ -234,7 +234,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
 
     if (with_rc && (k & 1)) {
         // TODO: the streaming parser only works for odd k (because of palindromes?)
-        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
+        auto parser = sshash::streaming_query<kmer_t, with_rc>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup_advanced(sequence.data() + i);
             assert(sshash::equal_lookup_result(ret_val,
@@ -264,7 +264,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
                 uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data() + i, k);
             } else {
                 uint_kmer.drop_char();
-                uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
+                uint_kmer.set(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
             }
             ret_val = dict.lookup_advanced_uint(uint_kmer, with_rc);
 
@@ -664,10 +664,14 @@ char DBGSSHash::get_last_char(node_index node) const {
                 using kmer_t = get_kmer_t<decltype(d)>;
                 const auto& buckets = d.data();
                 uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
-                sshash::bit_vector_iterator<kmer_t> bv_it(
-                        d.strings(), kmer_t::bits_per_char * (offset + get_k() - 1));
+                auto read_kmer = sshash::util::read_kmer_at<kmer_t>(
+                    d.strings(),
+                    1,
+                    kmer_t::bits_per_char * (offset + get_k() - 1)
+                );
                 return kmer_t::uint64_to_char(
-                        static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+                    static_cast<uint64_t>(read_kmer)
+                );
             },
             dict_);
 }
@@ -681,10 +685,14 @@ char DBGSSHash::get_first_char(node_index node) const {
                 using kmer_t = get_kmer_t<decltype(d)>;
                 const auto& buckets = d.data();
                 uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
-                sshash::bit_vector_iterator<kmer_t> bv_it(d.strings(),
-                                                          kmer_t::bits_per_char * offset);
+                auto read_kmer = sshash::util::read_kmer_at<kmer_t>(
+                    d.strings(),
+                    1,
+                    kmer_t::bits_per_char * offset
+                );
                 return kmer_t::uint64_to_char(
-                        static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+                    static_cast<uint64_t>(read_kmer)
+                );
             },
             dict_);
 }
@@ -748,6 +756,7 @@ bool DBGSSHash::load(const std::string& filename) {
     std::ifstream fin(suffixed_filename, std::ios::binary);
     return load(fin);
 }
+
 
 } // namespace graph
 } // namespace mtg
