@@ -470,7 +470,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         // deletion
                         if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
                             // extension
-                            auto [last_dist, last_num_ops, last_node] = *del_ext_bucket;
+                            const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
                             assert(last_node != DeBruijnGraph::npos);
                             assert(last_num_ops > 0);
                             assert(last_dist >= last_num_ops);
@@ -480,6 +480,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                     if (c == boss::BOSS::kSentinel)
                                         return;
 
+                                    const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
                                     if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
                                             && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
                                             && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
@@ -787,19 +788,22 @@ void align_fwd(const DeBruijnGraph &graph,
                std::string_view suffix = "") {
     align_impl(
         [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, size_t dist, size_t) {
+            std::ignore = start_node;
             assert(dist >= suffix.size() || node == start_node);
             return dist < suffix.size() || graph.has_single_outgoing(node);
         },
         [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, char c, size_t dist, size_t) {
             if (dist < suffix.size()) {
-                 assert(node == start_node);
-                 return c == suffix[dist] ? node : DeBruijnGraph::npos;
+                std::ignore = start_node;
+                assert(node == start_node);
+                return c == suffix[dist] ? node : DeBruijnGraph::npos;
             } else {
                 return graph.traverse(node, c);
             }
         },
         [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, const auto &callback, size_t dist, size_t) {
             if (dist < suffix.size()) {
+                std::ignore = start_node;
                 assert(node == start_node);
                 callback(node, suffix[dist]);
             } else {
@@ -842,6 +846,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
         auto it = std::make_reverse_iterator(aln.get_cigar().data().end());
         auto end = std::make_reverse_iterator(aln.get_cigar().data().begin());
+        std::ignore = end;
         assert(it != end);
         if (it->first == Cigar::CLIPPED) {
             ++it;
@@ -930,6 +935,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
         auto it = aln.get_cigar().data().begin();
         auto end = aln.get_cigar().data().end();
+        std::ignore = end;
         assert(it != end);
         if (it->first == Cigar::CLIPPED) {
             ++it;

@@ -24,7 +24,7 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 const std::string test_data_dir = "../tests/data";
-const bool PICK_REV_COMP = true;
+//const bool PICK_REV_COMP = true;
 
 template <typename Graph>
 class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};

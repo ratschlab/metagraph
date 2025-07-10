@@ -125,6 +125,7 @@ class Anchor : public Match {
                 const DeBruijnGraph *graph = nullptr);
 
     label_class_t get_label_class() const { return label_class_; }
+    int64_t get_coord() const { return coord_; }
 
   private:
     label_class_t label_class_;
