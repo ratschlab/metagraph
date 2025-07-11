@@ -43,7 +43,10 @@ class Extender {
     Extender(const Query &query, const DBGAlignerConfig &config)
           : query_(query), config_(config) {}
 
-    void extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback) const;
+    void extend(const Alignment &aln,
+                const std::function<void(Alignment&&)> &callback,
+                bool no_bwd = false,
+                bool no_fwd = false) const;
 
   protected:
     const Query &query_;
