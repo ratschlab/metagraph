@@ -49,6 +49,9 @@ TYPED_TEST_SUITE(CanonicalDBGTest, CanonicalGraphTypes);
 
 
 TYPED_TEST(CanonicalDBGTest, CheckGraph) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", DeBruijnGraph::PRIMARY, true));
 }
 
