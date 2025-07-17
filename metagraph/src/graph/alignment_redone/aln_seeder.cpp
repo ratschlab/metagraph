@@ -365,199 +365,274 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
         return inserted;
     };
 
-    auto fill_table = [&]() {
-        {
-            size_t query_dist = 0;
-            DeBruijnGraph::node_index node = start_node;
-            SMap data(0, 0, start_node, Cigar::MATCH, *(query_window_rbegin - 1), start_num_matches);
-            auto &[best_dist, last_ext, last_node, last_op, c, num_matches] = data;
+    {
+        size_t query_dist = 0;
+        DeBruijnGraph::node_index node = start_node;
+        SMap data(0, 0, start_node, Cigar::MATCH, *(query_window_rbegin - 1), start_num_matches);
+        auto &[best_dist, last_ext, last_node, last_op, c, num_matches] = data;
 
-            for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
-                if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node, best_dist, query_dist))
-                    break;
+        for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
+            if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node, best_dist, query_dist))
+                break;
 
-                if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
-                    ++best_dist;
-                    ++query_dist;
-                    ++last_ext;
-                    ++num_matches;
-                    node = prev;
-                } else {
-                    break;
-                }
+            if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
+                ++best_dist;
+                ++query_dist;
+                ++last_ext;
+                ++num_matches;
+                node = prev;
+            } else {
+                break;
             }
-
-            set_value(
-                S,
-                0,
-                query_dist,
-                node,
-                best_dist,
-                start_node,
-                best_dist,
-                Cigar::MATCH,
-                best_dist > 0 ? *query_window_rbegin : '\0',
-                num_matches
-            );
         }
 
-        for (size_t cost = 0; cost < S.size(); ++cost) {
-            // if (S[cost].size() > S[cost].offset()) {
-            //     size_t nnodes = 0;
-            //     size_t slots = 0;
-            //     for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
-            //         if (S[cost][query_dist].size()) {
-            //             nnodes += S[cost][query_dist].size();
-            //             ++slots;
-            //         }
-            //     }
-            //     common::logger->info("Cost: {}\tslots: {}\tnnodes: {}", cost, slots, nnodes);
-            // }
-            for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
-                assert(query_dist <= query_size);
-                size_t it_dist = 0;
-                for (auto it = S[cost][query_dist].begin(); it != S[cost][query_dist].end(); ++it, ++it_dist) {
-                    node_index node = it->first;
-                    size_t best_dist = std::get<0>(it->second);
-                    Cigar::Operator last_op = std::get<3>(it->second);
-                    size_t num_matches = std::get<5>(it->second);
-                    assert(last_op != Cigar::CLIPPED);
+        set_value(
+            S,
+            0,
+            query_dist,
+            node,
+            best_dist,
+            start_node,
+            best_dist,
+            Cigar::MATCH,
+            best_dist > 0 ? *query_window_rbegin : '\0',
+            num_matches
+        );
+    }
 
-                    if (terminate(cost, it->second, query_dist, node)) {
-                        // common::logger->info("Halted at cost {}", cost);
-                        return;
-                    }
+    // size_t max_edit_cost = std::max({ gap_opn, gap_ext, mismatch_cost });
 
-                    if (terminate_branch(cost, it->second, query_dist, node))
+    // for (size_t cost = 0; cost < S.size() + max_edit_cost; ++cost) {
+    for (size_t cost = 0; cost < S.size(); ++cost) {
+        // if (S[cost].size() > S[cost].offset()) {
+        //     size_t nnodes = 0;
+        //     size_t slots = 0;
+        //     for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
+        //         if (S[cost][query_dist].size()) {
+        //             nnodes += S[cost][query_dist].size();
+        //             ++slots;
+        //         }
+        //     }
+        //     common::logger->info("Cost: {}\tslots: {}\tnnodes: {}", cost, slots, nnodes);
+        // }
+
+        // // indel open from existing bucket
+        // if (static_cast<ssize_t>(cost) >= gap_opn) {
+        //     size_t prev_cost = cost - gap_opn;
+        //     if (prev_cost < S.size()) {
+        //         for (size_t query_dist = S[prev_cost].offset(); query_dist < S[prev_cost].size(); ++query_dist) {
+        //             for (const auto &[node, data] : S[prev_cost].get(query_dist)) {
+        //                 size_t best_dist = std::get<0>(data);
+        //                 Cigar::Operator last_op = std::get<3>(data);
+        //                 node_index last_node = std::get<2>(data);
+        //                 // size_t num_matches = std::get<5>(data);
+        //                 assert(last_op != Cigar::CLIPPED);
+
+        //                 if (terminate_branch(cost, SMap(best_dist + 1, 0, last_node, Cigar::DELETION, '\0', 0), query_dist, node))
+        //                     continue;
+
+        //                 // deletion
+        //                 if (last_op != Cigar::INSERTION) {
+        //                     call_incoming_kmers(node, [&,node=node](auto prev, char c) {
+        //                         if (c != boss::BOSS::kSentinel
+        //                                 // && !terminate_branch(cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
+        //                                 && set_value(F, cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, '\0', 0)) {
+        //                             set_value(S, cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, '\0', 0);
+        //                         }
+        //                     }, best_dist, query_dist);
+        //                 }
+
+        //                 // insertion
+        //                 if (last_op != Cigar::DELETION) {
+        //                     // TODO
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+
+        // // indel extension
+        // if (static_cast<ssize_t>(cost) >= gap_ext) {
+        //     size_t prev_cost = cost - gap_opn;
+        //     if (prev_cost < S.size()) {
+        //         for (size_t query_dist = S[prev_cost].offset(); query_dist < S[prev_cost].size(); ++query_dist) {
+        //         }
+        //     }
+        //     // size_t prev_cost = cost - gap_ext;
+        //     // if (const auto *del_ext_bucket = get_bucket(F, prev_cost, query_dist, node)) {
+        //     //         // extension
+        //     //         const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
+        //     //         assert(last_node != DeBruijnGraph::npos);
+        //     //         assert(last_num_ops > 0);
+        //     //         assert(last_dist >= last_num_ops);
+        //     //         if (last_dist < max_dist) {
+        //     //             ssize_t next_ext_cost = cost + gap_ext;
+        //     //             call_incoming_kmers(node, [&](auto prev, char c) {
+        //     //                 if (c == boss::BOSS::kSentinel)
+        //     //                     return;
+
+        //     //                 const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
+        //     //                 if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
+        //     //                         && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
+        //     //                         && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
+        //     //                     it = S[cost][query_dist].begin() + it_dist;
+        //     //                 }
+        //     //             }, last_dist, query_dist);
+        //     //         }
+        //     //     }
+        // }
+
+        // if (cost >= S.size())
+        //     continue;
+
+        for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
+            assert(query_dist <= query_size);
+
+            size_t it_dist = 0;
+            bool done = false;
+            for (auto it = S[cost][query_dist].begin(); it != S[cost][query_dist].end(); ++it, ++it_dist) {
+                node_index node = it->first;
+                size_t best_dist = std::get<0>(it->second);
+                Cigar::Operator last_op = std::get<3>(it->second);
+                size_t num_matches = std::get<5>(it->second);
+                assert(last_op != Cigar::CLIPPED);
+
+                if (terminate(cost, it->second, query_dist, node)) {
+                    done = true;
+                    // common::logger->info("Halted at cost {}", cost);
+                    break;
+                }
+
+                if (terminate_branch(cost, it->second, query_dist, node))
+                    continue;
+
+                std::ignore = last_op;
+                // // forward creation of insertions
+                // if (query_dist < query_size) {
+                //     // extend a previous insertion
+                //     if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
+                //         auto [last_dist, last_num_ops] = *ins_ext_bucket;
+                //         assert(last_num_ops > 0);
+                //         assert(query_dist >= last_num_ops);
+                //         ssize_t next_ext_cost = cost + gap_ext;
+                //         if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
+                //                 && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0)
+                //                 && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
+                //             it = S[cost][query_dist].begin() + it_dist;
+                //         }
+                //     }
+
+                //     // open an insertion
+                //     if (last_op != Cigar::DELETION) {
+                //         ssize_t next_opn_cost = cost + gap_opn;
+                //         if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
+                //                 && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0)
+                //                 && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
+                //             it = S[cost][query_dist].begin() + it_dist;
+                //         }
+                //     }
+                // }
+
+                if (best_dist < max_dist) {
+                    std::vector<std::pair<node_index, char>> prevs;
+                    call_incoming_kmers(node, [&](auto prev, char c) {
+                        if (c != boss::BOSS::kSentinel)
+                            prevs.emplace_back(prev, c);
+                    }, best_dist, query_dist);
+
+                    if (prevs.empty())
                         continue;
 
-                    // forward creation of insertions
-                    if (query_dist < query_size) {
-                        // extend a previous insertion
-                        if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
-                            auto [last_dist, last_num_ops] = *ins_ext_bucket;
-                            assert(last_num_ops > 0);
-                            assert(query_dist >= last_num_ops);
+                    // deletion
+                    if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
+                        // extension
+                        const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
+                        assert(last_node != DeBruijnGraph::npos);
+                        assert(last_num_ops > 0);
+                        assert(last_dist >= last_num_ops);
+                        if (last_dist < max_dist) {
                             ssize_t next_ext_cost = cost + gap_ext;
-                            if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
-                                    && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0)
-                                    && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
-                                it = S[cost][query_dist].begin() + it_dist;
-                            }
-                        }
+                            call_incoming_kmers(node, [&](auto prev, char c) {
+                                if (c == boss::BOSS::kSentinel)
+                                    return;
 
-                        // open an insertion
-                        if (last_op != Cigar::DELETION) {
-                            ssize_t next_opn_cost = cost + gap_opn;
-                            if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
-                                    && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0)
-                                    && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
+                                const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
+                                if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
+                                        && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
+                                        && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
+                                    it = S[cost][query_dist].begin() + it_dist;
+                                }
+                            }, last_dist, query_dist);
+                        }
+                    }
+
+                    if (last_op != Cigar::INSERTION) {
+                        ssize_t next_opn_cost = cost + gap_opn;
+                        for (const auto &[prev, c] : prevs) {
+                            if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
+                                    && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, '\0', 0)
+                                    && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
                                 it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
 
-                    if (best_dist < max_dist) {
-                        std::vector<std::pair<node_index, char>> prevs;
-                        call_incoming_kmers(node, [&](auto prev, char c) {
-                            if (c != boss::BOSS::kSentinel)
-                                prevs.emplace_back(prev, c);
-                        }, best_dist, query_dist);
+                    if (query_dist < query_size) {
+                        // match
+                        auto local_query_window_begin = query_window_begin;
+                        auto local_query_window_end = query_window_end;
+                        local_query_window_end -= query_dist;
 
-                        if (prevs.empty())
-                            continue;
+                        auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
+                        auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
 
-                        // deletion
-                        if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
-                            // extension
-                            const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
-                            assert(last_node != DeBruijnGraph::npos);
-                            assert(last_num_ops > 0);
-                            assert(last_dist >= last_num_ops);
-                            if (last_dist < max_dist) {
-                                ssize_t next_ext_cost = cost + gap_ext;
-                                call_incoming_kmers(node, [&](auto prev, char c) {
-                                    if (c == boss::BOSS::kSentinel)
-                                        return;
-
-                                    const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
-                                    if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
-                                            && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
-                                            && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
-                                        it = S[cost][query_dist].begin() + it_dist;
-                                    }
-                                }, last_dist, query_dist);
+                        for (auto [prev, c] : prevs) {
+                            SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
+                            auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
+                            size_t cur_query_dist = query_dist + 1;
+                            size_t cur_cost = cost;
+                            if (c != *local_query_window_rbegin) {
+                                cur_cost += mismatch_cost;
+                                op = Cigar::MISMATCH;
+                                cur_num_matches = 0;
                             }
-                        }
 
-                        if (last_op != Cigar::INSERTION) {
-                            ssize_t next_opn_cost = cost + gap_opn;
-                            for (const auto &[prev, c] : prevs) {
-                                if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
-                                        && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, '\0', 0)
-                                        && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
-                                    it = S[cost][query_dist].begin() + it_dist;
+                            for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
+                                    break;
+
+                                if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
+                                    ++cur_best;
+                                    ++cur_query_dist;
+                                    ++cur_num_matches;
+                                    prev = pprev;
+                                } else {
+                                    break;
                                 }
                             }
-                        }
 
-                        if (query_dist < query_size) {
-                            // match
-                            auto local_query_window_begin = query_window_begin;
-                            auto local_query_window_end = query_window_end;
-                            local_query_window_end -= query_dist;
-
-                            auto local_query_window_rbegin = std::make_reverse_iterator(local_query_window_end);
-                            auto local_query_window_rend = std::make_reverse_iterator(local_query_window_begin);
-
-                            for (auto [prev, c] : prevs) {
-                                SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1);
-                                auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches] = data;
-                                size_t cur_query_dist = query_dist + 1;
-                                size_t cur_cost = cost;
-                                if (c != *local_query_window_rbegin) {
-                                    cur_cost += mismatch_cost;
-                                    op = Cigar::MISMATCH;
-                                    cur_num_matches = 0;
-                                }
-
-                                for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                    if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
-                                        break;
-
-                                    if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
-                                        ++cur_best;
-                                        ++cur_query_dist;
-                                        ++cur_num_matches;
-                                        prev = pprev;
-                                    } else {
-                                        break;
-                                    }
-                                }
-
-                                if (set_value(
-                                    S,
-                                    cur_cost,
-                                    cur_query_dist,
-                                    prev,
-                                    cur_best,
-                                    node,
-                                    cur_query_dist - query_dist,
-                                    op,
-                                    c,
-                                    cur_num_matches
-                                )) {
-                                    it = S[cost][query_dist].begin() + it_dist;
-                                }
+                            if (set_value(
+                                S,
+                                cur_cost,
+                                cur_query_dist,
+                                prev,
+                                cur_best,
+                                node,
+                                cur_query_dist - query_dist,
+                                op,
+                                c,
+                                cur_num_matches
+                            )) {
+                                it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
                 }
             }
+            if (done)
+                break;
         }
-    };
-
-    fill_table();
+    }
 
     // backtrack
     size_t num_explored_nodes = 0;
@@ -1026,6 +1101,44 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         std::cerr << "\t" << a << "\n";
     }
 
+    const auto &graph = query_.get_graph();
+    ssize_t k = graph.get_k();
+
+    for (auto it = anchors.rbegin(); it + 1 != anchors.rend(); ++it) {
+        auto &a_i = *(it + 1);
+        if (graph.has_single_outgoing(a_i.get_path().back())
+                && graph.indegree(a_i.get_path().back()) <= 1) {
+            auto &a_j = *it;
+            std::string_view query_i = a_i.get_seed();
+            std::string_view query_j = a_j.get_seed();
+            auto a_i_spelling = a_i.get_path_spelling();
+            size_t i_seed_size = k - (a_i_spelling.size() - query_i.size());
+            auto last_node_i_query = query_i.end() - i_seed_size;
+            if (last_node_i_query + 1 >= query_j.begin()) {
+                size_t j = last_node_i_query + 1 - query_j.begin();
+                bool found = false;
+                graph.adjacent_outgoing_nodes(a_i.get_path().back(), [&](DeBruijnGraph::node_index next) {
+                    found |= next == a_j.get_path()[j];
+                });
+
+                if (found) {
+                    // merge these anchors
+                    a_i.append(a_j, config_, &graph);
+                    a_j = Anchor();
+                }
+            }
+        }
+    }
+
+    auto rem_it = std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); });
+    if (rem_it != anchors.end()) {
+        anchors.erase(rem_it, anchors.end());
+        std::cerr << "Merged anchors\n";
+        for (const auto &a : anchors) {
+            std::cerr << "\t" << a << "\n";
+        }
+    }
+
     sdsl::bit_vector selected(anchors.size(), false);
 
     bool first_chain = true;
@@ -1035,7 +1148,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     std::string dummy(query_.get_query().size(), '$');
 
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
-        [this,&graph=query_.get_graph(),&dummy,k=static_cast<ssize_t>(query_.get_graph().get_k())](
+        [this,k,&graph,&dummy](
                 const Anchor &a_j,
                 ssize_t max_dist,
                 AnchorIt begin,
@@ -1067,31 +1180,75 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 if (score <= score_j)
                     continue;
 
-                if (query_i.end() > query_j.begin()) {
-                    // overlap
-                    // std::cerr << "ol" << a_i << " -> " << a_j << "\n";
-                    size_t i_seed_size = k - (a_i.get_path_spelling().size() - query_i.size());
-                    auto last_node_i_query = query_i.end() - i_seed_size;
-                    if (last_node_i_query + 1 >= query_j.begin()) {
-                        size_t num_chars_in_j = last_node_i_query - query_j.begin() + 1;
-                        if (num_chars_in_j < a_j.get_path().size()
-                                && graph.traverse(a_i.get_path().back(), *query_i.end()) == a_j.get_path()[num_chars_in_j]) {
-                            // traversal worked
-                            // std::cerr << "\tworked\n";
-                            update_score(score, it, dist);
-                        }
-                    } else {
-                        // gap, so we need to count indels
-                        size_t gap = query_j.begin() - (last_node_i_query + 1);
-                        // std::cerr << "dl" << a_i << " -> " << a_j << "\t" << gap << "\n";
-                        score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
-                        if (score > score_j)
-                            update_score(score, it, dist);
+                size_t i_seed_size = k - (a_i.get_path_spelling().size() - query_i.size());
+                auto last_node_i_query = query_i.end() - i_seed_size;
+
+                if (last_node_i_query >= query_j.begin()) {
+                    // there should be overlapping nodes
+                    std::cerr << "olN" << a_i << " -> " << a_j << "\n";
+                    size_t j_start = last_node_i_query - query_j.begin();
+                    if (a_i.get_path().size() >= j_start
+                            && a_j.get_path().size() >= j_start
+                            && std::equal(a_j.get_path().begin(), a_j.get_path().begin() + j_start,
+                                          a_i.get_path().end() - j_start, a_i.get_path().end())) {
+                        update_score(score, it, dist);
                     }
                     continue;
-                } else if (dist <= k || query_i.end() == query_j.begin()) {
+                } else if (query_i.end() > query_j.begin()) {
+                    // overlapping nucleotides
+                    std::cerr << "oln" << a_i << " -> " << a_j << "\n";
+                    const std::string spelling = a_j.get_path_spelling();
+                    const char *jt_end = spelling.c_str() + k;
+                    const char *jt = jt_end - (query_j.begin() - last_node_i_query);
+                    ssize_t num_matches = 0;
+                    DeBruijnGraph::node_index last_node = DeBruijnGraph::npos;
+                    graph.traverse(a_i.get_path().back(), jt, jt_end, [&](DeBruijnGraph::node_index cur) {
+                        ++num_matches;
+                        last_node = cur;
+                    });
+                    assert(num_matches < jt_end - jt || last_node == a_j.get_path()[0]);
+                    std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
+                    if (num_matches == jt_end - jt) {
+                        std::cerr << "\t\tworked!" << "\n";
+                        update_score(score, it, dist);
+                    }
+
+                    // std::cerr << "ol" << a_i << " -> " << a_j << "\n";
+                    // if (last_node_i_query + 1 >= query_j.begin()) {
+                    //     size_t num_chars_in_j = last_node_i_query - query_j.begin() + 1;
+                    //     if (num_chars_in_j < a_j.get_path().size()
+                    //             && graph.traverse(a_i.get_path().back(), *query_i.end()) == a_j.get_path()[num_chars_in_j]) {
+                    //         // traversal worked
+                    //         // std::cerr << "\tworked\n";
+                    //         update_score(score, it, dist);
+                    //     }
+                    // // } else {
+                    // //     size_t gap = query_j.begin() - (last_node_i_query + 1);
+                    // //     // std::cerr << "dl" << a_i << " -> " << a_j << "\t" << gap << "\n";
+                    // //     score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+                    // //     if (score > score_j)
+                    // //         update_score(score, it, dist);
+                    // }
                     continue;
+                // } else if (dist <= k) {
+                    // first, check for insertion
+                    // if (graph.traverse(a_i.get_path().back(), a_j.get_path_spelling()[k - 1]) == a_j.get_path()[0]) {
+                    //     size_t i_seed_size = k - (a_i.get_path_spelling().size() - query_i.size());
+                    //     auto last_node_i_query = query_i.end() - i_seed_size;
+                    //     size_t ins_length = query_j.begin() - last_node_i_query - 1;
+                    //     DBGAlignerConfig::score_t ins_score = score + config_.gap_opening_penalty + (ins_length - 1) * config_.gap_extension_penalty;
+                    //     if (ins_score > score_j)
+                    //         update_score(ins_score, it, dist);
+                    // }
+                    // // gap, so we need to count indels
+                    // size_t gap = query_j.begin() - query_i.end() + 1;
+                    // score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+                    // if (score > score_j)
+                    //     update_score(score, it, dist);
+                    // continue;
                 }
+
+
 
                 // TODO: deal with indels?
                 assert(query_j.begin() > query_i.end());
@@ -1112,6 +1269,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                             || std::any_of(chain.begin(), chain.end(),
                                            [](const auto &a) { return a.first->get_path().size() > 1; });
 
+            ret_val &= std::all_of(chain.begin(), chain.end(),
+                                   [&](const auto &a) { return !selected[a.first - anchors.begin()]; });
 
             if (ret_val) {
                 common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
@@ -1140,7 +1299,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             return ret_val;
         },
-        [this,match_score = config_.match_score("A")](
+        [this,match_score=config_.match_score("A")](
                 AnchorIt last,
                AnchorIt next,
                Alignment&& aln,
@@ -1196,6 +1355,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
+                // common::logger->info("Checkbt: n: {}, d: {}, qd: {} / {}, s: {}, nm: {}",
+                //                      graph.get_node_sequence(node), dist, query_dist, query_window.size(),
+                //                      get_score(cost, query_dist, dist), num_matches);
+
                 if (dist == 0 || query_dist == 0 || num_matches < next->get_seed().size())
                     return false;
 
@@ -1204,10 +1367,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-                if (dist == 0 && query_dist == 0)
-                    return false;
+                // common::logger->info("Check: n: {}, d: {}, qd: {} / {}, s: {}",
+                //                      graph.get_node_sequence(node), dist, query_dist, query_window.size(),
+                //                      get_score(cost, query_dist, dist));
 
-                if (num_matches < next->get_seed().size())
+                if (dist == 0 && query_dist == 0)
                     return false;
 
                 if (query_dist == query_window.size())
@@ -1216,6 +1380,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
                 if (score <= 0)
                     return true;
+
+                // if (num_matches < next->get_seed().size())
+                //     return false;
 
                 return false;
 
@@ -1279,6 +1446,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     std::ignore = cost;
                     std::ignore = data;
                     std::ignore = query_dist;
+                    // const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
+                    // common::logger->info("Checkt: n: {}, d: {}, qd: {} / {}, s: {}",
+                    //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
+                    //                  get_score(cost, query_dist, dist));
                     return query_dist == query_window.size() && node == next->get_path()[0];
                     // // terminate
                     // const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
