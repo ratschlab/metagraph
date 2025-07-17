@@ -1350,13 +1350,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         + (query_dist == query_window.size() && !next->get_clipping() ? config_.left_end_bonus : 0);
             };
 
+            bool aln_found = false;
+
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                 // common::logger->info("Checkbt: n: {}, d: {}, qd: {} / {}, s: {}, nm: {}",
                 //                      graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                 //                      get_score(cost, query_dist, dist), num_matches);
 
-                if (dist == 0 || query_dist == 0 || num_matches < next->get_seed().size())
+                if (aln_found || dist == 0 || query_dist == 0 || num_matches < next->get_seed().size())
                     return false;
 
                 return query_dist == query_window.size() && node == next->get_path()[0];
@@ -1435,6 +1437,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                     std::move(cigar),
                                     aln.get_end_trim());
                     std::cerr << "\t\t" << next_aln << std::endl;
+                    aln_found = true;
                     callback(std::move(next_aln));
                 },
                 start_backtracking,
@@ -1447,7 +1450,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     // common::logger->info("Checkt: n: {}, d: {}, qd: {} / {}, s: {}",
                     //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                  get_score(cost, query_dist, dist));
-                    return query_dist == query_window.size() && node == next->get_path()[0];
+                    return !aln_found && query_dist == query_window.size() && node == next->get_path()[0];
                     // // terminate
                     // const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                     // DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
