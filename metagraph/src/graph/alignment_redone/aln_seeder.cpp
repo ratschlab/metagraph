@@ -506,32 +506,31 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                 if (terminate_branch(cost, it->second, query_dist, node))
                     continue;
 
-                std::ignore = last_op;
-                // // forward creation of insertions
-                // if (query_dist < query_size) {
-                //     // extend a previous insertion
-                //     if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
-                //         auto [last_dist, last_num_ops] = *ins_ext_bucket;
-                //         assert(last_num_ops > 0);
-                //         assert(query_dist >= last_num_ops);
-                //         ssize_t next_ext_cost = cost + gap_ext;
-                //         if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
-                //                 && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0)
-                //                 && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
-                //             it = S[cost][query_dist].begin() + it_dist;
-                //         }
-                //     }
+                // forward creation of insertions
+                if (query_dist < query_size) {
+                    // extend a previous insertion
+                    if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
+                        auto [last_dist, last_num_ops] = *ins_ext_bucket;
+                        assert(last_num_ops > 0);
+                        assert(query_dist >= last_num_ops);
+                        ssize_t next_ext_cost = cost + gap_ext;
+                        if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
+                                && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0)
+                                && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
+                            it = S[cost][query_dist].begin() + it_dist;
+                        }
+                    }
 
-                //     // open an insertion
-                //     if (last_op != Cigar::DELETION) {
-                //         ssize_t next_opn_cost = cost + gap_opn;
-                //         if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
-                //                 && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0)
-                //                 && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
-                //             it = S[cost][query_dist].begin() + it_dist;
-                //         }
-                //     }
-                // }
+                    // open an insertion
+                    if (last_op != Cigar::DELETION) {
+                        ssize_t next_opn_cost = cost + gap_opn;
+                        if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
+                                && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0)
+                                && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
+                            it = S[cost][query_dist].begin() + it_dist;
+                        }
+                    }
+                }
 
                 if (best_dist < max_dist) {
                     std::vector<std::pair<node_index, char>> prevs;
