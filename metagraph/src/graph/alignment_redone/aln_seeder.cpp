@@ -1247,8 +1247,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     // continue;
                 }
 
-
-
                 // TODO: deal with indels?
                 assert(query_j.begin() > query_i.end());
                 size_t nmismatch = query_j.begin() - query_i.end();

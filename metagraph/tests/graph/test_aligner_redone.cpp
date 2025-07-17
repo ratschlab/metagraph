@@ -361,7 +361,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     run_alignment(*graph, config, query, { reference }, { "5=9I5=" }, 0, true);
