@@ -550,13 +550,17 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         assert(last_dist >= last_num_ops);
                         if (last_dist < max_dist) {
                             ssize_t next_ext_cost = cost + gap_ext;
-                            std::vector<std::pair<DeBruijnGraph::node_index, char>> prevs;
-                            call_incoming_kmers(node, [&](auto prev, char c) {
-                                if (c != boss::BOSS::kSentinel)
-                                    prevs.emplace_back(prev, c);
-                            }, last_dist, query_dist);
+                            std::vector<std::pair<DeBruijnGraph::node_index, char>> last_prevs;
+                            if (best_dist == last_dist) {
+                                last_prevs = prevs;
+                            } else {
+                                call_incoming_kmers(node, [&](auto prev, char c) {
+                                    if (c != boss::BOSS::kSentinel)
+                                        last_prevs.emplace_back(prev, c);
+                                }, last_dist, query_dist);
+                            }
 
-                            for (const auto &[prev, c] : prevs) {
+                            for (const auto &[prev, c] : last_prevs) {
                                 if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
                                         && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
                                         && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
@@ -1107,41 +1111,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
     const auto &graph = query_.get_graph();
     ssize_t k = graph.get_k();
-
-    for (auto it = anchors.rbegin(); it + 1 != anchors.rend(); ++it) {
-        auto &a_i = *(it + 1);
-        if (graph.has_single_outgoing(a_i.get_path().back())
-                && graph.indegree(a_i.get_path().back()) <= 1) {
-            auto &a_j = *it;
-            std::string_view query_i = a_i.get_seed();
-            std::string_view query_j = a_j.get_seed();
-            auto a_i_spelling = a_i.get_path_spelling();
-            size_t i_seed_size = k - (a_i_spelling.size() - query_i.size());
-            auto last_node_i_query = query_i.end() - i_seed_size;
-            if (last_node_i_query + 1 >= query_j.begin()) {
-                size_t j = last_node_i_query + 1 - query_j.begin();
-                bool found = false;
-                graph.adjacent_outgoing_nodes(a_i.get_path().back(), [&](DeBruijnGraph::node_index next) {
-                    found |= next == a_j.get_path()[j];
-                });
-
-                if (found) {
-                    // merge these anchors
-                    a_i.append(a_j, config_, &graph);
-                    a_j = Anchor();
-                }
-            }
-        }
-    }
-
-    auto rem_it = std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); });
-    if (rem_it != anchors.end()) {
-        anchors.erase(rem_it, anchors.end());
-        std::cerr << "Merged anchors\n";
-        for (const auto &a : anchors) {
-            std::cerr << "\t" << a << "\n";
-        }
-    }
 
     sdsl::bit_vector selected(anchors.size(), false);
 
