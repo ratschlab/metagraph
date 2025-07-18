@@ -102,40 +102,40 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
     }
 
-    if (anchors.size() && (config_.max_seed_length > config_.min_seed_length || config_.min_seed_length > graph.get_k())) {
-        // common::logger->info("Merging {} anchors", anchors.size());
-        auto rbegin = anchors.rbegin();
-        auto rend = anchors.rend();
-        for (auto it = rbegin; it + 1 != rend; ++it) {
-            auto &a_j = *it;
-            auto &a_i = *(it + 1);
-            if (a_i.empty() || a_j.empty() || a_i.get_orientation() != a_j.get_orientation()
-                    || a_i.get_label_class() != a_j.get_label_class() || a_i.get_end_trim())
-                continue;
+    // if (anchors.size() && (config_.max_seed_length > config_.min_seed_length || config_.min_seed_length > graph.get_k())) {
+    //     // common::logger->info("Merging {} anchors", anchors.size());
+    //     auto rbegin = anchors.rbegin();
+    //     auto rend = anchors.rend();
+    //     for (auto it = rbegin; it + 1 != rend; ++it) {
+    //         auto &a_j = *it;
+    //         auto &a_i = *(it + 1);
+    //         if (a_i.empty() || a_j.empty() || a_i.get_orientation() != a_j.get_orientation()
+    //                 || a_i.get_label_class() != a_j.get_label_class() || a_i.get_end_trim())
+    //             continue;
 
-            std::string_view a_i_s = a_i.get_spelling();
-            std::string_view a_j_s = a_j.get_spelling();
-            size_t overlap = graph.get_k() - 1;
-            if (a_i_s.size() >= overlap
-                    && a_j_s.size() >= overlap
-                    && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
-                    && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config_.max_seed_length
-                    && (a_i.get_seed().size() < config_.min_seed_length
-                            || (graph.has_single_incoming(a_j.get_path()[0])
-                            && graph.has_single_outgoing(a_i.get_path().back())))
-                    && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
-                // merge them
-                a_i.append(a_j, config_, &query_.get_graph());
-                a_j = std::decay_t<decltype(a_j)>();
-            }
-        }
+    //         std::string_view a_i_s = a_i.get_spelling();
+    //         std::string_view a_j_s = a_j.get_spelling();
+    //         size_t overlap = graph.get_k() - 1;
+    //         if (a_i_s.size() >= overlap
+    //                 && a_j_s.size() >= overlap
+    //                 && a_i.get_clipping() + a_i_s.size() - a_j.get_clipping() >= overlap
+    //                 && a_j.get_clipping() + a_j_s.size() - a_i.get_clipping() <= config_.max_seed_length
+    //                 && (a_i.get_seed().size() < config_.min_seed_length
+    //                         || (graph.has_single_incoming(a_j.get_path()[0])
+    //                         && graph.has_single_outgoing(a_i.get_path().back())))
+    //                 && std::equal(a_i_s.end() - overlap, a_i_s.end(), a_j_s.begin(), a_j_s.begin() + overlap)) {
+    //             // merge them
+    //             a_i.append(a_j, config_, &query_.get_graph());
+    //             a_j = std::decay_t<decltype(a_j)>();
+    //         }
+    //     }
 
-        auto end = std::remove_if(anchors.begin(), anchors.end(), [&](auto &a) {
-            return a.empty() || a.get_seed().size() < config_.min_seed_length;
-        });
+    //     auto end = std::remove_if(anchors.begin(), anchors.end(), [&](auto &a) {
+    //         return a.empty() || a.get_seed().size() < config_.min_seed_length;
+    //     });
 
-        anchors.erase(end, anchors.end());
-    }
+    //     anchors.erase(end, anchors.end());
+    // }
 
     return anchors;
 }
@@ -1230,6 +1230,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     //     update_score(score, it, dist);
                     // continue;
                 } else if (query_j.begin() == query_i.end()) {
+                    size_t gap = k;
+                    score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+                    std::cerr << "gap\t" << a_i << " -> " << a_j << "\t" << gap << "\t" << score << "\n";
+                    if (score > score_j) {
+                        std::cerr << "\t\tworked! " << score << "\n";
+                        update_score(score, it, dist);
+                    }
                     continue;
                 }
 
