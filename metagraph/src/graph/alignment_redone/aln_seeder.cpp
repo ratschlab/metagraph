@@ -1189,10 +1189,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         ++num_matches;
                         last_node = cur;
                     });
-                    assert(num_matches < jt_end - jt || last_node == a_j.get_path()[0]);
-                    std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
-                    if (num_matches == jt_end - jt) {
-                        std::cerr << "\t\tworked! " << score << "\n";
+                    // assert(num_matches < jt_end - jt || last_node == a_j.get_path()[0]);
+                    // std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
+                    if (num_matches == jt_end - jt && last_node == a_j.get_path()[0]) {
+                        // std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
 
