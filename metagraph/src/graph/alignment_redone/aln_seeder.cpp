@@ -1158,7 +1158,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 DBGAlignerConfig::score_t score = base_score + config_.match_score(added_seq);
 
-                std::cerr << "chh\t" << a_i << " -> " << a_j << "\t" << score << " vs. " << score_j << "\n";
+                // std::cerr << "chh\t" << a_i << " -> " << a_j << "\t" << score << " vs. " << score_j << "\n";
                 if (score <= score_j)
                     continue;
 
@@ -1167,19 +1167,19 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 if (last_node_i_query >= query_j.begin()) {
                     // there should be overlapping nodes
-                    std::cerr << "olN" << a_i << " -> " << a_j << "\n";
+                    // std::cerr << "olN" << a_i << " -> " << a_j << "\n";
                     size_t j_start = last_node_i_query - query_j.begin();
                     if (a_i.get_path().size() >= j_start
                             && a_j.get_path().size() >= j_start
                             && std::equal(a_j.get_path().begin(), a_j.get_path().begin() + j_start,
                                           a_i.get_path().end() - j_start, a_i.get_path().end())) {
-                        std::cerr << "\t\tworked! " << score << "\n";
+                        // std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
                     continue;
                 } else if (query_i.end() > query_j.begin()) {
                     // overlapping nucleotides
-                    std::cerr << "oln" << a_i << " -> " << a_j << "\n";
+                    // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     const std::string spelling = a_j.get_path_spelling();
                     const char *jt_end = spelling.c_str() + k;
                     const char *jt = jt_end - (query_j.begin() - last_node_i_query);
@@ -1232,9 +1232,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 } else if (query_j.begin() == query_i.end()) {
                     size_t gap = k;
                     score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
-                    std::cerr << "gap\t" << a_i << " -> " << a_j << "\t" << gap << "\t" << score << "\n";
+                    // std::cerr << "gap\t" << a_i << " -> " << a_j << "\t" << gap << "\t" << score << "\n";
                     if (score > score_j) {
-                        std::cerr << "\t\tworked! " << score << "\n";
+                        // std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
                     continue;
@@ -1244,10 +1244,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 size_t nmismatch = query_j.begin() - query_i.end();
                 DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
                                                            std::string_view(dummy.c_str(), nmismatch));
-                std::cerr << "uk" << a_i << " -> " << a_j << "\t" << nmismatch << "\t" << cur_mismatch << "\n";
+                // std::cerr << "uk" << a_i << " -> " << a_j << "\t" << nmismatch << "\t" << cur_mismatch << "\n";
                 score += cur_mismatch;
                 if (score > score_j) {
-                    std::cerr << "\t\tworked! " << score << "\n";
+                    // std::cerr << "\t\tworked! " << score << "\n";
                     update_score(score, it, dist);
                 }
             }
