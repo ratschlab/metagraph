@@ -831,14 +831,14 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;
-    std::string reference =    "GTAGTGCTAGCTGTAGTCGTGCTGATGC";
-    std::string query =        "GTAGTGCTACCTGTAGTCGTGGTGATGC";
-    //                                   X           X
+    std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGC";
+    std::string query =        "GTAGTGCTACCTTGTAGTCGTGGTGATGC";
+    //                                   X            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    run_alignment(*graph, config, query, { reference }, { "9=1X11=1X6=" });
+    run_alignment(*graph, config, query, { reference }, { "9=1X12=1X6=" });
 }
 
 // TYPED_TEST(DBGAlignerTest, align_nodummy) {
