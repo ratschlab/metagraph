@@ -13,7 +13,7 @@ namespace mtg::graph::align_redone {
 class Cigar {
   public:
     enum Operator : int8_t {
-        CLIPPED,
+        CLIPPED = 0,
         MISMATCH,
         MATCH,
         DELETION,

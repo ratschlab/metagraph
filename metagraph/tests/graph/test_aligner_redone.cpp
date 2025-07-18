@@ -263,9 +263,9 @@ TYPED_TEST(DBGAlignerRedoneTest, variation_in_branching_point) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.gap_opening_penalty = -3;
-    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
+    config.gap_opening_penalty = -4;
+    config.gap_extension_penalty = -2;
     run_alignment(*graph, config, query, { "" }, { "8=3X4=" });
 }
 
@@ -397,9 +397,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     size_t k = 4;
-    std::string reference = "TTTCTGTATACCTTGGCGCTCTC";
-    std::string query =     "TTTCTGTATAGGCGCTCTC";
     //                                 DDDD
+    std::string reference = "TTTCTGTATACCTTGGCGCTCTC";
+    std::string query =     "TTTCTGTATA"  "GGCGCTCTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
@@ -411,9 +411,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     size_t k = 4;
+    //                           DDDD
     std::string reference = "TTTCCCTTGGCGCTCTC";
     std::string query =     "TTTC"  "GGCGCTCTC";
-    //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
