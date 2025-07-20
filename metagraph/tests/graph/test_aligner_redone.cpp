@@ -614,6 +614,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
 
+    config.gap_opening_penalty = -5;
     run_alignment(*graph, config, query, { reference.substr(10) }, { "3S4=1X9=1X8=1X39=" }, 0, true, true);
 
     config.gap_opening_penalty = -3;
@@ -918,16 +919,16 @@ TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
     size_t k = 7;
-    std::string reference = "AAAAGCT";
-    std::string query =     "AAAAGTT";
-    //                            X
+    std::string reference = "GAAAAGCT";
+    std::string query =     "GAAAAGTT";
+    //                             X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.min_seed_length = 5;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { reference }, { "5=1X1=" });
+        run_alignment(*graph, config, query, { reference }, { "6=1X1=" });
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
