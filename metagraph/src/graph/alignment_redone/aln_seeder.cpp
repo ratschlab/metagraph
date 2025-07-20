@@ -928,7 +928,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             std::cerr << "\tskipfwd\t" << aln << "\n";
             fwd_exts.emplace_back(aln);
         }
-    } else if (!aln.get_end_trim()) {
+    } else {
         std::string_view query_window = aln.get_query();
         query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
 
@@ -1509,7 +1509,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             // std::ignore = last_to_next_dist;
             // std::ignore = score_up_to_now;
         },
-        [&alignments](Alignment&& aln) { alignments.emplace_back(std::move(aln)); }
+        [&alignments](Alignment&& aln) {
+            aln.trim_end();
+            alignments.emplace_back(std::move(aln));
+        }
     );
 
     size_t num_selected = sdsl::util::cnt_one_bits(selected);

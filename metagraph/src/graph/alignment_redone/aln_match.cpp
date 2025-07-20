@@ -116,35 +116,50 @@ std::ostream& operator<<(std::ostream &out, const Match &a) {
 }
 
 size_t Anchor::trim_end() {
-    size_t end_trim = get_end_trim();
-    if (end_trim == 0)
+    assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+    if (suffix_.empty())
         return 0;
 
     size_t num_trimmed = 0;
-    while (end_trim && path_.size() > 1) {
-        assert(suffix_.size());
+
+#ifndef NDEBUG
+    std::string old_spelling(get_spelling());
+#endif
+
+    while (suffix_.size() && path_.size() > 1) {
         suffix_.pop_back();
         path_.pop_back();
-        --end_trim;
         ++num_trimmed;
+        assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+        assert(get_spelling() == old_spelling);
     }
+
+    assert(get_spelling() == old_spelling);
 
     return num_trimmed;
 }
 
 size_t Alignment::trim_end() {
-    size_t end_trim = get_end_trim();
-    if (end_trim == 0)
+    assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+    if (end_trim_ == 0)
         return 0;
 
+#ifndef NDEBUG
+    std::string old_spelling(get_spelling());
+#endif
+
     size_t num_trimmed = 0;
-    while (end_trim && path_.size() > 1) {
+    while (end_trim_ && path_.size() > 1) {
         assert(path_spelling_.size());
         path_spelling_.pop_back();
         path_.pop_back();
-        --end_trim;
+        --end_trim_;
         ++num_trimmed;
+        assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+        assert(get_spelling() == old_spelling);
     }
+
+    assert(get_spelling() == old_spelling);
 
     return num_trimmed;
 }
