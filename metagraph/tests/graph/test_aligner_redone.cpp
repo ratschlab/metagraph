@@ -685,7 +685,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     DBGAlignerConfig config;
     config.min_seed_length = 9;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query, { reference.substr(3, 50) }, { "31=1I2=1X3=2I1=3X9=" });
     } else {
         run_alignment(*graph, config, query, {}, {});
@@ -926,7 +926,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.min_seed_length = 5;
-    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query, { reference }, { "5=1X1=" });
     } else {
         run_alignment(*graph, config, query, {}, {});
@@ -943,7 +943,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = 5;
-    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query, { reference }, { "5=1X6=" });
     } else {
         run_alignment(*graph, config, query, {}, {});
@@ -961,8 +961,10 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.min_seed_length = 15;
-    if constexpr(std::is_same_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" }, { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" });
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        run_alignment(*graph, config, query,
+                      { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" },
+                      { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" });
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
