@@ -314,7 +314,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     assert(gap_ext % 2 == 0);
     assert(gap_opn % 2 == 0);
 
-    common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
+    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -442,7 +442,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                 size_t num_matches = std::get<5>(it->second);
                 assert(last_op != Cigar::CLIPPED);
 
-                std::cerr << "Exp: " << cost << "\t" << node << "\t" << best_dist << "," << query_dist << "\n";
+                // std::cerr << "Exp: " << cost << "\t" << node << "\t" << best_dist << "," << query_dist << "\n";
 
                 if (terminate(cost, it->second, query_dist, node)) {
                     done = true;
@@ -774,11 +774,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             assert(dist == 0);
             assert(cost == 0);
             assert(query_dist == 0);
-            std::cerr << "Ext: " << start_cost << "\t" << cigar.to_string() << "\n";
+            // std::cerr << "Ext: " << start_cost << "\t" << cigar.to_string() << "\n";
             callback(std::move(path), std::move(cigar), start_cost);
         }
     }
-    common::logger->info("Explored {} nodes", num_explored_nodes);
+    // common::logger->info("Explored {} nodes", num_explored_nodes);
 }
 
 void align_bwd(const DeBruijnGraph &graph,
@@ -864,13 +864,13 @@ void align_fwd(const DeBruijnGraph &graph,
 }
 
 void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback, bool no_bwd, bool no_fwd) const {
-    std::cerr << "Base " << aln << "\n";
+    // std::cerr << "Base " << aln << "\n";
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     std::vector<Alignment> fwd_exts;
     if (no_fwd || !aln.get_end_clipping()) {
         if (!aln.get_end_trim()) {
-            std::cerr << "\tskipfwd\t" << aln << "\n";
+            // std::cerr << "\tskipfwd\t" << aln << "\n";
             fwd_exts.emplace_back(aln);
         }
     } else {
@@ -929,8 +929,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 if (dist == 0 && query_dist == 0)
                     return false;
 
-                if (best_score == get_score(cost, dist, query_dist))
-                    std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
+                // if (best_score == get_score(cost, dist, query_dist))
+                //     std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 if (query_dist < max_query_dist)
                     return false;
 
@@ -971,7 +971,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
     for (auto &fwd_ext : fwd_exts) {
         assert(!fwd_ext.get_end_trim());
         if (no_bwd || !fwd_ext.get_clipping()) {
-            std::cerr << "\tskipbwd\t" << fwd_ext << "\n";
+            // std::cerr << "\tskipbwd\t" << fwd_ext << "\n";
             callback(std::move(fwd_ext));
             continue;
         }
@@ -1037,8 +1037,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 if (dist == 0 && query_dist == 0)
                     return false;
 
-                if (best_score == get_score(cost, dist, query_dist))
-                    std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
+                // if (best_score == get_score(cost, dist, query_dist))
+                //     std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 if (query_dist < max_query_dist)
                     return false;
 
@@ -1064,8 +1064,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     best_score = score;
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                if (query_dist == query_window.size())
-                    std::cerr << "Exppp: " << cost << "\t" << score << " vs. " << best_score << "\t" << Cigar::opt_to_char(std::get<3>(data)) << "\n";
+                // if (query_dist == query_window.size())
+                //     std::cerr << "Exppp: " << cost << "\t" << score << " vs. " << best_score << "\t" << Cigar::opt_to_char(std::get<3>(data)) << "\n";
                 // return false;
                 // return query_dist == query_window.size() && dist == max_dist;
                 return query_dist == query_window.size();
@@ -1083,10 +1083,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     using AnchorIt = std::vector<Anchor>::iterator;
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
 
-    std::cerr << "Anchors\n";
-    for (const auto &a : anchors) {
-        std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
-    }
+    // std::cerr << "Anchors\n";
+    // for (const auto &a : anchors) {
+    //     std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
+    // }
 
     std::vector<Alignment> alignments;
 
@@ -1257,12 +1257,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             ret_val &= std::all_of(chain.begin(), chain.end(),
                                    [&](const auto &a) { return !selected[a.first - anchors.begin()]; });
 
-            if (ret_val) {
-                common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                for (const auto &[it, dist] : chain) {
-                    std::cerr << "\t" << *it << "\t" << dist << "\n";
-                }
-            }
+            // if (ret_val) {
+            //     common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
+            //     for (const auto &[it, dist] : chain) {
+            //         std::cerr << "\t" << *it << "\t" << dist << "\n";
+            //     }
+            // }
 
             if (!ret_val)
                 return false;
@@ -1293,7 +1293,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                const AlignmentCallback &callback) {
             if (next->get_seed().begin() + 1 == last->get_seed().begin()) {
                 // simple extension
-                std::cerr << "Simple extension: " << *next << "\t->\t" << aln << std::endl;
+                // std::cerr << "Simple extension: " << *next << "\t->\t" << aln << std::endl;
                 // const auto &graph = query_.get_graph();
                 // size_t k = graph.get_k();
                 // if (graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
@@ -1321,13 +1321,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                 config_,
                                 std::move(cigar),
                                 aln.get_end_trim());
-                std::cerr << "\tnew aln: " << next_aln << std::endl;
+                // std::cerr << "\tnew aln: " << next_aln << std::endl;
                 callback(std::move(next_aln));
                 return;
             }
 
             // common::logger->info("aln extension {} -> {}", *next, aln);
-            std::cerr << "Alignment extension: " << *next << "\t->\t" << aln << std::endl;
+            // std::cerr << "Alignment extension: " << *next << "\t->\t" << aln << std::endl;
 
             std::string_view query_window(
                 next->get_seed().data(),
@@ -1418,7 +1418,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                     Cigar cigar(Cigar::CLIPPED, next->get_clipping());
                     cigar.append(std::move(bt_cigar));
-                    std::cerr << "\textension: " << *next << "\t" << cigar.to_string() << "\t" << aln << std::endl;
+                    // std::cerr << "\textension: " << *next << "\t" << cigar.to_string() << "\t" << aln << std::endl;
 
                     Cigar aln_cigar = aln.get_cigar();
                     aln_cigar.trim_clipping();
@@ -1432,7 +1432,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                     config_,
                                     std::move(cigar),
                                     aln.get_end_trim());
-                    std::cerr << "\t\t" << next_aln << std::endl;
+                    // std::cerr << "\t\t" << next_aln << std::endl;
                     aln_found = true;
                     callback(std::move(next_aln));
                 },
@@ -1484,11 +1484,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
         }
     );
 
-    size_t num_selected = sdsl::util::cnt_one_bits(selected);
-    common::logger->info("Selected {} / {} anchors from {} chains. Produced {} alignments",
-                            num_selected,
-                            selected.size(),
-                            num_chains, alignments.size());
+    // size_t num_selected = sdsl::util::cnt_one_bits(selected);
+    // common::logger->info("Selected {} / {} anchors from {} chains. Produced {} alignments",
+    //                         num_selected,
+    //                         selected.size(),
+    //                         num_chains, alignments.size());
 
     return alignments;
     // // common::logger->info("Computing alignments between {} anchors", anchors.size());
