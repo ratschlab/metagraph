@@ -550,6 +550,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_end_clipping) {
     run_alignment(*graph, config, query, { reference.substr(0, 17) }, { "17=7S" });
 }
 
+// TODO: implement min cell score
 // TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 //     size_t k = 7;
 //     std::string reference = "AAAAGCTTTCGAGGCCAA";
@@ -628,6 +629,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
     run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" }, 0, true, true);
 }
 
+// TODO: implement seed complexity filter
 // TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
 //     size_t k = 27;
 //     std::string reference = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGTGCTGGGATTATAGGTGTGAACCACCACACCTGGCTAATTTTTTTTGTGTGTGTGTGTGTTTTTTC";
