@@ -971,7 +971,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATCTTTTTTTT";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::PRIMARY);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
     config.min_seed_length = 9;

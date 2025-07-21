@@ -7,6 +7,7 @@
 #include "common/vector_map.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -36,7 +37,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             );
         }
     } else {
-        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        const DBGSuccinct *dbg_succ;
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+        if (canonical) {
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+        } else {
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        }
+
         if (!dbg_succ)
             return anchors;
 
@@ -61,6 +69,22 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     continue;
 
                 using edge_index = boss::BOSS::edge_index;
+
+                if (canonical) {
+                    for (edge_index rc_node = first; rc_node <= last; ++rc_node) {
+                        if (dbg_succ->in_graph(rc_node)) {
+                            DeBruijnGraph::node_index node = canonical->reverse_complement(rc_node);
+                            size_t i_rc = this_query.size() - (i + match_size);
+                            anchors.emplace_back(this_query,
+                                                 i_rc, i_rc + match_size,
+                                                 !orientation,
+                                                 std::vector<Match::node_index>{ node },
+                                                 config_,
+                                                 graph.get_node_sequence(node).substr(match_size));
+                        }
+                    }
+                }
+
                 std::vector<std::tuple<edge_index, edge_index, std::string>> traverse;
                 traverse.emplace_back(first, last, "");
                 while (traverse.size()) {
