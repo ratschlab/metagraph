@@ -623,6 +623,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
     run_alignment(*graph, config, query, { reference.substr(10) }, { "3S4=1X9=1X8=1X39=" }, 0, true, true);
 
     config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -1;
     run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" }, 0, true, true);
 }
 

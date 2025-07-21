@@ -904,11 +904,12 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 if (dist == 0 && query_dist == 0)
                     return false;
 
+                if (best_score == get_score(cost, dist, query_dist))
+                    std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 if (query_dist < max_query_dist)
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
-                // std::cerr << "BT?: " << score << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 assert(score <= best_score);
                 return score == best_score;
             },
@@ -1011,6 +1012,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 if (dist == 0 && query_dist == 0)
                     return false;
 
+                if (best_score == get_score(cost, dist, query_dist))
+                    std::cerr << "BT?: " << get_score(cost, dist, query_dist) << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 if (query_dist < max_query_dist)
                     return false;
 
@@ -1036,8 +1039,8 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     best_score = score;
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                // if (query_dist == query_window.size())
-                //     std::cerr << "Exppp: " << cost << "\n";
+                if (query_dist == query_window.size())
+                    std::cerr << "Exppp: " << cost << "\t" << score << " vs. " << best_score << "\t" << Cigar::opt_to_char(std::get<3>(data)) << "\n";
                 // return false;
                 // return query_dist == query_window.size() && dist == max_dist;
                 return query_dist == query_window.size();
