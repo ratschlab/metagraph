@@ -56,7 +56,9 @@ void run_alignment(const DeBruijnGraph &graph,
         Extender extender(aln_query, config);
         std::vector<Alignment> paths_no_extend = seeder.get_inexact_anchors();
         for (const auto &base_path : paths_no_extend) {
+            std::cerr << "BASE: " << base_path << "\n";
             extender.extend(base_path, [&](Alignment&& path) {
+                std::cerr << "\tFOUND: " << path << "\n";
                 paths.emplace_back(std::move(path));
             });
         }
@@ -647,7 +649,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 //     }
 // }
 
-// // TODO: this test is currently too slow
+// TODO: double-check this
 // TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
 //     size_t k = 6;
 //     std::vector<std::string> seqs;
@@ -684,16 +686,18 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     size_t k = 31;
-    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAG" "GTCTTC""GCCTGTGTAGATCTCGGTGGTCG";
-    std::string query =        "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAG""AGTGTTCCTGGTGGTGTAGATC";
+    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAG" "GTCTTC""GCCTGTGTAGATCTCGGTGGTCGGCTAGCTAGCTA";
+    std::string query =        "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAG""AGTGTTCCTGGTGGTGTAGATCTC";
     //                                                           I  X   II XXX
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
-    config.min_seed_length = 9;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.min_seed_length = 11;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
+    config.left_end_bonus = 5;
+    config.right_end_bonus = 5;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { reference.substr(3, 50) }, { "31=1I2=1X3=2I1=3X9=" });
+        run_alignment(*graph, config, query, { reference.substr(3, 52) }, { "31=1I2=1X3=2I1=3X11=" });
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
