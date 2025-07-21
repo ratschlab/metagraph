@@ -898,19 +898,19 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
                 size_t dist = std::get<0>(data);
-                size_t num_matches = std::get<5>(data);
+                // size_t num_matches = std::get<5>(data);
                 // if (!num_matches || dist < aln.get_end_trim() || (dist == 0 && query_dist == 0))
                 // if (!num_matches || (dist == 0 && query_dist == 0))
                 if (dist == 0 && query_dist == 0)
                     return false;
 
-                if (!num_matches && query_dist < max_query_dist)
+                if (query_dist < max_query_dist)
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
                 // std::cerr << "BT?: " << score << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 assert(score <= best_score);
-                return score == best_score && query_dist == max_query_dist;
+                return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
@@ -1004,13 +1004,19 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // start backtrack
                 size_t dist = std::get<0>(data);
-                size_t num_matches = std::get<5>(data);
-                if ((dist == 0 && query_dist == 0) || !num_matches)
+                // size_t num_matches = std::get<5>(data);
+                // if ((dist == 0 && query_dist == 0) || !num_matches)
+                //     return false;
+
+                if (dist == 0 && query_dist == 0)
+                    return false;
+
+                if (query_dist < max_query_dist)
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
                 assert(score <= best_score);
-                return score == best_score && query_dist == max_query_dist;
+                return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
