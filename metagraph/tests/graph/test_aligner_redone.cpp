@@ -965,33 +965,24 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     }
 }
 
-// #if ! _PROTEIN_GRAPH
-// TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
-//     size_t k = 31;
-//     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
-//     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
+    size_t k = 31;
+    std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATCTTTTTTTT";
+    std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
 
-//     auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
-//     dbg_succ->add_sequence(reference);
-//     auto graph = std::make_shared<CanonicalDBG>(dbg_succ);
-
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-//     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
-//     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-//     config.min_seed_length = 13;
-
-//     for (size_t max_seed_length : { (size_t)0, k + 100 }) {
-//         config.max_seed_length = max_seed_length;
-//         DBGAligner<> aligner(*graph, config);
-//         auto paths = aligner.align(query);
-//         ASSERT_EQ(1ull, paths.size());
-//         auto path = paths[0];
-//         EXPECT_TRUE(path.is_valid(*graph, &config));
-//         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-//     }
-// }
-// #endif
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
+    config.min_seed_length = 9;
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        run_alignment(*graph, config, query,
+                      { reference.substr(0, 91) },
+                      { "" });
+    } else {
+        run_alignment(*graph, config, query, {}, {});
+    }
+}
+#endif
 
 } // namespace
