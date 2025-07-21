@@ -948,6 +948,8 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.left_end_bonus = 2;
+    config.right_end_bonus = 2;
     config.min_seed_length = 5;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query, { reference }, { "5=1X6=1X" });

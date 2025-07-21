@@ -405,87 +405,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
 
     // for (size_t cost = 0; cost < S.size() + max_edit_cost; ++cost) {
     for (size_t cost = 0; cost < S.size(); ++cost) {
-        // if (S[cost].size() > S[cost].offset()) {
-        //     size_t nnodes = 0;
-        //     size_t slots = 0;
-        //     for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
-        //         if (S[cost][query_dist].size()) {
-        //             nnodes += S[cost][query_dist].size();
-        //             ++slots;
-        //         }
-        //     }
-        //     common::logger->info("Cost: {}\tslots: {}\tnnodes: {}", cost, slots, nnodes);
-        // }
-
-        // // indel open from existing bucket
-        // if (static_cast<ssize_t>(cost) >= gap_opn) {
-        //     size_t prev_cost = cost - gap_opn;
-        //     if (prev_cost < S.size()) {
-        //         for (size_t query_dist = S[prev_cost].offset(); query_dist < S[prev_cost].size(); ++query_dist) {
-        //             for (const auto &[node, data] : S[prev_cost].get(query_dist)) {
-        //                 size_t best_dist = std::get<0>(data);
-        //                 Cigar::Operator last_op = std::get<3>(data);
-        //                 node_index last_node = std::get<2>(data);
-        //                 // size_t num_matches = std::get<5>(data);
-        //                 assert(last_op != Cigar::CLIPPED);
-
-        //                 if (terminate_branch(cost, SMap(best_dist + 1, 0, last_node, Cigar::DELETION, '\0', 0), query_dist, node))
-        //                     continue;
-
-        //                 // deletion
-        //                 if (last_op != Cigar::INSERTION) {
-        //                     call_incoming_kmers(node, [&,node=node](auto prev, char c) {
-        //                         if (c != boss::BOSS::kSentinel
-        //                                 // && !terminate_branch(cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
-        //                                 && set_value(F, cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, '\0', 0)) {
-        //                             set_value(S, cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, '\0', 0);
-        //                         }
-        //                     }, best_dist, query_dist);
-        //                 }
-
-        //                 // insertion
-        //                 if (last_op != Cigar::DELETION) {
-        //                     // TODO
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-
-        // // indel extension
-        // if (static_cast<ssize_t>(cost) >= gap_ext) {
-        //     size_t prev_cost = cost - gap_opn;
-        //     if (prev_cost < S.size()) {
-        //         for (size_t query_dist = S[prev_cost].offset(); query_dist < S[prev_cost].size(); ++query_dist) {
-        //         }
-        //     }
-        //     // size_t prev_cost = cost - gap_ext;
-        //     // if (const auto *del_ext_bucket = get_bucket(F, prev_cost, query_dist, node)) {
-        //     //         // extension
-        //     //         const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
-        //     //         assert(last_node != DeBruijnGraph::npos);
-        //     //         assert(last_num_ops > 0);
-        //     //         assert(last_dist >= last_num_ops);
-        //     //         if (last_dist < max_dist) {
-        //     //             ssize_t next_ext_cost = cost + gap_ext;
-        //     //             call_incoming_kmers(node, [&](auto prev, char c) {
-        //     //                 if (c == boss::BOSS::kSentinel)
-        //     //                     return;
-
-        //     //                 const auto &[last_dist, last_num_ops, last_node] = *del_ext_bucket;
-        //     //                 if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, '\0', 0), query_dist, prev)
-        //     //                         && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, '\0', 0)
-        //     //                         && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, '\0', 0)) {
-        //     //                     it = S[cost][query_dist].begin() + it_dist;
-        //     //                 }
-        //     //             }, last_dist, query_dist);
-        //     //         }
-        //     //     }
-        // }
-
-        // if (cost >= S.size())
-        //     continue;
-
         bool done = false;
         for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
             assert(query_dist <= query_size);
@@ -641,8 +560,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                     }
                 }
             }
-            if (done)
-                break;
+            // if (done)
+            //     break;
         }
 
         if (done)
@@ -658,6 +577,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             for (const auto &[node, data] : bucket) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                 assert(last_op != Cigar::CLIPPED);
+                // std::cerr << "BTIter: " << start_cost << "\t" << node << "\t" << dist << "," << start_query_dist << std::endl;
                 if (start_backtrack(start_cost, data, start_query_dist, node))
                     starts.emplace_back(dist, static_cast<ssize_t>(dist) - start_query_dist, start_query_dist, node);
             }
@@ -979,11 +899,16 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 // start backtrack
                 size_t dist = std::get<0>(data);
                 size_t num_matches = std::get<5>(data);
-                if (!num_matches || dist < aln.get_end_trim() || (dist == 0 && query_dist == 0))
+                // if (!num_matches || dist < aln.get_end_trim() || (dist == 0 && query_dist == 0))
+                // if (!num_matches || (dist == 0 && query_dist == 0))
+                if (dist == 0 && query_dist == 0)
+                    return false;
+
+                if (!num_matches && query_dist < max_query_dist)
                     return false;
 
                 auto score = get_score(cost, dist, query_dist);
-                std::cerr << "BT?: " << score << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << "\n";
+                // std::cerr << "BT?: " << score << " vs. " << best_score << "\t" << query_dist << " vs. " << max_query_dist << std::endl;
                 assert(score <= best_score);
                 return score == best_score && query_dist == max_query_dist;
             },
