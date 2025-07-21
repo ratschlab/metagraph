@@ -1055,11 +1055,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     std::vector<Anchor> anchors = get_anchors();
 
-    std::vector<Alignment> alignments;
-
-    if (anchors.empty())
-        return alignments;
-
     using AnchorIt = std::vector<Anchor>::iterator;
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
 
@@ -1067,6 +1062,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     for (const auto &a : anchors) {
         std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
     }
+
+    std::vector<Alignment> alignments;
+
+    if (anchors.empty())
+        return alignments;
 
     const auto &graph = query_.get_graph();
     ssize_t k = graph.get_k();
@@ -1204,9 +1204,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
                                                         std::string_view(dummy.c_str(), nmismatch));
                 score += cur_mismatch;
-                std::cerr << "uk" << a_i << " -> " << a_j << "\t" << nmismatch << "\t" << cur_mismatch << "\t" << score << " vs. " << score_j << "\n";
+                // std::cerr << "uk" << a_i << " -> " << a_j << "\t" << nmismatch << "\t" << cur_mismatch << "\t" << score << " vs. " << score_j << "\n";
                 if (score > score_j) {
-                    std::cerr << "\t\tworked! " << score << "\n";
+                    // std::cerr << "\t\tworked! " << score << "\n";
                     update_score(score, it, dist);
                 }
             };
