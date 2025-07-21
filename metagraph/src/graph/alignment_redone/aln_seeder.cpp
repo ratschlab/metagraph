@@ -297,6 +297,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     // derived from 2.4.1 in https://doi.org/10.1101/2022.01.12.476087 (v1)
     DBGAlignerConfig::score_t match_score = config.match_score("A");
     DBGAlignerConfig::score_t mismatch_score = config.score_sequences("A", "T");
+
     assert(config.gap_opening_penalty <= config.gap_extension_penalty);
     assert(config.gap_extension_penalty < 0);
     assert(mismatch_score < match_score);
