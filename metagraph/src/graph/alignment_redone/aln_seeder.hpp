@@ -5,6 +5,7 @@
 #include "aln_match.hpp"
 #include "aln_query.hpp"
 #include "aligner_config.hpp"
+#include "annotation_buffer.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -32,10 +33,19 @@ class ExactSeeder : public Seeder {
 
     std::vector<Anchor> get_anchors() const override;
     std::vector<Alignment> get_inexact_anchors() const override;
+};
+
+class LabeledSeeder : public ExactSeeder {
+  public:
+    template <typename... Args>
+    LabeledSeeder(AnnotationBuffer &anno_buffer, Args&&... args)
+        : ExactSeeder(std::forward<Args>(args)...),
+          anno_buffer_(anno_buffer) {}
+
+    std::vector<Anchor> get_anchors() const override;
 
   private:
-    using Connections = tsl::hopscotch_map<Anchor, tsl::hopscotch_map<Anchor, std::vector<std::tuple<size_t, DBGAlignerConfig::score_t, std::vector<DeBruijnGraph::node_index>, Cigar>>>>;
-    Connections get_connections(std::vector<Anchor> &anchors) const;
+    AnnotationBuffer &anno_buffer_;
 };
 
 class Extender {

@@ -163,6 +163,39 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     return anchors;
 }
 
+std::vector<Anchor> LabeledSeeder::get_anchors() const {
+    auto anchors = ExactSeeder::get_anchors();
+
+    for (const auto &anchor : anchors) {
+        anno_buffer_.queue_path(anchor.get_path());
+    }
+
+    anno_buffer_.fetch_queued_annotations();
+
+    std::vector<Anchor> labeled_anchors;
+    labeled_anchors.reserve(anchors.size());
+    for (auto &anchor : anchors) {
+        auto [labels_it, coord_it] = anno_buffer_.get_labels_and_coords(anchor.get_path()[0]);
+        if (labels_it) {
+            for (size_t i = 0; i < labels_it->size(); ++i) {
+                anchor.set_label_class(anno_buffer_.cache_column_set(labels_it->begin() + i,
+                                                                     labels_it->begin() + i + 1));
+                if (coord_it) {
+                    const auto &coords = (*coord_it)[i];
+                    for (auto coord : coords) {
+                        labeled_anchors.emplace_back(anchor).set_coord(coord);
+                    }
+                } else {
+                    labeled_anchors.emplace_back(anchor);
+                }
+            }
+        }
+        anchor = Anchor();
+    }
+
+    return labeled_anchors;
+}
+
 template <typename T>
 class OffsetVector {
   public:

@@ -26,6 +26,10 @@ class AnnotationBuffer {
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 
+    void queue_path(const std::vector<node_index> &path) {
+        queued_paths_.push_back(path);
+    }
+
     void queue_path(std::vector<node_index>&& path) {
         queued_paths_.push_back(std::move(path));
     }
@@ -39,6 +43,9 @@ class AnnotationBuffer {
     // The returned pointers are valid until next fetch_queued_annotations().
     std::pair<const Columns*, const CoordinateSet*>
     get_labels_and_coords(node_index node) const;
+
+    std::pair<size_t, const CoordinateSet*>
+    get_labels_id_and_coords(node_index node) const;
 
     // get the labels of a node if they have been fetched
     inline const Columns* get_labels(node_index node) const {

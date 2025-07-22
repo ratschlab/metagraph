@@ -192,9 +192,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
 #endif
 }
 
-auto AnnotationBuffer::get_labels_and_coords(node_index node) const
-        -> std::pair<const Columns*, const CoordinateSet*> {
-    std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
+auto AnnotationBuffer::get_labels_id_and_coords(node_index node) const
+        -> std::pair<size_t, const CoordinateSet*> {
+    std::pair<size_t, const CoordinateSet*> ret_val {
+        std::numeric_limits<size_t>::max(),
+        nullptr
+    };
 
     if (canonical_)
         node = canonical_->get_base_node(node);
@@ -206,7 +209,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     if (it == node_to_cols_.end() || it->second == nannot)
         return ret_val;
 
-    ret_val.first = &column_sets_.data()[it->second];
+    ret_val.first = it->second;
 
     if (has_coordinates()) {
         assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
@@ -214,6 +217,15 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     }
 
     return ret_val;
+}
+
+auto AnnotationBuffer::get_labels_and_coords(node_index node) const
+        -> std::pair<const Columns*, const CoordinateSet*> {
+    auto [labels_i, coords] = get_labels_id_and_coords(node);
+    return std::make_pair(
+        labels_i < column_sets_.size() ? &column_sets_.data()[labels_i] : nullptr,
+        coords
+    );
 }
 
 } // namespace align

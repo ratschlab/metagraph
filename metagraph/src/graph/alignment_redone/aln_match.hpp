@@ -127,6 +127,9 @@ class Anchor : public Match {
     label_class_t get_label_class() const { return label_class_; }
     int64_t get_coord() const { return coord_; }
 
+    void set_label_class(label_class_t label_class) { label_class_ = label_class; }
+    void set_coord(int64_t coord) { coord_ = coord; }
+
   private:
     label_class_t label_class_;
     int64_t coord_;
