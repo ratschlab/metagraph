@@ -429,11 +429,15 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
         SMap data(0, 0, start_node, Cigar::MATCH, *(query_window_rbegin - 1), start_num_matches);
         auto &[best_dist, last_ext, last_node, last_op, c, num_matches] = data;
 
+        // std::cerr << "start ext" << std::endl;
+
         for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
+            // std::cerr << "\tcheck\t" << node << std::endl;
             if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node, best_dist, query_dist))
                 break;
 
             if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
+                // std::cerr << "\t" << node << " -> " << prev << std::endl;
                 ++num_explored_nodes;
                 ++best_dist;
                 ++query_dist;
@@ -444,6 +448,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                 break;
             }
         }
+
+        // std::cerr << "end ext" << std::endl;
 
         set_value(
             S,
@@ -457,6 +463,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             best_dist > 0 ? *query_window_rbegin : '\0',
             num_matches
         );
+
+        // std::cerr << "init ext\n";
     }
 
     // size_t max_edit_cost = std::max({ gap_opn, gap_ext, mismatch_cost });
@@ -814,7 +822,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     // common::logger->info("Explored {} nodes", num_explored_nodes);
 }
 
-void align_bwd(const DeBruijnGraph &graph,
+template <class Graph>
+void align_bwd(const Graph &graph,
                const DBGAlignerConfig &config,
                const DeBruijnGraph::node_index start_node,
                size_t num_matches,
@@ -842,7 +851,8 @@ void align_bwd(const DeBruijnGraph &graph,
     );
 }
 
-void align_fwd(const DeBruijnGraph &graph,
+template <class Graph>
+void align_fwd(const Graph &graph,
                const DBGAlignerConfig &config,
                const DeBruijnGraph::node_index start_node,
                size_t num_matches,
@@ -896,16 +906,114 @@ void align_fwd(const DeBruijnGraph &graph,
     );
 }
 
+class AlignmentGraph {
+    using node_index = DeBruijnGraph::node_index;
+    using label_class_t = Anchor::label_class_t;
+
+  public:
+    AlignmentGraph(const DeBruijnGraph &graph)
+          : graph_(graph), anno_buffer_(nullptr), target_(Anchor::nlabel) {}
+
+    AlignmentGraph(const DeBruijnGraph &graph, AnnotationBuffer &anno_buffer, label_class_t target)
+          : graph_(graph), anno_buffer_(&anno_buffer), target_(target) {}
+
+    node_index traverse(node_index node, char c) const {
+        node_index next = graph_.traverse(node, c);
+        return target_ == Anchor::nlabel || get_labels(next) == target_ ? next : DeBruijnGraph::npos;
+    }
+
+    bool has_single_outgoing(node_index node) const {
+        if (target_ == Anchor::nlabel)
+            return graph_.has_single_outgoing(node);
+
+        size_t outdegree = 0;
+        adjacent_outgoing_nodes(node, [&](node_index) { ++outdegree; });
+        return outdegree == 1;
+    }
+
+    void call_outgoing_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.call_outgoing_kmers(node, callback);
+        } else {
+            graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
+                if (get_labels(next) == target_)
+                    callback(next, c);
+            });
+        }
+    }
+
+    void adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.adjacent_outgoing_nodes(node, callback);
+        } else {
+            graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
+                if (get_labels(next) == target_)
+                    callback(next);
+            });
+        }
+    }
+
+    node_index traverse_back(node_index node, char c) const {
+        node_index prev = graph_.traverse_back(node, c);
+        return target_ == Anchor::nlabel || get_labels(prev) == target_ ? prev : DeBruijnGraph::npos;
+    }
+
+    bool has_single_incoming(node_index node) const {
+        // std::cerr << "hsi\t" << node << "\t" << target_ << std::endl;
+        if (target_ == Anchor::nlabel) {
+            return graph_.has_single_incoming(node);
+        } else {
+            size_t indegree = 0;
+            adjacent_incoming_nodes(node, [&](node_index) { ++indegree; });
+            return indegree == 1;
+        }
+    }
+
+    void call_incoming_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
+        // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
+        if (target_ == Anchor::nlabel) {
+            graph_.call_incoming_kmers(node, callback);
+        } else {
+            graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
+                if (get_labels(prev) == target_)
+                    callback(prev, c);
+            });
+        }
+    }
+
+    void adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.adjacent_incoming_nodes(node, callback);
+        } else {
+            graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
+                if (get_labels(prev) == target_)
+                    callback(prev);
+            });
+        }
+    }
+
+  private:
+    const DeBruijnGraph &graph_;
+    AnnotationBuffer* const anno_buffer_;
+    label_class_t target_;
+
+    label_class_t get_labels(node_index node) const {
+        assert(anno_buffer_);
+        assert(target_ != Anchor::nlabel);
+        anno_buffer_->queue_path(std::vector<node_index>{ node });
+        anno_buffer_->fetch_queued_annotations();
+        return anno_buffer_->get_labels_id(node);
+    }
+};
+
 void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback, bool no_bwd, bool no_fwd) const {
     // std::cerr << "Base " << aln << "\n";
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     std::vector<Alignment> fwd_exts;
     if (no_fwd || !aln.get_end_clipping()) {
-        if (!aln.get_end_trim()) {
-            // std::cerr << "\tskipfwd\t" << aln << "\n";
-            fwd_exts.emplace_back(aln);
-        }
+        // std::cerr << "skip fwd\t" << aln << "\t" << aln.get_label_classes().back() << "\n";
+        fwd_exts.emplace_back(aln);
     } else {
         std::string_view query_window = aln.get_query();
         query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
@@ -928,7 +1036,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         DBGAlignerConfig::score_t best_score = aln.get_score();
         size_t max_query_dist = 0;
         align_fwd(
-            query_.get_graph(), config_, aln.get_path().back(), num_matches,
+            make_aln_graph(aln.get_label_classes().back()), config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& path, auto&& cigar, size_t) {
                 auto ext_path = aln.get_path();
@@ -948,7 +1056,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     aln.get_orientation(),
                     std::move(ext_path),
                     config_,
-                    std::move(ext_cigar)
+                    std::move(ext_cigar),
+                    0,
+                    aln.get_label_classes().back()
                 );
 
                 // assert(fwd_exts.back().get_score() == best_score);
@@ -1002,7 +1112,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
     }
 
     for (auto &fwd_ext : fwd_exts) {
-        assert(!fwd_ext.get_end_trim());
         if (no_bwd || !fwd_ext.get_clipping()) {
             // std::cerr << "\tskipbwd\t" << fwd_ext << "\n";
             callback(std::move(fwd_ext));
@@ -1032,9 +1141,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         bool found = false;
         size_t max_dist = 0;
         size_t max_query_dist = 0;
-        // std::cerr << "bwd extending\t" << fwd_ext << "\n";
+        // std::cerr << "bwd extending\t" << fwd_ext << "\t" << fwd_ext.get_label_classes()[0] << "\n";
         align_bwd(
-            query_.get_graph(), config_, fwd_ext.get_path()[0], num_matches,
+            make_aln_graph(fwd_ext.get_label_classes()[0]), config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& path, auto&& cigar, size_t) {
                 path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
@@ -1052,7 +1161,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     fwd_ext.get_orientation(),
                     std::move(path),
                     config_,
-                    std::move(ext_cigar)
+                    std::move(ext_cigar),
+                    fwd_ext.get_end_trim(),
+                    fwd_ext.get_label_classes()[0]
                 );
 
                 // assert(next_aln.get_score() == best_score);
@@ -1110,6 +1221,22 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
     }
 }
 
+AlignmentGraph ExactSeeder::make_aln_graph(Anchor::label_class_t) const {
+    return AlignmentGraph(query_.get_graph());
+}
+
+AlignmentGraph LabeledSeeder::make_aln_graph(Anchor::label_class_t target) const {
+    return AlignmentGraph(query_.get_graph(), anno_buffer_, target);
+}
+
+AlignmentGraph Extender::make_aln_graph(Anchor::label_class_t) const {
+    return AlignmentGraph(query_.get_graph());
+}
+
+AlignmentGraph LabeledExtender::make_aln_graph(Anchor::label_class_t target) const {
+    return AlignmentGraph(query_.get_graph(), anno_buffer_, target);
+}
+
 std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     std::vector<Anchor> anchors = get_anchors();
 
@@ -1128,6 +1255,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
     const auto &graph = query_.get_graph();
     ssize_t k = graph.get_k();
+
+    assert(!dynamic_cast<const LabeledSeeder*>(this) || std::all_of(anchors.begin(), anchors.end(),
+                                          [](const auto &a) { return a.get_label_class() != Anchor::nlabel; }));
 
     sdsl::bit_vector selected(anchors.size(), false);
 
@@ -1293,7 +1423,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             // if (ret_val) {
             //     common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
             //     for (const auto &[it, dist] : chain) {
-            //         std::cerr << "\t" << *it << "\t" << dist << "\n";
+            //         std::cerr << "\t" << *it << "\t" << dist << "\t" << it->get_label_class() << "\n";
             //     }
             // }
 
@@ -1353,13 +1483,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                 std::move(path),
                                 config_,
                                 std::move(cigar),
-                                aln.get_end_trim());
+                                aln.get_end_trim(),
+                                next->get_label_class());
                 // std::cerr << "\tnew aln: " << next_aln << std::endl;
                 callback(std::move(next_aln));
                 return;
             }
 
-            // common::logger->info("aln extension {} -> {}", *next, aln);
             // std::cerr << "Alignment extension: " << *next << "\t->\t" << aln << std::endl;
 
             std::string_view query_window(
@@ -1434,7 +1564,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             };
 
             align_bwd(
-                query_.get_graph(),
+                make_aln_graph(last->get_label_class()),
                 config_,
                 aln.get_path()[0],
                 last->get_seed().size(),
@@ -1464,7 +1594,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                     std::move(bt_path),
                                     config_,
                                     std::move(cigar),
-                                    aln.get_end_trim());
+                                    aln.get_end_trim(),
+                                    last->get_label_class());
                     // std::cerr << "\t\t" << next_aln << std::endl;
                     aln_found = true;
                     callback(std::move(next_aln));

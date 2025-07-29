@@ -9,6 +9,8 @@
 
 namespace mtg::graph::align_redone {
 
+class AlignmentGraph;
+
 class Seeder {
   public:
     Seeder(const Query &query, const DBGAlignerConfig &config)
@@ -31,8 +33,13 @@ class ExactSeeder : public Seeder {
     template <typename... Args>
     ExactSeeder(Args&&... args) : Seeder(std::forward<Args>(args)...) {}
 
+    virtual ~ExactSeeder() {}
+
     std::vector<Anchor> get_anchors() const override;
     std::vector<Alignment> get_inexact_anchors() const override;
+
+  protected:
+    virtual AlignmentGraph make_aln_graph(Anchor::label_class_t) const;
 };
 
 class LabeledSeeder : public ExactSeeder {
@@ -43,6 +50,10 @@ class LabeledSeeder : public ExactSeeder {
           anno_buffer_(anno_buffer) {}
 
     std::vector<Anchor> get_anchors() const override;
+    AnnotationBuffer& get_buffer() const { return anno_buffer_; }
+
+  protected:
+    virtual AlignmentGraph make_aln_graph(Anchor::label_class_t target) const override;
 
   private:
     AnnotationBuffer &anno_buffer_;
@@ -53,6 +64,8 @@ class Extender {
     Extender(const Query &query, const DBGAlignerConfig &config)
           : query_(query), config_(config) {}
 
+    virtual ~Extender() {}
+
     void extend(const Alignment &aln,
                 const std::function<void(Alignment&&)> &callback,
                 bool no_bwd = false,
@@ -61,6 +74,21 @@ class Extender {
   protected:
     const Query &query_;
     const DBGAlignerConfig &config_;
+
+    virtual AlignmentGraph make_aln_graph(Anchor::label_class_t) const;
+};
+
+class LabeledExtender : public Extender {
+  public:
+    template <typename... Args>
+    LabeledExtender(AnnotationBuffer &anno_buffer, Args&&... args)
+        : Extender(std::forward<Args>(args)...),
+          anno_buffer_(anno_buffer) {}
+
+  private:
+    AnnotationBuffer &anno_buffer_;
+
+    virtual AlignmentGraph make_aln_graph(Anchor::label_class_t target) const override;
 };
 
 } // namespace mtg::graph::align

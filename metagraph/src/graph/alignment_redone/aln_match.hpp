@@ -198,6 +198,8 @@ class Alignment : public Match {
                                 end_trim_);
     }
 
+    const std::vector<Anchor::label_class_t>& get_label_classes() const { return label_classes_; }
+
   private:
     size_t end_trim_;
     std::string path_spelling_;

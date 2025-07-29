@@ -72,7 +72,7 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         Query aln_query(graph, query);
         LabeledSeeder seeder(anno_buffer, aln_query, config);
         std::vector<Alignment> paths;
-        Extender extender(aln_query, config);
+        LabeledExtender extender(anno_buffer, aln_query, config);
         std::vector<Alignment> paths_no_extend = seeder.get_inexact_anchors();
         for (const auto &base_path : paths_no_extend) {
             extender.extend(base_path, [&](Alignment&& path) {

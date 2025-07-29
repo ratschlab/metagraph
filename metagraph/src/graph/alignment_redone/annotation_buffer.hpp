@@ -52,6 +52,11 @@ class AnnotationBuffer {
         return get_labels_and_coords(node).first;
     }
 
+    // get the labels of a node if they have been fetched
+    inline size_t get_labels_id(node_index node) const {
+        return get_labels_id_and_coords(node).first;
+    }
+
     const Annotator& get_annotator() const { return annotator_; }
 
     size_t num_nodes_buffered() const { return node_to_cols_.size(); }
