@@ -1313,7 +1313,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             std::string_view query_j = a_j.get_seed();
             // const DBGAlignerConfig::score_t &score_j = std::get<0>(*(chain_scores + (end - begin)));
             const DBGAlignerConfig::score_t &score_j = std::get<0>(*(rchain_scores_end));
-            const DBGAlignerConfig::score_t dist_j = std::get<2>(*(rchain_scores_end));
+            // const DBGAlignerConfig::score_t dist_j = std::get<2>(*(rchain_scores_end));
 
             auto try_chain = [&](auto it, auto chain_scores) {
                 const Anchor &a_i = *it;
@@ -1336,7 +1336,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                                                 + (config_.right_end_bonus * !a_j.get_end_clipping());
 
                 // std::cerr << "chh\t" << a_i << " -> " << a_j << "\t" << score << " vs. " << score_j << "\n";
-                if (score < score_j || (score == score_j && dist >= dist_j))
+                // if (score < score_j || (score == score_j && dist >= dist_j))
+                if (score <= score_j)
                     return;
                 // std::cerr << "\tchhs\n";
 
@@ -1345,19 +1346,19 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 if (last_node_i_query >= query_j.begin()) {
                     // there should be overlapping nodes
-                    // std::cerr << "olN" << a_i << " -> " << a_j << "\n";
+                    std::cerr << "olN" << a_i << " -> " << a_j << "\n";
                     size_t j_start = last_node_i_query - query_j.begin();
                     if (a_i.get_path().size() >= j_start
                             && a_j.get_path().size() >= j_start
                             && std::equal(a_j.get_path().begin(), a_j.get_path().begin() + j_start,
                                         a_i.get_path().end() - j_start, a_i.get_path().end())) {
-                        // std::cerr << "\t\tworked! " << score << "\n";
+                        std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
                     return;
                 } else if (query_i.end() > query_j.begin()) {
                     // overlapping nucleotides
-                    // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
+                    std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     const std::string spelling = a_j.get_path_spelling();
                     const char *jt_end = spelling.c_str() + k;
                     const char *jt = jt_end - (query_j.begin() - last_node_i_query);
@@ -1370,7 +1371,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     // assert(num_matches < jt_end - jt || last_node == a_j.get_path()[0]);
                     // std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
                     if (num_matches == jt_end - jt && last_node == a_j.get_path()[0]) {
-                        // std::cerr << "\t\tworked! " << score << "\n";
+                        std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
 
@@ -1480,7 +1481,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                     std::cerr << "gap\t" << a_i << " -> " << a_j << "\t" << gap << "\t" << score << "\n";
                     if (score > score_j) {
-                        // std::cerr << "\t\tworked! " << score << "\n";
+                        std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, traversed);
                     }
                 }
@@ -1596,24 +1597,24 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             }
 
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
-            std::cerr << "Alignment extension: " << *next << "\t" << next->get_path_spelling() << "\t->\t" << aln << "\td:" << traversal_dist << std::endl;
+            std::cerr << "Alignment extension: " << *next << "\t" << next->get_path_spelling() << "\t->\t" << aln << "\t" << aln.get_path_spelling() << "\td:" << traversal_dist << std::endl;
             assert(traversal_dist > 0);
 
             std::string_view query_window(
                 next->get_seed().data(),
                 aln.get_seed().begin() - next->get_seed().begin()
             );
-            auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-                return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
-                        + (query_dist == query_window.size() && !next->get_clipping() ? config_.left_end_bonus : 0);
-            };
+            // auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
+            //     return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+            //             + (query_dist == query_window.size() && !next->get_clipping() ? config_.left_end_bonus : 0);
+            // };
 
             bool aln_found = false;
 
             auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                 // common::logger->info("Checkbt: n: {}, d: {}, qd: {} / {}, s: {}, nm: {}",
-                //                      graph.get_node_sequence(node), dist, query_dist, query_window.size(),
+                //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
                 //                      get_score(cost, query_dist, dist), num_matches);
 
                 if (aln_found || dist == 0 || query_dist == 0 || num_matches < next->get_seed().size())
@@ -1625,7 +1626,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
                 // common::logger->info("Check: n: {}, d: {}, qd: {} / {}, s: {}",
-                //                      graph.get_node_sequence(node), dist, query_dist, query_window.size(),
+                //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
                 //                      get_score(cost, query_dist, dist));
 
                 if (dist == 0 && query_dist == 0)
@@ -1643,9 +1644,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     return true;
                 }
 
-                DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
-                if (score <= 0)
-                    return true;
+                // DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
+                // if (score <= 0)
+                //     return true;
 
                 // if (num_matches < next->get_seed().size())
                 //     return false;
@@ -1743,6 +1744,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     // return found && query_dist == query_window.size() && dist == max_dist;
                 }
             );
+            assert(aln_found);
             // callback(std::move(aln));
             // std::ignore = this;
             // // std::cerr << aln << "\t" << *last << "\t" << *next << "\n";

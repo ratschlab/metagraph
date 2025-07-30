@@ -290,6 +290,9 @@ TYPED_TEST(DBGAlignerRedoneTest, multiple_variations) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        config.min_seed_length = 2;
+    }
     run_alignment(*graph, config, query, { reference }, { "6=1X6=1X1=1X4=" }, 0, true, true);
 }
 
@@ -326,18 +329,18 @@ TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
 
 TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     size_t k = 4;
-    std::vector<std::string> references = {"ACAATTTTTTTT",
-                                           "ACAATTTTTGTT",
-                                           "ACAAGTTTTTTT",
-                                           "ACAAGTTTTGTT"};
+    std::vector<std::string> references = {"ACAATTTTTTTTGG",
+                                           "ACAATTTTTGTTGG",
+                                           "ACAAGTTTTTTTGG",
+                                           "ACAAGTTTTGTTGG"};
     std::string query =                    "ACAACTTTTCTT";
     //                                          X    X
 
     auto graph = build_graph_batch<TypeParam>(k, references);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.gap_opening_penalty = -3;
-    config.gap_extension_penalty = -1;
+    // config.gap_opening_penalty = -3;
+    // config.gap_extension_penalty = -1;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 2;
         run_alignment(*graph, config, query, { "" }, { "4=1X4=1X2=" });
