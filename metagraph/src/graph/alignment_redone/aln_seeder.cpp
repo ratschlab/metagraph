@@ -1415,24 +1415,24 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
                     std::string a_i_spelling = a_i.get_path_spelling();
-                    std::cerr << "olap\t" << a_i << "\t" << a_i_spelling << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << olap << " vs. " << dist << "\t" << score << "\n";
                     auto a_i_rbegin = a_i_spelling.rbegin();
                     auto a_i_rend = a_i_rbegin + olap;
                     auto a_j_rend = query_j.rend();
                     auto a_j_rbegin = a_j_rend - olap;
                     auto [mm_a_i, mm_a_j] = std::mismatch(a_i_rbegin, a_i_rend, a_j_rbegin, a_j_rend);
                     assert(mm_a_i - a_i_rbegin == mm_a_j - a_j_rbegin);
-                    // assert(a_i_rend - mm_a_i == a_j_rend - mm_a_j);
-                    size_t gap = olap - (mm_a_i - a_i_rbegin);
+                    size_t nmatches = mm_a_i - a_i_rbegin;
+                    size_t gap = olap - nmatches;
                     std::string a_j_spelling = a_j.get_path_spelling();
                     size_t traversed = 0;
-                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap, a_j_spelling.c_str() + k,
+                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap - nmatches, a_j_spelling.c_str() + k,
                         [&](DeBruijnGraph::node_index cur) { ++traversed; }
                     );
+                    std::cerr << "olap\t" << a_i << "\t" << a_i_spelling << " -> " << a_j << "\t" << a_j_spelling << "\t" << dist << " vs. o: " << olap << "\t" << score << "\tg:" << gap << "\tt: " << traversed << "\n";
 
-                    if (traversed == k - olap) {
-                        assert(a_i.get_end_trim() >= gap + (mm_a_i - a_i_rbegin));
-                        size_t nmismatch = a_i.get_end_trim() - gap - (mm_a_i - a_i_rbegin);
+                    if (traversed == k - olap + nmatches) {
+                        assert(a_i.get_end_trim() >= gap + nmatches);
+                        size_t nmismatch = a_i.get_end_trim() - gap - nmatches;
                         // assert(a_i.get_end_trim() >= olap);
                         // size_t nmismatch = a_i.get_end_trim() - olap;
                         // traversed += nmismatch;
