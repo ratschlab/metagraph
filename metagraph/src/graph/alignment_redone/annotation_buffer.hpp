@@ -71,6 +71,10 @@ class AnnotationBuffer {
         return it - column_sets_.begin();
     }
 
+    inline size_t cache_column(Column column) {
+        return cache_column_set(Columns(1, column));
+    }
+
     // Fetch a label set given its index returned by `cache_column_set()`
     inline const Columns& get_cached_column_set(size_t i) const {
         assert(i < column_sets_.size());

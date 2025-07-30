@@ -48,17 +48,19 @@ using AnchorExtender = std::function<void(AnchorIt, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename AnchorIt>
-void extend_chain(const AnchorChain<AnchorIt> &chain,
+bool extend_chain(const AnchorChain<AnchorIt> &chain,
                   const std::vector<DBGAlignerConfig::score_t> &score_traceback,
                   const AnchorExtender<AnchorIt> &anchor_extender,
                   const AlignmentCallback &callback,
                   const std::function<bool()> &terminate = []() { return false; }) {
     assert(chain.size());
     if (chain.size() == 1) {
-        if (!terminate())
+        if (!terminate()) {
             callback(Alignment(*chain.back().first));
+            return true;
+        }
 
-        return;
+        return false;
     }
 
     std::vector<Alignment> alns;
@@ -78,12 +80,17 @@ void extend_chain(const AnchorChain<AnchorIt> &chain,
         std::swap(next_alns, alns);
     }
 
+    size_t num_alns = 0;
+
     for (auto&& aln : alns) {
         if (terminate())
-            return;
+            return num_alns;
 
         callback(std::move(aln));
+        ++num_alns;
     }
+
+    return num_alns;
 }
 
 template <typename Anchor>
@@ -263,11 +270,11 @@ AnchorIt chain_anchors(const Query &query,
         std::reverse(scores.begin(), scores.end());
 
         if (chain.size() && extension_starter(chain, scores)) {
-            for (const auto &[a_ptr, dist] : chain) {
-                used[a_ptr - begin] = true;
+            if (extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate)) {
+                for (const auto &[a_ptr, dist] : chain) {
+                    used[a_ptr - begin] = true;
+                }
             }
-
-            extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate);
         }
     }
 
