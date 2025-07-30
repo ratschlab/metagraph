@@ -1438,7 +1438,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         // size_t nmismatch = a_i.get_end_trim() - olap;
                         // traversed += nmismatch;
                         // assert(static_cast<ssize_t>(traversed) - dist == static_cast<ssize_t>(gap));
-                        std::cerr << "\tfound!\t" << olap << "\t" << nmismatch << "\t" << gap << "\t" << traversed << " vs. " << dist << "\n";
+                        size_t graph_dist = traversed + query_j.size() - query_i.size();
+                        std::cerr << "\tfound!\t" << olap << "\t" << nmismatch << "\t" << gap << "\t" << traversed << " vs. " << dist << "\t->\t" << graph_dist << "\n";
                         if (gap)
                             score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
 
@@ -1452,7 +1453,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         score += cur_mismatch;
                         if (score > score_j) {
                             std::cerr << "\t\tworked! " << score << "\n";
-                            update_score(score, it, dist + gap);
+                            update_score(score, it, graph_dist);
                         }
                     }
                     return;
