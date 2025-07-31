@@ -552,11 +552,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_repeat_sequence_no_delete_after_insert) {
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        config.min_seed_length = 2;
-        run_alignment(*graph, config, query, { reference }, { "45=7I8=1X39=" });
-    } else {
-        run_alignment(*graph, config, query, { reference }, { "45=7I8=1X39=" }, 0, true, true);
+        config.min_seed_length = 25;
     }
+    run_alignment(*graph, config, query, { reference }, { "45=7I8=1X39=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_clipping1) {
@@ -966,7 +964,12 @@ TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.xdrop = 27;
-    run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" });
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        config.min_seed_length = 19;
+        run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" });
+    } else {
+        run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" }, 0, true, true);
+    }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
