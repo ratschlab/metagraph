@@ -1040,17 +1040,18 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
     size_t k = 31;
-    std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATCTTTTTTTT";
+    std::string reference =     "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATCTTTTTTTT";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
+    //                       SSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::PRIMARY);
     DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.min_seed_length = 9;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query,
                       { reference.substr(0, 91) },
-                      { "" });
+                      { "4S9=1I1=1X6=2I9=1X2=2I7=1I3=1I9=1X2=1X4=1I12=1I16=1X6=" }, 0, true, true);
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
