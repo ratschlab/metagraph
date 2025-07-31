@@ -1453,7 +1453,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     std::string a_j_spelling = a_j.get_path_spelling();
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap, a_j_spelling.c_str() + k,
+                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap - gap, a_j_spelling.c_str() + k,
                         [&](DeBruijnGraph::node_index cur) {
                             ++traversed;
                             node = cur;
@@ -1461,7 +1461,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     );
                     std::cerr << "olap\t" << a_i << "\t" << a_i_spelling << " -> " << a_j << "\t" << a_j_spelling << "\t" << dist << " vs. o: " << olap << "\t" << score << "\tg:" << gap << "\tt: " << traversed << "\t" << node << " vs. " << a_j.get_path()[0] << "\n";
 
-                    if (traversed == k - olap && node == a_j.get_path()[0]) {
+                    if (traversed == k - olap + gap && node == a_j.get_path()[0]) {
                         assert(a_i.get_end_trim() >= gap + nmatches);
                         size_t nmismatch = a_i.get_end_trim() - gap - nmatches;
                         // assert(a_i.get_end_trim() >= olap);
