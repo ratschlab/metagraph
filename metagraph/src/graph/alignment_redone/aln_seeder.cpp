@@ -360,7 +360,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     assert(gap_ext % 2 == 0);
     assert(gap_opn % 2 == 0);
 
-    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
+    common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -1384,7 +1384,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     return;
                 } else if (query_i.end() > query_j.begin()) {
                     // overlapping nucleotides
-                    // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
+                    std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     const std::string spelling = a_j.get_path_spelling();
                     const char *jt_end = spelling.c_str() + k;
                     const char *jt = jt_end - (query_j.begin() - last_node_i_query);
@@ -1395,9 +1395,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                         last_node = cur;
                     });
                     // assert(num_matches < jt_end - jt || last_node == a_j.get_path()[0]);
-                    // std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
+                    std::cerr << "\t" << std::string_view(jt, jt_end - jt) << "\t" << num_matches << " vs. " << jt_end - jt << "\n";
                     if (num_matches == jt_end - jt && last_node == a_j.get_path()[0]) {
-                        // std::cerr << "\t\tworked! " << score << "\n";
+                        std::cerr << "\t\tworked! " << score << "\n";
                         update_score(score, it, dist);
                     }
 
@@ -1496,46 +1496,32 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 //         update_score(score, it, dist);
                 //     }
                 //     return;
-                }
+                } else if (!a_i.get_end_trim()) {
+                    std::string a_j_spelling = a_j.get_path_spelling();
+                    DBGAlignerConfig::score_t traversed = 0;
+                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str(), a_j_spelling.c_str() + k,
+                        [&](DeBruijnGraph::node_index) {
+                            ++traversed;
+                        }
+                    );
 
-                std::string a_j_spelling = a_j.get_path_spelling();
-                DBGAlignerConfig::score_t traversed = 0;
-                auto iit = a_j_spelling.begin();
-                auto jjt = query_i.data() + query_i.size();
-                size_t nmismatch = 0;
-                if (a_i.get_end_trim()) {
-                    for (char c : a_i.get_trim_spelling()) {
-                        nmismatch += (c != *jjt);
-                        ++jjt;
+                    if (traversed == k) {
+                        DBGAlignerConfig::score_t dist_to_first_node = dist - a_j.get_path().size() + 1;
+                        size_t gap = std::abs(traversed - dist_to_first_node);
+                        if (gap > 0)
+                            score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+
+                        std::cerr << "gap\t" << a_i << " -> " << a_j << "\tg: " << gap
+                                << "\t" << score << " vs. " << score_j << "\n";
+                        if (score > score_j) {
+                            std::cerr << "\t\tworked! " << score << "\n";
+                            update_score(score, it, traversed + a_i.get_end_trim());
+                        }
                     }
                 }
-                graph.traverse(a_i.get_path().back(), a_j_spelling.c_str(), a_j_spelling.c_str() + k,
-                    [&](DeBruijnGraph::node_index cur) {
-                        nmismatch += (*iit != *jjt);
-                        ++traversed;
-                        ++iit;
-                        ++jjt;
-                    }
-                );
 
-                if (traversed == k) {
-                    DBGAlignerConfig::score_t dist_to_first_node = dist - a_j.get_path().size() + 1;
-                    size_t gap = std::abs(traversed - dist_to_first_node);
-                    if (gap > 0)
-                        score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
-
-                    if (nmismatch > 0) {
-                        DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
-                                                            std::string_view(dummy.c_str(), nmismatch));
-                        score += cur_mismatch;
-                    }
-
-                    std::cerr << "gap\t" << a_i << " -> " << a_j << "\t" << gap << "\t" << score << "\n";
-                    if (score > score_j) {
-                        std::cerr << "\t\tworked! " << score << "\n";
-                        update_score(score, it, traversed + a_i.get_end_trim());
-                    }
-                }
+                // TODO: if a_i.get_end_trim() != 0, then we need to deal with
+                //       a combination of D from the trim, X to the trim, then I of the query
 
                 // // TODO: deal with indels?
                 // size_t nmismatch = query_j.begin() - query_i.end();
