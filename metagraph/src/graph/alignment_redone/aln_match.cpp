@@ -4,9 +4,6 @@ namespace mtg::graph::align_redone {
 
 using mtg::common::logger;
 
-// Return the string spelled by the path. This path may have disconnects (if it came)
-// from a chain alignment), so this method handles that case. If there is an invalid
-// edge, or if there is too long of a stretch of npos nodes, this throws a runtime error.
 std::string spell_path(const DeBruijnGraph &graph,
                        const std::vector<DeBruijnGraph::node_index> &path) {
     std::string seq;

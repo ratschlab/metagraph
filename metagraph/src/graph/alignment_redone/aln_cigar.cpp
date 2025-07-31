@@ -120,7 +120,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
         if (!op.second) {
             std::cerr << "Empty operation found in CIGAR" << std::endl
                       << to_string() << std::endl
-                      << reference << std::endl
+                      << std::string(get_clipping(), ' ') << reference << std::endl
                       << query << std::endl;
             return false;
         }
@@ -131,7 +131,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     std::cerr << "Query too short after "
                                 << Cigar::opt_to_char(op.first) << std::endl
                                 << to_string() << std::endl
-                                << reference << std::endl
+                                << std::string(get_clipping(), ' ') << reference << std::endl
                                 << query << std::endl;
                     return false;
                 }
@@ -144,7 +144,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     std::cerr << "Reference too short after "
                               << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -153,7 +153,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     std::cerr << "Query too short after "
                               << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -162,7 +162,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                         == (op.first != Cigar::MATCH)) {
                     std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -174,7 +174,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 if (i && cigar_[i - 1].first == DELETION) {
                     std::cerr << "INSERTION after DELETION" << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -183,7 +183,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     std::cerr << "Query too short after "
                               << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -194,7 +194,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 if (i && cigar_[i - 1].first == INSERTION && *ref_it != boss::BOSS::kSentinel) {
                     std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -203,7 +203,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     std::cerr << "Reference too short after "
                               << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
-                              << reference << std::endl
+                              << std::string(get_clipping(), ' ') << reference << std::endl
                               << query << std::endl;
                     return false;
                 }
@@ -219,7 +219,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     if (ref_it != reference.end()) {
         std::cerr << "Reference end not reached" << std::endl
                   << to_string() << std::endl
-                  << reference << std::endl
+                  << std::string(get_clipping(), ' ') << reference << std::endl
                   << query << std::endl;
         return false;
     }
@@ -227,7 +227,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     if (alt_it != query.end()) {
         std::cerr << "Query end not reached" << std::endl
                   << to_string() << std::endl
-                  << reference << std::endl
+                  << std::string(get_clipping(), ' ') << reference << std::endl
                   << query << std::endl;
         return false;
     }

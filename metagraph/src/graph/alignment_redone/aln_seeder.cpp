@@ -74,30 +74,33 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\t" << first << "," << last << "\t" << std::flush << graph.get_node_sequence(first) << "\t" << graph.get_node_sequence(last) << "\n";
                 using edge_index = boss::BOSS::edge_index;
 
-                if (canonical) {
-                    for (edge_index rc_node = first; rc_node <= last; ++rc_node) {
-                        if (dbg_succ->in_graph(rc_node)) {
-                            DeBruijnGraph::node_index node = canonical->reverse_complement(rc_node);
-                            size_t i_rc = this_query.size() - (i + match_size);
-                            anchors.emplace_back(this_query,
-                                                 i_rc, i_rc + match_size,
-                                                 !orientation,
-                                                 std::vector<Match::node_index>{ node },
-                                                 config_,
-                                                 graph.get_node_sequence(node).substr(match_size));
-                        }
-                    }
-                }
-
-                std::vector<std::tuple<edge_index, edge_index, std::string>> traverse;
-                traverse.emplace_back(first, last, "");
+                std::vector<std::tuple<edge_index, edge_index, std::string, bool>> traverse;
+                traverse.emplace_back(first, last, "", true);
                 while (traverse.size()) {
-                    auto [first, last, suffix] = traverse.back();
+                    auto [first, last, suffix, is_exact_match] = traverse.back();
                     assert(boss.get_last(last));
                     traverse.pop_back();
 
-                    assert(suffix.size() + match_size < k);
-                    if (suffix.size() + match_size == k - 1) {
+                    size_t cur_match_size = match_size + suffix.size();
+
+                    if (canonical && is_exact_match) {
+                        if (dbg_succ->in_graph(last)) {
+                            dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
+                                node = canonical->reverse_complement(node);
+                                size_t i_rc = this_query.size() - (i + cur_match_size);
+                                anchors.emplace_back(query_.get_query(!orientation),
+                                                    i_rc, i_rc + cur_match_size,
+                                                    !orientation,
+                                                    std::vector<Match::node_index>{ node },
+                                                    config_,
+                                                    graph.get_node_sequence(node).substr(cur_match_size));
+                                assert(anchors.back().is_spelling_valid(graph));
+                            });
+                        }
+                    }
+
+                    assert(cur_match_size < k);
+                    if (cur_match_size == k - 1) {
                         assert(first == last || !boss.get_last(first));
                         assert(boss.succ_last(first) == last);
                         // std::cerr << "foo\t" << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\n";
@@ -108,15 +111,28 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     // std::cerr << "\t" << suffix << c << "\n";
                                     auto first_mm = std::mismatch(this_query.begin() + i + match_size, this_query.end(),
                                                                   suffix.begin(), suffix.end()).second;
-                                    size_t full_match_size = match_size + (first_mm - suffix.begin())
-                                            + (i + k <= this_query.size() && first_mm == suffix.end() && c == this_query[i + k - 1]);
+                                    bool last_char_matches = i + k <= this_query.size() && first_mm == suffix.end() && c == this_query[i + k - 1];
+                                    size_t full_match_size = match_size + (first_mm - suffix.begin()) + last_char_matches;
+
+                                    is_exact_match &= last_char_matches;
 
                                     anchors.emplace_back(this_query,
-                                                         i, i + full_match_size,
-                                                         orientation,
-                                                         std::vector<Match::node_index>{ node },
-                                                         config_,
-                                                         (suffix + c).substr(full_match_size - match_size));
+                                                        i, i + full_match_size,
+                                                        orientation,
+                                                        std::vector<Match::node_index>{ node },
+                                                        config_,
+                                                        (suffix + c).substr(full_match_size - match_size));
+                                    assert(anchors.back().is_spelling_valid(graph));
+
+                                    if (canonical && is_exact_match) {
+                                        size_t i_rc = this_query.size() - (i + full_match_size);
+                                        anchors.emplace_back(query_.get_query(!orientation),
+                                                             i_rc, i_rc + full_match_size,
+                                                             !orientation,
+                                                             std::vector<Match::node_index>{ canonical->reverse_complement(node) },
+                                                             config_);
+                                        assert(anchors.back().is_spelling_valid(graph));
+                                    }
                                 }
                             }
                         }
@@ -130,7 +146,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
                         if (boss.tighten_range(&next_first, &next_last, s)) {
                             // std::cerr << "\tworked!\n";
-                            traverse.emplace_back(next_first, next_last, suffix + boss.decode(s));
+                            char c = boss.decode(s);
+                            bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
+                            traverse.emplace_back(next_first, next_last, suffix + c,
+                                                  next_is_exact_match);
                         }
                     }
                 }
@@ -1557,6 +1576,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 // common::logger->info("Simple extension {} -> {}", *next, aln);
                 std::vector<DeBruijnGraph::node_index> path;
                 path.resize(aln.get_path().size() + 1);
+                assert(next->get_path().size() == 1);
                 path[0] = next->get_path()[0];
                 std::copy(aln.get_path().begin(), aln.get_path().end(), path.begin() + 1);
 
@@ -1567,6 +1587,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
                 cigar.append(Cigar::MATCH, 1);
                 cigar.append(std::move(aln_cigar));
+
+                // assert(next->get_path_spelling().substr(0, next->get_spelling().size()) == next->get_seed());
+                // for (size_t i = 0; i < path.size(); ++i) {
+                //     std::cerr << "\t" << std::string(i, ' ') << graph.get_node_sequence(path[i]) << "\n";
+                // }
+
+                // std::cerr << "\tfoo\t" << spell_path(graph, path) << "\n";
 
                 Alignment next_aln(graph,
                                 aln.get_query(),
