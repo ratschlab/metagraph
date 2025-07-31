@@ -24,30 +24,6 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
-// inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_graph,
-//                                                      const Alignment &alignment,
-//                                                      bool check_full_coverage = true) {
-//     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
-//     auto labels = anno_graph.get_labels(alignment.get_path_spelling(),
-//                                         check_full_coverage ? 1.0 : 0.0);
-//     const auto &columns = alignment.get_label_class();
-//     if (check_full_coverage) {
-//         EXPECT_GE(labels.size(), columns.size());
-//     }
-
-//     std::unordered_set<uint64_t> enc_labels;
-//     for (const auto &label : labels) {
-//         enc_labels.emplace(label_encoder.encode(label));
-//     }
-
-//     std::vector<std::string> dec_labels;
-//     for (uint64_t label : columns) {
-//         EXPECT_TRUE(enc_labels.count(label)) << alignment;
-//         dec_labels.emplace_back(label_encoder.decode(label));
-//     }
-
-//     return dec_labels;
-// }
 
 void run_alignment(const AnnotatedDBG &anno_graph,
                    DBGAlignerConfig config,
@@ -88,7 +64,6 @@ void run_alignment(const AnnotatedDBG &anno_graph,
             return std::make_pair(a.get_score(), b.get_orientation())
                  > std::make_pair(b.get_score(), a.get_orientation());
         });
-
 
         ASSERT_LE(mappings.size(), paths.size()) << mx;
         paths.resize(mappings.size());
@@ -134,9 +109,7 @@ void run_alignment(const AnnotatedDBG &anno_graph,
 
             check_ref(paths[i], "extend");
 
-            if (check_chaining
-                    && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
-                    && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
+            if (check_chaining) {
                 // this alignment should work with chaining alone
                 ASSERT_LT(i, paths_no_extend.size());
                 check_ref(paths_no_extend[i], "chain");
@@ -220,7 +193,7 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
     };
 
     for (const auto &[query, mappings] : exp_alignments) {
-        run_alignment(*anno_graph, config, query, mappings);
+        run_alignment(*anno_graph, config, query, mappings, 0, true, true);
     }
 }
 
@@ -253,75 +226,78 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
 
-    std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-        { std::string("TGAAATGCAT"), {
-            std::make_tuple(std::string("C"), std::string("TGGAATGCAT"), std::string("2=1X7=")),
-            // std::make_tuple(std::string("B"), std::string("TCGAATGCCT"), std::string("1=2X5=1X1=")),
-        } }
-    };
+    {
+        std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+            { std::string("TGAAATGCAT"), {
+                std::make_tuple(std::string("C"), std::string("TGGAATGCAT"), std::string("2=1X7=")),
+            } }
+        };
 
-    for (const auto &[query, mappings] : exp_alignments) {
-        run_alignment(*anno_graph, config, query, mappings);
+        for (const auto &[query, mappings] : exp_alignments) {
+            run_alignment(*anno_graph, config, query, mappings);
+        }
+    }
+    {
+        std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+            { std::string("TGAAATGCAT"), {
+                std::make_tuple(std::string("C"), std::string("TGGAATGCAT"), std::string("2=1X7=")),
+                std::make_tuple(std::string("B"), std::string("TCGAATGCCT"), std::string("1=2X5=1X1=")),
+            } }
+        };
+
+        for (const auto &[query, mappings] : exp_alignments) {
+            run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+        }
     }
 }
 
 #if ! _PROTEIN_GRAPH
-// TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
-//     size_t k = 5;
-//     /*   B     B                AB    AB
-//        TTAGT-TAGTC             TCGAA-CGAAA
-//                   \  BC   ABC /
-//                    AGTCG-GTCGA
-//           C     C /           \   C     C
-//        TCAGT-CAGTC             TCGAT-CGATT
-//         AB    AB                 B     B
-//        TTTCG-TTCGA             GACTA-ACTAA
-//                   \ ABC    BC /
-//                    TCGAC-CGACT
-//           C     C /           \   C     C
-//        AATCG-ATCGA             GACTG-ACTGA
-//     */
-//     const std::vector<std::string> sequences {
-//         "GTCGAAA", // "TTTCGAC"
-//         "TTAGTCGAAA", // "TTTCGACTAA"
-//         "TCAGTCGATT" // "AATCGACTGA"
-//     };
-//     const std::vector<std::string> labels { "A", "B", "C" };
+TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+        return;
+    }
 
-//     for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
-//         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
-//                                            typename TypeParam::second_type>(
-//             k, sequences, labels, mode
-//         );
+    size_t k = 5;
+    /*   B     B                AB    AB
+       TTAGT-TAGTC             TCGAA-CGAAA
+                  \  BC   ABC /
+                   AGTCG-GTCGA
+          C     C /           \   C     C
+       TCAGT-CAGTC             TCGAT-CGATT
+        AB    AB                 B     B
+       TTTCG-TTCGA             GACTA-ACTAA
+                  \ ABC    BC /
+                   TCGAC-CGACT
+          C     C /           \   C     C
+       AATCG-ATCGA             GACTG-ACTGA
+    */
+    const std::vector<std::string> sequences {
+        "GTCGAAA", // "TTTCGAC"
+        "TTAGTCGAAA", // "TTTCGACTAA"
+        "TCAGTCGATT" // "AATCGACTGA"
+    };
+    const std::vector<std::string> labels { "A", "B", "C" };
 
-//         DBGAlignerConfig config;
-//         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k, sequences, labels, mode
+        );
 
-//         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-//             // r.c. TTTGAACTAA
-//             { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") } }} } // 5=2X3=
-//         }};
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+        config.min_seed_length = 4;
+        std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+            { std::string("TTAGTTCAAA"), { // RC: TTTGAACTAA
+                std::make_tuple(std::string("B"), std::string("TTAGTCGAAA"), std::string("5=2X3=")),
+            } }
+        };
 
-//         for (const auto &[query, labels] : exp_alignments) {
-//             auto alignments = aligner.align(query);
-//             EXPECT_EQ(labels.size(), alignments.size()) << query;
-
-//             for (const auto &alignment : alignments) {
-//                 bool found = false;
-//                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
-//                     auto find = labels.find(label);
-//                     ASSERT_TRUE(find != labels.end());
-//                     if (alignment.get_sequence() == find->second) {
-//                         found = true;
-//                         break;
-//                     }
-//                 }
-//                 EXPECT_TRUE(found) << alignment;
-//             }
-//         }
-//     }
-// }
+        for (const auto &[query, mappings] : exp_alignments) {
+            run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+        }
+    }
+}
 #endif
 
 } // namespace

@@ -69,7 +69,6 @@ void run_alignment(const DeBruijnGraph &graph,
                  > std::make_pair(b.get_score(), a.get_orientation());
         });
 
-
         ASSERT_LE(reference.size(), paths.size()) << mx;
         paths.resize(reference.size());
 
@@ -99,9 +98,6 @@ void run_alignment(const DeBruijnGraph &graph,
                 Cigar cigar(cigar_str[i]);
                 check_aln(paths[i], cigar, reference[i], "extend");
 
-                // if (check_chaining
-                //         && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
-                //         && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
                 if (check_chaining) {
                     // this alignment should work with chaining alone
                     ASSERT_LT(i, paths_no_extend.size());

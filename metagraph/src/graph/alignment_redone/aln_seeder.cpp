@@ -1132,11 +1132,12 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             aln.get_trim_spelling()
         );
 
-        if (fwd_exts.empty() && !aln.get_end_trim())
+        if (fwd_exts.empty())
             fwd_exts.emplace_back(aln);
     }
 
     for (auto &fwd_ext : fwd_exts) {
+        fwd_ext.trim_end();
         if (no_bwd || !fwd_ext.get_clipping()) {
             // std::cerr << "\tskipbwd\t" << fwd_ext << "\n";
             callback(std::move(fwd_ext));
@@ -1190,6 +1191,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     fwd_ext.get_end_trim(),
                     fwd_ext.get_label_classes()[0]
                 );
+                next_aln.trim_end();
 
                 // assert(next_aln.get_score() == best_score);
                 // std::cerr << "found\t" << next_aln << "\n";
@@ -1268,10 +1270,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     using AnchorIt = std::vector<Anchor>::iterator;
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
 
-    // std::cerr << "Anchors\n";
-    // for (const auto &a : anchors) {
-    //     std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
-    // }
+    std::cerr << "Anchors\n";
+    for (const auto &a : anchors) {
+        std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
+    }
 
     std::vector<Alignment> alignments;
 
