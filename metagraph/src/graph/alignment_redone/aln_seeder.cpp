@@ -1389,8 +1389,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     std::string_view left(query_i.data(), query_j.data() - query_i.data());
                     DeBruijnGraph::node_index node = a_j.get_path()[0];
                     ssize_t num_matches = 0;
-                    for (auto it = left.rbegin(); it != left.rend() && node != DeBruijnGraph::npos; ++it) {
-                        node = graph.traverse_back(node, *it);
+                    for (auto ait = left.rbegin(); ait != left.rend() && node != DeBruijnGraph::npos; ++ait) {
+                        node = graph.traverse_back(node, *ait);
                         ++num_matches;
                     }
                     if (num_matches == static_cast<ssize_t>(left.size()) && node == a_i.get_path()[0]) {
