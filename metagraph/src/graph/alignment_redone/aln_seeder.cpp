@@ -140,11 +140,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         continue;
                     }
 
-                    for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+                    // for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+                    for (boss::BOSS::edge_index e = first; e <= last; ++e) {
+                        boss::BOSS::TAlphabet s = boss.get_W(e) % boss.alph_size;
+                        // if (s) {
                         boss::BOSS::edge_index next_first = first;
                         boss::BOSS::edge_index next_last = last;
                         // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
-                        if (boss.tighten_range(&next_first, &next_last, s)) {
+                        if (s && boss.tighten_range(&next_first, &next_last, s)) {
                             // std::cerr << "\tworked!\n";
                             char c = boss.decode(s);
                             bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
@@ -154,6 +157,24 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     }
                 }
             }
+        }
+
+        if (anchors.size() > 1 && canonical) {
+            std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
+                return std::make_tuple(a.get_orientation(), a.get_clipping(), a.get_path()[0], b.get_end_clipping())
+                     < std::make_tuple(b.get_orientation(), b.get_clipping(), b.get_path()[0], a.get_end_clipping());
+            });
+            for (auto it = anchors.begin(), jt = anchors.begin() + 1; jt != anchors.end(); ++it, ++jt) {
+                if (it->get_orientation() != jt->get_orientation() || it->get_clipping() != jt->get_clipping() || it->get_path()[0] != jt->get_path()[0])
+                    continue;
+
+                assert(it->get_end_clipping() >= jt->get_end_clipping());
+                assert(it->get_end_trim() >= jt->get_end_trim());
+                // std::cerr << "redundant\t" << *it << "\t" << *jt << "\n";
+                *it = Anchor();
+            }
+            anchors.erase(std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); }),
+                          anchors.end());
         }
     }
 
