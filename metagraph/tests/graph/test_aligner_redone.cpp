@@ -423,7 +423,12 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long_offset) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
-    run_alignment(*graph, config, query, { reference }, { "6=1X9I6=" });
+    run_alignment(*graph, config, query, { reference }, { "6=1X9I6=" }, 0, true, true);
+    // if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+    //     config.min_seed_length = 3;
+    //     run_alignment(*graph, config, query, { reference }, { "6=1X9I6=" });
+    // } else {
+    // }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
@@ -456,16 +461,13 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        config.min_seed_length = 2;
-    }
-    run_alignment(*graph, config, query, { reference }, { "10=4D9=" }, 0, true);
+    run_alignment(*graph, config, query, { reference }, { "10=4D9=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     size_t k = 4;
     //                           DDDD
-    std::string reference = "TTTCCCTTGGCGCTCTC";
+    std::string reference = "TTTCCCAAGGCGCTCTC";
     std::string query =     "TTTC"  "GGCGCTCTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
@@ -473,10 +475,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
     config.gap_opening_penalty = -4;
     config.gap_extension_penalty = -2;
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        config.min_seed_length = 2;
-    }
-    run_alignment(*graph, config, query, { reference }, { "4=4D9=" });
+    config.left_end_bonus = 4;
+    config.right_end_bonus = 4;
+    run_alignment(*graph, config, query, { reference }, { "4=4D9=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
@@ -492,10 +493,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_loop_deletion) {
     );
     config.gap_opening_penalty = -2;
     config.gap_extension_penalty = -2;
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        config.min_seed_length = 2;
-    }
-    run_alignment(*graph, config, query, { "AAAATTTCGAGGCCAA" }, { "4=3D9=" });
+    run_alignment(*graph, config, query, { "AAAATTTCGAGGCCAA" }, { "4=3D9=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_straight_long_xdrop) {
