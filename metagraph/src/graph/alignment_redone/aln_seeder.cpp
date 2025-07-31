@@ -935,6 +935,17 @@ class AlignmentGraph {
         return has_labels(next) ? next : DeBruijnGraph::npos;
     }
 
+    void traverse(node_index node, const char *begin, const char *end, const std::function<void(node_index)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.traverse(node, begin, end, callback);
+            return;
+        }
+
+        for (auto it = begin; it != end && (node = traverse(node, *it)); ++it) {
+            callback(node);
+        }
+    }
+
     bool has_single_outgoing(node_index node) const {
         if (target_ == Anchor::nlabel)
             return graph_.has_single_outgoing(node);
@@ -1299,7 +1310,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
     bool ext_success = false;
     Anchor::score_t last_chain_score = 0;
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
-        [this,k,&graph,&dummy](
+        [this,k,&dummy](
                 const Anchor &a_j,
                 ssize_t max_dist,
                 AnchorIt rbegin,
@@ -1321,6 +1332,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 const Anchor &a_i = *it;
                 assert(a_i.get_label_class() == a_j.get_label_class());
                 assert(a_i.get_orientation() == a_j.get_orientation());
+
+                auto graph = make_aln_graph(a_i.get_label_class());
 
                 std::string_view query_i = a_i.get_seed();
 
