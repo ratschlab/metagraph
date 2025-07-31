@@ -203,17 +203,17 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
     }
 
     size_t k = 4;
-    /*  B    B                  AB   AB
-       TCGA-CGAA                TGCC-GCCT
-                \ BC   BC   BC /
-                 GAAT-AATG-ATGC
-          C    C/              \   C    C
-       TGGA-GGAA                TGCA-GCAT
+    /*   B    B    B                  AB   AB
+        GTCG-TCGA-CGAA                TGCC-GCCT
+                      \ BC   BC   BC /
+                       GAAT-AATG-ATGC
+           C    C    C/              \   C    C
+        GTGG-TGGA-GGAA                TGCA-GCAT
     */
     const std::vector<std::string> sequences {
-        "TGCCT",
-        "TCGAATGCCT",
-        "TGGAATGCAT"
+         "TGCCT",
+        "GTCGAATGCCT",
+        "GTGGAATGCAT"
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
@@ -228,8 +228,8 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
 
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("TGAAATGCAT"), {
-                std::make_tuple(std::string("C"), std::string("TGGAATGCAT"), std::string("2=1X7=")),
+            { std::string("GTGAAATGCAT"), {
+                std::make_tuple(std::string("C"), std::string("GTGGAATGCAT"), std::string("3=1X7=")),
             } }
         };
 
@@ -239,9 +239,9 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
     }
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("TGAAATGCAT"), {
-                std::make_tuple(std::string("C"), std::string("TGGAATGCAT"), std::string("2=1X7=")),
-                std::make_tuple(std::string("B"), std::string("TCGAATGCCT"), std::string("1=2X5=1X1=")),
+            { std::string("GTGAAATGCAT"), {
+                std::make_tuple(std::string("C"), std::string("GTGGAATGCAT"), std::string("3=1X7=")),
+                std::make_tuple(std::string("B"), std::string("GTCGAATGCCT"), std::string("2=2X5=1X1=")),
             } }
         };
 
