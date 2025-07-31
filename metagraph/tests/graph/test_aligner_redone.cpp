@@ -99,9 +99,10 @@ void run_alignment(const DeBruijnGraph &graph,
                 Cigar cigar(cigar_str[i]);
                 check_aln(paths[i], cigar, reference[i], "extend");
 
-                if (check_chaining
-                        && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
-                        && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
+                // if (check_chaining
+                //         && cigar.data()[0].first == Cigar::MATCH && cigar.data()[0].second >= config.min_seed_length
+                //         && cigar.data().back().first == Cigar::MATCH && cigar.data().back().second >= config.min_seed_length) {
+                if (check_chaining) {
                     // this alignment should work with chaining alone
                     ASSERT_LT(i, paths_no_extend.size());
                     check_ref(paths_no_extend[i], reference[i], "chain");
@@ -647,7 +648,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity) {
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    run_alignment(*graph, config, query, { reference }, { "30=2D2=1X2=1X6=" });
+    run_alignment(*graph, config, query, { reference }, { "30=2D2=1X2=1X6=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2) {
@@ -660,10 +661,10 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
 
-    run_alignment(*graph, config, query, { reference.substr(3) }, { "10S4=1X9=1X8=1X39=" });
+    run_alignment(*graph, config, query, { reference.substr(3) }, { "10S4=1X9=1X8=1X39=" }, 0, true, true);
 
     config.gap_opening_penalty = -3;
-    run_alignment(*graph, config, query, { reference },           {       "18=7I8=1X39=" });
+    run_alignment(*graph, config, query, { reference },           {       "18=7I8=1X39=" }, 0, true, true);
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
@@ -882,19 +883,29 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        config.min_seed_length = 5;
+        run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
+    } else {
+        run_alignment(*graph, config, query, { reference }, { "5=1X12=" }, 0, true, true);
+    }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;
-    std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGC";
+    std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGCAAAAA";
     std::string query =        "GTAGTGCTACCTTGTAGTCGTGGTGATGC";
     //                                   X            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    run_alignment(*graph, config, query, { reference }, { "9=1X12=1X6=" });
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        config.min_seed_length = 6;
+        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X6=" });
+    } else {
+        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X6=" }, 0, true, true);
+    }
 }
 
 // TYPED_TEST(DBGAlignerTest, align_nodummy) {
@@ -983,7 +994,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.min_seed_length = 5;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { reference }, { "6=1X1=" });
+        run_alignment(*graph, config, query, { reference }, { "6=1X1=" }, 0, true, true);
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
@@ -1002,7 +1013,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     config.right_end_bonus = 2;
     config.min_seed_length = 5;
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
-        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "5=1X6=1X" });
+        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "5=1X6=1X" }, 0, true, true);
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
@@ -1022,7 +1033,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query,
                       { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" },
-                      { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" });
+                      { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" }, 0, true, true);
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
