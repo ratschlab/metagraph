@@ -329,12 +329,13 @@ TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
 
 TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     size_t k = 4;
-    std::vector<std::string> references = {"ACAATTTTTTTTGG",
-                                           "ACAATTTTTGTTGG",
-                                           "ACAAGTTTTTTTGG",
-                                           "ACAAGTTTTGTTGG"};
-    std::string query =                    "ACAACTTTTCTT";
-    //                                          X    X
+    std::vector<std::string> references = {
+                        "ACAATTTTTTTTGG",
+                        "ACAATTTTTGTTGG",
+                        "ACAAGTTTTTTTGG",
+                        "ACAAGTTTTGTTGG" };
+    std::string query = "ACAACTTTTCTT";
+    //                       X    X
 
     auto graph = build_graph_batch<TypeParam>(k, references);
     DBGAlignerConfig config;
