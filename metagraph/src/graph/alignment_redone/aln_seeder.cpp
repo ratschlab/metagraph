@@ -1618,7 +1618,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
 
             if (!align) {
-                // connect anchors without actually aligning
+                // connect anchors without actually aligning or traversing
                 size_t query_dist = last->get_clipping() - next->get_clipping();
                 std::vector<DeBruijnGraph::node_index> path;
                 path.resize(aln.get_path().size() + traversal_dist);
@@ -1631,15 +1631,23 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // overlap
                     // std::cerr << "foo\t" << next->get_seed().end() - last->get_seed().begin() << "\t" << *next << " " << next->get_path_spelling() << " -> " << *last << " " << last->get_path_spelling() << std::endl;
                     assert(traversal_dist == query_dist);
-                    auto jt = path.rbegin() + aln.get_path().size();
-                    for (auto it = next->get_seed().rend() - query_dist; it != next->get_seed().rend(); ++it, ++jt) {
-                        *jt = graph.traverse_back(*(jt - 1), *it);
-                        assert(graph.in_graph(*jt));
+                    // TODO: don't bother traversing, trust that the connection worked.
+                    //       keep intermediate nodes as DeBruijnGraph::npos
+#ifndef NDEBUG
+                    DeBruijnGraph::node_index node = *(path.rbegin() + aln.get_path().size() - 1);
+                    // auto jt = path.rbegin() + aln.get_path().size();
+                    // for (auto it = next->get_seed().rend() - query_dist; it != next->get_seed().rend(); ++it, ++jt) {
+                    for (auto it = next->get_seed().rend() - query_dist; it != next->get_seed().rend(); ++it) {
+                        // *jt = graph.traverse_back(*(jt - 1), *it);
+                        // assert(graph.in_graph(*jt));
+                        node = graph.traverse_back(node, *it);
+                        assert(graph.in_graph(node));
                     }
-                    assert(path[0] == next->get_path()[0]);
+                    assert(node == next->get_path()[0]);
+#endif
+                    // assert(path[0] == next->get_path()[0]);
                     cigar.append(Cigar::MATCH, query_dist);
                 } else {
-                    path[0] = next->get_path()[0];
                     cigar.append(Cigar::MATCH, next->get_seed().size());
                     if (traversal_dist == query_dist) {
                         // no gap
@@ -1662,6 +1670,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     }
                 }
 
+                path[0] = next->get_path()[0];
                 Cigar aln_cigar = aln.get_cigar();
                 aln_cigar.trim_clipping();
                 cigar.append(std::move(aln_cigar));
