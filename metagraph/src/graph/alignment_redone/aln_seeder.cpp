@@ -78,19 +78,23 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                     size_t cur_match_size = match_size + suffix.size();
 
-                    if (canonical && is_exact_match) {
-                        if (dbg_succ->in_graph(last)) {
-                            dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
-                                node = canonical->reverse_complement(node);
-                                size_t i_rc = this_query.size() - (i + cur_match_size);
-                                anchors.emplace_back(query_.get_query(!orientation),
-                                                    i_rc, i_rc + cur_match_size,
-                                                    !orientation,
-                                                    std::vector<Match::node_index>{ node },
-                                                    config_,
-                                                    graph.get_node_sequence(node).substr(cur_match_size));
-                                assert(anchors.back().is_spelling_valid(graph));
-                            });
+                    if (canonical) {
+                        if (is_exact_match) {
+                            if (dbg_succ->in_graph(last)) {
+                                dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
+                                    node = canonical->reverse_complement(node);
+                                    size_t i_rc = this_query.size() - (i + cur_match_size);
+                                    anchors.emplace_back(query_.get_query(!orientation),
+                                                        i_rc, i_rc + cur_match_size,
+                                                        !orientation,
+                                                        std::vector<Match::node_index>{ node },
+                                                        config_,
+                                                        graph.get_node_sequence(node).substr(cur_match_size));
+                                    assert(anchors.back().is_spelling_valid(graph));
+                                });
+                            }
+                        // } else {
+                            // break;
                         }
                     }
 
@@ -111,23 +115,25 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     is_exact_match &= last_char_matches;
 
-                                    anchors.emplace_back(this_query,
-                                                        i, i + full_match_size,
-                                                        orientation,
-                                                        std::vector<Match::node_index>{ node },
-                                                        config_,
-                                                        (suffix + c).substr(full_match_size - match_size));
-                                    assert(anchors.back().is_spelling_valid(graph));
-
-                                    if (canonical && is_exact_match) {
-                                        size_t i_rc = this_query.size() - (i + full_match_size);
-                                        anchors.emplace_back(query_.get_query(!orientation),
-                                                            i_rc, i_rc + full_match_size,
-                                                            !orientation,
-                                                            std::vector<Match::node_index>{ canonical->reverse_complement(node) },
-                                                            config_);
+                                    if (!is_exact_match) {
+                                        anchors.emplace_back(this_query,
+                                                            i, i + full_match_size,
+                                                            orientation,
+                                                            std::vector<Match::node_index>{ node },
+                                                            config_,
+                                                            (suffix + c).substr(full_match_size - match_size));
                                         assert(anchors.back().is_spelling_valid(graph));
                                     }
+
+                                    // if (canonical && is_exact_match) {
+                                    //     size_t i_rc = this_query.size() - (i + full_match_size);
+                                    //     anchors.emplace_back(query_.get_query(!orientation),
+                                    //                         i_rc, i_rc + full_match_size,
+                                    //                         !orientation,
+                                    //                         std::vector<Match::node_index>{ canonical->reverse_complement(node) },
+                                    //                         config_);
+                                    //     assert(anchors.back().is_spelling_valid(graph));
+                                    // }
                                 }
                             }
                         }
