@@ -1626,99 +1626,49 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 // connect anchors without actually aligning
                 assert(next->get_seed().end() <= last->get_seed().begin());
                 size_t query_dist = last->get_clipping() - next->get_clipping();
+                std::vector<DeBruijnGraph::node_index> path;
+                path.resize(aln.get_path().size() + traversal_dist);
+                assert(next->get_path().size() == 1);
+                path[0] = next->get_path()[0];
+                std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
+
+                Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+
+                Cigar aln_cigar = aln.get_cigar();
+                aln_cigar.trim_clipping();
+
+                cigar.append(Cigar::MATCH, next->get_seed().size());
                 if (traversal_dist == query_dist) {
                     // no gap
-                    std::vector<DeBruijnGraph::node_index> path;
-                    path.resize(aln.get_path().size() + traversal_dist);
-                    assert(next->get_path().size() == 1);
-                    path[0] = next->get_path()[0];
-                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
-
-                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
-
-                    Cigar aln_cigar = aln.get_cigar();
-                    aln_cigar.trim_clipping();
-
-                    cigar.append(Cigar::MATCH, next->get_seed().size());
                     assert(query_dist > next->get_seed().size());
                     cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
-                    cigar.append(std::move(aln_cigar));
-
-                    Alignment next_aln(graph,
-                                    aln.get_query(),
-                                    aln.get_orientation(),
-                                    std::move(path),
-                                    config_,
-                                    std::move(cigar),
-                                    aln.get_end_trim(),
-                                    next->get_label_class());
-                    callback(std::move(next_aln));
                 } else if (traversal_dist > query_dist) {
                     // deletion
-                    std::vector<DeBruijnGraph::node_index> path;
-                    path.resize(aln.get_path().size() + traversal_dist);
-                    assert(next->get_path().size() == 1);
-                    path[0] = next->get_path()[0];
-                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
-
-                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
-
-                    Cigar aln_cigar = aln.get_cigar();
-                    aln_cigar.trim_clipping();
-
-                    cigar.append(Cigar::MATCH, next->get_seed().size());
-
                     // TODO: which first, mismatch or deletion?
                     cigar.append(Cigar::DELETION, traversal_dist - query_dist);
                     if (query_dist > next->get_seed().size()) {
                         cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
                     }
-
-                    cigar.append(std::move(aln_cigar));
-
-                    Alignment next_aln(graph,
-                                    aln.get_query(),
-                                    aln.get_orientation(),
-                                    std::move(path),
-                                    config_,
-                                    std::move(cigar),
-                                    aln.get_end_trim(),
-                                    next->get_label_class());
-                    callback(std::move(next_aln));
                 } else {
                     // insertion
-                    std::vector<DeBruijnGraph::node_index> path;
-                    path.resize(aln.get_path().size() + traversal_dist);
-                    assert(next->get_path().size() == 1);
-                    path[0] = next->get_path()[0];
-                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
-
-                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
-
-                    Cigar aln_cigar = aln.get_cigar();
-                    aln_cigar.trim_clipping();
-
-                    cigar.append(Cigar::MATCH, next->get_seed().size());
-
                     // TODO: which first, mismatch or insert?
                     cigar.append(Cigar::INSERTION, query_dist - traversal_dist);
                     if (traversal_dist > next->get_seed().size()) {
                         cigar.append(Cigar::MISMATCH, traversal_dist - next->get_seed().size());
                     }
-
-                    cigar.append(std::move(aln_cigar));
-
-                    Alignment next_aln(graph,
-                                    aln.get_query(),
-                                    aln.get_orientation(),
-                                    std::move(path),
-                                    config_,
-                                    std::move(cigar),
-                                    aln.get_end_trim(),
-                                    next->get_label_class());
-                    callback(std::move(next_aln));
                 }
 
+                cigar.append(std::move(aln_cigar));
+
+                Alignment next_aln(graph,
+                                aln.get_query(),
+                                aln.get_orientation(),
+                                std::move(path),
+                                config_,
+                                std::move(cigar),
+                                aln.get_end_trim(),
+                                next->get_label_class());
+                callback(std::move(next_aln));
                 return;
             }
 

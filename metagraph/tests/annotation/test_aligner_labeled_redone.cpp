@@ -117,7 +117,7 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                 check_ref(paths_no_extend[i], "chain");
 
                 ASSERT_LT(i, paths_no_align.size());
-                EXPECT_EQ(cigar.to_string(), paths_no_align[i].get_cigar().to_string()) << mx << "\tnoalign";
+                EXPECT_EQ(cigar.to_string(), paths_no_align[i].get_cigar().to_string()) << label << "\t" << mx << "\tnoalign";
             }
         }
     }
