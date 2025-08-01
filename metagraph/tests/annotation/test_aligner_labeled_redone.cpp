@@ -51,19 +51,21 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         std::vector<Alignment> paths;
         LabeledExtender extender(anno_buffer, aln_query, config);
         std::vector<Alignment> paths_no_extend = seeder.get_inexact_anchors();
+        std::vector<Alignment> paths_no_align = seeder.get_inexact_anchors(false);
         for (const auto &base_path : paths_no_extend) {
             extender.extend(base_path, [&](Alignment&& path) {
                 paths.emplace_back(std::move(path));
             });
         }
-        std::sort(paths_no_extend.begin(), paths_no_extend.end(), [](const auto &a, const auto &b) {
+
+        auto aln_sort = [](const auto &a, const auto &b) {
             return std::make_pair(a.get_score(), b.get_orientation())
                  > std::make_pair(b.get_score(), a.get_orientation());
-        });
-        std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
-            return std::make_pair(a.get_score(), b.get_orientation())
-                 > std::make_pair(b.get_score(), a.get_orientation());
-        });
+        };
+
+        std::sort(paths_no_extend.begin(), paths_no_extend.end(), aln_sort);
+        std::sort(paths_no_align.begin(), paths_no_align.end(), aln_sort);
+        std::sort(paths.begin(), paths.end(), aln_sort);
 
         ASSERT_LE(mappings.size(), paths.size()) << mx;
         paths.resize(mappings.size());
@@ -113,6 +115,9 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                 // this alignment should work with chaining alone
                 ASSERT_LT(i, paths_no_extend.size());
                 check_ref(paths_no_extend[i], "chain");
+
+                ASSERT_LT(i, paths_no_align.size());
+                EXPECT_EQ(cigar.to_string(), paths_no_align[i].get_cigar().to_string()) << mx << "\tnoalign";
             }
         }
     }

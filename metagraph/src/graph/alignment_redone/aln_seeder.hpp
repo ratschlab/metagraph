@@ -19,7 +19,7 @@ class Seeder {
     virtual ~Seeder() {}
 
     virtual std::vector<Anchor> get_anchors() const = 0;
-    virtual std::vector<Alignment> get_inexact_anchors() const = 0;
+    virtual std::vector<Alignment> get_inexact_anchors(bool align = true) const = 0;
 
     const Query& get_query() const { return query_; }
 
@@ -36,7 +36,7 @@ class ExactSeeder : public Seeder {
     virtual ~ExactSeeder() {}
 
     std::vector<Anchor> get_anchors() const override;
-    std::vector<Alignment> get_inexact_anchors() const override;
+    std::vector<Alignment> get_inexact_anchors(bool align = true) const override;
 
   protected:
     virtual AlignmentGraph make_aln_graph(Anchor::label_class_t) const;

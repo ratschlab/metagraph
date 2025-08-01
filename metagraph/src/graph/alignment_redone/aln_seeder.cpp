@@ -1315,7 +1315,7 @@ AlignmentGraph LabeledExtender::make_aln_graph(Anchor::label_class_t target) con
     return AlignmentGraph(query_.get_graph(), anno_buffer_, target);
 }
 
-std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
+std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     std::vector<Anchor> anchors = get_anchors();
 
     using AnchorIt = std::vector<Anchor>::iterator;
@@ -1575,7 +1575,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
 
             return ret_val;
         },
-        [this,match_score=config_.match_score("A")](
+        [this,align,match_score=config_.match_score("A")](
                 AnchorIt last,
                AnchorIt next,
                Alignment&& aln,
@@ -1583,10 +1583,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                DBGAlignerConfig::score_t score_up_to_now,
                const AlignmentCallback &callback) {
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
+            const auto &graph = query_.get_graph();
             if (next->get_seed().begin() + 1 == last->get_seed().begin() && traversal_dist == 1) {
                 // simple extension
                 // std::cerr << "Simple extension: " << *next << "\t->\t" << aln << std::endl;
-                const auto &graph = query_.get_graph();
 #ifndef NDEBUG
                 size_t k = graph.get_k();
                 if (graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
@@ -1609,13 +1609,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 cigar.append(Cigar::MATCH, 1);
                 cigar.append(std::move(aln_cigar));
 
-                // assert(next->get_path_spelling().substr(0, next->get_spelling().size()) == next->get_seed());
-                // for (size_t i = 0; i < path.size(); ++i) {
-                //     std::cerr << "\t" << std::string(i, ' ') << graph.get_node_sequence(path[i]) << "\n";
-                // }
-
-                // std::cerr << "\tfoo\t" << spell_path(graph, path) << "\n";
-
                 Alignment next_aln(graph,
                                 aln.get_query(),
                                 aln.get_orientation(),
@@ -1629,17 +1622,112 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 return;
             }
 
-            // std::cerr << "Alignment extension: " << *next << "\t" << next->get_path_spelling() << "\t->\t" << aln << "\t" << aln.get_path_spelling() << "\td:" << traversal_dist << std::endl;
+            if (!align) {
+                // connect anchors without actually aligning
+                assert(next->get_seed().end() <= last->get_seed().begin());
+                size_t query_dist = last->get_clipping() - next->get_clipping();
+                if (traversal_dist == query_dist) {
+                    // no gap
+                    std::vector<DeBruijnGraph::node_index> path;
+                    path.resize(aln.get_path().size() + traversal_dist);
+                    assert(next->get_path().size() == 1);
+                    path[0] = next->get_path()[0];
+                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
+
+                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+
+                    Cigar aln_cigar = aln.get_cigar();
+                    aln_cigar.trim_clipping();
+
+                    cigar.append(Cigar::MATCH, next->get_seed().size());
+                    assert(query_dist > next->get_seed().size());
+                    cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
+                    cigar.append(std::move(aln_cigar));
+
+                    Alignment next_aln(graph,
+                                    aln.get_query(),
+                                    aln.get_orientation(),
+                                    std::move(path),
+                                    config_,
+                                    std::move(cigar),
+                                    aln.get_end_trim(),
+                                    next->get_label_class());
+                    callback(std::move(next_aln));
+                } else if (traversal_dist > query_dist) {
+                    // deletion
+                    std::vector<DeBruijnGraph::node_index> path;
+                    path.resize(aln.get_path().size() + traversal_dist);
+                    assert(next->get_path().size() == 1);
+                    path[0] = next->get_path()[0];
+                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
+
+                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+
+                    Cigar aln_cigar = aln.get_cigar();
+                    aln_cigar.trim_clipping();
+
+                    cigar.append(Cigar::MATCH, next->get_seed().size());
+
+                    // TODO: which first, mismatch or deletion?
+                    cigar.append(Cigar::DELETION, traversal_dist - query_dist);
+                    if (query_dist > next->get_seed().size()) {
+                        cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
+                    }
+
+                    cigar.append(std::move(aln_cigar));
+
+                    Alignment next_aln(graph,
+                                    aln.get_query(),
+                                    aln.get_orientation(),
+                                    std::move(path),
+                                    config_,
+                                    std::move(cigar),
+                                    aln.get_end_trim(),
+                                    next->get_label_class());
+                    callback(std::move(next_aln));
+                } else {
+                    // insertion
+                    std::vector<DeBruijnGraph::node_index> path;
+                    path.resize(aln.get_path().size() + traversal_dist);
+                    assert(next->get_path().size() == 1);
+                    path[0] = next->get_path()[0];
+                    std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
+
+                    Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+
+                    Cigar aln_cigar = aln.get_cigar();
+                    aln_cigar.trim_clipping();
+
+                    cigar.append(Cigar::MATCH, next->get_seed().size());
+
+                    // TODO: which first, mismatch or insert?
+                    cigar.append(Cigar::INSERTION, query_dist - traversal_dist);
+                    if (traversal_dist > next->get_seed().size()) {
+                        cigar.append(Cigar::MISMATCH, traversal_dist - next->get_seed().size());
+                    }
+
+                    cigar.append(std::move(aln_cigar));
+
+                    Alignment next_aln(graph,
+                                    aln.get_query(),
+                                    aln.get_orientation(),
+                                    std::move(path),
+                                    config_,
+                                    std::move(cigar),
+                                    aln.get_end_trim(),
+                                    next->get_label_class());
+                    callback(std::move(next_aln));
+                }
+
+                return;
+            }
+
             assert(traversal_dist > 0);
 
             std::string_view query_window(
                 next->get_seed().data(),
                 aln.get_seed().begin() - next->get_seed().begin()
             );
-            // auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            //     return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
-            //             + (query_dist == query_window.size() && !next->get_clipping() ? config_.left_end_bonus : 0);
-            // };
 
             bool aln_found = false;
 
@@ -1669,38 +1757,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     return true;
                 }
 
-                // if (static_cast<ssize_t>(query_window.size()) - query_dist < static_cast<ssize_t>(next->get_seed().size()) - num_matches)
                 if (query_window.size() - query_dist <= next->get_seed().size() && num_matches < next->get_seed().size()
                         && query_window.size() - query_dist < next->get_seed().size() - num_matches) {
                     // std::cerr << "ttt: " << query_window.size() << "," << query_dist << "\t" << next->get_seed().size() << "," << num_matches << "\n";
                     return true;
                 }
 
-                // DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
-                // if (score <= 0)
-                //     return true;
-
-                // if (num_matches < next->get_seed().size())
-                //     return false;
-
                 return false;
-
-                // if (score <= 0 || config_.xdrop < local_best_score - score)
-                //     return true;
-
-
-
-                // // first check if we've hit another anchor
-                // auto jt = node_to_anchors.find(node);
-                // if (jt == node_to_anchors.end())
-                //     return false;
-
-                // for (size_t j : jt->second) {
-                //     if (found_next_anchor(j, query_dist, num_matches) && !skipped[j] && is_last_anchor(j))
-                //         return true;
-                // }
-
-                // return false;
             };
 
 
@@ -1714,11 +1777,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                 [&](auto&& bt_path, auto&& bt_cigar, size_t cost) { // callback
                     if (bt_path[0] != next->get_path()[0])
                         return;
-
-                    // size_t dist = bt_path.size();
-                    // size_t query_dist = bt_cigar.get_num_query();
-                    // assert(dist == cigar.get_num_ref());
-                    // auto added_score = get_score(cost, dist, query_dist) - last->get_score();
 
                     Cigar cigar(Cigar::CLIPPED, next->get_clipping());
                     cigar.append(std::move(bt_cigar));
@@ -1752,37 +1810,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors() const {
                     //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                  get_score(cost, query_dist, dist));
                     return aln_found || (query_dist == query_window.size() && node == next->get_path()[0]);
-                    // // terminate
-                    // const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-                    // DBGAlignerConfig::score_t score = get_score(cost, query_dist, dist);
-                    // best_score = std::max(best_score, score);
-                    // local_best_score = std::max(local_best_score, score);
-
-                    // max_dist = std::max(dist, max_dist);
-                    // auto jt = all_nodes_to_anchors.find(node);
-                    // if (jt == all_nodes_to_anchors.end())
-                    //     return false;
-
-                    // bool found = false;
-                    // for (const auto &[j, i] : jt->second) {
-                    //     auto kt = begin + j;
-                    //     if (found_next_anchor(j, query_dist - kt->get_path().size() + 1 + i, num_matches + i)) {
-                    //         found = true;
-                    //         if (is_last_anchor(j))
-                    //             return true;
-                    //     }
-                    // }
-
-                    // return found && query_dist == query_window.size() && dist == max_dist;
                 }
             );
             assert(aln_found);
-            // callback(std::move(aln));
-            // std::ignore = this;
-            // // std::cerr << aln << "\t" << *last << "\t" << *next << "\n";
-            // std::ignore = aln;
-            // std::ignore = last_to_next_dist;
-            // std::ignore = score_up_to_now;
         },
         [&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
             aln.trim_end();
