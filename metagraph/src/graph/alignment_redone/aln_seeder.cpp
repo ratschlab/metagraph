@@ -93,8 +93,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     assert(anchors.back().is_spelling_valid(graph));
                                 });
                             }
-                        // } else {
-                            // break;
+                        } else if (nodes[i] != DeBruijnGraph::npos) {
+                            break;
                         }
                     }
 
@@ -124,16 +124,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                             (suffix + c).substr(full_match_size - match_size));
                                         assert(anchors.back().is_spelling_valid(graph));
                                     }
-
-                                    // if (canonical && is_exact_match) {
-                                    //     size_t i_rc = this_query.size() - (i + full_match_size);
-                                    //     anchors.emplace_back(query_.get_query(!orientation),
-                                    //                         i_rc, i_rc + full_match_size,
-                                    //                         !orientation,
-                                    //                         std::vector<Match::node_index>{ canonical->reverse_complement(node) },
-                                    //                         config_);
-                                    //     assert(anchors.back().is_spelling_valid(graph));
-                                    // }
                                 }
                             }
                         }
