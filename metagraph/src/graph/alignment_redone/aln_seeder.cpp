@@ -13,6 +13,7 @@
 namespace mtg::graph::align_redone {
 
 std::vector<Anchor> ExactSeeder::get_anchors() const {
+    common::logger->trace("Seeding");
     const DeBruijnGraph &graph = query_.get_graph();
     std::vector<Anchor> anchors;
 

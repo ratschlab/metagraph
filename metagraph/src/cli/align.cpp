@@ -426,27 +426,44 @@ int align_to_graph(Config *config) {
                     aln_graph = wrap_graph(aln_graph);
                 }
 
+                std::optional<align_redone::AnnotationBuffer> anno_buffer;
+                if (anno_dbg)
+                    anno_buffer.emplace(*aln_graph, anno_dbg->get_annotator());
+
                 for (const auto &[header, query] : batch) {
                     align_redone::Query aln_query(*graph, query);
-                    align_redone::ExactSeeder seeder(aln_query, aligner_config);
-                    std::vector<align_redone::Alignment> paths;
-                    align_redone::Extender extender(aln_query, aligner_config);
+
+                    std::unique_ptr<align_redone::ExactSeeder> seeder;
+                    if (anno_dbg) {
+                        seeder = std::make_unique<align_redone::LabeledSeeder>(*anno_buffer, aln_query, aligner_config);
+                    } else {
+                        seeder = std::make_unique<align_redone::ExactSeeder>(aln_query, aligner_config);
+                    }
+
+                    std::unique_ptr<align_redone::Extender> extender;
+                    if (anno_dbg) {
+                        extender = std::make_unique<align_redone::LabeledExtender>(*anno_buffer, aln_query, aligner_config);
+                    } else {
+                        extender = std::make_unique<align_redone::Extender>(aln_query, aligner_config);
+                    }
+
                     common::logger->trace("Chaining");
-                    auto chains = seeder.get_inexact_anchors();
-                    std::sort(chains.begin(), chains.end(), [](const auto &a, const auto &b) {
+                    auto aln_sort = [](const auto &a, const auto &b) {
                         return std::make_pair(a.get_score(), b.get_orientation())
-                            > std::make_pair(b.get_score(), a.get_orientation());
-                    });
+                             > std::make_pair(b.get_score(), a.get_orientation());
+                    };
+
+                    auto chains = seeder->get_inexact_anchors();
+                    std::sort(chains.begin(), chains.end(), aln_sort);
+
                     common::logger->trace("Extending");
+                    std::vector<align_redone::Alignment> paths;
                     for (const auto &base_path : chains) {
-                        extender.extend(base_path, [&](align_redone::Alignment&& path) {
+                        extender->extend(base_path, [&](align_redone::Alignment&& path) {
                             paths.emplace_back(std::move(path));
                         });
                     }
-                    std::sort(paths.begin(), paths.end(), [](const auto &a, const auto &b) {
-                        return std::make_pair(a.get_score(), b.get_orientation())
-                            > std::make_pair(b.get_score(), a.get_orientation());
-                    });
+                    std::sort(paths.begin(), paths.end(), aln_sort);
 
                     *out << header << "\t" << query;
                     if (paths.size()) {
@@ -455,23 +472,6 @@ int align_to_graph(Config *config) {
                         *out << "\t*\t*\t*\t*\t*\t*\n";
                     }
                 }
-
-            //     std::unique_ptr<IDBGAligner> aligner;
-
-            //     if (anno_dbg) {
-            //         aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
-            //                                                      anno_dbg->get_annotator());
-            //     } else {
-            //         aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
-            //     }
-
-            //     aligner->align_batch(batch,
-            //         [&](const std::string &header, AlignmentResults&& paths) {
-            //             const auto &res = format_alignment(header, paths, *graph, *config);
-            //             std::lock_guard<std::mutex> lock(print_mutex);
-            //             *out << res;
-            //         }
-                // );
             });
 
             num_bp += num_bytes_read;
