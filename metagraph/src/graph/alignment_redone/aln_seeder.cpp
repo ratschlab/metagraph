@@ -1606,6 +1606,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 std::move(path),
                                 config_,
                                 std::move(cigar),
+                                std::string(1, next->get_seed()[0]) + aln.get_path_spelling(),
                                 aln.get_end_trim(),
                                 next->get_label_class());
                 // std::cerr << "\tnew aln: " << next_aln << std::endl;

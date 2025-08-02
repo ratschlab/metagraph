@@ -156,6 +156,28 @@ class Alignment : public Match {
               std::vector<node_index>&& path,
               const DBGAlignerConfig &config,
               Cigar&& cigar,
+              std::string&& path_spelling,
+              size_t end_trim = 0,
+              Anchor::label_class_t label_class = Anchor::nlabel)
+          : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
+                  orientation, std::move(path), 0),
+            end_trim_(end_trim),
+            path_spelling_(std::move(path_spelling)),
+            cigar_(std::move(cigar)),
+            label_classes_(path_.size(), label_class) {
+        assert(path_spelling_ == spell_path(graph, path_));
+        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        assert(cigar_.get_clipping() == get_clipping());
+        assert(cigar_.get_end_clipping() == get_end_clipping());
+        score_ = config.score_cigar(get_spelling(), query_, cigar_);
+    }
+
+    Alignment(const DeBruijnGraph &graph,
+              std::string_view query,
+              bool orientation,
+              std::vector<node_index>&& path,
+              const DBGAlignerConfig &config,
+              Cigar&& cigar,
               size_t end_trim = 0,
               Anchor::label_class_t label_class = Anchor::nlabel)
           : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
