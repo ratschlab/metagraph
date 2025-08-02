@@ -447,7 +447,6 @@ int align_to_graph(Config *config) {
                         extender = std::make_unique<align_redone::Extender>(aln_query, aligner_config);
                     }
 
-                    common::logger->trace("Chaining");
                     auto aln_sort = [](const auto &a, const auto &b) {
                         return std::make_pair(a.get_score(), b.get_orientation())
                              > std::make_pair(b.get_score(), a.get_orientation());
@@ -459,7 +458,6 @@ int align_to_graph(Config *config) {
                     std::vector<align_redone::Alignment> paths;
 
                     if (config->alignment_extend_chains) {
-                        common::logger->trace("Extending");
                         for (const auto &base_path : chains) {
                             extender->extend(base_path, [&](align_redone::Alignment&& path) {
                                 paths.emplace_back(std::move(path));

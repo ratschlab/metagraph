@@ -13,7 +13,6 @@
 namespace mtg::graph::align_redone {
 
 std::vector<Anchor> ExactSeeder::get_anchors() const {
-    common::logger->trace("Seeding");
     const DeBruijnGraph &graph = query_.get_graph();
     std::vector<Anchor> anchors;
 
@@ -1323,6 +1322,7 @@ AlignmentGraph LabeledExtender::make_aln_graph(Anchor::label_class_t target) con
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
+    common::logger->trace("Seeding");
     std::vector<Anchor> anchors = get_anchors();
 
     using AnchorIt = std::vector<Anchor>::iterator;
@@ -1356,6 +1356,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
     bool ext_success = false;
     Anchor::score_t last_chain_score = 0;
+    common::logger->trace("Chaining");
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
         [this,k,&dummy](
                 const Anchor &a_j,
