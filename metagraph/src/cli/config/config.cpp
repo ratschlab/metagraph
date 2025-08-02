@@ -243,6 +243,10 @@ Config::Config(int argc, char *argv[]) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
+        } else if (!strcmp(argv[i], "--align-no-connect-anchors")) {
+            alignment_connect_anchors = false;
+        } else if (!strcmp(argv[i], "--align-no-extend-chains")) {
+            alignment_extend_chains = false;
         } else if (!strcmp(argv[i], "--num-chars")) {
             num_chars = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--max-hull-depth")) {

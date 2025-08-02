@@ -453,17 +453,22 @@ int align_to_graph(Config *config) {
                              > std::make_pair(b.get_score(), a.get_orientation());
                     };
 
-                    auto chains = seeder->get_inexact_anchors();
+                    auto chains = seeder->get_inexact_anchors(config->alignment_connect_anchors);
                     std::sort(chains.begin(), chains.end(), aln_sort);
 
-                    common::logger->trace("Extending");
                     std::vector<align_redone::Alignment> paths;
-                    for (const auto &base_path : chains) {
-                        extender->extend(base_path, [&](align_redone::Alignment&& path) {
-                            paths.emplace_back(std::move(path));
-                        });
+
+                    if (config->alignment_extend_chains) {
+                        common::logger->trace("Extending");
+                        for (const auto &base_path : chains) {
+                            extender->extend(base_path, [&](align_redone::Alignment&& path) {
+                                paths.emplace_back(std::move(path));
+                            });
+                        }
+                        std::sort(paths.begin(), paths.end(), aln_sort);
+                    } else {
+                        std::swap(paths, chains);
                     }
-                    std::sort(paths.begin(), paths.end(), aln_sort);
 
                     *out << header << "\t" << query;
                     if (paths.size()) {
