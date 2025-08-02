@@ -86,11 +86,6 @@ class Anchor : public Match {
     static constexpr label_class_t nlabel = std::numeric_limits<uint64_t>::max();
     static constexpr int64_t ncoord = std::numeric_limits<int64_t>::max();
 
-    Anchor(Anchor&&) = default;
-    Anchor(const Anchor&) = default;
-    Anchor& operator=(const Anchor&) = default;
-    Anchor& operator=(Anchor&&) = default;
-
     Anchor() : Match(), label_class_(nlabel), coord_(ncoord) {}
 
     Anchor(std::string_view query,
@@ -143,11 +138,6 @@ bool operator==(const Anchor &a, const Anchor &b);
 
 class Alignment : public Match {
   public:
-    Alignment(const Alignment&) = default;
-    Alignment(Alignment&&) = default;
-    Alignment& operator=(const Alignment&) = default;
-    Alignment& operator=(Alignment&&) = default;
-
     Alignment() : Alignment(Anchor()) {}
 
     Alignment(const DeBruijnGraph &graph,
@@ -166,27 +156,6 @@ class Alignment : public Match {
             cigar_(std::move(cigar)),
             label_classes_(path_.size(), label_class) {
         assert(path_spelling_ == spell_path(graph, path_));
-        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
-        assert(cigar_.get_clipping() == get_clipping());
-        assert(cigar_.get_end_clipping() == get_end_clipping());
-        score_ = config.score_cigar(get_spelling(), query_, cigar_);
-    }
-
-    Alignment(const DeBruijnGraph &graph,
-              std::string_view query,
-              bool orientation,
-              std::vector<node_index>&& path,
-              const DBGAlignerConfig &config,
-              Cigar&& cigar,
-              size_t end_trim = 0,
-              Anchor::label_class_t label_class = Anchor::nlabel)
-          : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
-                  orientation, std::move(path), 0),
-            end_trim_(end_trim),
-            path_spelling_(spell_path(graph, path_)),
-            cigar_(std::move(cigar)),
-            label_classes_(path_.size(), label_class) {
-        assert(path_spelling_.size() - graph.get_k() + 1 == path_.size());
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
