@@ -1639,6 +1639,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
 
                 Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+                std::string spelling;
 
                 if (next->get_seed().end() > last->get_seed().begin()) {
                     // overlap
@@ -1660,18 +1661,26 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 #endif
                     // assert(path[0] == next->get_path()[0]);
                     cigar.append(Cigar::MATCH, query_dist);
+                    assert(next->get_query().begin() + next->get_clipping() + query_dist <= next->get_query().end());
+                    spelling += std::string(next->get_seed().data(), next->get_seed().data() + query_dist);
                 } else {
                     cigar.append(Cigar::MATCH, next->get_seed().size());
+                    spelling += next->get_seed();
                     if (traversal_dist == query_dist) {
                         // no gap
                         assert(query_dist > next->get_seed().size());
                         cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
+                        // assert(query_dist - next->get_seed().size() <= next->get_end_trim());
+                        // spelling += next->get_trim_spelling().substr(0, query_dist - next->get_seed().size());
+                        spelling += std::string(query_dist - next->get_seed().size(), '$');
                     } else if (traversal_dist > query_dist) {
                         // deletion
                         // TODO: which first, mismatch or deletion?
                         cigar.append(Cigar::DELETION, traversal_dist - query_dist);
+                        spelling += std::string(traversal_dist - query_dist, '$');
                         if (query_dist > next->get_seed().size()) {
                             cigar.append(Cigar::MISMATCH, query_dist - next->get_seed().size());
+                            spelling += std::string(query_dist - next->get_seed().size(), '$');
                         }
                     } else {
                         // insertion
@@ -1679,11 +1688,22 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         cigar.append(Cigar::INSERTION, query_dist - traversal_dist);
                         if (traversal_dist > next->get_seed().size()) {
                             cigar.append(Cigar::MISMATCH, traversal_dist - next->get_seed().size());
+                            spelling += std::string(traversal_dist - next->get_seed().size(), '$');
                         }
+                    }
+
+                    if (next->get_end_trim()) {
+                        assert(next->get_path().size() == 1);
+                        std::string_view next_trim_spelling = next->get_trim_spelling();
+                        auto end = next_trim_spelling.begin() + std::min(next_trim_spelling.size(), spelling.size() - next->get_seed().size());
+                        assert(next->get_seed().size() + (end - next_trim_spelling.begin()) <= spelling.size());
+                        std::copy(next_trim_spelling.begin(), end,
+                                  spelling.begin() + next->get_seed().size());
                     }
                 }
 
                 path[0] = next->get_path()[0];
+
                 Cigar aln_cigar = aln.get_cigar();
                 aln_cigar.trim_clipping();
                 cigar.append(std::move(aln_cigar));
@@ -1694,6 +1714,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 std::move(path),
                                 config_,
                                 std::move(cigar),
+                                spelling + aln.get_path_spelling(),
                                 aln.get_end_trim(),
                                 next->get_label_class());
                 callback(std::move(next_aln));
