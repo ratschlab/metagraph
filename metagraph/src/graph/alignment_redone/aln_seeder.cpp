@@ -1733,11 +1733,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 return;
             }
 
-            assert(traversal_dist > 0);
+            assert(traversal_dist > next->get_path().size() - 1);
+            traversal_dist -= next->get_path().size() - 1;
 
+            size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
             std::string_view query_window(
-                next->get_seed().data(),
-                aln.get_seed().begin() - next->get_seed().begin()
+                next->get_seed().data() + next->get_path().size() - 1,
+                aln.get_seed().begin() - next->get_seed().begin() - (next->get_path().size() - 1)
             );
 
             bool aln_found = false;
@@ -1748,10 +1750,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
                 //                      get_score(cost, query_dist, dist), num_matches);
 
-                if (aln_found || dist == 0 || query_dist == 0 || num_matches < next->get_seed().size())
+                if (aln_found || dist == 0 || query_dist == 0 || num_matches < target_num_matches)
                     return false;
 
-                return query_dist == query_window.size() && node == next->get_path()[0];
+                return query_dist == query_window.size() && node == next->get_path().back();
             };
 
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -1768,12 +1770,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return true;
                 }
 
-                if (query_window.size() - query_dist <= next->get_seed().size() && num_matches < next->get_seed().size()) {
+                if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
                     // sanity checks once we've hit the target seed
 
                     // cut off the branch if we did not match some of the target seed
                     // characters along the way
-                    if (query_window.size() - query_dist < next->get_seed().size() - num_matches) {
+                    if (query_window.size() - query_dist < target_num_matches - num_matches) {
                         // std::cerr << "ttt: " << query_window.size() << "," << query_dist << "\t" << next->get_seed().size() << "," << num_matches << "\n";
                         return true;
                     }
@@ -1797,9 +1799,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 query_window,
                 traversal_dist,
                 [&](auto&& spelling, auto&& bt_path, auto&& bt_cigar, size_t cost) { // callback
-                    assert(bt_path[0] == next->get_path()[0]);
+                    assert(bt_path[0] == next->get_path().back());
+                    bt_path.insert(bt_path.begin(), next->get_path().begin(), next->get_path().end() - 1);
 
                     Cigar cigar(Cigar::CLIPPED, next->get_clipping());
+                    cigar.append(Cigar::MATCH, next->get_path().size() - 1);
                     cigar.append(std::move(bt_cigar));
                     // std::cerr << "\textension: " << *next << "\t" << cigar.to_string() << "\t" << aln << std::endl;
 
@@ -1814,7 +1818,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                     std::move(bt_path),
                                     config_,
                                     std::move(cigar),
-                                    spelling + aln.get_path_spelling(),
+                                    std::string(next->get_spelling().substr(0, next->get_path().size() - 1)) + spelling + aln.get_path_spelling(),
                                     aln.get_end_trim(),
                                     last->get_label_class());
                     // std::cerr << "\t\t" << next_aln << std::endl;
@@ -1831,7 +1835,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // common::logger->info("Checkt: n: {}, d: {}, qd: {} / {}, s: {}",
                     //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                  get_score(cost, query_dist, dist));
-                    return aln_found || (query_dist == query_window.size() && node == next->get_path()[0]);
+                    return aln_found || (query_dist == query_window.size() && node == next->get_path().back());
                 }
             );
             assert(aln_found);
