@@ -1523,9 +1523,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         }
                     }
                     return;
-                } else if (!a_i.get_end_trim()) {
+                } else if (!a_i.get_end_trim() && query_i.end() != query_j.begin()) {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
+
+                    // don't try inserting if the previous character matches
+                    if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)))
+                        return;
+
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_j.get_path()[0];
                     auto end = query_i.rend() - a_i.get_path().size() + 1;

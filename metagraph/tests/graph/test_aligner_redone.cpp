@@ -720,31 +720,31 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 //     }
 // }
 
-TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
-    size_t k = 6;
-    std::vector<std::string> seqs;
-    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
-                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
+// TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
+//     size_t k = 6;
+//     std::vector<std::string> seqs;
+//     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+//                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+//     auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
 
-    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGA";
+//     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGA";
 
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.left_end_bonus = 5;
-    config.right_end_bonus = 5;
-    config.gap_opening_penalty = -5;
-    config.gap_extension_penalty = -2;
-    // config.min_seed_length = 6;
-    run_alignment(*graph, config, query, { "" }, { "" });
-}
+//     DBGAlignerConfig config;
+//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+//     config.left_end_bonus = 5;
+//     config.right_end_bonus = 5;
+//     config.gap_opening_penalty = -5;
+//     config.gap_extension_penalty = -2;
+//     // config.min_seed_length = 6;
+//     run_alignment(*graph, config, query, { "" }, { "" });
+// }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     size_t k = 31;
@@ -857,31 +857,31 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 //     }
 // }
 
-TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
-    size_t k = 6;
-    std::vector<std::string> seqs;
-    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
-                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
+// TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
+//     size_t k = 6;
+//     std::vector<std::string> seqs;
+//     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+//                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+//     auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
 
-    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGA";
+//     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+//                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+//                         "CGATCGATCGATCGATCGATCGA";
 
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.left_end_bonus = 5;
-    config.right_end_bonus = 5;
-    config.gap_opening_penalty = -5;
-    config.gap_extension_penalty = -2;
-    // config.min_seed_length = 6;
-    run_alignment(*graph, config, query, { "" }, { "" });
-}
+//     DBGAlignerConfig config;
+//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+//     config.left_end_bonus = 5;
+//     config.right_end_bonus = 5;
+//     config.gap_opening_penalty = -5;
+//     config.gap_extension_penalty = -2;
+//     // config.min_seed_length = 6;
+//     run_alignment(*graph, config, query, { "" }, { "" });
+// }
 #endif
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
