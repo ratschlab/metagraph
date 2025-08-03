@@ -8,6 +8,7 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 
 namespace mtg::graph::align_redone {
@@ -42,128 +43,129 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
             }
 
-            if (!dbg_succ)
-                continue;
+            if (dbg_succ) {
+                const auto &boss = dbg_succ->get_boss();
+                auto encoded = boss.encode(this_query);
 
-            const auto &boss = dbg_succ->get_boss();
-            auto encoded = boss.encode(this_query);
-
-            size_t k = graph.get_k();
-            for (size_t i = 0; i + config_.min_seed_length <= this_query.size(); ++i) {
-                if (std::find(encoded.begin() + i, encoded.begin() + i + config_.min_seed_length,
-                            boss.alph_size) != encoded.begin() + i + config_.min_seed_length) {
-                    continue;
-                }
-
-                auto [first, last, it] = boss.index_range(
-                    encoded.begin() + i,
-                    encoded.begin() + i + config_.min_seed_length
-                );
-
-                size_t match_size = it - (encoded.begin() + i);
-                if (match_size < config_.min_seed_length)
-                    continue;
-
-                first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
-                // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\t" << first << "," << last << "\t" << std::flush << graph.get_node_sequence(first) << "\t" << graph.get_node_sequence(last) << "\n";
-                using edge_index = boss::BOSS::edge_index;
-
-                std::vector<std::tuple<edge_index, edge_index, std::string, bool>> traverse;
-                traverse.emplace_back(first, last, "", true);
-                while (traverse.size()) {
-                    auto [first, last, suffix, is_exact_match] = traverse.back();
-                    assert(boss.get_last(last));
-                    traverse.pop_back();
-
-                    size_t cur_match_size = match_size + suffix.size();
-
-                    if (canonical) {
-                        if (is_exact_match) {
-                            if (dbg_succ->in_graph(last)) {
-                                dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
-                                    node = canonical->reverse_complement(node);
-                                    size_t i_rc = this_query.size() - (i + cur_match_size);
-                                    anchors.emplace_back(query_.get_query(!orientation),
-                                                        i_rc, i_rc + cur_match_size,
-                                                        !orientation,
-                                                        std::vector<Match::node_index>{ node },
-                                                        config_,
-                                                        graph.get_node_sequence(node).substr(cur_match_size));
-                                    assert(anchors.back().is_spelling_valid(graph));
-                                });
-                            }
-                        } else if (nodes[i] != DeBruijnGraph::npos) {
-                            break;
-                        }
+                size_t k = graph.get_k();
+                for (size_t i = 0; i + config_.min_seed_length <= this_query.size(); ++i) {
+                    if (std::find(encoded.begin() + i, encoded.begin() + i + config_.min_seed_length,
+                                boss.alph_size) != encoded.begin() + i + config_.min_seed_length) {
+                        continue;
                     }
 
-                    assert(cur_match_size < k);
-                    if (cur_match_size == k - 1) {
-                        assert(first == last || !boss.get_last(first));
-                        assert(boss.succ_last(first) == last);
-                        // std::cerr << "foo\t" << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\n";
-                        for (edge_index node = first; node <= last; ++node) {
-                            if (dbg_succ->in_graph(node)) {
-                                char c = boss.decode(boss.get_W(node) % boss.alph_size);
-                                if (c != boss::BOSS::kSentinel) {
-                                    // std::cerr << "\t" << suffix << c << "\n";
-                                    auto first_mm = std::mismatch(this_query.begin() + i + match_size, this_query.end(),
-                                                                suffix.begin(), suffix.end()).second;
-                                    bool last_char_matches = i + k <= this_query.size() && first_mm == suffix.end() && c == this_query[i + k - 1];
-                                    size_t full_match_size = match_size + (first_mm - suffix.begin()) + last_char_matches;
+                    auto [first, last, it] = boss.index_range(
+                        encoded.begin() + i,
+                        encoded.begin() + i + config_.min_seed_length
+                    );
 
-                                    is_exact_match &= last_char_matches;
+                    size_t match_size = it - (encoded.begin() + i);
+                    if (match_size < config_.min_seed_length)
+                        continue;
 
-                                    if (!is_exact_match) {
-                                        anchors.emplace_back(this_query,
-                                                            i, i + full_match_size,
-                                                            orientation,
+                    first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
+                    // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\t" << first << "," << last << "\t" << std::flush << graph.get_node_sequence(first) << "\t" << graph.get_node_sequence(last) << "\n";
+                    using edge_index = boss::BOSS::edge_index;
+
+                    std::vector<std::tuple<edge_index, edge_index, std::string, bool>> traverse;
+                    traverse.emplace_back(first, last, "", true);
+                    while (traverse.size()) {
+                        auto [first, last, suffix, is_exact_match] = traverse.back();
+                        assert(boss.get_last(last));
+                        traverse.pop_back();
+
+                        size_t cur_match_size = match_size + suffix.size();
+
+                        if (canonical) {
+                            if (is_exact_match) {
+                                if (dbg_succ->in_graph(last)) {
+                                    dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
+                                        node = canonical->reverse_complement(node);
+                                        size_t i_rc = this_query.size() - (i + cur_match_size);
+                                        anchors.emplace_back(query_.get_query(!orientation),
+                                                            i_rc, i_rc + cur_match_size,
+                                                            !orientation,
                                                             std::vector<Match::node_index>{ node },
                                                             config_,
-                                                            (suffix + c).substr(full_match_size - match_size));
+                                                            graph.get_node_sequence(node).substr(cur_match_size));
                                         assert(anchors.back().is_spelling_valid(graph));
+                                    });
+                                }
+                            } else if (nodes[i] != DeBruijnGraph::npos) {
+                                break;
+                            }
+                        }
+
+                        assert(cur_match_size < k);
+                        if (cur_match_size == k - 1) {
+                            assert(first == last || !boss.get_last(first));
+                            assert(boss.succ_last(first) == last);
+                            // std::cerr << "foo\t" << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\n";
+                            for (edge_index node = first; node <= last; ++node) {
+                                if (dbg_succ->in_graph(node)) {
+                                    char c = boss.decode(boss.get_W(node) % boss.alph_size);
+                                    if (c != boss::BOSS::kSentinel) {
+                                        // std::cerr << "\t" << suffix << c << "\n";
+                                        auto first_mm = std::mismatch(this_query.begin() + i + match_size, this_query.end(),
+                                                                    suffix.begin(), suffix.end()).second;
+                                        bool last_char_matches = i + k <= this_query.size() && first_mm == suffix.end() && c == this_query[i + k - 1];
+                                        size_t full_match_size = match_size + (first_mm - suffix.begin()) + last_char_matches;
+
+                                        is_exact_match &= last_char_matches;
+
+                                        if (!is_exact_match) {
+                                            anchors.emplace_back(this_query,
+                                                                i, i + full_match_size,
+                                                                orientation,
+                                                                std::vector<Match::node_index>{ node },
+                                                                config_,
+                                                                (suffix + c).substr(full_match_size - match_size));
+                                            assert(anchors.back().is_spelling_valid(graph));
+                                        }
                                     }
                                 }
                             }
+
+                            continue;
                         }
 
-                        continue;
-                    }
-
-                    // for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
-                    for (boss::BOSS::edge_index e = first; e <= last; ++e) {
-                        boss::BOSS::TAlphabet s = boss.get_W(e) % boss.alph_size;
-                        // if (s) {
-                        boss::BOSS::edge_index next_first = first;
-                        boss::BOSS::edge_index next_last = last;
-                        // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
-                        if (s && boss.tighten_range(&next_first, &next_last, s)) {
-                            // std::cerr << "\tworked!\n";
-                            char c = boss.decode(s);
-                            bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
-                            traverse.emplace_back(next_first, next_last, suffix + c,
-                                                next_is_exact_match);
+                        // for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+                        for (boss::BOSS::edge_index e = first; e <= last; ++e) {
+                            boss::BOSS::TAlphabet s = boss.get_W(e) % boss.alph_size;
+                            // if (s) {
+                            boss::BOSS::edge_index next_first = first;
+                            boss::BOSS::edge_index next_last = last;
+                            // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
+                            if (s && boss.tighten_range(&next_first, &next_last, s)) {
+                                // std::cerr << "\tworked!\n";
+                                char c = boss.decode(s);
+                                bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
+                                traverse.emplace_back(next_first, next_last, suffix + c,
+                                                    next_is_exact_match);
+                            }
                         }
                     }
                 }
-            }
 
-            if (anchors.size() > 1 && canonical) {
-                std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
-                    return std::make_tuple(a.get_orientation(), a.get_clipping(), a.get_path()[0], b.get_end_clipping())
-                        < std::make_tuple(b.get_orientation(), b.get_clipping(), b.get_path()[0], a.get_end_clipping());
-                });
-                for (auto it = anchors.begin(), jt = anchors.begin() + 1; jt != anchors.end(); ++it, ++jt) {
-                    if (it->get_orientation() != jt->get_orientation() || it->get_clipping() != jt->get_clipping() || it->get_path()[0] != jt->get_path()[0])
-                        continue;
+                if (anchors.size() > 1 && canonical) {
+                    std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
+                        return std::make_tuple(a.get_orientation(), a.get_clipping(), a.get_path()[0], b.get_end_clipping())
+                            < std::make_tuple(b.get_orientation(), b.get_clipping(), b.get_path()[0], a.get_end_clipping());
+                    });
+                    for (auto it = anchors.begin(), jt = anchors.begin() + 1; jt != anchors.end(); ++it, ++jt) {
+                        if (it->get_orientation() != jt->get_orientation() || it->get_clipping() != jt->get_clipping() || it->get_path()[0] != jt->get_path()[0])
+                            continue;
 
-                    assert(it->get_end_clipping() >= jt->get_end_clipping());
-                    assert(it->get_end_trim() >= jt->get_end_trim());
-                    // std::cerr << "redundant\t" << *it << "\t" << *jt << "\n";
-                    *it = Anchor();
+                        assert(it->get_end_clipping() >= jt->get_end_clipping());
+                        assert(it->get_end_trim() >= jt->get_end_trim());
+                        // std::cerr << "redundant\t" << *it << "\t" << *jt << "\n";
+                        *it = Anchor();
+                    }
+                    anchors.erase(std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); }),
+                                anchors.end());
                 }
-                anchors.erase(std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); }),
-                            anchors.end());
+            } else if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
+                // TODO
             }
         }
     }
