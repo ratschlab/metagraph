@@ -1773,7 +1773,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 if (aln_found || dist == 0 || query_dist == 0)
                     return false;
 
-                return query_dist == query_window.size() && node == next->get_path().back();
+                bool ret_val = query_dist == query_window.size() && node == next->get_path().back();
+                if (ret_val)
+                    common::logger->trace("Final cost: {}", cost);
+
+                return ret_val;
             };
 
             auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
