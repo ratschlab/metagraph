@@ -1481,12 +1481,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     for (size_t del = 0; del < olap; ++del) {
                         // std::cerr << "olap o:" << olap - del << "\td: " << del << "\t" << a_i << " " << a_i.get_path_spelling() << " -> " << a_j << " " << a_j.get_path_spelling() << std::endl;
 
-                        // // if the character before a_j also matches, then skip this
-                        // // since we should work with an earlier seed instead
-                        // assert(olap - del + 1 >= a_i_trim.size());
-                        // assert(a_j.get_clipping());
-                        // if (*(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
-                        //     continue;
+                        // if the character before a_j also matches, then skip this
+                        // since we should work with an earlier seed instead
+                        assert(olap - del + 1 >= a_i_trim.size());
+                        assert(a_j.get_clipping());
+                        if (*(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
+                            continue;
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
                             // no need for indels
@@ -1527,9 +1527,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
 
-                    // // don't try inserting if the previous character matches
-                    // if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)))
-                    //     return;
+                    // don't try inserting if the previous character matches
+                    if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)))
+                        return;
 
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_j.get_path()[0];
