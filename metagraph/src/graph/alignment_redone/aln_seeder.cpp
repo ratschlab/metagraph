@@ -1793,7 +1793,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 return false;
             };
 
-
             align_bwd(
                 make_aln_graph(last->get_label_class()),
                 config_,
@@ -1841,7 +1840,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return aln_found || (query_dist == query_window.size() && node == next->get_path().back());
                 }
             );
-            assert(aln_found);
+            if (!aln_found) {
+                std::cerr << "q: " << aln.get_clipping() - next->get_clipping() << "\td: " << next_to_last_dist - last->get_seed().size() + next->get_seed().size() << "\t" << *next << " " << next->get_path_spelling() << " -> " << aln << std::endl;
+                throw std::runtime_error("Failed to connect anchors");
+            }
         },
         [&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
             aln.trim_end();
