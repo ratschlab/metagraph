@@ -1605,29 +1605,28 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                const AlignmentCallback &callback) {
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
-            if (next->get_seed().begin() + 1 == last->get_seed().begin() && traversal_dist == 1) {
+            if (next->get_seed().begin() + next->get_path().size() == last->get_seed().begin() && traversal_dist == next->get_path().size()) {
                 // simple extension
                 // std::cerr << "Simple extension: " << *next << "\t->\t" << aln << std::endl;
 #ifndef NDEBUG
                 size_t k = graph.get_k();
-                if (graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
-                    std::cerr << "\t" << next->get_path()[0] << " > " << aln.get_path_spelling()[k-1] << "\t" << graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) << " vs. " << aln.get_path()[0] << std::endl;
+                if (graph.traverse(next->get_path().back(), aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
+                    std::cerr << "\t" << next->get_path().back() << " > " << aln.get_path_spelling()[k-1] << "\t" << graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) << " vs. " << aln.get_path()[0] << std::endl;
                     assert(false);
                 }
 #endif
                 // common::logger->info("Simple extension {} -> {}", *next, aln);
                 std::vector<DeBruijnGraph::node_index> path;
-                path.resize(aln.get_path().size() + 1);
-                assert(next->get_path().size() == 1);
-                path[0] = next->get_path()[0];
-                std::copy(aln.get_path().begin(), aln.get_path().end(), path.begin() + 1);
+                path.resize(aln.get_path().size() + next->get_path().size());
+                std::copy(next->get_path().begin(), next->get_path().end(), path.begin());
+                std::copy(aln.get_path().begin(), aln.get_path().end(), path.begin() + next->get_path().size());
 
                 Cigar cigar(Cigar::CLIPPED, next->get_clipping());
 
                 Cigar aln_cigar = aln.get_cigar();
                 aln_cigar.trim_clipping();
 
-                cigar.append(Cigar::MATCH, 1);
+                cigar.append(Cigar::MATCH, next->get_path().size());
                 cigar.append(std::move(aln_cigar));
 
                 Alignment next_aln(graph,
@@ -1636,7 +1635,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 std::move(path),
                                 config_,
                                 std::move(cigar),
-                                std::string(1, next->get_seed()[0]) + aln.get_path_spelling(),
+                                std::string(next->get_seed().substr(0, next->get_path().size())) + aln.get_path_spelling(),
                                 aln.get_end_trim(),
                                 next->get_label_class());
                 // std::cerr << "\tnew aln: " << next_aln << std::endl;
