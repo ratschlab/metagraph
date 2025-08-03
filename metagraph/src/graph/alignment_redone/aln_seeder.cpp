@@ -848,7 +848,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             callback(std::move(spelling), std::move(path), std::move(cigar), start_cost);
         }
     }
-    common::logger->trace("Explored {} nodes", num_explored_nodes);
+    common::logger->trace("Explored {} nodes. q: {}\td: {}", num_explored_nodes, query_size, max_dist);
 }
 
 template <class Graph>
@@ -1325,6 +1325,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         }
 
         full_it = std::remove_if(full_it, anchors.end(), [](const auto &a) { return a.get_path().empty(); });
+        common::logger->trace("Merged {} anchors down to {}", anchors.size(), full_it - anchors.begin());
         anchors.erase(full_it, anchors.end());
     }
 
