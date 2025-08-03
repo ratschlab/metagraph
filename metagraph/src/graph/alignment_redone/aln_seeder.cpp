@@ -1503,6 +1503,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     }
                     return;
                 } else if (!a_i.get_end_trim()) {
+                    // detect insertions
                     std::string a_j_spelling = a_j.get_path_spelling();
                     DBGAlignerConfig::score_t traversed = 0;
                     graph.traverse(a_i.get_path().back(), a_j_spelling.c_str(), a_j_spelling.c_str() + k,
@@ -1512,7 +1513,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     );
 
                     if (traversed == k) {
-                        DBGAlignerConfig::score_t dist_to_first_node = dist - a_j.get_path().size() + 1;
+                        traversed -= a_j.get_end_trim();
+                        DBGAlignerConfig::score_t dist_to_first_node = a_j.get_clipping() - a_i.get_clipping() - a_i.get_path().size() + 1;
                         size_t gap = std::abs(traversed - dist_to_first_node);
                         if (gap > 0)
                             score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
@@ -1521,7 +1523,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         //         << "\t" << score << " vs. " << score_j << "\n";
                         if (score > score_j) {
                             // std::cerr << "\t\tworked! " << score << "\n";
-                            update_score(score, it, traversed + a_i.get_end_trim());
+                            update_score(score, it, traversed - query_i.size() + query_j.size());
                         }
                     }
                 }
