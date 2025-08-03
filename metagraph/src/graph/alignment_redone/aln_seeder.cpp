@@ -1416,18 +1416,24 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // overlapping nucleotides
                     // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     assert(query_j.data() > query_i.data());
-                    std::string_view left(query_i.data(), query_j.data() - query_i.data());
-                    DeBruijnGraph::node_index node = a_j.get_path()[0];
-                    ssize_t num_matches = 0;
-                    for (auto ait = left.rbegin(); ait != left.rend() && node != DeBruijnGraph::npos; ++ait) {
-                        node = graph.traverse_back(node, *ait);
-                        ++num_matches;
-                    }
-                    if (num_matches == static_cast<ssize_t>(left.size()) && node == a_i.get_path()[0]) {
-                        assert(dist == num_matches - static_cast<ssize_t>(query_i.size()) + static_cast<ssize_t>(query_j.size()));
+                    if (!a_i.get_end_trim() && !a_j.get_end_trim() && dist == 1) {
+                        // no need to check
                         update_score(score, it, dist);
                     }
                     return;
+                    // TODO: this check is expensive, skip it
+                    // std::string_view left(query_i.data(), query_j.data() - query_i.data());
+                    // DeBruijnGraph::node_index node = a_j.get_path()[0];
+                    // ssize_t num_matches = 0;
+                    // for (auto ait = left.rbegin(); ait != left.rend() && node != DeBruijnGraph::npos; ++ait) {
+                    //     node = graph.traverse_back(node, *ait);
+                    //     ++num_matches;
+                    // }
+                    // if (num_matches == static_cast<ssize_t>(left.size()) && node == a_i.get_path()[0]) {
+                    //     assert(dist == num_matches - static_cast<ssize_t>(query_i.size()) + static_cast<ssize_t>(query_j.size()));
+                    //     update_score(score, it, dist);
+                    // }
+                    // return;
                 } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
                     size_t olap = std::min(a_i.get_query().size(),
