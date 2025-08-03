@@ -1481,12 +1481,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     for (size_t del = 0; del < olap; ++del) {
                         // std::cerr << "olap o:" << olap - del << "\td: " << del << "\t" << a_i << " " << a_i.get_path_spelling() << " -> " << a_j << " " << a_j.get_path_spelling() << std::endl;
 
-                        // if the character before a_j also matches, then skip this
-                        // since we should work with an earlier seed instead
-                        assert(olap - del + 1 >= a_i_trim.size());
-                        assert(a_j.get_clipping());
-                        if (*(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
-                            continue;
+                        // // if the character before a_j also matches, then skip this
+                        // // since we should work with an earlier seed instead
+                        // assert(olap - del + 1 >= a_i_trim.size());
+                        // assert(a_j.get_clipping());
+                        // if (*(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
+                        //     continue;
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
                             // no need for indels
@@ -1527,9 +1527,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
 
-                    // don't try inserting if the previous character matches
-                    if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)))
-                        return;
+                    // // don't try inserting if the previous character matches
+                    // if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)))
+                    //     return;
 
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_j.get_path()[0];
@@ -1571,6 +1571,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         },
         [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
             assert(chain.size());
+            // common::logger->info("Try Chain\t{}", score_traceback.back());
 
             ext_success = false;
 
@@ -1591,13 +1592,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             if (!ret_val)
                 return false;
 
+            last_chain_score = score_traceback.back();
+            ret_val = score_traceback.back() >= first_chain_score * config_.rel_score_cutoff;
+
             // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
             // for (const auto &[it, dist] : chain) {
             //     std::cerr << "\t" << *it << "\t" << dist << "\t" << it->get_label_class() << "\t" << it->get_path_spelling() << "\n";
             // }
-
-            last_chain_score = score_traceback.back();
-            ret_val = score_traceback.back() >= first_chain_score * config_.rel_score_cutoff;
 
             // if (ret_val) {
             //     ++num_chains;
@@ -1617,11 +1618,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                size_t next_to_last_dist,
                DBGAlignerConfig::score_t score_up_to_now,
                const AlignmentCallback &callback) {
+            // std::cerr << "try\t" << *next << " -> " << aln << std::endl;
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
             if (next->get_seed().begin() + next->get_path().size() == last->get_seed().begin() && traversal_dist == next->get_path().size()) {
                 // simple extension
-                // std::cerr << "Simple extension: " << *next << "\t->\t" << aln << std::endl;
+                // std::cerr << "\tSimple extension" << std::endl;
 #ifndef NDEBUG
                 size_t k = graph.get_k();
                 if (graph.traverse(next->get_path().back(), aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
@@ -1747,10 +1749,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 return;
             }
 
+            // std::cerr << "\talignment\n";
             assert(traversal_dist > next->get_path().size() - 1);
             traversal_dist -= next->get_path().size() - 1;
 
-            size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
+            // size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
             std::string_view query_window(
                 next->get_seed().data() + next->get_path().size() - 1,
                 aln.get_seed().begin() - next->get_seed().begin() - (next->get_path().size() - 1)
@@ -1764,7 +1767,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
                 //                      get_score(cost, query_dist, dist), num_matches);
 
-                if (aln_found || dist == 0 || query_dist == 0 || num_matches < target_num_matches)
+                // if (aln_found || dist == 0 || query_dist == 0 || num_matches < target_num_matches)
+                if (aln_found || dist == 0 || query_dist == 0)
                     return false;
 
                 return query_dist == query_window.size() && node == next->get_path().back();
@@ -1780,29 +1784,29 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return false;
 
                 if (query_dist == query_window.size()) {
-                    aln_found |= start_backtracking(cost, data, query_dist, node);
+                    // aln_found |= start_backtracking(cost, data, query_dist, node);
                     return true;
                 }
 
-                assert(traversal_dist >= dist);
-                if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
-                    // sanity checks once we've hit the target seed
+                // assert(traversal_dist >= dist);
+                // if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
+                //     // sanity checks once we've hit the target seed
 
-                    // cut off the branch if we did not match some of the target seed
-                    // characters along the way
-                    if (query_window.size() - query_dist < target_num_matches - num_matches) {
-                        // std::cerr << "ttt: " << query_window.size() << "," << query_dist << "\t" << next->get_seed().size() << "," << num_matches << "\n";
-                        return true;
-                    }
+                //     // cut off the branch if we did not match some of the target seed
+                //     // characters along the way
+                //     if (query_window.size() - query_dist < target_num_matches - num_matches) {
+                //         // std::cerr << "ttt: " << query_window.size() << "," << query_dist << "\t" << next->get_seed().size() << "," << num_matches << "\n";
+                //         return true;
+                //     }
 
-                    // cut off the branch if we've hit the target seed on an incorrect
-                    // diagonal (i.e., not enough indels)
-                    if (query_window.size() - query_dist != traversal_dist - dist)
-                        return true;
-                }
+                //     // cut off the branch if we've hit the target seed on an incorrect
+                //     // diagonal (i.e., not enough indels)
+                //     if (query_window.size() - query_dist != traversal_dist - dist)
+                //         return true;
+                // }
 
-                if (traversal_dist - dist < target_num_matches && traversal_dist - dist != query_window.size() - query_dist)
-                    return true;
+                // if (traversal_dist - dist < target_num_matches && traversal_dist - dist != query_window.size() - query_dist)
+                //     return true;
 
                 return false;
             };
