@@ -1396,7 +1396,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                 // std::cerr << "chh\t" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << dist << "\n";
                 if (dist == 0 && a_j.get_end_trim()) {
-                    std::string a_j_trim_spelling = a_j.get_path_spelling().substr(0, k).substr(query_j.size());
+                    assert(a_j.get_path().size() == 1);
+                    std::string_view a_j_trim_spelling = a_j.get_trim_spelling();
                     // std::cerr << "extleft" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << a_j_trim_spelling.size() << "\n";
                     if (a_i.get_end_trim()) {
                         std::string_view a_i_trim_spelling = a_i.get_trim_spelling();
@@ -1414,7 +1415,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                    });
                     if (traverse == a_j_trim_spelling.size()) {
                         assert(node == a_j.get_path()[0]);
-                        if (base_score >= score_j) {
+                        if (base_score > score_j) {
                             // std::cerr << "\tworked!\t" << base_score << "\n";
                             update_score(base_score, it, 0);
                         }
@@ -1471,48 +1472,88 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // return;
                 } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
-                    assert(a_i.get_path().size() == 1);
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
-                    std::string a_i_spelling = a_i.get_path_spelling();
-                    assert(a_i_spelling.size() == query_.get_graph().get_k());
-                    auto a_i_rbegin = a_i_spelling.rbegin();
-                    auto a_i_rend = a_i_rbegin + olap;
-                    auto a_j_rend = query_j.rend();
-                    auto a_j_rbegin = a_j_rend - olap;
-                    auto [mm_a_i, mm_a_j] = std::mismatch(a_i_rbegin, a_i_rend, a_j_rbegin, a_j_rend);
-                    assert(mm_a_i - a_i_rbegin == mm_a_j - a_j_rbegin);
-                    size_t nmatches = mm_a_i - a_i_rbegin;
-                    size_t gap = olap - nmatches;
-                    std::string a_j_spelling = a_j.get_path_spelling().substr(0, k);
-                    size_t traversed = 0;
-                    DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap - gap, a_j_spelling.c_str() + k,
-                        [&](DeBruijnGraph::node_index cur) {
-                            ++traversed;
-                            node = cur;
-                        }
-                    );
-                    // std::cerr << "olap\t" << a_i << "\t" << a_i_spelling << " -> " << a_j << "\t" << a_j_spelling << "\t" << dist << " vs. o: " << olap << "\t" << score << "\tg:" << gap << "\tt: " << traversed << "\t" << node << " vs. " << a_j.get_path()[0] << "\n";
-
-                    if (traversed == k - olap + gap && node == a_j.get_path()[0]) {
-                        assert(a_i.get_end_trim() >= gap + nmatches);
-                        size_t nmismatch = a_i.get_end_trim() - gap - nmatches;
-                        size_t graph_dist = traversed + a_j.get_path().size() - 1 - a_j.get_end_trim() + a_i.get_end_trim();
-                        // size_t graph_dist = traversed + query_j.size() - (query_i.size() - a_i.get_path().size() + 1);
-                        // std::cerr << "\tfound!\to: " << olap << "\tnmm: " << nmismatch << "\tg: " << gap << "\tt: " << traversed << " vs. d: " << dist << "\t->\tgd: " << graph_dist << "\n";
-                        if (gap)
-                            score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
-
-                        DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
-                                                                std::string_view(dummy.c_str(), nmismatch));
-                        score += cur_mismatch;
-                        if (score > score_j) {
-                            // std::cerr << "\t\tworked! " << score << "\n";
-                            update_score(score, it, graph_dist);
+                    std::string_view a_i_trim = a_i.get_trim_spelling();
+                    auto a_j_spelling = a_j.get_path_spelling();
+                    assert(a_i_trim.size() >= olap);
+                    for (size_t del = 0; del < olap; ++del) {
+                        // std::cerr << "olap o:" << olap - del << "\td: " << del << "\t" << a_i << " " << a_i.get_path_spelling() << " -> " << a_j << " " << a_j.get_path_spelling() << std::endl;
+                        if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
+                            // no need for indels
+                            // std::cerr << "\tfound\n";
+                            DeBruijnGraph::node_index node = a_j.get_path()[0];
+                            size_t traversed = 0;
+                            for (auto bit = a_i_trim.rbegin() + olap - del; bit != a_i_trim.rend() && (node = graph.traverse_back(node, *bit)); ++bit) {
+                                ++traversed;
+                            }
+                            if (node != DeBruijnGraph::npos) {
+                                // std::cerr << "\t\tstep2\n";
+                                for (auto bit = a_i.get_seed().rbegin(); bit != a_i.get_seed().rend() && (node = graph.traverse_back(node, *bit)); ++bit) {
+                                    ++traversed;
+                                }
+                                if (node == a_i.get_path().back()) {
+                                    traversed += a_i.get_path().size() - 1;
+                                    size_t nmismatch = query_j.begin() - query_i.end();
+                                    assert(traversed >= del);
+                                    assert(static_cast<ssize_t>(traversed - del) == query_j.begin() - query_i.begin());
+                                    DBGAlignerConfig::score_t cur_score = score;
+                                    DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
+                                                                            std::string_view(dummy.c_str(), nmismatch));
+                                    cur_score += cur_mismatch;
+                                    if (del)
+                                        cur_score += config_.gap_opening_penalty + (del - 1) * config_.gap_extension_penalty;
+                                    if (cur_score > score_j) {
+                                        // std::cerr << "\t\t\tworked! " << score << "\n";
+                                        update_score(cur_score, it, traversed - query_i.size() + query_j.size());
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
                     return;
+                    // assert(a_i.get_path().size() == 1);
+
+                    // std::string a_i_spelling = a_i.get_path_spelling();
+                    // assert(a_i_spelling.size() == query_.get_graph().get_k());
+                    // auto a_i_rbegin = a_i_spelling.rbegin();
+                    // auto a_i_rend = a_i_rbegin + olap;
+                    // auto a_j_rend = query_j.rend();
+                    // auto a_j_rbegin = a_j_rend - olap;
+                    // auto [mm_a_i, mm_a_j] = std::mismatch(a_i_rbegin, a_i_rend, a_j_rbegin, a_j_rend);
+                    // assert(mm_a_i - a_i_rbegin == mm_a_j - a_j_rbegin);
+                    // size_t nmatches = mm_a_i - a_i_rbegin;
+                    // size_t gap = olap - nmatches;
+                    // std::string a_j_spelling = a_j.get_path_spelling().substr(0, k);
+                    // size_t traversed = 0;
+                    // DeBruijnGraph::node_index node = a_i.get_path().back();
+                    // graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap - gap, a_j_spelling.c_str() + k,
+                    //     [&](DeBruijnGraph::node_index cur) {
+                    //         ++traversed;
+                    //         node = cur;
+                    //     }
+                    // );
+                    // // std::cerr << "olap\t" << a_i << "\t" << a_i_spelling << " -> " << a_j << "\t" << a_j_spelling << "\t" << dist << " vs. o: " << olap << "\t" << score << "\tg:" << gap << "\tt: " << traversed << "\t" << node << " vs. " << a_j.get_path()[0] << "\n";
+
+                    // if (traversed == k - olap + gap && node == a_j.get_path()[0]) {
+                    //     assert(a_i.get_end_trim() >= gap + nmatches);
+                    //     size_t nmismatch = a_i.get_end_trim() - gap - nmatches;
+                    //     size_t graph_dist = traversed + a_j.get_path().size() - 1 - a_j.get_end_trim() + a_i.get_end_trim();
+                    //     // size_t graph_dist = traversed + query_j.size() - (query_i.size() - a_i.get_path().size() + 1);
+                    //     // std::cerr << "\tfound!\to: " << olap << "\tnmm: " << nmismatch << "\tg: " << gap << "\tt: " << traversed << " vs. d: " << dist << "\t->\tgd: " << graph_dist << "\n";
+                    //     if (gap)
+                    //         score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+
+                    //     DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
+                    //                                             std::string_view(dummy.c_str(), nmismatch));
+                    //     score += cur_mismatch;
+                    //     if (score > score_j) {
+                    //         // std::cerr << "\t\tworked! " << score << "\n";
+                    //         update_score(score, it, graph_dist);
+                    //     }
+                    // }
+                    // return;
                 } else if (!a_i.get_end_trim()) {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
@@ -1644,13 +1685,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
 
             if (!align) {
-                assert(next->get_path().size() == 1);
-                assert(aln.get_path().size() == 1);
                 // connect anchors without actually aligning or traversing
                 size_t query_dist = last->get_clipping() - next->get_clipping();
                 std::vector<DeBruijnGraph::node_index> path;
                 path.resize(aln.get_path().size() + traversal_dist);
-                assert(next->get_path().size() == 1);
                 std::copy(aln.get_path().rbegin(), aln.get_path().rend(), path.rbegin());
 
                 Cigar cigar(Cigar::CLIPPED, next->get_clipping());
@@ -1717,7 +1755,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     }
                 }
 
-                path[0] = next->get_path()[0];
+                std::copy(next->get_path().begin(), next->get_path().end(), path.begin());
 
                 Cigar aln_cigar = aln.get_cigar();
                 aln_cigar.trim_clipping();

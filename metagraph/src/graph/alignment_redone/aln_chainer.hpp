@@ -96,8 +96,8 @@ bool extend_chain(const AnchorChain<AnchorIt> &chain,
 template <typename Anchor>
 struct AnchorLess {
     bool operator()(const Anchor &a, const Anchor &b) const {
-        return std::make_tuple(a.get_orientation(), a.get_label_class(), b.get_end_clipping())
-             < std::make_tuple(b.get_orientation(), b.get_label_class(), a.get_end_clipping());
+        return std::make_tuple(a.get_orientation(), a.get_label_class(), b.get_end_clipping(), a.get_clipping())
+             < std::make_tuple(b.get_orientation(), b.get_label_class(), a.get_end_clipping(), b.get_clipping());
     }
 };
 
