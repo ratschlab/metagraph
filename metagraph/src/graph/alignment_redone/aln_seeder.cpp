@@ -363,7 +363,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     assert(gap_ext % 2 == 0);
     assert(gap_opn % 2 == 0);
 
-    // common::logger->info("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
+    common::logger->trace("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
