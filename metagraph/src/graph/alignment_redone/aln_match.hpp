@@ -101,6 +101,7 @@ class Anchor : public Match {
                   std::move(path), 0),
             label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {
         score_ = config.score_cigar(seed_, query_, generate_cigar());
+        assert(get_spelling() == get_seed());
     }
 
     std::string_view get_spelling() const override final { return seed_; }

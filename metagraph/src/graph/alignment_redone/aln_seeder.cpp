@@ -88,6 +88,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                             std::vector<Match::node_index>{ node },
                                                             config_,
                                                             graph.get_node_sequence(node).substr(cur_match_size));
+                                        assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
                                         assert(anchors.back().is_spelling_valid(graph));
                                     });
                                 }
@@ -120,6 +121,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                                 std::vector<Match::node_index>{ node },
                                                                 config_,
                                                                 (suffix + c).substr(full_match_size - match_size));
+                                            assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
                                             assert(anchors.back().is_spelling_valid(graph));
                                         }
                                     }
@@ -169,6 +171,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             }
         }
     }
+
+    assert(std::all_of(anchors.begin(), anchors.end(), [k=graph.get_k()](const auto &a) {
+        return a.get_spelling().size() + a.get_end_trim() == k;
+    }));
 
     return anchors;
 }
@@ -1292,6 +1298,36 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     common::logger->trace("Seeding");
     std::vector<Anchor> anchors = get_anchors();
 
+    const auto &graph = query_.get_graph();
+
+    auto full_it = std::partition(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_end_trim(); });
+    std::sort(full_it, anchors.end(), AnchorLess<Anchor>());
+    if (anchors.end() - full_it > 1) {
+        assert(full_it->get_spelling().size() + full_it->get_end_trim() == graph.get_k());
+        for (auto it = full_it; it + 1 != anchors.end(); ++it) {
+            auto &a_i = *it;
+            auto &a_j = *(it + 1);
+            assert(!a_i.get_end_trim());
+            assert(!a_j.get_end_trim());
+            assert(a_j.get_spelling().size() + a_j.get_end_trim() == graph.get_k());
+            if (a_i.get_orientation() != a_j.get_orientation() || a_i.get_label_class() != a_j.get_label_class())
+                continue;
+
+            if (a_i.get_seed().size() < config_.max_seed_length
+                    && a_i.get_end_clipping() == a_j.get_end_clipping() + 1
+                    && graph.has_single_outgoing(a_i.get_path().back())
+                    && graph.has_single_incoming(a_j.get_path()[0])) {
+                // merge
+                a_i.append(a_j, config_, &graph);
+                std::swap(a_i, a_j);
+                a_i = Anchor();
+            }
+        }
+
+        full_it = std::remove_if(full_it, anchors.end(), [](const auto &a) { return a.get_path().empty(); });
+        anchors.erase(full_it, anchors.end());
+    }
+
     using AnchorIt = std::vector<Anchor>::iterator;
     std::sort(anchors.begin(), anchors.end(), AnchorLess<Anchor>());
 
@@ -1305,7 +1341,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     if (anchors.empty())
         return alignments;
 
-    const auto &graph = query_.get_graph();
     ssize_t k = graph.get_k();
 
     assert(!dynamic_cast<const LabeledSeeder*>(this) || std::all_of(anchors.begin(), anchors.end(),
@@ -1360,7 +1395,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 DBGAlignerConfig::score_t base_score = std::get<0>(*chain_scores);
 
                 // std::cerr << "chh\t" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << dist << "\n";
-                if (dist == 0 && a_j.get_end_trim() && query_j.begin() - query_i.begin() == 1) {
+                if (dist == 0 && a_j.get_end_trim()) {
                     std::string a_j_trim_spelling = a_j.get_path_spelling().substr(0, k).substr(query_j.size());
                     // std::cerr << "extleft" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << a_j_trim_spelling.size() << "\n";
                     if (a_i.get_end_trim()) {
@@ -1416,7 +1451,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // overlapping nucleotides
                     // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     assert(query_j.data() > query_i.data());
-                    if (!a_i.get_end_trim() && !a_j.get_end_trim() && dist == 1) {
+                    if (!a_i.get_end_trim() && !a_j.get_end_trim() && query_i.end() - query_j.begin() == k - 1) {
                         // no need to check
                         update_score(score, it, dist);
                     }
@@ -1436,9 +1471,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // return;
                 } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
+                    assert(a_i.get_path().size() == 1);
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
                     std::string a_i_spelling = a_i.get_path_spelling();
+                    assert(a_i_spelling.size() == query_.get_graph().get_k());
                     auto a_i_rbegin = a_i_spelling.rbegin();
                     auto a_i_rend = a_i_rbegin + olap;
                     auto a_j_rend = query_j.rend();
@@ -1447,7 +1484,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     assert(mm_a_i - a_i_rbegin == mm_a_j - a_j_rbegin);
                     size_t nmatches = mm_a_i - a_i_rbegin;
                     size_t gap = olap - nmatches;
-                    std::string a_j_spelling = a_j.get_path_spelling();
+                    std::string a_j_spelling = a_j.get_path_spelling().substr(0, k);
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_i.get_path().back();
                     graph.traverse(a_i.get_path().back(), a_j_spelling.c_str() + olap - gap, a_j_spelling.c_str() + k,
@@ -1461,7 +1498,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     if (traversed == k - olap + gap && node == a_j.get_path()[0]) {
                         assert(a_i.get_end_trim() >= gap + nmatches);
                         size_t nmismatch = a_i.get_end_trim() - gap - nmatches;
-                        size_t graph_dist = traversed + query_j.size() - query_i.size();
+                        size_t graph_dist = traversed + a_j.get_path().size() - 1 - a_j.get_end_trim() + a_i.get_end_trim();
+                        // size_t graph_dist = traversed + query_j.size() - (query_i.size() - a_i.get_path().size() + 1);
                         // std::cerr << "\tfound!\to: " << olap << "\tnmm: " << nmismatch << "\tg: " << gap << "\tt: " << traversed << " vs. d: " << dist << "\t->\tgd: " << graph_dist << "\n";
                         if (gap)
                             score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
@@ -1478,17 +1516,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 } else if (!a_i.get_end_trim()) {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
-                    assert(a_i.get_path().size() == 1);
                     size_t traversed = 0;
                     DeBruijnGraph::node_index node = a_j.get_path()[0];
-                    for (auto ait = query_i.rbegin(); ait != query_i.rend() && (node = graph.traverse_back(node, *ait)); ++ait) {
+                    auto end = query_i.rend() - a_i.get_path().size() + 1;
+                    for (auto ait = query_i.rbegin(); ait != end && (node = graph.traverse_back(node, *ait)); ++ait) {
                         ++traversed;
                     }
-                    assert((node == DeBruijnGraph::npos && traversed < query_i.size()) || node == a_i.get_path()[0]);
-                    if (traversed == query_i.size()) {
-                        assert(node == a_i.get_path()[0]);
-                        assert(a_j.get_clipping() >= a_i.get_clipping());
-                        size_t query_dist = a_j.get_clipping() - a_i.get_clipping();
+                    assert((node == DeBruijnGraph::npos && traversed < query_i.size()) || node == a_i.get_path().back());
+                    if (traversed == query_i.size() - a_i.get_path().size() + 1) {
+                        assert(node == a_i.get_path().back());
+                        size_t query_dist = a_j.get_clipping() - (a_i.get_clipping() + a_i.get_path().size() - 1);
                         assert(query_dist >= traversed);
                         size_t gap = query_dist - traversed;
                         if (gap > 0)
@@ -1496,8 +1533,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                         if (score > score_j) {
                             // std::cerr << "\t\tworked! " << score << "\n";
-                            assert(traversed + query_j.size() >= query_i.size());
-                            update_score(score, it, traversed - query_i.size() + query_j.size());
+                            update_score(score, it, traversed - (query_i.size() - a_i.get_path().size() + 1) + query_j.size());
                         }
                     }
                 }
@@ -1608,6 +1644,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
 
             if (!align) {
+                assert(next->get_path().size() == 1);
+                assert(aln.get_path().size() == 1);
                 // connect anchors without actually aligning or traversing
                 size_t query_dist = last->get_clipping() - next->get_clipping();
                 std::vector<DeBruijnGraph::node_index> path;
@@ -1762,8 +1800,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 query_window,
                 traversal_dist,
                 [&](auto&& spelling, auto&& bt_path, auto&& bt_cigar, size_t cost) { // callback
-                    if (bt_path[0] != next->get_path()[0])
-                        return;
+                    assert(bt_path[0] == next->get_path()[0]);
 
                     Cigar cigar(Cigar::CLIPPED, next->get_clipping());
                     cigar.append(std::move(bt_cigar));
