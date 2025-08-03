@@ -1595,10 +1595,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             last_chain_score = score_traceback.back();
             ret_val = score_traceback.back() >= first_chain_score * config_.rel_score_cutoff;
 
-            // common::logger->info("Chain\t{}\t{}", score_traceback.back(), ret_val);
-            // for (const auto &[it, dist] : chain) {
-            //     std::cerr << "\t" << *it << "\t" << dist << "\t" << it->get_label_class() << "\t" << it->get_path_spelling() << "\n";
-            // }
+            if (ret_val) {
+                common::logger->trace("Chain\t{}\t{}", score_traceback.back(), ret_val);
+                // for (const auto &[it, dist] : chain) {
+                //     std::cerr << "\t" << *it << "\t" << dist << "\t" << it->get_label_class() << "\t" << it->get_path_spelling() << "\n";
+                // }
+            }
 
             // if (ret_val) {
             //     ++num_chains;
@@ -1877,6 +1879,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         found_labels.emplace(label);
                 }
             }
+            common::logger->trace("Aln: {}\t{}", aln.get_cigar().to_string(), aln.get_label_classes()[0]);
             // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
             alignments.emplace_back(std::move(aln));
         }
