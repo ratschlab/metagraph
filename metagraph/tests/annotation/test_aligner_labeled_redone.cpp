@@ -207,16 +207,16 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
         return;
     }
 
-    size_t k = 4;
-    /*   B    B    B                  AB   AB
-        GTCG-TCGA-CGAA                TGCC-GCCT
-                      \ BC   BC   BC /
-                       GAAT-AATG-ATGC
-           C    C    C/              \   C    C
-        GTGG-TGGA-GGAA                TGCA-GCAT
+    size_t k = 5;
+    /*      B     B     B                 B    AB
+           GTCGA-TCGAA-CGAAT             ATGCC-TGCCT
+                            \ BC    BC  /
+                             GAATG-AATGC
+             C     C     C  /           \  C     C
+           GTGGA-TGGAA-GGAAT             ATGCA-TGCAT
     */
     const std::vector<std::string> sequences {
-         "TGCCT",
+              "TGCCT",
         "GTCGAATGCCT",
         "GTGGAATGCAT"
     };
