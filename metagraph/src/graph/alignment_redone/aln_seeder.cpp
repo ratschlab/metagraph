@@ -1770,6 +1770,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return true;
                 }
 
+                assert(traversal_dist >= dist);
                 if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
                     // sanity checks once we've hit the target seed
 
@@ -1782,10 +1783,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                     // cut off the branch if we've hit the target seed on an incorrect
                     // diagonal (i.e., not enough indels)
-                    assert(traversal_dist >= dist);
                     if (query_window.size() - query_dist != traversal_dist - dist)
                         return true;
                 }
+
+                if (traversal_dist - dist < target_num_matches && traversal_dist - dist != query_window.size() - query_dist)
+                    return true;
 
                 return false;
             };
