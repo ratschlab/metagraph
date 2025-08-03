@@ -1755,7 +1755,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             assert(traversal_dist > next->get_path().size() - 1);
             traversal_dist -= next->get_path().size() - 1;
 
-            // size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
+            size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
             std::string_view query_window(
                 next->get_seed().data() + next->get_path().size() - 1,
                 aln.get_seed().begin() - next->get_seed().begin() - (next->get_path().size() - 1)
@@ -1785,11 +1785,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 if (dist == 0 && query_dist == 0)
                     return false;
 
-                if (query_dist == query_window.size()) {
+                if (query_dist == query_window.size() || dist == traversal_dist) {
                     // aln_found |= start_backtracking(cost, data, query_dist, node);
                     return true;
                 }
 
+                std::ignore = target_num_matches;
                 // assert(traversal_dist >= dist);
                 // if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
                 //     // sanity checks once we've hit the target seed
@@ -1879,7 +1880,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         found_labels.emplace(label);
                 }
             }
-            common::logger->trace("Aln: {}\t{}", aln.get_cigar().to_string(), aln.get_label_classes()[0]);
+            common::logger->trace("Aln: {}\t{}\t{}", aln.get_score(), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
             // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
             alignments.emplace_back(std::move(aln));
         }
