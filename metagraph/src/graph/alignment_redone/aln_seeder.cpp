@@ -1471,25 +1471,26 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return;
                 } else if (!a_i.get_end_trim()) {
                     // detect insertions
-                    std::string a_j_spelling = a_j.get_path_spelling();
-                    DBGAlignerConfig::score_t traversed = 0;
-                    graph.traverse(a_i.get_path().back(), a_j_spelling.c_str(), a_j_spelling.c_str() + k,
-                        [&](DeBruijnGraph::node_index) {
-                            ++traversed;
-                        }
-                    );
-
-                    if (traversed == k) {
-                        traversed -= a_j.get_end_trim();
-                        DBGAlignerConfig::score_t dist_to_first_node = a_j.get_clipping() - a_i.get_clipping() - a_i.get_path().size() + 1;
-                        size_t gap = std::abs(traversed - dist_to_first_node);
+                    // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
+                    assert(a_i.get_path().size() == 1);
+                    size_t traversed = 0;
+                    DeBruijnGraph::node_index node = a_j.get_path()[0];
+                    for (auto ait = query_i.rbegin(); ait != query_i.rend() && (node = graph.traverse_back(node, *ait)); ++ait) {
+                        ++traversed;
+                    }
+                    assert((node == DeBruijnGraph::npos && traversed < query_i.size()) || node == a_i.get_path()[0]);
+                    if (traversed == query_i.size()) {
+                        assert(node == a_i.get_path()[0]);
+                        assert(a_j.get_clipping() >= a_i.get_clipping());
+                        size_t query_dist = a_j.get_clipping() - a_i.get_clipping();
+                        assert(query_dist >= traversed);
+                        size_t gap = query_dist - traversed;
                         if (gap > 0)
                             score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
 
-                        // std::cerr << "gap\t" << a_i << " -> " << a_j << "\tg: " << gap
-                        //         << "\t" << score << " vs. " << score_j << "\n";
                         if (score > score_j) {
                             // std::cerr << "\t\tworked! " << score << "\n";
+                            assert(traversed + query_j.size() >= query_i.size());
                             update_score(score, it, traversed - query_i.size() + query_j.size());
                         }
                     }
