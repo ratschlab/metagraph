@@ -554,7 +554,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                     continue;
 
                 // forward creation of insertions
-                if (query_dist < query_size) {
+                if (!done && query_dist < query_size) {
                     // extend a previous insertion
                     if (const auto *ins_ext_bucket = get_bucket(E, cost, query_dist, node)) {
                         auto [last_dist, last_num_ops] = *ins_ext_bucket;
@@ -591,42 +591,44 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         continue;
 
                     // deletion extension
-                    if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
-                        auto [last_dist, last_num_ops, last_node, del_char] = *del_ext_bucket;
-                        assert(last_node != DeBruijnGraph::npos);
-                        assert(last_num_ops > 0);
-                        assert(last_dist >= last_num_ops);
-                        if (last_dist < max_dist) {
-                            ssize_t next_ext_cost = cost + gap_ext;
-                            std::vector<std::pair<DeBruijnGraph::node_index, char>> last_prevs;
-                            if (best_dist == last_dist) {
-                                last_prevs = prevs;
-                            } else {
-                                call_incoming_kmers(node, [&](auto prev, char c) {
-                                    ++num_explored_nodes;
-                                    if (c != boss::BOSS::kSentinel)
-                                        last_prevs.emplace_back(prev, c);
-                                }, last_dist, query_dist);
-                            }
+                    if (!done) {
+                        if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
+                            auto [last_dist, last_num_ops, last_node, del_char] = *del_ext_bucket;
+                            assert(last_node != DeBruijnGraph::npos);
+                            assert(last_num_ops > 0);
+                            assert(last_dist >= last_num_ops);
+                            if (last_dist < max_dist) {
+                                ssize_t next_ext_cost = cost + gap_ext;
+                                std::vector<std::pair<DeBruijnGraph::node_index, char>> last_prevs;
+                                if (best_dist == last_dist) {
+                                    last_prevs = prevs;
+                                } else {
+                                    call_incoming_kmers(node, [&](auto prev, char c) {
+                                        ++num_explored_nodes;
+                                        if (c != boss::BOSS::kSentinel)
+                                            last_prevs.emplace_back(prev, c);
+                                    }, last_dist, query_dist);
+                                }
 
-                            for (const auto &[prev, c] : last_prevs) {
-                                if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
-                                        && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, c, 0)
-                                        && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
-                                    // it = S[cost][query_dist].begin() + it_dist;
+                                for (const auto &[prev, c] : last_prevs) {
+                                    if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
+                                            && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, c, 0)
+                                            && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
+                                        // it = S[cost][query_dist].begin() + it_dist;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // deletion open
-                    if (last_op != Cigar::INSERTION) {
-                        ssize_t next_opn_cost = cost + gap_opn;
-                        for (const auto &[prev, c] : prevs) {
-                            if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
-                                    && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, c, 0)
-                                    && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
-                                // it = S[cost][query_dist].begin() + it_dist;
+                        // deletion open
+                        if (last_op != Cigar::INSERTION) {
+                            ssize_t next_opn_cost = cost + gap_opn;
+                            for (const auto &[prev, c] : prevs) {
+                                if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
+                                        && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, c, 0)
+                                        && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
+                                    // it = S[cost][query_dist].begin() + it_dist;
+                                }
                             }
                         }
                     }
