@@ -651,6 +651,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                 cur_cost += mismatch_cost;
                                 op = Cigar::MISMATCH;
                                 cur_num_matches = 0;
+                            } else if (last_op == Cigar::MATCH) {
+                                continue;
                             }
 
                             for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
