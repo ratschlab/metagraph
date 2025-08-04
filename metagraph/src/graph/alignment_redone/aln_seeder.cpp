@@ -385,11 +385,16 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             || last_op == Cigar::MISMATCH
             || last_op == Cigar::INSERTION
             || last_op == Cigar::DELETION);
-        if (cost >= table.size())
+        bool inserted = false;
+        if (cost >= table.size()) {
+            inserted = true;
             table.resize(cost + 1);
+        }
 
-        if (query_dist >= table[cost].size())
+        if (query_dist >= table[cost].size()) {
+            inserted = true;
             table[cost].resize(query_dist + 1);
+        }
 
         auto &bucket = table[cost].get(query_dist)[node];
         using table_t = std::decay_t<decltype(bucket)>;
@@ -397,7 +402,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         || std::is_same_v<table_t, EMap>
                         || std::is_same_v<table_t, SMap>);
 
-        bool inserted = dist > std::get<0>(bucket);
+        inserted |= dist > std::get<0>(bucket);
 
         if constexpr(std::is_same_v<table_t, SMap>) {
             inserted |= std::get<3>(bucket) == Cigar::CLIPPED || std::make_pair(dist, num_matches) > std::make_pair(std::get<0>(bucket), std::get<5>(bucket));
