@@ -22,9 +22,15 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     if (query_.get_query().size() < config_.min_seed_length)
         return anchors;
 
+    std::vector<std::vector<DeBruijnGraph::node_index>> mapped_nodes(2);
     for (bool orientation : { false, true }) {
         std::string_view this_query = query_.get_query(orientation);
-        auto nodes = map_to_nodes_sequentially(graph, this_query);
+        mapped_nodes[orientation] = map_to_nodes_sequentially(graph, this_query);
+    }
+
+    for (bool orientation : { false, true }) {
+        std::string_view this_query = query_.get_query(orientation);
+        const auto &nodes = mapped_nodes[orientation];
         for (size_t begin = 0; begin < nodes.size(); ++begin) {
             Match::node_index node = nodes[begin];
             if (node != DeBruijnGraph::npos) {
@@ -84,14 +90,16 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
                                         node = canonical->reverse_complement(node);
                                         size_t i_rc = this_query.size() - (i + cur_match_size);
-                                        anchors.emplace_back(query_.get_query(!orientation),
-                                                            i_rc, i_rc + cur_match_size,
-                                                            !orientation,
-                                                            std::vector<Match::node_index>{ node },
-                                                            config_,
-                                                            graph.get_node_sequence(node).substr(cur_match_size));
-                                        assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
-                                        assert(anchors.back().is_spelling_valid(graph));
+                                        if (i_rc >= nodes.size() || mapped_nodes[!orientation][i_rc] != node) {
+                                            anchors.emplace_back(query_.get_query(!orientation),
+                                                                i_rc, i_rc + cur_match_size,
+                                                                !orientation,
+                                                                std::vector<Match::node_index>{ node },
+                                                                config_,
+                                                                graph.get_node_sequence(node).substr(cur_match_size));
+                                            assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
+                                            assert(anchors.back().is_spelling_valid(graph));
+                                        }
                                     });
                                 }
                             } else if (nodes[i] != DeBruijnGraph::npos) {
@@ -105,6 +113,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             assert(boss.succ_last(first) == last);
                             // std::cerr << "foo\t" << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\n";
                             for (edge_index node = first; node <= last; ++node) {
+                                if (i < nodes.size() && node == nodes[i])
+                                    continue;
+
                                 if (dbg_succ->in_graph(node)) {
                                     char c = boss.decode(boss.get_W(node) % boss.alph_size);
                                     if (c != boss::BOSS::kSentinel) {
