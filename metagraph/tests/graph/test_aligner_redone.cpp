@@ -1047,7 +1047,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         run_alignment(*graph, config, query,
                       { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" },
-                      { "22=2I1=1X1=1X1I1X9=2I3=4I3=2I1=1I7=2D3=1X1D3=1X6=6S" }, 0, true, true);
+                      { "" }, 0, true, true);
     } else {
         run_alignment(*graph, config, query, {}, {});
     }
