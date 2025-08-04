@@ -140,7 +140,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             boss::BOSS::edge_index next_first = first;
                             boss::BOSS::edge_index next_last = last;
                             // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
-                            if (s && boss.tighten_range(&next_first, &next_last, s)) {
+                            if (s) {
+                                bool ret_val = boss.tighten_range(&next_first, &next_last, s);
+                                std::ignore = ret_val;
+                                assert(ret_val);
                                 // std::cerr << "\tworked!\n";
                                 char c = boss.decode(s);
                                 bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
@@ -1544,13 +1547,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     auto a_j_spelling = a_j.get_path_spelling();
                     assert(a_i_trim.size() >= olap);
                     for (size_t del = 0; del < olap; ++del) {
+                        assert(a_i_trim.size() >= olap - del);
                         // std::cerr << "olap o:" << olap - del << "\td: " << del << "\t" << a_i << " " << a_i.get_path_spelling() << " -> " << a_j << " " << a_j.get_path_spelling() << std::endl;
 
                         // if the character before a_j also matches, then skip this
                         // since we should work with an earlier seed instead
-                        assert(olap - del + 1 >= a_i_trim.size());
                         assert(a_j.get_clipping());
-                        if (*(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
+                        if (a_i_trim.size() >= olap - del + 1 && *(a_i_trim.end() - olap + del - 1) == *(a_j.get_seed().data() - 1))
                             continue;
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
