@@ -1553,8 +1553,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                             continue;
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
-                            // no need for indels
-
                             // std::cerr << "\tfound\n";
                             DeBruijnGraph::node_index node = a_j.get_path()[0];
                             size_t traversed = 0;
@@ -1568,12 +1566,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 }
                                 if (node == a_i.get_path().back()) {
                                     traversed += a_i.get_path().size() - 1;
-                                    size_t nmismatch = query_j.begin() - query_i.end();
                                     assert(traversed >= del);
                                     assert(static_cast<ssize_t>(traversed - del) == query_j.begin() - query_i.begin());
                                     DBGAlignerConfig::score_t cur_score = score;
-                                    DBGAlignerConfig::score_t cur_mismatch = config_.score_sequences(std::string_view(&*query_i.end(), nmismatch),
-                                                                            std::string_view(dummy.c_str(), nmismatch));
+                                    size_t nmismatch = query_j.begin() - query_i.end();
+                                    std::string_view query_trim_window(query_i.data() + query_i.size(), nmismatch);
+                                    auto cur_mismatch = config_.score_sequences(query_trim_window,
+                                                                                del == 0 ? std::string_view(a_i_trim.begin(), nmismatch)
+                                                                                         : std::string_view(dummy.c_str(), nmismatch));
                                     cur_score += cur_mismatch;
                                     if (del)
                                         cur_score += config_.gap_opening_penalty + (del - 1) * config_.gap_extension_penalty;
