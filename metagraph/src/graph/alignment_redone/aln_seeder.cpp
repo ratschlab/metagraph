@@ -1367,6 +1367,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     auto full_it = std::partition(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_end_trim(); });
     std::sort(full_it, anchors.end(), AnchorLess<Anchor>());
     if (anchors.end() - full_it > 1) {
+        common::logger->trace("Merging {} anchors", anchors.size());
         assert(full_it->get_spelling().size() + full_it->get_end_trim() == graph.get_k());
         for (auto it = full_it; it + 1 != anchors.end(); ++it) {
             auto &a_i = *it;
