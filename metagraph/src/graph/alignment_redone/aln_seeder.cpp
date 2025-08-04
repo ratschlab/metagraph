@@ -459,8 +459,23 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
 
         for (auto it = query_window_rbegin; it != query_window_rend; ++it) {
             // std::cerr << "\tcheck\t" << node << std::endl;
-            if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist || !has_single_incoming(node, best_dist, query_dist))
+            if (terminate_branch(0, data, query_dist, node) || best_dist == max_dist)
                 break;
+
+            if (!has_single_incoming(node, best_dist, query_dist)) {
+                set_value(
+                    S,
+                    0,
+                    query_dist,
+                    node,
+                    best_dist,
+                    start_node,
+                    best_dist,
+                    Cigar::MATCH,
+                    best_dist > 0 ? *query_window_rbegin : '\0',
+                    num_matches
+                );
+            }
 
             if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
                 // std::cerr << "\t" << node << " -> " << prev << std::endl;
@@ -620,8 +635,25 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                             }
 
                             for (auto jt = local_query_window_rbegin + 1; jt != local_query_window_rend; ++jt) {
-                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist || !has_single_incoming(prev, cur_best, cur_query_dist))
+                                if (terminate_branch(cur_cost, data, cur_query_dist, prev) || cur_best == max_dist)
                                     break;
+
+                                if (!has_single_incoming(prev, cur_best, cur_query_dist)) {
+                                    if (set_value(
+                                        S,
+                                        cur_cost,
+                                        cur_query_dist,
+                                        prev,
+                                        cur_best,
+                                        node,
+                                        cur_query_dist - query_dist,
+                                        op,
+                                        c,
+                                        cur_num_matches
+                                    )) {
+                                        it = S[cost][query_dist].begin() + it_dist;
+                                    }
+                                }
 
                                 if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
                                     ++num_explored_nodes;
