@@ -1,5 +1,7 @@
 #include "aln_seeder.hpp"
 
+#include <queue>
+
 #include <tsl/hopscotch_set.h>
 
 #include "aln_chainer.hpp"
@@ -513,13 +515,28 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     // for (size_t cost = 0; cost < S.size() + max_edit_cost; ++cost) {
     for (size_t cost = 0; cost < S.size(); ++cost) {
         bool done = false;
+        using HeapEntry = std::tuple<size_t, size_t, DeBruijnGraph::node_index>;
+        std::priority_queue<HeapEntry> queue;
         for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
+            for (const auto &[node, data] : S[cost][query_dist]) {
+                size_t best_dist = std::get<0>(data);
+                queue.emplace(best_dist, query_dist, node);
+            }
+        }
+
+        while (queue.size()) {
+            auto [best_dist, query_dist, node] = queue.top();
+            queue.pop();
             assert(query_dist <= query_size);
 
-            size_t it_dist = 0;
-            for (auto it = S[cost][query_dist].begin(); it != S[cost][query_dist].end(); ++it, ++it_dist) {
-                node_index node = it->first;
-                size_t best_dist = std::get<0>(it->second);
+            auto it = S[cost][query_dist].find(node);
+            if (it != S[cost][query_dist].end()) {
+                // outdated entry
+                if (std::get<0>(it->second) != best_dist)
+                    continue;
+
+                // node_index node = it->first;
+                // size_t best_dist = std::get<0>(it->second);
                 Cigar::Operator last_op = std::get<3>(it->second);
                 size_t num_matches = std::get<5>(it->second);
                 assert(last_op != Cigar::CLIPPED);
@@ -528,9 +545,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
 
                 if (terminate(cost, it->second, query_dist, node)) {
                     done = true;
-                    // continue;
+                    continue;
                     // common::logger->info("Halted at cost {}", cost);
-                    break;
+                    // break;
                 }
 
                 if (terminate_branch(cost, it->second, query_dist, node))
@@ -547,7 +564,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
                                 && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0)
                                 && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
-                            it = S[cost][query_dist].begin() + it_dist;
+                            // it = S[cost][query_dist].begin() + it_dist;
                         }
                     }
 
@@ -557,7 +574,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                         if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0), query_dist + 1, node)
                                 && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0)
                                 && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0)) {
-                            it = S[cost][query_dist].begin() + it_dist;
+                            // it = S[cost][query_dist].begin() + it_dist;
                         }
                     }
                 }
@@ -596,7 +613,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                 if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
                                         && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, c, 0)
                                         && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
-                                    it = S[cost][query_dist].begin() + it_dist;
+                                    // it = S[cost][query_dist].begin() + it_dist;
                                 }
                             }
                         }
@@ -609,7 +626,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                             if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, c, 0), query_dist, prev)
                                     && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, c, 0)
                                     && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, c, 0)) {
-                                it = S[cost][query_dist].begin() + it_dist;
+                                // it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
@@ -651,7 +668,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                         c,
                                         cur_num_matches
                                     )) {
-                                        it = S[cost][query_dist].begin() + it_dist;
+                                        if (cur_cost == cost) {
+                                            queue.emplace(cur_best, cur_query_dist, prev);
+                                        }
+                                        // it = S[cost][query_dist].begin() + it_dist;
                                     }
                                 }
 
@@ -678,7 +698,10 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                 c,
                                 cur_num_matches
                             )) {
-                                it = S[cost][query_dist].begin() + it_dist;
+                                if (cur_cost == cost) {
+                                    queue.emplace(cur_best, cur_query_dist, prev);
+                                }
+                                // it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
