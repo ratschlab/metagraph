@@ -1851,71 +1851,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
 
             // std::cerr << "\talignment\n";
+            DeBruijnGraph::node_index target_node = next->get_path().back();
             assert(traversal_dist > next->get_path().size() - 1);
             traversal_dist -= next->get_path().size() - 1;
 
-            size_t target_num_matches = next->get_seed().size() - next->get_path().size() + 1;
             std::string_view query_window(
                 next->get_seed().data() + next->get_path().size() - 1,
                 aln.get_seed().begin() - next->get_seed().begin() - (next->get_path().size() - 1)
             );
 
             bool aln_found = false;
-
-            auto start_backtracking = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-                // common::logger->info("Checkbt: n: {}, d: {}, qd: {} / {}, s: {}, nm: {}",
-                //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
-                //                      get_score(cost, query_dist, dist), num_matches);
-
-                // if (aln_found || dist == 0 || query_dist == 0 || num_matches < target_num_matches)
-                if (aln_found || dist == 0 || query_dist == 0)
-                    return false;
-
-                bool ret_val = query_dist == query_window.size() && node == next->get_path().back();
-                if (ret_val)
-                    common::logger->trace("Final cost: {}", cost);
-
-                return ret_val;
-            };
-
-            auto terminate_branch = [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
-                const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
-                // common::logger->info("Check: n: {}, d: {}, qd: {} / {}, s: {}",
-                //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
-                //                      get_score(cost, query_dist, dist));
-
-                if (dist == 0 && query_dist == 0)
-                    return false;
-
-                if (query_dist == query_window.size() || dist == traversal_dist) {
-                    // aln_found |= start_backtracking(cost, data, query_dist, node);
-                    return true;
-                }
-
-                std::ignore = target_num_matches;
-                // assert(traversal_dist >= dist);
-                // if (query_window.size() - query_dist <= target_num_matches && num_matches < target_num_matches) {
-                //     // sanity checks once we've hit the target seed
-
-                //     // cut off the branch if we did not match some of the target seed
-                //     // characters along the way
-                //     if (query_window.size() - query_dist < target_num_matches - num_matches) {
-                //         // std::cerr << "ttt: " << query_window.size() << "," << query_dist << "\t" << next->get_seed().size() << "," << num_matches << "\n";
-                //         return true;
-                //     }
-
-                //     // cut off the branch if we've hit the target seed on an incorrect
-                //     // diagonal (i.e., not enough indels)
-                //     if (query_window.size() - query_dist != traversal_dist - dist)
-                //         return true;
-                // }
-
-                // if (traversal_dist - dist < target_num_matches && traversal_dist - dist != query_window.size() - query_dist)
-                //     return true;
-
-                return false;
-            };
 
             align_bwd(
                 make_aln_graph(last->get_label_class()),
@@ -1950,9 +1895,40 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     aln_found = true;
                     callback(std::move(next_aln));
                 },
-                start_backtracking,
-                terminate_branch,
-                [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) { // terminate
+                [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // start_backtracking
+                    const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
+                    // common::logger->info("Checkbt: n: {}, d: {}, qd: {} / {}, s: {}, nm: {}",
+                    //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
+                    //                      get_score(cost, query_dist, dist), num_matches);
+
+                    if (aln_found || dist == 0 || query_dist == 0)
+                        return false;
+
+                    bool ret_val = query_dist == query_window.size() && node == target_node;
+                    if (ret_val)
+                        common::logger->trace("Final cost: {}", cost);
+
+                    return ret_val;
+                },
+                [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // terminate branch
+                    const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches] = data;
+                    // common::logger->info("Check: n: {}, d: {}, qd: {} / {}, s: {}",
+                    //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
+                    //                      get_score(cost, query_dist, dist));
+
+                    if (dist == 0 && query_dist == 0)
+                        return false;
+
+                    if (query_dist == query_window.size() || dist == traversal_dist) {
+                        return true;
+                    }
+
+                    return false;
+                },
+                [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
+                    // terminate
                     std::ignore = cost;
                     std::ignore = data;
                     std::ignore = query_dist;
@@ -1960,7 +1936,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // common::logger->info("Checkt: n: {}, d: {}, qd: {} / {}, s: {}",
                     //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                  get_score(cost, query_dist, dist));
-                    return aln_found || (query_dist == query_window.size() && node == next->get_path().back());
+                    return aln_found || (query_dist == query_window.size() && node == target_node);
                 }
             );
             if (!aln_found) {
