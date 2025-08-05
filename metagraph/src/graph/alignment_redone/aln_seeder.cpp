@@ -1579,9 +1579,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // return;
                 } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
+                    std::string_view a_i_trim = a_i.get_trim_spelling();
+                    if (a_i_trim.find(boss::BOSS::kSentinel) != std::string::npos)
+                        return;
+
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
-                    std::string_view a_i_trim = a_i.get_trim_spelling();
                     auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
                     assert(a_i_trim.size() >= olap);
                     for (size_t del = 0; del < olap; ++del) {

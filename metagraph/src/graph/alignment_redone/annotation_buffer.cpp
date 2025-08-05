@@ -1,5 +1,7 @@
 #include "annotation_buffer.hpp"
 
+#include "aln_match.hpp"
+
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"

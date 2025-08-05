@@ -196,6 +196,7 @@ AnchorIt chain_anchors(const Query &query,
                 best_cost = traversed + queried - 2 * best_score / match_score;
             } while (best_cost > b_last);
         } else {
+            common::logger->trace("Using fallback chaining with bandwidth {}", config.chaining_bandwidth);
             // otherwise, use this algorithm
             for (AnchorIt i = begin + 1; i != end; ++i) {
                 AnchorIt j = i - std::min(static_cast<size_t>(i - begin), config.chaining_bandwidth);
