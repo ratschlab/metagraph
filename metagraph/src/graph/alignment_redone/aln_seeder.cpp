@@ -82,8 +82,27 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                     first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
                     // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\t" << first << "," << last << "\t" << std::flush << graph.get_node_sequence(first) << "\t" << graph.get_node_sequence(last) << "\n";
-                    using edge_index = boss::BOSS::edge_index;
 
+                    if (canonical) {
+                        if (dbg_succ->in_graph(last)) {
+                            size_t i_rc = this_query.size() - (i + match_size);
+                            dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
+                                node = canonical->reverse_complement(node);
+                                auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                if (match_size > it->second.get_seed().size()) {
+                                    it.value() = Anchor(query_.get_query(!orientation),
+                                                        i_rc, i_rc + match_size,
+                                                        !orientation,
+                                                        std::vector<Match::node_index>{ node },
+                                                        graph.get_node_sequence(node).substr(match_size));
+                                    assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                    assert(it->second.is_spelling_valid(graph));
+                                }
+                            });
+                        }
+                    }
+
+                    using edge_index = boss::BOSS::edge_index;
                     std::vector<std::tuple<edge_index, edge_index, std::string, bool>> traverse;
                     traverse.emplace_back(first, last, "", true);
                     while (traverse.size()) {
@@ -92,29 +111,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         traverse.pop_back();
 
                         size_t cur_match_size = match_size + suffix.size();
-
-                        if (canonical) {
-                            if (is_exact_match) {
-                                size_t i_rc = this_query.size() - (i + cur_match_size);
-                                if (dbg_succ->in_graph(last)) {
-                                    dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
-                                        node = canonical->reverse_complement(node);
-                                        auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                        if (cur_match_size > it->second.get_seed().size()) {
-                                            it.value() = Anchor(query_.get_query(!orientation),
-                                                                i_rc, i_rc + cur_match_size,
-                                                                !orientation,
-                                                                std::vector<Match::node_index>{ node },
-                                                                graph.get_node_sequence(node).substr(cur_match_size));
-                                            assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
-                                            assert(it->second.is_spelling_valid(graph));
-                                        }
-                                    });
-                                }
-                            } else if (nodes[i] != DeBruijnGraph::npos) {
-                                break;
-                            }
-                        }
 
                         assert(cur_match_size < k);
                         if (cur_match_size == k - 1) {
@@ -155,12 +151,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             continue;
                         }
 
-                        // for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
-                        for (boss::BOSS::edge_index e = first; e <= last; ++e) {
+                        for (edge_index e = first; e <= last; ++e) {
                             boss::BOSS::TAlphabet s = boss.get_W(e) % boss.alph_size;
-                            // if (s) {
-                            boss::BOSS::edge_index next_first = first;
-                            boss::BOSS::edge_index next_last = last;
+                            edge_index next_first = first;
+                            edge_index next_last = last;
                             // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\ttry " << suffix << boss.decode(s) << "\t" << graph.get_node_sequence(next_first) << "\t" << graph.get_node_sequence(next_last) << "\n";
                             if (s) {
                                 bool ret_val = boss.tighten_range(&next_first, &next_last, s);
@@ -169,8 +163,25 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 // std::cerr << "\tworked!\n";
                                 char c = boss.decode(s);
                                 bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
-                                traverse.emplace_back(next_first, next_last, suffix + c,
-                                                    next_is_exact_match);
+                                if (!canonical || next_is_exact_match || nodes[i] == DeBruijnGraph::npos) {
+                                    traverse.emplace_back(next_first, next_last, suffix + c,
+                                                        next_is_exact_match);
+                                }
+                                if (canonical && next_is_exact_match) {
+                                    size_t next_match_size = cur_match_size + 1;
+                                    size_t i_rc = this_query.size() - (i + next_match_size);
+                                    auto node = canonical->reverse_complement(e);
+                                    auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                    if (next_match_size > it->second.get_seed().size()) {
+                                        it.value() = Anchor(query_.get_query(!orientation),
+                                                            i_rc, i_rc + next_match_size,
+                                                            !orientation,
+                                                            std::vector<Match::node_index>{ node },
+                                                            graph.get_node_sequence(node).substr(next_match_size));
+                                        assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                        assert(it->second.is_spelling_valid(graph));
+                                    }
+                                }
                             }
                         }
                     }
