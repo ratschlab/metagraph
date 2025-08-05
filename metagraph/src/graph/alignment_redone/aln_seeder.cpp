@@ -1576,7 +1576,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
                     std::string_view a_i_trim = a_i.get_trim_spelling();
-                    auto a_j_spelling = a_j.get_path_spelling();
+                    auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
                     assert(a_i_trim.size() >= olap);
                     for (size_t del = 0; del < olap; ++del) {
                         assert(a_i_trim.size() >= olap - del);
@@ -1590,34 +1590,33 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
                             // std::cerr << "\tfound\n";
-                            DeBruijnGraph::node_index node = a_j.get_path()[0];
                             size_t traversed = 0;
-                            for (auto bit = a_i_trim.rbegin() + olap - del; bit != a_i_trim.rend() && (node = graph.traverse_back(node, *bit)); ++bit) {
-                                ++traversed;
-                            }
-                            if (node != DeBruijnGraph::npos) {
-                                // std::cerr << "\t\tstep2\n";
-                                for (auto bit = a_i.get_seed().rbegin(); bit != a_i.get_seed().rend() && (node = graph.traverse_back(node, *bit)); ++bit) {
+                            DeBruijnGraph::node_index node = a_i.get_path().back();
+                            graph.traverse(node, a_j_spelling.data() + olap - del, a_j_spelling.data() + a_j_spelling.size(),
+                                [&](DeBruijnGraph::node_index next) {
+                                    node = next;
                                     ++traversed;
                                 }
-                                if (node == a_i.get_path().back()) {
-                                    traversed += a_i.get_path().size() - 1;
-                                    assert(traversed >= del);
-                                    assert(static_cast<ssize_t>(traversed - del) == query_j.begin() - query_i.begin());
-                                    DBGAlignerConfig::score_t cur_score = score;
-                                    size_t nmismatch = query_j.begin() - query_i.end();
-                                    std::string_view query_trim_window(query_i.data() + query_i.size(), nmismatch);
-                                    auto cur_mismatch = config_.score_sequences(query_trim_window,
-                                                                                del == 0 ? std::string_view(a_i_trim.begin(), nmismatch)
-                                                                                         : std::string_view(dummy.c_str(), nmismatch));
-                                    cur_score += cur_mismatch;
-                                    if (del)
-                                        cur_score += config_.gap_opening_penalty + (del - 1) * config_.gap_extension_penalty;
-                                    if (cur_score > score_j) {
-                                        // std::cerr << "\t\t\tworked! " << score << "\n";
-                                        update_score(cur_score, it, traversed - query_i.size() + query_j.size());
-                                        break;
-                                    }
+                            );
+
+                            if (traversed == a_j_spelling.size() - olap + del) {
+                                assert(node == a_j.get_path()[0]);
+                                traversed += a_i.get_path().size() - 1;
+                                assert(traversed >= del);
+                                assert(static_cast<ssize_t>(traversed - del) == query_j.begin() - query_i.begin());
+                                DBGAlignerConfig::score_t cur_score = score;
+                                size_t nmismatch = query_j.begin() - query_i.end();
+                                std::string_view query_trim_window(query_i.data() + query_i.size(), nmismatch);
+                                auto cur_mismatch = config_.score_sequences(query_trim_window,
+                                                                            del == 0 ? std::string_view(a_i_trim.begin(), nmismatch)
+                                                                                        : std::string_view(dummy.c_str(), nmismatch));
+                                cur_score += cur_mismatch;
+                                if (del)
+                                    cur_score += config_.gap_opening_penalty + (del - 1) * config_.gap_extension_penalty;
+                                if (cur_score > score_j) {
+                                    // std::cerr << "\t\t\tworked! " << score << "\n";
+                                    update_score(cur_score, it, traversed - query_i.size() + query_j.size());
+                                    break;
                                 }
                             }
                         }
@@ -1632,14 +1631,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         return;
 
                     size_t traversed = 0;
-                    DeBruijnGraph::node_index node = a_j.get_path()[0];
-                    auto end = query_i.rend() - a_i.get_path().size() + 1;
-                    for (auto ait = query_i.rbegin(); ait != end && (node = graph.traverse_back(node, *ait)); ++ait) {
-                        ++traversed;
-                    }
-                    assert((node == DeBruijnGraph::npos && traversed < query_i.size()) || node == a_i.get_path().back());
+                    auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
+                    DeBruijnGraph::node_index node = a_i.get_path().back();
+                    graph.traverse(node, a_j_spelling.data(), a_j_spelling.data() + a_j_spelling.size(),
+                        [&](DeBruijnGraph::node_index next) {
+                            node = next;
+                            ++traversed;
+                        }
+                    );
                     if (traversed == query_i.size() - a_i.get_path().size() + 1) {
-                        assert(node == a_i.get_path().back());
+                        assert(node == a_j.get_path()[0]);
                         size_t query_dist = a_j.get_clipping() - (a_i.get_clipping() + a_i.get_path().size() - 1);
                         assert(query_dist >= traversed);
                         size_t gap = query_dist - traversed;
