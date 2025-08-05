@@ -486,6 +486,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
     };
 
     size_t num_explored_nodes = 0;
+    size_t max_explored_dist = 0;
     {
         size_t query_dist = 0;
         DeBruijnGraph::node_index node = start_node;
@@ -517,6 +518,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             if (auto prev = traverse_back(node, *it, best_dist, query_dist)) {
                 // std::cerr << "\t" << node << " -> " << prev << std::endl;
                 ++num_explored_nodes;
+                ++max_explored_dist;
                 ++best_dist;
                 ++query_dist;
                 ++last_ext;
@@ -625,6 +627,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                     if (prevs.empty())
                         continue;
 
+                    max_explored_dist = std::max(max_explored_dist, best_dist + 1);
+
                     // deletion extension
                     if (!done) {
                         if (const auto *del_ext_bucket = get_bucket(F, cost, query_dist, node)) {
@@ -717,6 +721,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                 if (auto pprev = traverse_back(prev, *jt, cur_best, cur_query_dist)) {
                                     ++num_explored_nodes;
                                     ++cur_best;
+                                    max_explored_dist = std::max(max_explored_dist, cur_best);
                                     ++cur_query_dist;
                                     ++cur_num_matches;
                                     prev = pprev;
@@ -947,7 +952,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
             callback(std::move(spelling), std::move(path), std::move(cigar), start_cost);
         }
     }
-    common::logger->trace("Explored {} nodes. q: {}\td: {}", num_explored_nodes, query_size, max_dist);
+    common::logger->trace("Explored {} nodes. q: {}\td: {} / {}",
+                          num_explored_nodes, query_size, max_explored_dist, max_dist);
 }
 
 template <class Graph>
