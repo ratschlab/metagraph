@@ -86,8 +86,7 @@ bool operator==(const Match &a, const Match &b) {
         && a.get_clipping() == b.get_clipping()
         && a.get_end_clipping() == b.get_end_clipping()
         && a.get_end_trim() == b.get_end_trim()
-        && a.get_path() == b.get_path()
-        && a.get_score() == b.get_score();
+        && a.get_path() == b.get_path();
 }
 
 bool operator==(const Anchor &a, const Anchor &b) {
@@ -102,10 +101,9 @@ bool operator==(const Alignment &a, const Alignment &b) {
 
 std::ostream& operator<<(std::ostream &out, const Match &a) {
     Cigar cigar = a.generate_cigar();
-    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+    out << fmt::format("{}\t{}\t*\t{}\t{}\t{}",
                        !a.get_orientation() ? "+" : "-",
                        a.get_spelling(),
-                       a.get_score(),
                        cigar.get_num_matches(),
                        cigar.to_string(),
                        a.get_end_trim());
@@ -161,9 +159,7 @@ size_t Alignment::trim_end() {
     return num_trimmed;
 }
 
-void Anchor::append(const Anchor &other,
-                    const DBGAlignerConfig &config,
-                    const DeBruijnGraph *graph) {
+void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
     assert(query_.data() == other.query_.data());
     assert(query_.data() + query_.size() == other.query_.data() + other.query_.size());
     assert(label_class_ == other.label_class_);
@@ -195,7 +191,6 @@ void Anchor::append(const Anchor &other,
     path_.erase(next, path_.end());
     path_.insert(path_.end(), other.path_.begin(), other.path_.end());
     suffix_ = other.suffix_;
-    score_ = config.score_cigar(seed_, query_, generate_cigar());
 
     assert(!graph || is_spelling_valid(*graph));
 }

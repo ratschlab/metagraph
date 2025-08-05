@@ -121,7 +121,8 @@ AnchorIt chain_anchors(const Query &query,
     ChainScores<AnchorIt> chain_scores;
     chain_scores.reserve(end - begin);
     std::transform(begin, end, std::back_inserter(chain_scores), [&](const Anchor &a) {
-        return std::make_tuple(a.get_score(), end, 0, a.get_spelling().size(), a.get_seed().size());
+        return std::make_tuple(score_match(a, config),
+                               end, 0, a.get_spelling().size(), a.get_seed().size());
     });
 
     // forward pass

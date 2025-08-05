@@ -447,13 +447,13 @@ int align_to_graph(Config *config) {
                         extender = std::make_unique<align_redone::Extender>(aln_query, aligner_config);
                     }
 
-                    auto aln_sort = [](const auto &a, const auto &b) {
-                        return std::make_pair(a.get_score(), b.get_orientation())
-                             > std::make_pair(b.get_score(), a.get_orientation());
-                    };
+                    // auto aln_sort = [](const auto &a, const auto &b) {
+                    //     return std::make_pair(a.get_score(), b.get_orientation())
+                    //          > std::make_pair(b.get_score(), a.get_orientation());
+                    // };
 
                     auto chains = seeder->get_inexact_anchors(config->alignment_connect_anchors);
-                    std::sort(chains.begin(), chains.end(), aln_sort);
+                    // std::sort(chains.begin(), chains.end(), aln_sort);
 
                     std::vector<align_redone::Alignment> paths;
 
@@ -463,7 +463,7 @@ int align_to_graph(Config *config) {
                                 paths.emplace_back(std::move(path));
                             });
                         }
-                        std::sort(paths.begin(), paths.end(), aln_sort);
+                        // std::sort(paths.begin(), paths.end(), aln_sort);
                     } else {
                         std::swap(paths, chains);
                     }

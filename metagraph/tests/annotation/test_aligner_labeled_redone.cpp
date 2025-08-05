@@ -58,9 +58,9 @@ void run_alignment(const AnnotatedDBG &anno_graph,
             });
         }
 
-        auto aln_sort = [](const auto &a, const auto &b) {
-            return std::make_pair(a.get_score(), b.get_orientation())
-                 > std::make_pair(b.get_score(), a.get_orientation());
+        auto aln_sort = [&config](const auto &a, const auto &b) {
+            return std::make_pair(score_match(a, config), b.get_orientation())
+                 > std::make_pair(score_match(b, config), a.get_orientation());
         };
 
         std::sort(paths_no_extend.begin(), paths_no_extend.end(), aln_sort);
@@ -102,7 +102,8 @@ void run_alignment(const AnnotatedDBG &anno_graph,
 
                 EXPECT_EQ(end_trim, path.get_end_trim()) << label << "\t" << mx << "\t" << type;
                 if (reference.size()) {
-                    EXPECT_EQ(config.score_cigar(reference, path.get_query(), cigar), path.get_score()) << label << "\t" << mx << "\t" << type;
+                    EXPECT_EQ(config.score_cigar(reference, path.get_query(), cigar),
+                              score_match(path, config)) << label << "\t" << mx << "\t" << type;
                 }
 
                 EXPECT_EQ(cigar.get_clipping(), path.get_clipping()) << label << "\t" << mx << "\t" << type;

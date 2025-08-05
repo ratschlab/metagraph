@@ -23,24 +23,33 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         return anchors;
 
     std::vector<std::vector<DeBruijnGraph::node_index>> mapped_nodes(2);
+    std::vector<std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, Anchor>>> max_seeds(2);
+
     for (bool orientation : { false, true }) {
         std::string_view this_query = query_.get_query(orientation);
-        mapped_nodes[orientation] = map_to_nodes_sequentially(graph, this_query);
+        auto &nodes = mapped_nodes[orientation];
+        nodes = map_to_nodes_sequentially(graph, this_query);
+
+        auto &cur_max_seeds = max_seeds[orientation];
+        cur_max_seeds.resize(this_query.size() - config_.min_seed_length + 1);
+
+        for (size_t begin = 0; begin < nodes.size(); ++begin) {
+            Match::node_index node = nodes[begin];
+            if (node != DeBruijnGraph::npos) {
+                cur_max_seeds[begin][node] = Anchor(
+                    this_query,
+                    begin, begin + graph.get_k(),
+                    orientation,
+                    std::vector<Match::node_index>{ node }
+                );
+            }
+        }
     }
 
     for (bool orientation : { false, true }) {
         std::string_view this_query = query_.get_query(orientation);
-        const auto &nodes = mapped_nodes[orientation];
-        for (size_t begin = 0; begin < nodes.size(); ++begin) {
-            Match::node_index node = nodes[begin];
-            if (node != DeBruijnGraph::npos) {
-                anchors.emplace_back(this_query,
-                                        begin, begin + graph.get_k(),
-                                        orientation,
-                                        std::vector<Match::node_index>{ node },
-                                        config_);
-            }
-        }
+        auto &nodes = mapped_nodes[orientation];
+        auto &cur_max_seeds = max_seeds[orientation];
 
         if (config_.min_seed_length < graph.get_k()) {
             const DBGSuccinct *dbg_succ;
@@ -86,19 +95,19 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                         if (canonical) {
                             if (is_exact_match) {
+                                size_t i_rc = this_query.size() - (i + cur_match_size);
                                 if (dbg_succ->in_graph(last)) {
                                     dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
                                         node = canonical->reverse_complement(node);
-                                        size_t i_rc = this_query.size() - (i + cur_match_size);
-                                        if (i_rc >= nodes.size() || mapped_nodes[!orientation][i_rc] != node) {
-                                            anchors.emplace_back(query_.get_query(!orientation),
+                                        auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                        if (cur_match_size > it->second.get_seed().size()) {
+                                            it.value() = Anchor(query_.get_query(!orientation),
                                                                 i_rc, i_rc + cur_match_size,
                                                                 !orientation,
                                                                 std::vector<Match::node_index>{ node },
-                                                                config_,
                                                                 graph.get_node_sequence(node).substr(cur_match_size));
-                                            assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
-                                            assert(anchors.back().is_spelling_valid(graph));
+                                            assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                            assert(it->second.is_spelling_valid(graph));
                                         }
                                     });
                                 }
@@ -128,14 +137,16 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         is_exact_match &= last_char_matches;
 
                                         if (!is_exact_match) {
-                                            anchors.emplace_back(this_query,
-                                                                i, i + full_match_size,
-                                                                orientation,
-                                                                std::vector<Match::node_index>{ node },
-                                                                config_,
-                                                                (suffix + c).substr(full_match_size - match_size));
-                                            assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
-                                            assert(anchors.back().is_spelling_valid(graph));
+                                            auto [it, inserted] = cur_max_seeds[i].try_emplace(node, Anchor());
+                                            if (full_match_size > it->second.get_seed().size()) {
+                                                it.value() = Anchor(this_query,
+                                                                    i, i + full_match_size,
+                                                                    orientation,
+                                                                    std::vector<Match::node_index>{ node },
+                                                                    (suffix + c).substr(full_match_size - match_size));
+                                                assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                                assert(it->second.is_spelling_valid(graph));
+                                            }
                                         }
                                     }
                                 }
@@ -164,26 +175,16 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         }
                     }
                 }
-
-                if (anchors.size() > 1 && canonical) {
-                    std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
-                        return std::make_tuple(a.get_orientation(), a.get_clipping(), a.get_path()[0], b.get_end_clipping())
-                            < std::make_tuple(b.get_orientation(), b.get_clipping(), b.get_path()[0], a.get_end_clipping());
-                    });
-                    for (auto it = anchors.begin(), jt = anchors.begin() + 1; jt != anchors.end(); ++it, ++jt) {
-                        if (it->get_orientation() != jt->get_orientation() || it->get_clipping() != jt->get_clipping() || it->get_path()[0] != jt->get_path()[0])
-                            continue;
-
-                        assert(it->get_end_clipping() >= jt->get_end_clipping());
-                        assert(it->get_end_trim() >= jt->get_end_trim());
-                        // std::cerr << "redundant\t" << *it << "\t" << *jt << "\n";
-                        *it = Anchor();
-                    }
-                    anchors.erase(std::remove_if(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_path().empty(); }),
-                                anchors.end());
-                }
             } else if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
                 // TODO
+            }
+        }
+    }
+
+    for (auto &cur_max_seeds : max_seeds) {
+        for (auto &bucket : cur_max_seeds) {
+            for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+                anchors.emplace_back(std::move(it.value()));
             }
         }
     }
@@ -1146,8 +1147,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         std::string_view query_window = aln.get_query();
         query_window.remove_prefix(aln.get_clipping() + aln.get_seed().size());
 
+        DBGAlignerConfig::score_t aln_score = score_match(aln, config_);
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            return aln.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+            return aln_score + cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.right_end_bonus : 0);
         };
 
@@ -1161,7 +1163,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
         size_t max_dist = 0;
-        DBGAlignerConfig::score_t best_score = aln.get_score();
+        DBGAlignerConfig::score_t best_score = aln_score;
         size_t max_query_dist = 0;
         align_fwd(
             make_aln_graph(aln.get_label_classes().back()), config_, aln.get_path().back(), num_matches,
@@ -1183,7 +1185,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     aln.get_query(),
                     aln.get_orientation(),
                     std::move(ext_path),
-                    config_,
                     std::move(ext_cigar),
                     std::string(aln.get_spelling()) + spelling,
                     aln.get_end_trim() - std::min(aln.get_end_trim(), spelling.size()),
@@ -1254,12 +1255,13 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         std::string_view query_window = fwd_ext.get_query();
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
 
+        DBGAlignerConfig::score_t fwd_ext_score = score_match(fwd_ext, config_);
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
-            return fwd_ext.get_score() + cost_to_score(cost, query_dist, dist, match_score)
+            return fwd_ext_score + cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
         };
 
-        DBGAlignerConfig::score_t best_score = fwd_ext.get_score();
+        DBGAlignerConfig::score_t best_score = fwd_ext_score;
 
         auto it = aln.get_cigar().data().begin();
         auto end = aln.get_cigar().data().end();
@@ -1293,7 +1295,6 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     fwd_ext.get_query(),
                     fwd_ext.get_orientation(),
                     std::move(path),
-                    config_,
                     std::move(ext_cigar),
                     spelling + fwd_ext.get_path_spelling(),
                     fwd_ext.get_end_trim(),
@@ -1397,7 +1398,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     && graph.has_single_outgoing(a_i.get_path().back())
                     && graph.has_single_incoming(a_j.get_path()[0])) {
                 // merge
-                a_i.append(a_j, config_, &graph);
+                a_i.append(a_j, &graph);
                 std::swap(a_i, a_j);
                 a_i = Anchor();
             }
@@ -1730,7 +1731,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 aln.get_query(),
                                 aln.get_orientation(),
                                 std::move(path),
-                                config_,
                                 std::move(cigar),
                                 std::string(next->get_seed().substr(0, next->get_path().size())) + aln.get_path_spelling(),
                                 aln.get_end_trim(),
@@ -1821,7 +1821,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 aln.get_query(),
                                 aln.get_orientation(),
                                 std::move(path),
-                                config_,
                                 std::move(cigar),
                                 spelling + aln.get_path_spelling(),
                                 aln.get_end_trim(),
@@ -1922,7 +1921,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                     aln.get_query(),
                                     aln.get_orientation(),
                                     std::move(bt_path),
-                                    config_,
                                     std::move(cigar),
                                     std::string(next->get_spelling().substr(0, next->get_path().size() - 1)) + spelling + aln.get_path_spelling(),
                                     aln.get_end_trim(),
@@ -1949,7 +1947,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 throw std::runtime_error("Failed to connect anchors");
             }
         },
-        [&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
+        [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
             aln.trim_end();
             if (!ext_success) {
                 ++num_chains;
@@ -1963,7 +1961,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         found_labels.emplace(label);
                 }
             }
-            common::logger->trace("Aln: {}\t{}\t{}", aln.get_score(), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
+            if (common::get_verbose())
+                common::logger->trace("Aln: {}\t{}\t{}", score_match(aln, config_), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
             // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
             alignments.emplace_back(std::move(aln));
         }

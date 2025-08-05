@@ -25,7 +25,7 @@ class Match {
 
     static constexpr score_t ninf = DBGAlignerConfig::ninf;
 
-    Match() : orientation_(false), score_(0) {}
+    Match() : orientation_(false) {}
 
     virtual ~Match() {}
 
@@ -42,7 +42,6 @@ class Match {
 
     virtual Cigar generate_cigar() const = 0;
 
-    score_t get_score() const { return score_; }
     bool get_orientation() const { return orientation_; }
 
     virtual size_t get_end_trim() const = 0;
@@ -64,17 +63,19 @@ class Match {
           size_t begin,
           size_t end,
           bool orientation,
-          std::vector<node_index>&& path,
-          score_t score)
+          std::vector<node_index>&& path)
           : query_(query), orientation_(orientation), seed_(query_.substr(begin, end - begin)),
-            path_(std::move(path)), score_(score) {}
+            path_(std::move(path)) {}
 
     std::string_view query_;
     bool orientation_;
     std::string_view seed_;
     std::vector<node_index> path_;
-    score_t score_;
 };
+
+inline Match::score_t score_match(const Match &match, const DBGAlignerConfig &config) {
+    return config.score_cigar(match.get_spelling(), match.get_query(), match.generate_cigar());
+}
 
 bool operator==(const Match &a, const Match &b);
 
@@ -93,14 +94,11 @@ class Anchor : public Match {
            size_t end,
            bool orientation,
            std::vector<node_index>&& path,
-           const DBGAlignerConfig &config,
            std::string&& suffix = "",
            label_class_t label_class = nlabel,
            int64_t coord = ncoord)
-          : Match(query, begin, end, orientation,
-                  std::move(path), 0),
+          : Match(query, begin, end, orientation, std::move(path)),
             label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {
-        score_ = config.score_cigar(seed_, query_, generate_cigar());
         assert(get_spelling() == get_seed());
     }
 
@@ -120,7 +118,6 @@ class Anchor : public Match {
     size_t trim_end() override final;
 
     void append(const Anchor &other,
-                const DBGAlignerConfig &config,
                 const DeBruijnGraph *graph = nullptr);
 
     label_class_t get_label_class() const { return label_class_; }
@@ -145,13 +142,12 @@ class Alignment : public Match {
               std::string_view query,
               bool orientation,
               std::vector<node_index>&& path,
-              const DBGAlignerConfig &config,
               Cigar&& cigar,
               std::string&& path_spelling,
               size_t end_trim = 0,
               Anchor::label_class_t label_class = Anchor::nlabel)
           : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
-                  orientation, std::move(path), 0),
+                  orientation, std::move(path)),
             end_trim_(end_trim),
             path_spelling_(std::move(path_spelling)),
             cigar_(std::move(cigar)),
@@ -160,7 +156,6 @@ class Alignment : public Match {
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
-        score_ = config.score_cigar(get_spelling(), query_, cigar_);
     }
 
     Alignment(const Anchor &anchor)
@@ -168,8 +163,7 @@ class Alignment : public Match {
                   anchor.get_clipping(),
                   anchor.get_clipping() + anchor.get_seed().size(),
                   anchor.get_orientation(),
-                  std::vector<node_index>(anchor.get_path()),
-                  anchor.get_score()),
+                  std::vector<node_index>(anchor.get_path())),
             end_trim_(anchor.get_end_trim()),
             path_spelling_(anchor.get_path_spelling()),
             cigar_(anchor.generate_cigar()),
