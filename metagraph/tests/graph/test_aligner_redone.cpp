@@ -467,7 +467,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
-    size_t k = 4;
+    size_t k = 9;
     //                                 DDDD
     std::string reference = "TTTCTGTATACCTTGGCGCTCTC";
     std::string query =     "TTTCTGTATA"  "GGCGCTCTC";
@@ -477,7 +477,12 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
-    run_alignment(*graph, config, query, { reference }, { "10=4D9=" }, 0, true, true);
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        config.min_seed_length = 4;
+        run_alignment(*graph, config, query, { reference }, { "10=4D9=" });
+    } else {
+        run_alignment(*graph, config, query, { reference }, { "10=4D9=" }, 0, true, true);
+    }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_gap_after_seed) {
