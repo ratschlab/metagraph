@@ -487,6 +487,8 @@ class BOSS {
     inline std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const;
 
+    inline void call_tighter_ranges(edge_index rl, edge_index ru,
+                                    const std::function<void(edge_index, edge_index, TAlphabet s)> &callback) const;
     inline bool tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const;
 
     /**
@@ -685,6 +687,30 @@ inline bool BOSS::tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) con
     *rl = select_last(NF_[s] + rk_rl - 1) + 1;
     *ru = select_last(NF_[s] + rk_ru);
     return true;
+}
+
+inline void BOSS
+::call_tighter_ranges(edge_index rl, edge_index ru,
+                      const std::function<void(edge_index, edge_index, TAlphabet)> &callback) const {
+    if (ru - rl + 1 >= alphabet.size() - 1) {
+        for (TAlphabet s = 1; s < alph_size; ++s) {
+            edge_index next_rl = rl;
+            edge_index next_ru = ru;
+            if (tighten_range(&next_rl, &next_ru, s))
+                callback(next_rl, next_ru, s);
+        }
+    } else {
+        for (edge_index e = rl; e <= ru; ++e) {
+            if (TAlphabet s = get_W(e) % alph_size) {
+                edge_index next_rl = rl;
+                edge_index next_ru = ru;
+                bool ret_val = tighten_range(&next_rl, &next_ru, s);
+                std::ignore = ret_val;
+                assert(ret_val);
+                callback(next_rl, next_ru, s);
+            }
+        }
+    }
 }
 
 template <typename RandomAccessIt>
