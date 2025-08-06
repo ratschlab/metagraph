@@ -181,13 +181,16 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         auto node = canonical->reverse_complement(e);
                                         auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
                                         if (next_match_size > it->second.get_seed().size()) {
-                                            it.value() = Anchor(query_.get_query(!orientation),
-                                                                i_rc, i_rc + next_match_size,
-                                                                !orientation,
-                                                                std::vector<Match::node_index>{ node },
-                                                                graph.get_node_sequence(node).substr(next_match_size));
-                                            assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
-                                            assert(it->second.is_spelling_valid(graph));
+                                            std::string suffix = graph.get_node_sequence(node).substr(next_match_size);
+                                            if (suffix.find(boss::BOSS::kSentinel) == std::string::npos) {
+                                                it.value() = Anchor(query_.get_query(!orientation),
+                                                                    i_rc, i_rc + next_match_size,
+                                                                    !orientation,
+                                                                    std::vector<Match::node_index>{ node },
+                                                                    std::move(suffix));
+                                                assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                                assert(it->second.is_spelling_valid(graph));
+                                            }
                                         }
                                     }
                                 }
@@ -1707,8 +1710,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
                     std::string_view a_i_trim = a_i.get_trim_spelling();
-                    if (a_i_trim.find(boss::BOSS::kSentinel) != std::string::npos)
-                        return;
 
                     size_t olap = std::min(a_i.get_query().size(),
                                            a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim()) - a_j.get_clipping();
