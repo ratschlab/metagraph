@@ -1,5 +1,7 @@
 #include "annotation_buffer.hpp"
 
+#include <sstream>
+
 #include "aln_match.hpp"
 
 #include "graph/representation/rc_dbg.hpp"
@@ -228,6 +230,23 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         labels_i < column_sets_.size() ? &column_sets_.data()[labels_i] : nullptr,
         coords
     );
+}
+
+std::string AnnotationBuffer::generate_column_set_str(size_t i) const {
+    if (i == Anchor::nlabel)
+        return "*";
+
+    std::ostringstream ostd;
+    const Columns &columns = get_cached_column_set(i);
+    if (columns.empty())
+        return "*";
+
+    ostd << annotator_.get_label_encoder().decode(columns[0]);
+    for (size_t c = 1; c < columns.size(); ++c) {
+        ostd << ";" << annotator_.get_label_encoder().decode(columns[c]);
+    }
+
+    return ostd.str();
 }
 
 } // namespace align

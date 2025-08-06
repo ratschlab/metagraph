@@ -470,9 +470,17 @@ int align_to_graph(Config *config) {
 
                     *out << header << "\t" << query;
                     if (paths.size()) {
-                        *out << "\t" << paths[0] << "\n";
+                        for (const auto &path : paths) {
+                            *out << "\t" << path;
+                            if (anno_buffer) {
+                                *out << "\t" << anno_buffer->generate_column_set_str(path.get_label_classes()[0]);
+                            } else {
+                                *out << "\t";
+                            }
+                        }
+                        *out << "\n";
                     } else {
-                        *out << "\t*\t*\t*\t*\t*\t*\n";
+                        *out << "\t*\t*\t*\t*\t*\t*\t*\n";
                     }
                 }
             });

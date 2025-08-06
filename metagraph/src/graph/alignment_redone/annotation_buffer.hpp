@@ -79,6 +79,8 @@ class AnnotationBuffer {
         return column_sets_.data()[i];
     }
 
+    std::string generate_column_set_str(size_t i) const;
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
