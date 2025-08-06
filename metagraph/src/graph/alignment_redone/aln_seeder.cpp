@@ -204,9 +204,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
     }
 
+    std::vector<sdsl::bit_vector> coverage(2, sdsl::bit_vector(query_.get_query(false).size()));
     for (auto &cur_max_seeds : max_seeds) {
         for (auto &bucket : cur_max_seeds) {
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+                auto &cov = coverage[it->second.get_orientation()];
+                std::fill(cov.begin() + it->second.get_clipping(),
+                          cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
+                          true);
                 anchors.emplace_back(std::move(it.value()));
             }
         }
@@ -215,6 +220,12 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     assert(std::all_of(anchors.begin(), anchors.end(), [k=graph.get_k()](const auto &a) {
         return a.get_spelling().size() + a.get_end_trim() == k;
     }));
+
+    size_t num_covered = std::max(sdsl::util::cnt_one_bits(coverage[false]),
+                                  sdsl::util::cnt_one_bits(coverage[true]));
+
+    if (static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match)
+        anchors.clear();
 
     return anchors;
 }
@@ -230,21 +241,52 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
 
     anno_buffer_.fetch_queued_annotations();
 
+    tsl::hopscotch_map<AnnotationBuffer::Column, sdsl::bit_vector> coverages;
+    for (auto &anchor : anchors) {
+        assert(anchor.get_path().size() == 1);
+        if (const auto *labels_it = anno_buffer_.get_labels(anchor.get_path()[0])) {
+            for (AnnotationBuffer::Column c : *labels_it) {
+                auto [it, inserted] = coverages.try_emplace(c, sdsl::bit_vector());
+                if (inserted)
+                    it.value() = sdsl::bit_vector(query_.get_query(false).size());
+
+                std::fill(it.value().begin() + anchor.get_clipping(),
+                          it.value().begin() + anchor.get_clipping() + anchor.get_seed().size(),
+                          true);
+            }
+        }
+    }
+
+    for (auto it = coverages.begin(); it != coverages.end(); ++it) {
+        size_t num_covered = sdsl::util::cnt_one_bits(it->second);
+
+        if (static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match) {
+            // if the coverage is too low, clear out the vector
+            it.value() = sdsl::bit_vector();
+        } else {
+            // otherwise, we don't need the coverage anymore, so just make it tiny
+            it.value() = sdsl::bit_vector(1);
+        }
+    }
+
     std::vector<Anchor> labeled_anchors;
     labeled_anchors.reserve(anchors.size());
     for (auto &anchor : anchors) {
         auto [labels_it, coord_it] = anno_buffer_.get_labels_and_coords(anchor.get_path()[0]);
         if (labels_it) {
             for (size_t i = 0; i < labels_it->size(); ++i) {
-                anchor.set_label_class(anno_buffer_.cache_column_set(labels_it->begin() + i,
-                                                                     labels_it->begin() + i + 1));
-                if (coord_it) {
-                    const auto &coords = (*coord_it)[i];
-                    for (auto coord : coords) {
-                        labeled_anchors.emplace_back(anchor).set_coord(coord);
+                if (coverages[(*labels_it)[i]].size()) {
+                    // only pick labels that have sufficient coverage
+                    anchor.set_label_class(anno_buffer_.cache_column_set(labels_it->begin() + i,
+                                                                        labels_it->begin() + i + 1));
+                    if (coord_it) {
+                        const auto &coords = (*coord_it)[i];
+                        for (auto coord : coords) {
+                            labeled_anchors.emplace_back(anchor).set_coord(coord);
+                        }
+                    } else {
+                        labeled_anchors.emplace_back(anchor);
                     }
-                } else {
-                    labeled_anchors.emplace_back(anchor);
                 }
             }
         }
