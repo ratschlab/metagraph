@@ -95,8 +95,7 @@ class DBGSuccinct : public DeBruijnGraph {
     // returns true, or if the sequence is exhausted.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
+                          std::string_view seq,
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
 

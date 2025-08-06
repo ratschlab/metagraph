@@ -118,17 +118,39 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
 }
 
 void DeBruijnGraph::traverse(node_index start,
-                             const char *begin,
-                             const char *end,
+                             std::string_view seq,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
     assert(start >= 1 && start <= max_index());
-    assert(end >= begin);
     if (terminate())
         return;
 
-    for (; begin != end && !terminate(); ++begin) {
-        start = traverse(start, *begin);
+    for (char c : seq) {
+        if (terminate())
+            return;
+
+        start = traverse(start, c);
+
+        if (!in_graph(start))
+            return;
+
+        callback(start);
+    }
+}
+
+void DeBruijnGraph::traverse_back(node_index start,
+                                  std::string_view prefix_seq,
+                                  const std::function<void(node_index)> &callback,
+                                  const std::function<bool()> &terminate) const {
+    assert(start >= 1 && start <= max_index());
+    if (terminate())
+        return;
+
+    for (auto begin = prefix_seq.rbegin(); begin != prefix_seq.rend(); ++begin) {
+        if (terminate())
+            return;
+
+        start = traverse_back(start, *begin);
 
         if (!in_graph(start))
             return;

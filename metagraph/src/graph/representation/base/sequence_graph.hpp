@@ -175,10 +175,18 @@ class DeBruijnGraph : public SequenceGraph {
     // when the sequence is exhausted.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones.
     virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
+                          std::string_view seq,
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const;
+
+    // Given a starting node and a sequence of edge labels, traverse the graph
+    // backward starting from the end of prefix_seq. The traversal is terminated
+    // once terminate() returns true or when the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones.
+    virtual void traverse_back(node_index start,
+                               std::string_view prefix_seq,
+                               const std::function<void(node_index)> &callback,
+                               const std::function<bool()> &terminate = [](){ return false; }) const;
 
     typedef std::function<void(const std::string&, const std::vector<node_index>&)> CallPath;
 

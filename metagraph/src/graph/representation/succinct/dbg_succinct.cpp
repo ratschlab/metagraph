@@ -393,12 +393,10 @@ void DBGSuccinct
 }
 
 void DBGSuccinct::traverse(node_index start,
-                           const char *begin,
-                           const char *end,
+                           std::string_view seq,
                            const std::function<void(node_index)> &callback,
                            const std::function<bool()> &terminate) const {
     assert(in_graph(start));
-    assert(end >= begin);
 
     if (terminate())
         return;
@@ -407,7 +405,7 @@ void DBGSuccinct::traverse(node_index start,
     assert(edge);
 
     BOSS::TAlphabet w;
-    for (; begin != end && !terminate() && (w = boss_graph_->get_W(edge)); ++begin) {
+    for (auto begin = seq.begin(); begin != seq.end() && !terminate() && (w = boss_graph_->get_W(edge)); ++begin) {
         // stop traversal if the character is invalid
         if (boss_graph_->encode(*begin) == boss_graph_->alph_size)
             return;

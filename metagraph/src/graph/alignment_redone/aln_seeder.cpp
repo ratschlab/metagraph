@@ -1057,15 +1057,46 @@ class AlignmentGraph {
         return has_labels(next) ? next : DeBruijnGraph::npos;
     }
 
-    void traverse(node_index node, const char *begin, const char *end, const std::function<void(node_index)> &callback) const {
+    void traverse(node_index node, std::string_view seq,
+                  const std::function<void(node_index)> &callback,
+                  const std::function<bool()> &terminate = [](){ return false; }) const {
         if (target_ == Anchor::nlabel) {
-            graph_.traverse(node, begin, end, callback);
+            graph_.traverse(node, seq, callback, terminate);
             return;
         }
 
-        for (auto it = begin; it != end && (node = traverse(node, *it)); ++it) {
-            callback(node);
+        bool end_of_target = false;
+        graph_.traverse(node, seq,
+            [&](node_index next) {
+                if (!has_labels(next)) {
+                    end_of_target = true;
+                } else {
+                    callback(next);
+                }
+            },
+            [&]() { return end_of_target || terminate(); }
+        );
+    }
+
+    void traverse_back(node_index node, std::string_view prefix_seq,
+                       const std::function<void(node_index)> &callback,
+                       const std::function<bool()> &terminate = [](){ return false; }) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.traverse_back(node, prefix_seq, callback, terminate);
+            return;
         }
+
+        bool end_of_target = false;
+        graph_.traverse_back(node, prefix_seq,
+            [&](node_index prev) {
+                if (!has_labels(prev)) {
+                    end_of_target = true;
+                } else {
+                    callback(prev);
+                }
+            },
+            [&]() { return end_of_target || terminate(); }
+        );
     }
 
     bool has_single_outgoing(node_index node) const {
@@ -1515,7 +1546,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     }
                     size_t traverse = 0;
                     DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(a_i.get_path().back(), a_j_trim_spelling.data(), a_j_trim_spelling.data() + a_j_trim_spelling.size(),
+                    graph.traverse(a_i.get_path().back(), a_j_trim_spelling,
                                    [&](DeBruijnGraph::node_index next) {
                                        ++traverse;
                                        node = next;
@@ -1601,7 +1632,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                             // std::cerr << "\tfound\n";
                             size_t traversed = 0;
                             DeBruijnGraph::node_index node = a_i.get_path().back();
-                            graph.traverse(node, a_j_spelling.data() + olap - del, a_j_spelling.data() + a_j_spelling.size(),
+                            graph.traverse(node, a_j_spelling.substr(olap - del),
                                 [&](DeBruijnGraph::node_index next) {
                                     node = next;
                                     ++traversed;
@@ -1642,7 +1673,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     size_t traversed = 0;
                     auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
                     DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(node, a_j_spelling.data(), a_j_spelling.data() + a_j_spelling.size(),
+                    graph.traverse(node, a_j_spelling,
                         [&](DeBruijnGraph::node_index next) {
                             node = next;
                             ++traversed;

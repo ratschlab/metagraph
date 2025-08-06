@@ -29,12 +29,23 @@ TYPED_TEST(DeBruijnGraphTest, traverse_string) {
             std::string path;
             graph->traverse(
                 cur_node,
-                sequence.data() + i + k, sequence.data() + sequence.size(),
+                sequence.substr(i + k),
                 [&](auto node) {
                     path += graph->get_node_sequence(node).back();
                 }
             );
             EXPECT_EQ(std::string(sequence.begin() + i + k, sequence.end()), path);
+
+            std::string path_back;
+            graph->traverse_back(
+                cur_node,
+                sequence.substr(0, i),
+                [&](auto node) {
+                    path_back += graph->get_node_sequence(node)[0];
+                }
+            );
+            std::reverse(path_back.begin(), path_back.end());
+            EXPECT_EQ(std::string(sequence.begin(), sequence.begin() + i), path_back);
         }
     }
 }
@@ -47,8 +58,16 @@ TYPED_TEST(DeBruijnGraphTest, traverse_string_stop_when_no_edge) {
     std::string query = "CCCTGTTTG";
     graph->traverse(
         graph->kmer_to_node("AGGC"),
-        query.data() + 4,
-        query.data() + query.size(),
+        query.substr(4),
+        [&](auto node) {
+            EXPECT_FALSE(true) << node << " " << graph->get_node_sequence(node);
+        },
+        []() { return false; }
+    );
+
+    graph->traverse_back(
+        graph->kmer_to_node("TTTG"),
+        query.substr(0, query.size() - 1),
         [&](auto node) {
             EXPECT_FALSE(true) << node << " " << graph->get_node_sequence(node);
         },
