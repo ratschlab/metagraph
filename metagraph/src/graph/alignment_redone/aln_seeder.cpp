@@ -1166,10 +1166,10 @@ class AlignmentGraph {
         anno_buffer_->fetch_queued_annotations();
 
         for (node_index next : forward_nodes) {
-            if (!has_labels(next)) {
-                return;
-            } else {
+            if (has_labels(next)) {
                 callback(next);
+            } else {
+                return;
             }
         }
     }
@@ -1190,10 +1190,10 @@ class AlignmentGraph {
         anno_buffer_->fetch_queued_annotations();
 
         for (node_index prev : backward_nodes) {
-            if (!has_labels(prev)) {
-                return;
-            } else {
+            if (has_labels(prev)) {
                 callback(prev);
+            } else {
+                return;
             }
         }
     }
@@ -1211,10 +1211,21 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.call_outgoing_kmers(node, callback);
         } else {
+            std::vector<node_index> forward_n;
+            std::vector<char> forward_c;
             graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
+                forward_n.emplace_back(next);
+                forward_c.emplace_back(c);
+            });
+            anno_buffer_->queue_path(forward_n);
+            anno_buffer_->fetch_queued_annotations();
+
+            for (size_t i = 0; i < forward_n.size(); ++i) {
+                node_index next = forward_n[i];
+                char c = forward_c[i];
                 if (has_labels(next))
                     callback(next, c);
-            });
+            }
         }
     }
 
@@ -1222,10 +1233,17 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.adjacent_outgoing_nodes(node, callback);
         } else {
+            std::vector<node_index> forward_n;
             graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
+                forward_n.emplace_back(next);
+            });
+            anno_buffer_->queue_path(forward_n);
+            anno_buffer_->fetch_queued_annotations();
+
+            for (node_index next : forward_n) {
                 if (has_labels(next))
                     callback(next);
-            });
+            }
         }
     }
 
@@ -1250,10 +1268,21 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.call_incoming_kmers(node, callback);
         } else {
+            std::vector<node_index> backward_n;
+            std::vector<char> backward_c;
             graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
+                backward_n.emplace_back(prev);
+                backward_c.emplace_back(c);
+            });
+            anno_buffer_->queue_path(backward_n);
+            anno_buffer_->fetch_queued_annotations();
+
+            for (size_t i = 0; i < backward_n.size(); ++i) {
+                node_index prev = backward_n[i];
+                char c = backward_c[i];
                 if (has_labels(prev))
                     callback(prev, c);
-            });
+            }
         }
     }
 
@@ -1261,10 +1290,17 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.adjacent_incoming_nodes(node, callback);
         } else {
+            std::vector<node_index> backward_n;
             graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
+                backward_n.emplace_back(prev);
+            });
+            anno_buffer_->queue_path(backward_n);
+            anno_buffer_->fetch_queued_annotations();
+
+            for (node_index prev : backward_n) {
                 if (has_labels(prev))
                     callback(prev);
-            });
+            }
         }
     }
 
