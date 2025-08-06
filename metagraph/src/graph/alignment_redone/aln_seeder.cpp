@@ -944,6 +944,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
 
                     // reconstruct the backwards traversal from last_node to node
                     auto it = query_window_rbegin + prev_query;
+                    std::ignore = query_window_rend;
                     assert(it != query_window_rend);
                     size_t cur_path_size = path.size();
                     size_t num_traversed = 0;
@@ -970,6 +971,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                                       path.emplace_back(traverse_node);
                                   },
                                   []() { return false; });
+                    std::ignore = old_path_size;
                     assert(path.size() == old_path_size + num_match);
                     assert(traverse_node == node);
                     spelling += std::string(it, it_end);
@@ -1151,17 +1153,20 @@ class AlignmentGraph {
             return;
         }
 
-        bool end_of_target = false;
+        std::vector<node_index> forward_nodes;
         graph_.traverse(node, seq,
-            [&](node_index next) {
-                if (!has_labels(next)) {
-                    end_of_target = true;
-                } else {
-                    callback(next);
-                }
-            },
-            [&]() { return end_of_target || terminate(); }
-        );
+                        [&](node_index next) { forward_nodes.emplace_back(next); },
+                        terminate);
+        anno_buffer_->queue_path(forward_nodes);
+        anno_buffer_->fetch_queued_annotations();
+
+        for (node_index next : forward_nodes) {
+            if (!has_labels(next)) {
+                return;
+            } else {
+                callback(next);
+            }
+        }
     }
 
     void traverse_back(node_index node, std::string_view prefix_seq,
@@ -1172,17 +1177,20 @@ class AlignmentGraph {
             return;
         }
 
-        bool end_of_target = false;
+        std::vector<node_index> backward_nodes;
         graph_.traverse_back(node, prefix_seq,
-            [&](node_index prev) {
-                if (!has_labels(prev)) {
-                    end_of_target = true;
-                } else {
-                    callback(prev);
-                }
-            },
-            [&]() { return end_of_target || terminate(); }
-        );
+                             [&](node_index prev) { backward_nodes.emplace_back(prev); },
+                             terminate);
+        anno_buffer_->queue_path(backward_nodes);
+        anno_buffer_->fetch_queued_annotations();
+
+        for (node_index prev : backward_nodes) {
+            if (!has_labels(prev)) {
+                return;
+            } else {
+                callback(prev);
+            }
+        }
     }
 
     bool has_single_outgoing(node_index node) const {
