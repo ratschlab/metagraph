@@ -1277,10 +1277,13 @@ class AlignmentGraph {
         if (!anno_buffer_ || target_ == Anchor::nlabel)
             return true;
 
-        anno_buffer_->queue_path(std::vector<node_index>{ node });
-        anno_buffer_->fetch_queued_annotations();
-
         const auto *node_labels = anno_buffer_->get_labels(node);
+        if (!node_labels) {
+            anno_buffer_->queue_path(std::vector<node_index>{ node });
+            anno_buffer_->fetch_queued_annotations();
+            node_labels = anno_buffer_->get_labels(node);
+        }
+
         assert(node_labels);
 
         const auto &target_labels = anno_buffer_->get_cached_column_set(target_);
