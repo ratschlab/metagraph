@@ -219,6 +219,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 std::vector<Anchor> LabeledSeeder::get_anchors() const {
     auto anchors = ExactSeeder::get_anchors();
 
+    common::logger->trace("Annotating anchors");
+
     for (const auto &anchor : anchors) {
         anno_buffer_.queue_path(anchor.get_path());
     }
