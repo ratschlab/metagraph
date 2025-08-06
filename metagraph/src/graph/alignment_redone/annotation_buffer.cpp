@@ -46,6 +46,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         base_graph = &canonical_->get_graph();
 
     for (const auto &path : queued_paths_) {
+        assert(path == map_to_nodes_sequentially(graph_, spell_path(graph_, path)));
         std::vector<node_index> base_path;
         if (base_graph->get_mode() == DeBruijnGraph::BASIC) {
             base_path = path;

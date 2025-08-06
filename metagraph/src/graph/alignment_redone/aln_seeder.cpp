@@ -1093,6 +1093,7 @@ void align_fwd(const Graph &graph,
 
             auto begin = rend.base();
             auto end = rbegin.base();
+            assert(begin <= end);
 
             for (size_t i = dist; !terminate() && i < suffix.size() && begin != end; ++i, ++begin) {
                 if (*begin == suffix[i]) {
@@ -1186,7 +1187,8 @@ class AlignmentGraph {
         graph_.traverse_back(node, prefix_seq,
                              [&](node_index prev) { backward_nodes.emplace_back(prev); },
                              terminate);
-        anno_buffer_->queue_path(backward_nodes);
+        anno_buffer_->queue_path(std::vector<node_index>(backward_nodes.rbegin(),
+                                                         backward_nodes.rend()));
         anno_buffer_->fetch_queued_annotations();
 
         for (node_index prev : backward_nodes) {
@@ -1216,8 +1218,8 @@ class AlignmentGraph {
             graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
                 forward_n.emplace_back(next);
                 forward_c.emplace_back(c);
+                anno_buffer_->queue_path(std::vector<node_index>{ next });
             });
-            anno_buffer_->queue_path(forward_n);
             anno_buffer_->fetch_queued_annotations();
 
             for (size_t i = 0; i < forward_n.size(); ++i) {
@@ -1236,8 +1238,8 @@ class AlignmentGraph {
             std::vector<node_index> forward_n;
             graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
                 forward_n.emplace_back(next);
+                anno_buffer_->queue_path(std::vector<node_index>{ next });
             });
-            anno_buffer_->queue_path(forward_n);
             anno_buffer_->fetch_queued_annotations();
 
             for (node_index next : forward_n) {
@@ -1273,8 +1275,8 @@ class AlignmentGraph {
             graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
                 backward_n.emplace_back(prev);
                 backward_c.emplace_back(c);
+                anno_buffer_->queue_path(std::vector<node_index>{ prev });
             });
-            anno_buffer_->queue_path(backward_n);
             anno_buffer_->fetch_queued_annotations();
 
             for (size_t i = 0; i < backward_n.size(); ++i) {
@@ -1293,8 +1295,8 @@ class AlignmentGraph {
             std::vector<node_index> backward_n;
             graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
                 backward_n.emplace_back(prev);
+                anno_buffer_->queue_path(std::vector<node_index>{ prev });
             });
-            anno_buffer_->queue_path(backward_n);
             anno_buffer_->fetch_queued_annotations();
 
             for (node_index prev : backward_n) {
