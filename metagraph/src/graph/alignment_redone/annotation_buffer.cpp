@@ -232,7 +232,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     );
 }
 
-std::string AnnotationBuffer::generate_column_set_str(size_t i) const {
+std::string AnnotationBuffer::generate_column_set_str(size_t i, size_t spelling_size) const {
     if (i == Anchor::nlabel)
         return "*";
 
@@ -242,8 +242,21 @@ std::string AnnotationBuffer::generate_column_set_str(size_t i) const {
         return "*";
 
     ostd << annotator_.get_label_encoder().decode(columns[0]);
+    if (label_coords_.size()) {
+        assert(label_coords_.size() == node_to_cols_.size());
+        for (auto coord : label_coords_[i][0]) {
+            ostd << ":" << coord + 1 << "-" << coord + spelling_size;
+        }
+    }
+
     for (size_t c = 1; c < columns.size(); ++c) {
         ostd << ";" << annotator_.get_label_encoder().decode(columns[c]);
+        if (label_coords_.size()) {
+            assert(label_coords_.size() == node_to_cols_.size());
+            for (auto coord : label_coords_[i][c]) {
+                ostd << ":" << coord + 1 << "-" << coord + spelling_size;
+            }
+        }
     }
 
     return ostd.str();

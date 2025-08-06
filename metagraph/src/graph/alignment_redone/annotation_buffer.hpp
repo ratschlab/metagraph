@@ -79,7 +79,7 @@ class AnnotationBuffer {
         return column_sets_.data()[i];
     }
 
-    std::string generate_column_set_str(size_t i) const;
+    std::string generate_column_set_str(size_t i, size_t spelling_size) const;
 
   private:
     const DeBruijnGraph &graph_;

@@ -473,7 +473,8 @@ int align_to_graph(Config *config) {
                         for (const auto &path : paths) {
                             *out << "\t" << path;
                             if (anno_buffer) {
-                                *out << "\t" << anno_buffer->generate_column_set_str(path.get_label_classes()[0]);
+                                *out << "\t" << anno_buffer->generate_column_set_str(path.get_label_classes()[0],
+                                                                                     path.get_spelling().size());
                             } else {
                                 *out << "\t";
                             }
