@@ -2094,8 +2094,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         found_labels.emplace(label);
                 }
             }
-            if (common::get_verbose())
-                common::logger->trace("Aln: {}\t{}\t{}", score_match(aln, config_), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
+            if (common::get_verbose()) {
+                common::logger->trace("Aln: {}\t{}\t{}\t{}",
+                                      aln.get_orientation() ? "-" : "+",
+                                      score_match(aln, config_), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
+            }
             // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
             alignments.emplace_back(std::move(aln));
         }
