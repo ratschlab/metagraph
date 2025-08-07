@@ -736,8 +736,8 @@ bool DBGSSHash::load(std::istream& in) {
     loader.visit(mode);
 
     if (mode == PRIMARY) {
-        common::logger->warn("Graph constructed with old version (no need to reconstruct). Loading primary graph as canonical.");
-        mode = CANONICAL;
+        common::logger->warn("Graph constructed with old version and is incompatible. Please rebuild only graph (not annotations).");
+        throw std::runtime_error("Incompatible graph");
     }
 
     *this = DBGSSHash(k, mode);
