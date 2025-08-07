@@ -18,7 +18,7 @@ typedef annot::matrix::BinaryMatrix::Row Row;
 typedef annot::matrix::BinaryMatrix::Column Column;
 
 // dummy index for an unfetched annotations
-static constexpr size_t nannot = std::numeric_limits<size_t>::max();
+static constexpr size_t nannot = Anchor::nlabel;
 
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
@@ -155,10 +155,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
 auto AnnotationBuffer::get_labels_id_and_coords(node_index node) const
         -> std::pair<size_t, const CoordinateSet*> {
-    std::pair<size_t, const CoordinateSet*> ret_val {
-        std::numeric_limits<size_t>::max(),
-        nullptr
-    };
+    std::pair<size_t, const CoordinateSet*> ret_val { nannot, nullptr };
 
     if (canonical_)
         node = canonical_->get_base_node(node);
