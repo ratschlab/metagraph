@@ -92,16 +92,24 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             size_t i_rc = this_query.size() - (i + match_size);
                             dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
                                 node = canonical->reverse_complement(node);
-                                auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                if (match_size > it->second.get_seed().size()) {
-                                    it.value() = Anchor(query_.get_query(!orientation),
-                                                        i_rc, i_rc + match_size,
-                                                        !orientation,
-                                                        std::vector<Match::node_index>{ node },
-                                                        graph.get_node_sequence(node).substr(match_size));
-                                    assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
-                                    assert(it->second.is_spelling_valid(graph));
-                                }
+                                bool inserted = true;
+                                auto it = max_seeds[!orientation][i_rc].find(node);
+                                if (it != max_seeds[!orientation][i_rc].end() && match_size <= it->second.get_seed().size())
+                                    return;
+
+                                std::string suffix = graph.get_node_sequence(node).substr(match_size);
+                                if (suffix.find(boss::BOSS::kSentinel) != std::string::npos)
+                                    return;
+
+                                std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                it.value() = Anchor(query_.get_query(!orientation),
+                                                    i_rc, i_rc + match_size,
+                                                    !orientation,
+                                                    std::vector<Match::node_index>{ node },
+                                                    std::move(suffix));
+                                assert(it->second.get_path_spelling().size() == graph.get_k());
+                                assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                assert(it->second.is_spelling_valid(graph));
                             });
                         }
                     }
@@ -145,6 +153,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                                     orientation,
                                                                     std::vector<Match::node_index>{ node },
                                                                     (suffix + c).substr(full_match_size - match_size));
+                                                assert(it->second.get_path_spelling().size() == graph.get_k());
                                                 assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
                                                 assert(it->second.is_spelling_valid(graph));
                                             }
@@ -179,19 +188,24 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     for (edge_index e : succs) {
                                         auto node = canonical->reverse_complement(e);
-                                        auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                        if (next_match_size > it->second.get_seed().size()) {
-                                            std::string suffix = graph.get_node_sequence(node).substr(next_match_size);
-                                            if (suffix.find(boss::BOSS::kSentinel) == std::string::npos) {
-                                                it.value() = Anchor(query_.get_query(!orientation),
-                                                                    i_rc, i_rc + next_match_size,
-                                                                    !orientation,
-                                                                    std::vector<Match::node_index>{ node },
-                                                                    std::move(suffix));
-                                                assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
-                                                assert(it->second.is_spelling_valid(graph));
-                                            }
-                                        }
+                                        bool inserted = true;
+                                        auto it = max_seeds[!orientation][i_rc].find(node);
+                                        if (it != max_seeds[!orientation][i_rc].end() && next_match_size <= it->second.get_seed().size())
+                                            continue;
+
+                                        std::string suffix = graph.get_node_sequence(node).substr(next_match_size);
+                                        if (suffix.find(boss::BOSS::kSentinel) != std::string::npos)
+                                            continue;
+
+                                        std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                        it.value() = Anchor(query_.get_query(!orientation),
+                                                            i_rc, i_rc + next_match_size,
+                                                            !orientation,
+                                                            std::vector<Match::node_index>{ node },
+                                                            std::move(suffix));
+                                        assert(it->second.get_path_spelling().size() == graph.get_k());
+                                        assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                        assert(it->second.is_spelling_valid(graph));
                                     }
                                 }
                             }
@@ -213,13 +227,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                           cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
                           true);
                 anchors.emplace_back(std::move(it.value()));
+                assert(anchors.back().get_path_spelling().size() == graph.get_k());
+                assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
             }
         }
     }
-
-    assert(std::all_of(anchors.begin(), anchors.end(), [k=graph.get_k()](const auto &a) {
-        return a.get_spelling().size() + a.get_end_trim() == k;
-    }));
 
     size_t num_covered = std::max(sdsl::util::cnt_one_bits(coverage[false]),
                                   sdsl::util::cnt_one_bits(coverage[true]));
