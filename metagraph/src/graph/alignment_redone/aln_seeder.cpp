@@ -1439,14 +1439,16 @@ void align_bwd(const DeBruijnGraph &base_graph,
                Anchor::label_class_t target = Anchor::nlabel) {
     using StrItr = std::string_view::iterator;
     align_impl<StrItr>(
-        [&](DeBruijnGraph::node_index node, size_t, Anchor::label_class_t cur_target) {
+        [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
+            std::ignore = dist;
             assert(cur_target);
             return AlignmentGraph(base_graph, anno_buffer, cur_target).has_single_incoming(node);
         },
         [&](DeBruijnGraph::node_index node,
-                 StrItr begin, StrItr end,
-                 size_t, Anchor::label_class_t cur_target,
-                 const auto &callback, const auto &terminate) {
+            StrItr begin, StrItr end,
+            size_t dist, Anchor::label_class_t cur_target,
+            const auto &callback, const auto &terminate) {
+            std::ignore = dist;
             assert(cur_target);
             if (begin != end) {
                 AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
@@ -1456,7 +1458,10 @@ void align_bwd(const DeBruijnGraph &base_graph,
                 );
             }
         },
-        [&](DeBruijnGraph::node_index node, const auto &callback, size_t, Anchor::label_class_t cur_target) {
+        [&](DeBruijnGraph::node_index node,
+            const auto &callback,
+            size_t dist, Anchor::label_class_t cur_target) {
+            std::ignore = dist;
             assert(cur_target);
             AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(node, callback);
         },
