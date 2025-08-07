@@ -54,14 +54,6 @@ bool extend_chain(const AnchorChain<AnchorIt> &chain,
                   const AlignmentCallback &callback,
                   const std::function<bool()> &terminate = []() { return false; }) {
     assert(chain.size());
-    if (chain.size() == 1) {
-        if (!terminate()) {
-            callback(Alignment(*chain.back().first));
-            return true;
-        }
-
-        return false;
-    }
 
     std::vector<Alignment> alns;
     alns.emplace_back(*chain.back().first);

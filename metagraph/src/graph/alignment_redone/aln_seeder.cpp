@@ -23,6 +23,7 @@ class AlignmentGraph {
   public:
     using node_index = DeBruijnGraph::node_index;
     using label_class_t = Anchor::label_class_t;
+    using coord_t = Anchor::coord_t;
 
     AlignmentGraph(const DeBruijnGraph &graph,
                    AnnotationBuffer *anno_buffer = nullptr,
@@ -605,7 +606,7 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
                 if (coverages[(*labels_it)[i]].size()) {
                     // only pick labels that have sufficient coverage
                     anchor.set_label_class(anno_buffer_.cache_column_set(labels_it->begin() + i,
-                                                                        labels_it->begin() + i + 1));
+                                                                         labels_it->begin() + i + 1));
                     if (coord_it) {
                         const auto &coords = (*coord_it)[i];
                         for (auto coord : coords) {

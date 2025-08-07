@@ -85,8 +85,9 @@ std::ostream& operator<<(std::ostream &out, const Match &a);
 class Anchor : public Match {
   public:
     using label_class_t = AnnotationBuffer::label_class_t;
+    using coord_t = AnnotationBuffer::coord_t;
     static constexpr label_class_t nannot = AnnotationBuffer::nannot;
-    static constexpr int64_t ncoord = AnnotationBuffer::ncoord;
+    static constexpr coord_t ncoord = AnnotationBuffer::ncoord;
 
     Anchor() : Match(), label_class_(nannot), coord_(ncoord) {}
 
@@ -95,11 +96,9 @@ class Anchor : public Match {
            size_t end,
            bool orientation,
            std::vector<node_index>&& path,
-           std::string&& suffix = "",
-           label_class_t label_class = nannot,
-           int64_t coord = ncoord)
+           std::string&& suffix = "")
           : Match(query, begin, end, orientation, std::move(path)),
-            label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {
+            label_class_(nannot), coord_(ncoord), suffix_(std::move(suffix)) {
         assert(get_spelling() == get_seed());
     }
 
@@ -124,7 +123,11 @@ class Anchor : public Match {
     label_class_t get_label_class() const { return label_class_; }
     int64_t get_coord() const { return coord_; }
 
-    void set_label_class(label_class_t label_class) { label_class_ = label_class; }
+    void set_label_class(label_class_t label_class) {
+        assert(label_class);
+        label_class_ = label_class;
+    }
+
     void set_coord(int64_t coord) { coord_ = coord; }
 
   private:
@@ -137,6 +140,10 @@ bool operator==(const Anchor &a, const Anchor &b);
 
 class Alignment : public Match {
   public:
+    using label_class_t = Anchor::label_class_t;
+    using coord_t = Anchor::coord_t;
+    using CoordinateSet = AnnotationBuffer::CoordinateSet;
+
     Alignment() : Alignment(Anchor()) {}
 
     Alignment(const DeBruijnGraph &graph,
@@ -146,17 +153,21 @@ class Alignment : public Match {
               Cigar&& cigar,
               std::string&& path_spelling,
               size_t end_trim = 0,
-              Anchor::label_class_t label_class = Anchor::nannot)
+              label_class_t label_class = Anchor::nannot,
+              CoordinateSet&& coords = {})
           : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
                   orientation, std::move(path)),
             end_trim_(end_trim),
             path_spelling_(std::move(path_spelling)),
             cigar_(std::move(cigar)),
-            label_classes_(path_.size(), label_class) {
+            label_classes_(path_.size(), label_class),
+            coords_(std::move(coords)) {
         assert(path_spelling_ == spell_path(graph, path_));
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
+        assert(label_class);
+        assert(coords.empty() == (label_class == Anchor::nannot));
     }
 
     Alignment(const Anchor &anchor)
@@ -168,7 +179,8 @@ class Alignment : public Match {
             end_trim_(anchor.get_end_trim()),
             path_spelling_(anchor.get_path_spelling()),
             cigar_(anchor.generate_cigar()),
-            label_classes_(path_.size(), anchor.get_label_class()) {
+            label_classes_(path_.size(), anchor.get_label_class()),
+            coords_({ AnnotationBuffer::Tuple(1, anchor.get_coord()) }) {
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
     }
 
@@ -188,13 +200,14 @@ class Alignment : public Match {
                                 end_trim_);
     }
 
-    const std::vector<Anchor::label_class_t>& get_label_classes() const { return label_classes_; }
+    const std::vector<label_class_t>& get_label_classes() const { return label_classes_; }
 
   private:
     size_t end_trim_;
     std::string path_spelling_;
     Cigar cigar_;
-    std::vector<Anchor::label_class_t> label_classes_;
+    std::vector<label_class_t> label_classes_;
+    CoordinateSet coords_;
 };
 
 bool operator==(const Alignment &a, const Alignment &b);
