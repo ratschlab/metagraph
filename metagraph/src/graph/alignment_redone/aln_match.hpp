@@ -167,7 +167,7 @@ class Alignment : public Match {
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
         assert(label_class);
-        assert(coords.empty() == (label_class == Anchor::nannot));
+        assert(label_class != Anchor::nannot || coords.empty());
     }
 
     Alignment(const Anchor &anchor)
@@ -179,9 +179,10 @@ class Alignment : public Match {
             end_trim_(anchor.get_end_trim()),
             path_spelling_(anchor.get_path_spelling()),
             cigar_(anchor.generate_cigar()),
-            label_classes_(path_.size(), anchor.get_label_class()),
-            coords_({ AnnotationBuffer::Tuple(1, anchor.get_coord()) }) {
+            label_classes_(path_.size(), anchor.get_label_class()) {
         assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        if (anchor.get_coord() != Anchor::ncoord)
+            coords_.emplace_back(AnnotationBuffer::Tuple(1, anchor.get_coord()));
     }
 
     const Cigar& get_cigar() const { return cigar_; }

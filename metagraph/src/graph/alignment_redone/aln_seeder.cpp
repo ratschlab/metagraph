@@ -23,7 +23,6 @@ class AlignmentGraph {
   public:
     using node_index = DeBruijnGraph::node_index;
     using label_class_t = Anchor::label_class_t;
-    using coord_t = Anchor::coord_t;
 
     AlignmentGraph(const DeBruijnGraph &graph,
                    AnnotationBuffer *anno_buffer = nullptr,
@@ -1426,6 +1425,77 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                           num_explored_nodes, query_size, max_explored_dist, max_dist);
 }
 
+template <class T1, class T2>
+bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, ssize_t diff) {
+    auto a_begin = tuple1.begin();
+    const auto a_end = tuple1.end();
+    auto b_begin = tuple2.begin();
+    const auto b_end = tuple2.end();
+
+    assert(std::is_sorted(a_begin, a_end));
+    assert(std::is_sorted(b_begin, b_end));
+
+    while (a_begin != a_end && b_begin != b_end) {
+        if (*a_begin + diff == *b_begin)
+            return true;
+
+        if (*a_begin + diff < *b_begin) {
+            ++a_begin;
+        } else {
+            ++b_begin;
+        }
+    }
+
+    return false;
+}
+
+Anchor::label_class_t subset_coords(AnnotationBuffer &anno_buffer,
+                                    Anchor::label_class_t source,
+                                    const AnnotationBuffer::CoordinateSet &source_coords,
+                                    Anchor::label_class_t target,
+                                    DeBruijnGraph::node_index target_node,
+                                    ssize_t coord_offset) {
+    assert(source);
+    assert(target);
+    assert(source != AnnotationBuffer::nannot);
+    assert(target != AnnotationBuffer::nannot);
+
+    const auto &source_columns = anno_buffer.get_cached_column_set(source);
+    assert(source_columns.size() == source_coords.size());
+
+    const auto &target_columns = anno_buffer.get_cached_column_set(target);
+    const auto [target_columns_full, target_coords_full] = anno_buffer.get_labels_and_coords(target_node);
+    assert(target_columns_full);
+    assert(target_columns_full->size() >= target_columns.size());
+    assert(target_coords_full);
+    assert(target_coords_full->size() == target_columns_full->size());
+
+#ifndef NDEBUG
+    auto it = target_columns.begin();
+#endif
+
+    AnnotationBuffer::Columns intersection;
+    utils::match_indexed_values(
+        source_columns.begin(), source_columns.end(), source_coords.begin(),
+        target_columns_full->begin(), target_columns_full->end(), target_coords_full->begin(),
+        [&](AnnotationBuffer::Column c, const AnnotationBuffer::Tuple &source_coords, const AnnotationBuffer::Tuple &target_coords) {
+#ifndef NDEBUG
+            it = std::find(it, target_columns.end(), c);
+            assert(it != target_columns.end());
+#endif
+            if (overlap_with_diff(source_coords, target_coords, coord_offset))
+                intersection.emplace_back(c);
+        }
+    );
+
+    assert(it == target_columns.end());
+
+    if (intersection.size() == target_columns.size())
+        return target;
+
+    return anno_buffer.cache_column_set(std::move(intersection));
+}
+
 void align_bwd(const DeBruijnGraph &base_graph,
                const DBGAlignerConfig &config,
                const DeBruijnGraph::node_index start_node,
@@ -1437,34 +1507,85 @@ void align_bwd(const DeBruijnGraph &base_graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                AnnotationBuffer *anno_buffer = nullptr,
-               Anchor::label_class_t target = Anchor::nannot) {
+               Anchor::label_class_t target = Anchor::nannot,
+               const AnnotationBuffer::CoordinateSet &coords = {}) {
+    assert(!anno_buffer == (target == Anchor::nannot));
+    assert(!anno_buffer
+            || (!anno_buffer->has_coordinates() && coords.empty())
+            || anno_buffer->get_cached_column_set(target).size() == coords.size());
+
     using StrItr = std::string_view::iterator;
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
-            std::ignore = dist;
             assert(cur_target);
-            return AlignmentGraph(base_graph, anno_buffer, cur_target).has_single_incoming(node);
+            if (coords.empty()) {
+                return AlignmentGraph(base_graph, anno_buffer, cur_target).has_single_incoming(node);
+            } else {
+                assert(anno_buffer);
+                size_t indegree = 0;
+                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(
+                    node,
+                    [&](DeBruijnGraph::node_index prev, char c, Anchor::label_class_t prev_target) {
+                        std::ignore = c;
+                        if (subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
+                                          -static_cast<ssize_t>(dist)))
+                            ++indegree;
+                    }
+                );
+                return indegree == 1;
+            }
         },
         [&](DeBruijnGraph::node_index node,
             StrItr begin, StrItr end,
             size_t dist, Anchor::label_class_t cur_target,
             const auto &callback, const auto &terminate) {
-            std::ignore = dist;
+
             assert(cur_target);
             if (begin != end) {
-                AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
-                    node,
-                    std::string_view(&*begin, end - begin),
-                    callback, terminate
-                );
+                if (coords.empty()) {
+                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
+                        node,
+                        std::string_view(&*begin, end - begin),
+                        callback, terminate
+                    );
+                } else {
+                    assert(anno_buffer);
+                    bool stop_early = false;
+                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
+                        node,
+                        std::string_view(&*begin, end - begin),
+                        [&](DeBruijnGraph::node_index prev, Anchor::label_class_t prev_target) {
+                            if (subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
+                                              -static_cast<ssize_t>(dist))) {
+                                callback(prev, prev_target);
+                            } else {
+                                stop_early = true;
+                            }
+                        },
+                        [&]() { return stop_early || terminate(); }
+                    );
+                }
             }
         },
         [&](DeBruijnGraph::node_index node,
             const auto &callback,
             size_t dist, Anchor::label_class_t cur_target) {
-            std::ignore = dist;
+
             assert(cur_target);
-            AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(node, callback);
+
+            if (coords.empty()) {
+                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(node, callback);
+            } else {
+                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(
+                    node,
+                    [&](DeBruijnGraph::node_index prev, char c, Anchor::label_class_t prev_target) {
+                        if (Anchor::label_class_t prev_target_s = subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
+                                                                                -static_cast<ssize_t>(dist)))
+                            callback(prev, c, prev_target_s);
+                    }
+                );
+            }
         },
         config,
         start_node,
@@ -1498,20 +1619,44 @@ void align_fwd(const DeBruijnGraph &base_graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                std::string_view suffix = "",
                AnnotationBuffer *anno_buffer = nullptr,
-               Anchor::label_class_t target = Anchor::nannot) {
+               Anchor::label_class_t target = Anchor::nannot,
+               const AnnotationBuffer::CoordinateSet &coords = {}) {
     assert(!anno_buffer == (target == Anchor::nannot));
+    assert(!anno_buffer
+            || (!anno_buffer->has_coordinates() && coords.empty())
+            || anno_buffer->get_cached_column_set(target).size() == coords.size());
+
     using StrItr = std::reverse_iterator<std::string_view::iterator>;
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             std::ignore = start_node;
             assert(cur_target);
             assert(dist >= suffix.size() || node == start_node);
-            return dist < suffix.size() || AlignmentGraph(base_graph, anno_buffer, target).has_single_outgoing(node);
+            if (dist < suffix.size())
+                return true;
+
+            if (coords.empty()) {
+                return AlignmentGraph(base_graph, anno_buffer, target).has_single_outgoing(node);
+            } else {
+                assert(anno_buffer);
+                size_t outdegree = 0;
+                AlignmentGraph(base_graph, anno_buffer, cur_target).call_outgoing_kmers(
+                    node,
+                    [&](DeBruijnGraph::node_index next, char c, Anchor::label_class_t next_target) {
+                        std::ignore = c;
+                        if (subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist))
+                            ++outdegree;
+                    }
+                );
+                return outdegree == 1;
+            }
         },
         [&](DeBruijnGraph::node_index node,
             StrItr rbegin, StrItr rend,
             size_t dist, Anchor::label_class_t cur_target,
             const auto &callback, const auto &terminate) {
+
             std::ignore = start_node;
             assert(cur_target);
             assert(dist >= suffix.size() || node == start_node);
@@ -1529,10 +1674,27 @@ void align_fwd(const DeBruijnGraph &base_graph,
             }
 
             if (begin != end) {
-                AlignmentGraph(base_graph, anno_buffer, target).traverse(
-                    node, std::string_view(&*begin, end - begin),
-                    callback, terminate
-                );
+                if (coords.empty()) {
+                    AlignmentGraph(base_graph, anno_buffer, target).traverse(
+                        node, std::string_view(&*begin, end - begin),
+                        callback, terminate
+                    );
+                } else {
+                    assert(anno_buffer);
+                    bool stop_early = false;
+                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse(
+                        node,
+                        std::string_view(&*begin, end - begin),
+                        [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
+                            if (subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist)) {
+                                callback(next, next_target);
+                            } else {
+                                stop_early = true;
+                            }
+                        },
+                        [&]() { return stop_early || terminate(); }
+                    );
+                }
             }
         },
         [&](DeBruijnGraph::node_index node, const auto &callback,
@@ -1542,8 +1704,16 @@ void align_fwd(const DeBruijnGraph &base_graph,
                 std::ignore = start_node;
                 assert(node == start_node);
                 callback(node, suffix[dist], cur_target);
-            } else {
+            } else if (coords.empty()) {
                 AlignmentGraph(base_graph, anno_buffer, target).call_outgoing_kmers(node, callback);
+            } else {
+                AlignmentGraph(base_graph, anno_buffer, cur_target).call_outgoing_kmers(
+                    node,
+                    [&](DeBruijnGraph::node_index next, char c, Anchor::label_class_t next_target) {
+                        if (Anchor::label_class_t next_target_s = subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist))
+                            callback(next, c, next_target_s);
+                    }
+                );
             }
         },
         config,
