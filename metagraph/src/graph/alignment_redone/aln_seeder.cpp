@@ -15,6 +15,220 @@
 
 namespace mtg::graph::align_redone {
 
+class AlignmentGraph {
+    using node_index = DeBruijnGraph::node_index;
+    using label_class_t = Anchor::label_class_t;
+
+  public:
+    AlignmentGraph(const DeBruijnGraph &graph,
+                   AnnotationBuffer *anno_buffer = nullptr,
+                   label_class_t target = Anchor::nlabel)
+          : graph_(graph), anno_buffer_(anno_buffer), target_(target) {}
+
+    AnnotationBuffer* get_anno_buffer() const { return anno_buffer_; }
+
+    node_index traverse(node_index node, char c) const {
+        assert(c != boss::BOSS::kSentinel);
+        node_index next = graph_.traverse(node, c);
+        return next && has_labels(next) ? next : DeBruijnGraph::npos;
+    }
+
+    void traverse(node_index node, std::string_view seq,
+                  const std::function<void(node_index)> &callback,
+                  const std::function<bool()> &terminate = [](){ return false; }) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.traverse(node, seq, callback, terminate);
+            return;
+        }
+
+        std::vector<node_index> forward_nodes;
+        graph_.traverse(node, seq,
+                        [&](node_index next) { forward_nodes.emplace_back(next); },
+                        terminate);
+        anno_buffer_->queue_path(forward_nodes);
+        anno_buffer_->fetch_queued_annotations();
+
+        for (node_index next : forward_nodes) {
+            if (has_labels(next)) {
+                callback(next);
+            } else {
+                return;
+            }
+        }
+    }
+
+    void traverse_back(node_index node, std::string_view prefix_seq,
+                       const std::function<void(node_index)> &callback,
+                       const std::function<bool()> &terminate = [](){ return false; }) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.traverse_back(node, prefix_seq, callback, terminate);
+            return;
+        }
+
+        std::vector<node_index> backward_nodes;
+        graph_.traverse_back(node, prefix_seq,
+                             [&](node_index prev) { backward_nodes.emplace_back(prev); },
+                             terminate);
+        anno_buffer_->queue_path(std::vector<node_index>(backward_nodes.rbegin(),
+                                                         backward_nodes.rend()));
+        anno_buffer_->fetch_queued_annotations();
+
+        for (node_index prev : backward_nodes) {
+            if (has_labels(prev)) {
+                callback(prev);
+            } else {
+                return;
+            }
+        }
+    }
+
+    bool has_single_outgoing(node_index node) const {
+        if (target_ == Anchor::nlabel)
+            return graph_.has_single_outgoing(node);
+
+        size_t outdegree = 0;
+        adjacent_outgoing_nodes(node, [&](node_index) { ++outdegree; });
+        return outdegree == 1;
+    }
+
+    void call_outgoing_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.call_outgoing_kmers(node, callback);
+        } else {
+            std::vector<node_index> forward_n;
+            std::vector<char> forward_c;
+            graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
+                if (c != boss::BOSS::kSentinel) {
+                    forward_n.emplace_back(next);
+                    forward_c.emplace_back(c);
+                    anno_buffer_->queue_path(std::vector<node_index>{ next });
+                }
+            });
+            anno_buffer_->fetch_queued_annotations();
+
+            for (size_t i = 0; i < forward_n.size(); ++i) {
+                node_index next = forward_n[i];
+                char c = forward_c[i];
+                if (has_labels(next))
+                    callback(next, c);
+            }
+        }
+    }
+
+    void adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.adjacent_outgoing_nodes(node, callback);
+        } else {
+            // TODO: replace this once we can guarantee that we won't get
+            //       dummy nodes
+            call_outgoing_kmers(node, [&](node_index next, char) {
+                callback(next);
+            });
+            // std::vector<node_index> forward_n;
+            // graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
+            //     forward_n.emplace_back(next);
+            //     anno_buffer_->queue_path(std::vector<node_index>{ next });
+            // });
+            // anno_buffer_->fetch_queued_annotations();
+
+            // for (node_index next : forward_n) {
+            //     if (has_labels(next))
+            //         callback(next);
+            // }
+        }
+    }
+
+    node_index traverse_back(node_index node, char c) const {
+        assert(c != boss::BOSS::kSentinel);
+        node_index prev = graph_.traverse_back(node, c);
+        return prev && has_labels(prev) ? prev : DeBruijnGraph::npos;
+    }
+
+    bool has_single_incoming(node_index node) const {
+        // std::cerr << "hsi\t" << node << "\t" << target_ << std::endl;
+        if (target_ == Anchor::nlabel) {
+            return graph_.has_single_incoming(node);
+        } else {
+            size_t indegree = 0;
+            adjacent_incoming_nodes(node, [&](node_index) { ++indegree; });
+            return indegree == 1;
+        }
+    }
+
+    void call_incoming_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
+        // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
+        if (target_ == Anchor::nlabel) {
+            graph_.call_incoming_kmers(node, callback);
+        } else {
+            std::vector<node_index> backward_n;
+            std::vector<char> backward_c;
+            graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
+                if (c != boss::BOSS::kSentinel) {
+                    backward_n.emplace_back(prev);
+                    backward_c.emplace_back(c);
+                    anno_buffer_->queue_path(std::vector<node_index>{ prev });
+                }
+            });
+            anno_buffer_->fetch_queued_annotations();
+
+            for (size_t i = 0; i < backward_n.size(); ++i) {
+                node_index prev = backward_n[i];
+                char c = backward_c[i];
+                if (has_labels(prev))
+                    callback(prev, c);
+            }
+        }
+    }
+
+    void adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
+        if (target_ == Anchor::nlabel) {
+            graph_.adjacent_incoming_nodes(node, callback);
+        } else {
+            // TODO: replace this once we can guarantee that we won't get
+            //       dummy nodes
+            call_incoming_kmers(node, [&](node_index prev, char) {
+                callback(prev);
+            });
+            // std::vector<node_index> backward_n;
+            // graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
+            //     backward_n.emplace_back(prev);
+            //     anno_buffer_->queue_path(std::vector<node_index>{ prev });
+            // });
+            // anno_buffer_->fetch_queued_annotations();
+
+            // for (node_index prev : backward_n) {
+            //     if (has_labels(prev))
+            //         callback(prev);
+            // }
+        }
+    }
+
+  private:
+    const DeBruijnGraph &graph_;
+    AnnotationBuffer* const anno_buffer_;
+    label_class_t target_;
+
+    bool has_labels(node_index node) const {
+        assert(node != DeBruijnGraph::npos);
+        if (!anno_buffer_ || target_ == Anchor::nlabel)
+            return true;
+
+        const auto *node_labels = anno_buffer_->get_labels(node);
+        if (!node_labels) {
+            anno_buffer_->queue_path(std::vector<node_index>{ node });
+            anno_buffer_->fetch_queued_annotations();
+            node_labels = anno_buffer_->get_labels(node);
+        }
+
+        assert(node_labels);
+
+        const auto &target_labels = anno_buffer_->get_cached_column_set(target_);
+
+        return utils::count_intersection(node_labels->begin(), node_labels->end(),
+                                         target_labels.begin(), target_labels.end()) == target_labels.size();
+    }
+};
+
 std::vector<Anchor> ExactSeeder::get_anchors() const {
     const DeBruijnGraph &graph = query_.get_graph();
     std::vector<Anchor> anchors;
@@ -1089,8 +1303,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, si
                           num_explored_nodes, query_size, max_explored_dist, max_dist);
 }
 
-template <class Graph>
-void align_bwd(const Graph &graph,
+void align_bwd(const DeBruijnGraph &base_graph,
                const DBGAlignerConfig &config,
                const DeBruijnGraph::node_index start_node,
                size_t num_matches,
@@ -1099,7 +1312,10 @@ void align_bwd(const Graph &graph,
                const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t)> &callback,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
-               const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate) {
+               const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
+               AnnotationBuffer *anno_buffer = nullptr,
+               Anchor::label_class_t target = Anchor::nlabel) {
+    AlignmentGraph graph(base_graph, anno_buffer, target);
     using StrItr = std::string_view::iterator;
     align_impl<StrItr>(
         [&graph](DeBruijnGraph::node_index node, size_t, size_t) { return graph.has_single_incoming(node); },
@@ -1127,8 +1343,7 @@ void align_bwd(const Graph &graph,
     );
 }
 
-template <class Graph>
-void align_fwd(const Graph &graph,
+void align_fwd(const DeBruijnGraph &base_graph,
                const DBGAlignerConfig &config,
                const DeBruijnGraph::node_index start_node,
                size_t num_matches,
@@ -1138,7 +1353,11 @@ void align_fwd(const Graph &graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
-               std::string_view suffix = "") {
+               std::string_view suffix = "",
+               AnnotationBuffer *anno_buffer = nullptr,
+               Anchor::label_class_t target = Anchor::nlabel) {
+    assert(!anno_buffer == (target == Anchor::nlabel));
+    AlignmentGraph graph(base_graph, anno_buffer, target);
     using StrItr = std::reverse_iterator<std::string_view::iterator>;
     align_impl<StrItr>(
         [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, size_t dist, size_t) {
@@ -1197,219 +1416,6 @@ void align_fwd(const Graph &graph,
     );
 }
 
-class AlignmentGraph {
-    using node_index = DeBruijnGraph::node_index;
-    using label_class_t = Anchor::label_class_t;
-
-  public:
-    AlignmentGraph(const DeBruijnGraph &graph)
-          : graph_(graph), anno_buffer_(nullptr), target_(Anchor::nlabel) {}
-
-    AlignmentGraph(const DeBruijnGraph &graph, AnnotationBuffer &anno_buffer, label_class_t target)
-          : graph_(graph), anno_buffer_(&anno_buffer), target_(target) {}
-
-    node_index traverse(node_index node, char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        node_index next = graph_.traverse(node, c);
-        return next && has_labels(next) ? next : DeBruijnGraph::npos;
-    }
-
-    void traverse(node_index node, std::string_view seq,
-                  const std::function<void(node_index)> &callback,
-                  const std::function<bool()> &terminate = [](){ return false; }) const {
-        if (target_ == Anchor::nlabel) {
-            graph_.traverse(node, seq, callback, terminate);
-            return;
-        }
-
-        std::vector<node_index> forward_nodes;
-        graph_.traverse(node, seq,
-                        [&](node_index next) { forward_nodes.emplace_back(next); },
-                        terminate);
-        anno_buffer_->queue_path(forward_nodes);
-        anno_buffer_->fetch_queued_annotations();
-
-        for (node_index next : forward_nodes) {
-            if (has_labels(next)) {
-                callback(next);
-            } else {
-                return;
-            }
-        }
-    }
-
-    void traverse_back(node_index node, std::string_view prefix_seq,
-                       const std::function<void(node_index)> &callback,
-                       const std::function<bool()> &terminate = [](){ return false; }) const {
-        if (target_ == Anchor::nlabel) {
-            graph_.traverse_back(node, prefix_seq, callback, terminate);
-            return;
-        }
-
-        std::vector<node_index> backward_nodes;
-        graph_.traverse_back(node, prefix_seq,
-                             [&](node_index prev) { backward_nodes.emplace_back(prev); },
-                             terminate);
-        anno_buffer_->queue_path(std::vector<node_index>(backward_nodes.rbegin(),
-                                                         backward_nodes.rend()));
-        anno_buffer_->fetch_queued_annotations();
-
-        for (node_index prev : backward_nodes) {
-            if (has_labels(prev)) {
-                callback(prev);
-            } else {
-                return;
-            }
-        }
-    }
-
-    bool has_single_outgoing(node_index node) const {
-        if (target_ == Anchor::nlabel)
-            return graph_.has_single_outgoing(node);
-
-        size_t outdegree = 0;
-        adjacent_outgoing_nodes(node, [&](node_index) { ++outdegree; });
-        return outdegree == 1;
-    }
-
-    void call_outgoing_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
-        if (target_ == Anchor::nlabel) {
-            graph_.call_outgoing_kmers(node, callback);
-        } else {
-            std::vector<node_index> forward_n;
-            std::vector<char> forward_c;
-            graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    forward_n.emplace_back(next);
-                    forward_c.emplace_back(c);
-                    anno_buffer_->queue_path(std::vector<node_index>{ next });
-                }
-            });
-            anno_buffer_->fetch_queued_annotations();
-
-            for (size_t i = 0; i < forward_n.size(); ++i) {
-                node_index next = forward_n[i];
-                char c = forward_c[i];
-                if (has_labels(next))
-                    callback(next, c);
-            }
-        }
-    }
-
-    void adjacent_outgoing_nodes(node_index node, const std::function<void(node_index)> &callback) const {
-        if (target_ == Anchor::nlabel) {
-            graph_.adjacent_outgoing_nodes(node, callback);
-        } else {
-            // TODO: replace this once we can guarantee that we won't get
-            //       dummy nodes
-            call_outgoing_kmers(node, [&](node_index next, char) {
-                callback(next);
-            });
-            // std::vector<node_index> forward_n;
-            // graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
-            //     forward_n.emplace_back(next);
-            //     anno_buffer_->queue_path(std::vector<node_index>{ next });
-            // });
-            // anno_buffer_->fetch_queued_annotations();
-
-            // for (node_index next : forward_n) {
-            //     if (has_labels(next))
-            //         callback(next);
-            // }
-        }
-    }
-
-    node_index traverse_back(node_index node, char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        node_index prev = graph_.traverse_back(node, c);
-        return prev && has_labels(prev) ? prev : DeBruijnGraph::npos;
-    }
-
-    bool has_single_incoming(node_index node) const {
-        // std::cerr << "hsi\t" << node << "\t" << target_ << std::endl;
-        if (target_ == Anchor::nlabel) {
-            return graph_.has_single_incoming(node);
-        } else {
-            size_t indegree = 0;
-            adjacent_incoming_nodes(node, [&](node_index) { ++indegree; });
-            return indegree == 1;
-        }
-    }
-
-    void call_incoming_kmers(node_index node, const std::function<void(node_index, char)> &callback) const {
-        // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
-        if (target_ == Anchor::nlabel) {
-            graph_.call_incoming_kmers(node, callback);
-        } else {
-            std::vector<node_index> backward_n;
-            std::vector<char> backward_c;
-            graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    backward_n.emplace_back(prev);
-                    backward_c.emplace_back(c);
-                    anno_buffer_->queue_path(std::vector<node_index>{ prev });
-                }
-            });
-            anno_buffer_->fetch_queued_annotations();
-
-            for (size_t i = 0; i < backward_n.size(); ++i) {
-                node_index prev = backward_n[i];
-                char c = backward_c[i];
-                if (has_labels(prev))
-                    callback(prev, c);
-            }
-        }
-    }
-
-    void adjacent_incoming_nodes(node_index node, const std::function<void(node_index)> &callback) const {
-        if (target_ == Anchor::nlabel) {
-            graph_.adjacent_incoming_nodes(node, callback);
-        } else {
-            // TODO: replace this once we can guarantee that we won't get
-            //       dummy nodes
-            call_incoming_kmers(node, [&](node_index prev, char) {
-                callback(prev);
-            });
-            // std::vector<node_index> backward_n;
-            // graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
-            //     backward_n.emplace_back(prev);
-            //     anno_buffer_->queue_path(std::vector<node_index>{ prev });
-            // });
-            // anno_buffer_->fetch_queued_annotations();
-
-            // for (node_index prev : backward_n) {
-            //     if (has_labels(prev))
-            //         callback(prev);
-            // }
-        }
-    }
-
-  private:
-    const DeBruijnGraph &graph_;
-    AnnotationBuffer* const anno_buffer_;
-    label_class_t target_;
-
-    bool has_labels(node_index node) const {
-        assert(node != DeBruijnGraph::npos);
-        if (!anno_buffer_ || target_ == Anchor::nlabel)
-            return true;
-
-        const auto *node_labels = anno_buffer_->get_labels(node);
-        if (!node_labels) {
-            anno_buffer_->queue_path(std::vector<node_index>{ node });
-            anno_buffer_->fetch_queued_annotations();
-            node_labels = anno_buffer_->get_labels(node);
-        }
-
-        assert(node_labels);
-
-        const auto &target_labels = anno_buffer_->get_cached_column_set(target_);
-
-        return utils::count_intersection(node_labels->begin(), node_labels->end(),
-                                         target_labels.begin(), target_labels.end()) == target_labels.size();
-    }
-};
-
 void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback, bool no_bwd, bool no_fwd) const {
     // std::cerr << "Base " << aln << "\n";
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
@@ -1441,8 +1447,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         size_t max_dist = 0;
         DBGAlignerConfig::score_t best_score = aln_score;
         size_t max_query_dist = 0;
+        auto aln_graph = make_aln_graph(aln.get_label_classes().back());
         align_fwd(
-            make_aln_graph(aln.get_label_classes().back()), config_, aln.get_path().back(), num_matches,
+            query_.get_graph(),
+            config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& spelling, auto&& path, auto&& cigar, size_t) {
                 auto ext_path = aln.get_path();
@@ -1513,7 +1521,9 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 // return query_dist == query_window.size() && dist == max_dist;
                 return query_dist == query_window.size();
             },
-            aln.get_trim_spelling()
+            aln.get_trim_spelling(),
+            aln_graph.get_anno_buffer(),
+            aln.get_label_classes().back()
         );
 
         if (fwd_exts.empty())
@@ -1553,8 +1563,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         size_t max_dist = 0;
         size_t max_query_dist = 0;
         // std::cerr << "bwd extending\t" << fwd_ext << "\t" << fwd_ext.get_label_classes()[0] << "\n";
+        auto aln_graph = make_aln_graph(fwd_ext.get_label_classes()[0]);
         align_bwd(
-            make_aln_graph(fwd_ext.get_label_classes()[0]), config_, fwd_ext.get_path()[0], num_matches,
+            query_.get_graph(),
+            config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& spelling, auto&& path, auto&& cigar, size_t) {
                 path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
@@ -1625,28 +1637,14 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                 // return false;
                 // return query_dist == query_window.size() && dist == max_dist;
                 return query_dist == query_window.size();
-            }
+            },
+            aln_graph.get_anno_buffer(),
+            fwd_ext.get_label_classes()[0]
         );
 
         if (!found)
             callback(std::move(fwd_ext));
     }
-}
-
-AlignmentGraph ExactSeeder::make_aln_graph(Anchor::label_class_t) const {
-    return AlignmentGraph(query_.get_graph());
-}
-
-AlignmentGraph LabeledSeeder::make_aln_graph(Anchor::label_class_t target) const {
-    return AlignmentGraph(query_.get_graph(), anno_buffer_, target);
-}
-
-AlignmentGraph Extender::make_aln_graph(Anchor::label_class_t) const {
-    return AlignmentGraph(query_.get_graph());
-}
-
-AlignmentGraph LabeledExtender::make_aln_graph(Anchor::label_class_t target) const {
-    return AlignmentGraph(query_.get_graph(), anno_buffer_, target);
 }
 
 std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
@@ -2118,9 +2116,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
 
             bool aln_found = false;
+            auto aln_graph = make_aln_graph(last->get_label_class());
 
             align_bwd(
-                make_aln_graph(last->get_label_class()),
+                query_.get_graph(),
                 config_,
                 aln.get_path()[0],
                 last->get_seed().size(),
@@ -2194,7 +2193,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     //                  graph.get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                  get_score(cost, query_dist, dist));
                     return aln_found || (query_dist == query_window.size() && node == target_node);
-                }
+                },
+                aln_graph.get_anno_buffer(),
+                last->get_label_class()
             );
             if (!aln_found) {
                 std::cerr << "q: " << aln.get_clipping() - next->get_clipping() << "\td: " << next_to_last_dist - last->get_seed().size() + next->get_seed().size() << "\t" << *next << " " << next->get_path_spelling() << " -> " << aln << std::endl;
@@ -2232,6 +2233,22 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     //                         num_chains, alignments.size());
 
     return alignments;
+}
+
+AlignmentGraph ExactSeeder::make_aln_graph(Anchor::label_class_t) const {
+    return AlignmentGraph(query_.get_graph());
+}
+
+AlignmentGraph LabeledSeeder::make_aln_graph(Anchor::label_class_t target) const {
+    return AlignmentGraph(query_.get_graph(), &anno_buffer_, target);
+}
+
+AlignmentGraph Extender::make_aln_graph(Anchor::label_class_t) const {
+    return AlignmentGraph(query_.get_graph());
+}
+
+AlignmentGraph LabeledExtender::make_aln_graph(Anchor::label_class_t target) const {
+    return AlignmentGraph(query_.get_graph(), &anno_buffer_, target);
 }
 
 
