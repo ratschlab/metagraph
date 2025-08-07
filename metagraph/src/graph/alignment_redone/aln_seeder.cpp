@@ -217,6 +217,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 }
             } else if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
                 // TODO
+                std::ignore = sshash;
             }
         }
     }
