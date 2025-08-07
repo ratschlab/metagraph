@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aln_match.hpp"
+
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vector_set.hpp"
@@ -21,6 +23,10 @@ class AnnotationBuffer {
     using Tuple = SmallVector<int64_t>;
     using Columns = annot::matrix::BinaryMatrix::SetBitPositions;
     using CoordinateSet = Vector<Tuple>;
+
+    // dummy index for an unfetched annotations
+    static constexpr Anchor::label_class_t nannot = Anchor::nlabel;
+    static constexpr Column ncolumn = std::numeric_limits<Column>::max();
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 

@@ -257,9 +257,12 @@ class AlignmentGraph {
     }
 
     bool has_labels(node_index node, size_t target_labels_id) const {
-        if (!anno_buffer_)
-            return target_labels_id == Anchor::nlabel;
+        if (!anno_buffer_) {
+            assert(target_labels_id == Anchor::nlabel);
+            return true;
+        }
 
+        assert(target_labels_id != Anchor::nlabel);
         size_t node_labels_id = get_label_class(node);
         if (node_labels_id == Anchor::nlabel)
             return false;
@@ -303,7 +306,14 @@ class AlignmentGraph {
             return node_labels_id;
 
         const auto &target_labels = anno_buffer_->get_cached_column_set(target_labels_id);
+        assert(std::find(target_labels.begin(), target_labels.end(), AnnotationBuffer::ncolumn) == target_labels.end());
+        assert(std::all_of(target_labels.begin(), target_labels.end(),
+                           [&](auto c) { return c < anno_buffer_->get_annotator().get_label_encoder().size(); }));
+
         const auto &node_labels = anno_buffer_->get_cached_column_set(node_labels_id);
+        assert(std::find(node_labels.begin(), node_labels.end(), AnnotationBuffer::ncolumn) == node_labels.end());
+        assert(std::all_of(node_labels.begin(), node_labels.end(),
+                           [&](auto c) { return c < anno_buffer_->get_annotator().get_label_encoder().size(); }));
 
         AnnotationBuffer::Columns columns;
         std::set_intersection(node_labels.begin(), node_labels.end(),
@@ -732,7 +742,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 const StrItr query_window_begin,
                 const StrItr query_window_end,
                 size_t max_dist,
-                const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t cost)> &callback,
+                const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t, Anchor::label_class_t)> &callback,
                 const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                 const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                 const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
@@ -786,6 +796,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             char c,
             size_t num_matches,
             Anchor::label_class_t target) -> size_t {
+        assert(target);
         assert(last_op == Cigar::MATCH
             || last_op == Cigar::MISMATCH
             || last_op == Cigar::INSERTION
@@ -1011,7 +1022,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                         ++num_explored_nodes;
                         if (c != boss::BOSS::kSentinel)
                             prevs.emplace_back(prev, c, prev_target);
-                    }, best_dist, query_dist);
+                    }, best_dist, cur_target);
 
                     if (prevs.empty())
                         continue;
@@ -1035,7 +1046,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                         ++num_explored_nodes;
                                         if (c != boss::BOSS::kSentinel)
                                             last_prevs.emplace_back(prev, c, prev_target);
-                                    }, last_dist, query_dist);
+                                    }, last_dist, last_target);
                                 }
 
                                 for (const auto &[prev, c, prev_target] : last_prevs) {
@@ -1225,6 +1236,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             std::vector<node_index> path;
             Cigar cigar;
             std::string spelling;
+            Anchor::label_class_t final_target = std::get<6>(*bt);
+            Anchor::label_class_t cur_target = final_target;
 
             do {
                 assert(std::get<0>(*bt) == dist);
@@ -1248,6 +1261,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
+                    assert(std::get<6>(*check_bt) == cur_target);
 
                     query_dist = prev_query_dist;
                     cost = prev_cost;
@@ -1259,11 +1273,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     const auto *ft = get_bucket(F, cost, query_dist, node);
                     assert(ft);
 
-                    auto [del_dist, num_del, prev_node, del_char, cur_target] = *ft;
+                    auto [del_dist, num_del, prev_node, del_char, del_target] = *ft;
                     assert(prev_node != DeBruijnGraph::npos);
                     assert(del_char != '\0');
                     assert(del_dist == dist);
                     assert(dist >= num_del);
+                    assert(del_target == cur_target);
 
                     cigar.append(Cigar::DELETION, num_del);
 
@@ -1300,13 +1315,14 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == prev_dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
+                    assert(std::get<6>(*check_bt) == cur_target);
 
                     dist = prev_dist;
                     cost = prev_cost;
                     node = prev_node;
                     bt = check_bt;
                 } else if (std::get<3>(*bt) == Cigar::MATCH || std::get<3>(*bt) == Cigar::MISMATCH) {
-                    auto [cur_dist, num_match, last_node, last_op, mismatch_char, num_matches, this_target] = *bt;
+                    auto [cur_dist, num_match, last_node, last_op, mismatch_char, num_matches, mm_target] = *bt;
 
                     if (!num_match) {
                         assert(last_op == Cigar::MATCH);
@@ -1317,9 +1333,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     assert(query_dist >= num_match);
                     assert(dist >= num_match);
                     assert(cur_dist == dist);
+                    assert(cur_target == mm_target);
 
                     node_index traverse_node = last_node;
-                    Anchor::label_class_t cur_target = this_target;
 
                     cigar.append(Cigar::MATCH, num_match - 1);
                     cigar.append(last_op);
@@ -1402,7 +1418,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             assert(cost == 0);
             assert(query_dist == 0);
             // std::cerr << "Ext: " << start_cost << "\t" << cigar.to_string() << "\n";
-            callback(std::move(spelling), std::move(path), std::move(cigar), start_cost);
+            callback(std::move(spelling), std::move(path), std::move(cigar), start_cost, final_target);
         }
     }
     common::logger->trace("Explored {} nodes. q: {}\td: {} / {}",
@@ -1415,39 +1431,47 @@ void align_bwd(const DeBruijnGraph &base_graph,
                size_t num_matches,
                std::string_view query_window,
                size_t max_dist,
-               const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t)> &callback,
+               const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t, Anchor::label_class_t)> &callback,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                AnnotationBuffer *anno_buffer = nullptr,
                Anchor::label_class_t target = Anchor::nlabel) {
-    AlignmentGraph graph(base_graph, anno_buffer, target);
     using StrItr = std::string_view::iterator;
     align_impl<StrItr>(
-        [&graph](DeBruijnGraph::node_index node, size_t, Anchor::label_class_t) {
-            return graph.has_single_incoming(node);
+        [&](DeBruijnGraph::node_index node, size_t, Anchor::label_class_t cur_target) {
+            assert(cur_target);
+            return AlignmentGraph(base_graph, anno_buffer, cur_target).has_single_incoming(node);
         },
-        [&graph](DeBruijnGraph::node_index node,
+        [&](DeBruijnGraph::node_index node,
                  StrItr begin, StrItr end,
-                 size_t, Anchor::label_class_t, const auto &callback, const auto &terminate) {
+                 size_t, Anchor::label_class_t cur_target,
+                 const auto &callback, const auto &terminate) {
+            assert(cur_target);
             if (begin != end) {
-                graph.traverse_back(node,
-                                    std::string_view(&*begin, end - begin),
-                                    callback, terminate);
+                AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
+                    node,
+                    std::string_view(&*begin, end - begin),
+                    callback, terminate
+                );
             }
         },
-        [&graph](DeBruijnGraph::node_index node, const auto &callback, size_t, Anchor::label_class_t) {
-            graph.call_incoming_kmers(node, callback);
+        [&](DeBruijnGraph::node_index node, const auto &callback, size_t, Anchor::label_class_t cur_target) {
+            assert(cur_target);
+            AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(node, callback);
         },
         config,
         start_node,
         num_matches,
         query_window.begin(), query_window.end(),
         max_dist,
-        [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost) {
+        [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost, Anchor::label_class_t final_target) {
+            assert(final_target);
             assert(std::all_of(path.begin(), path.end(),
-                               [&](auto node) { return graph.has_labels(node, target); }));
-            callback(std::move(spelling), std::move(path), std::move(cigar), cost);
+                               [&](auto node) {
+                                   return AlignmentGraph(base_graph, anno_buffer, target).has_labels(node, final_target);
+                                }));
+            callback(std::move(spelling), std::move(path), std::move(cigar), cost, final_target);
         },
         start_backtrack,
         terminate_branch,
@@ -1462,7 +1486,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
                size_t num_matches,
                std::string_view query_window,
                size_t max_dist,
-               const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t)> &callback,
+               const std::function<void(std::string&&, std::vector<DeBruijnGraph::node_index>&&, Cigar&&, size_t, Anchor::label_class_t)> &callback,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &start_backtrack,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
@@ -1470,19 +1494,20 @@ void align_fwd(const DeBruijnGraph &base_graph,
                AnnotationBuffer *anno_buffer = nullptr,
                Anchor::label_class_t target = Anchor::nlabel) {
     assert(!anno_buffer == (target == Anchor::nlabel));
-    AlignmentGraph graph(base_graph, anno_buffer, target);
     using StrItr = std::reverse_iterator<std::string_view::iterator>;
     align_impl<StrItr>(
-        [&graph,&suffix,&start_node](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t) {
+        [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             std::ignore = start_node;
+            assert(cur_target);
             assert(dist >= suffix.size() || node == start_node);
-            return dist < suffix.size() || graph.has_single_outgoing(node);
+            return dist < suffix.size() || AlignmentGraph(base_graph, anno_buffer, target).has_single_outgoing(node);
         },
-        [&graph,&suffix,&start_node,&target](DeBruijnGraph::node_index node,
-                                             StrItr rbegin, StrItr rend,
-                                             size_t dist, Anchor::label_class_t,
-                                             const auto &callback, const auto &terminate) {
+        [&](DeBruijnGraph::node_index node,
+            StrItr rbegin, StrItr rend,
+            size_t dist, Anchor::label_class_t cur_target,
+            const auto &callback, const auto &terminate) {
             std::ignore = start_node;
+            assert(cur_target);
             assert(dist >= suffix.size() || node == start_node);
 
             auto begin = rend.base();
@@ -1491,22 +1516,28 @@ void align_fwd(const DeBruijnGraph &base_graph,
 
             for (size_t i = dist; !terminate() && i < suffix.size() && begin != end; ++i, ++begin) {
                 if (*begin == suffix[i]) {
-                    callback(node, target);
+                    callback(node, cur_target);
                 } else {
                     return;
                 }
             }
 
-            if (begin != end)
-                graph.traverse(node, std::string_view(&*begin, end - begin), callback, terminate);
+            if (begin != end) {
+                AlignmentGraph(base_graph, anno_buffer, target).traverse(
+                    node, std::string_view(&*begin, end - begin),
+                    callback, terminate
+                );
+            }
         },
-        [&graph,&suffix,&start_node,&target](DeBruijnGraph::node_index node, const auto &callback, size_t dist, Anchor::label_class_t) {
+        [&](DeBruijnGraph::node_index node, const auto &callback,
+            size_t dist, Anchor::label_class_t cur_target) {
+            assert(cur_target);
             if (dist < suffix.size()) {
                 std::ignore = start_node;
                 assert(node == start_node);
-                callback(node, suffix[dist], target);
+                callback(node, suffix[dist], cur_target);
             } else {
-                graph.call_outgoing_kmers(node, callback);
+                AlignmentGraph(base_graph, anno_buffer, target).call_outgoing_kmers(node, callback);
             }
         },
         config,
@@ -1514,14 +1545,17 @@ void align_fwd(const DeBruijnGraph &base_graph,
         num_matches,
         query_window.rbegin(), query_window.rend(),
         max_dist,
-        [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost) {
+        [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost, Anchor::label_class_t final_target) {
+            assert(final_target);
             path.resize(path.size() - suffix.size());
             assert(std::all_of(path.begin(), path.end(),
-                               [&](auto node) { return graph.has_labels(node, target); }));
+                               [&](auto node) {
+                                   return AlignmentGraph(base_graph, anno_buffer, final_target).has_labels(node, target);
+                                }));
             std::reverse(spelling.begin(), spelling.end());
             std::reverse(path.begin(), path.end());
             std::reverse(cigar.data().begin(), cigar.data().end());
-            callback(std::move(spelling), std::move(path), std::move(cigar), cost);
+            callback(std::move(spelling), std::move(path), std::move(cigar), cost, final_target);
         },
         start_backtrack,
         terminate_branch,
@@ -1566,7 +1600,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             query_.get_graph(),
             config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
-            [&](auto&& spelling, auto&& path, auto&& cigar, size_t) {
+            [&](auto&& spelling, auto&& path, auto&& cigar, size_t, Anchor::label_class_t final_target) {
                 auto ext_path = aln.get_path();
                 ext_path.insert(ext_path.end(), path.begin(), path.end());
 
@@ -1586,7 +1620,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar),
                     std::string(aln.get_spelling()) + spelling,
                     aln.get_end_trim() - std::min(aln.get_end_trim(), spelling.size()),
-                    aln.get_label_classes().back()
+                    final_target
                 );
 
                 // std::cerr << "\tend" << fwd_exts.back() << "\t" << fwd_exts.back().get_label_classes().back() << std::endl;
@@ -1682,7 +1716,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             query_.get_graph(),
             config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
-            [&](auto&& spelling, auto&& path, auto&& cigar, size_t) {
+            [&](auto&& spelling, auto&& path, auto&& cigar, size_t, Anchor::label_class_t final_target) {
                 path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
                 size_t query_dist = cigar.get_num_query();
                 assert(query_dist <= query_window.size());
@@ -1700,7 +1734,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
                     std::move(ext_cigar),
                     spelling + fwd_ext.get_path_spelling(),
                     fwd_ext.get_end_trim(),
-                    fwd_ext.get_label_classes()[0]
+                    final_target
                 );
                 next_aln.trim_end();
 
@@ -2242,7 +2276,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 last->get_seed().size(),
                 query_window,
                 traversal_dist,
-                [&](auto&& spelling, auto&& bt_path, auto&& bt_cigar, size_t cost) { // callback
+                [&](auto&& spelling, auto&& bt_path, auto&& bt_cigar, size_t cost, Anchor::label_class_t final_target) { // callback
                     assert(bt_path[0] == next->get_path().back());
                     bt_path.insert(bt_path.begin(), next->get_path().begin(), next->get_path().end() - 1);
 
@@ -2263,7 +2297,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                     std::move(cigar),
                                     std::string(next->get_spelling().substr(0, next->get_path().size() - 1)) + spelling + aln.get_path_spelling(),
                                     aln.get_end_trim(),
-                                    last->get_label_class());
+                                    final_target);
                     // std::cerr << "\t\t" << next_aln << std::endl;
                     aln_found = true;
                     callback(std::move(next_aln));

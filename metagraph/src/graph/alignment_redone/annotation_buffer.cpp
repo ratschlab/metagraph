@@ -2,8 +2,6 @@
 
 #include <sstream>
 
-#include "aln_match.hpp"
-
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
@@ -16,9 +14,6 @@ using mtg::common::logger;
 
 typedef annot::matrix::BinaryMatrix::Row Row;
 typedef annot::matrix::BinaryMatrix::Column Column;
-
-// dummy index for an unfetched annotations
-static constexpr size_t nannot = Anchor::nlabel;
 
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
@@ -195,6 +190,8 @@ std::string AnnotationBuffer::generate_column_set_str(size_t i, size_t spelling_
     if (columns.empty())
         return "*";
 
+    assert(columns[0] != ncolumn);
+    assert(columns[0] < annotator_.get_label_encoder().size());
     ostd << annotator_.get_label_encoder().decode(columns[0]);
     if (label_coords_.size()) {
         assert(label_coords_.size() == node_to_cols_.size());
@@ -204,6 +201,8 @@ std::string AnnotationBuffer::generate_column_set_str(size_t i, size_t spelling_
     }
 
     for (size_t c = 1; c < columns.size(); ++c) {
+        assert(columns[c] != ncolumn);
+        assert(columns[c] < annotator_.get_label_encoder().size());
         ostd << ";" << annotator_.get_label_encoder().decode(columns[c]);
         if (label_coords_.size()) {
             assert(label_coords_.size() == node_to_cols_.size());

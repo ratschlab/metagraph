@@ -84,7 +84,7 @@ std::ostream& operator<<(std::ostream &out, const Match &a);
 class Anchor : public Match {
   public:
     using label_class_t = uint64_t;
-    static constexpr label_class_t nlabel = std::numeric_limits<uint64_t>::max();
+    static constexpr label_class_t nlabel = std::numeric_limits<label_class_t>::max();
     static constexpr int64_t ncoord = std::numeric_limits<int64_t>::max();
 
     Anchor() : Match(), label_class_(nlabel), coord_(ncoord) {}

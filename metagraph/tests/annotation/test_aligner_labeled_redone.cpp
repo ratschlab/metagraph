@@ -78,19 +78,31 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                 const auto &[label, reference, cigar_str] = mappings[i];
 
                 if (label.size()) {
+                    // make sure the labels are correct before moving on
                     size_t target_column = label_encoder.encode(label);
+
+                    size_t old_num_column_sets = anno_buffer.num_column_sets();
                     size_t target = anno_buffer.cache_column(target_column);
+                    ASSERT_EQ(old_num_column_sets, anno_buffer.num_column_sets());
+                    ASSERT_LE(target, old_num_column_sets);
+
                     const auto &path_targets = path.get_label_classes();
-                    std::string path_target_labels;
-                    for (auto node_target : path_targets) {
-                        for (auto column : anno_buffer.get_cached_column_set(node_target)) {
-                            path_target_labels += label_encoder.decode(column) + ",";
-                        }
-                        path_target_labels += ";";
+                    std::string path_target_labels = anno_buffer.generate_column_set_str(target, path.get_spelling().size());
+                    if (path_targets.size() > 1) {
+                        ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
+                                                [&](auto node_target) { return node_target == path_targets[0]; }))
+                            << path_target_labels << "\t" << fmt::format("{}", fmt::join(path_targets, ","));
                     }
-                    EXPECT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
+                    // for (auto node_target : path_targets) {
+                    //     for (auto column : anno_buffer.get_cached_column_set(node_target)) {
+                    //         path_target_labels += label_encoder.decode(column) + ",";
+                    //     }
+                    //     path_target_labels += ";";
+                    // }
+                    ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                             [&](auto node_target) { return node_target == target; }))
-                        << path_target_labels << " vs. " << label;
+                        << path_target_labels << " vs. " << label << "\t"
+                        << fmt::format("{}", fmt::join(path_targets, ",")) << " vs. " << target;
                 }
 
                 ASSERT_EQ(cigar.to_string(), path.get_cigar().to_string()) << label << "\t" << mx << "\t" << type;
