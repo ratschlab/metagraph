@@ -735,6 +735,11 @@ bool DBGSSHash::load(std::istream& in) {
     loader.visit(k);
     loader.visit(mode);
 
+    if (mode == PRIMARY) {
+        common::logger->warn("Graph constructed with old version (no need to reconstruct). Loading primary graph as canonical.");
+        mode = CANONICAL;
+    }
+
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;
 
