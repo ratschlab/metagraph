@@ -107,6 +107,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                     !orientation,
                                                     std::vector<Match::node_index>{ node },
                                                     std::move(suffix));
+                                assert(it->second.get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                                 assert(it->second.get_path_spelling().size() == graph.get_k());
                                 assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
                                 assert(it->second.is_spelling_valid(graph));
@@ -153,6 +154,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                                     orientation,
                                                                     std::vector<Match::node_index>{ node },
                                                                     (suffix + c).substr(full_match_size - match_size));
+                                                assert(it->second.get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                                                 assert(it->second.get_path_spelling().size() == graph.get_k());
                                                 assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
                                                 assert(it->second.is_spelling_valid(graph));
@@ -203,6 +205,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                             !orientation,
                                                             std::vector<Match::node_index>{ node },
                                                             std::move(suffix));
+                                        assert(it->second.get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                                         assert(it->second.get_path_spelling().size() == graph.get_k());
                                         assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
                                         assert(it->second.is_spelling_valid(graph));
@@ -227,6 +230,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                           cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
                           true);
                 anchors.emplace_back(std::move(it.value()));
+                assert(anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                 assert(anchors.back().get_path_spelling().size() == graph.get_k());
                 assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
             }
@@ -248,6 +252,7 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
     common::logger->trace("Annotating anchors");
 
     for (const auto &anchor : anchors) {
+        assert(anchor.get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
         anno_buffer_.queue_path(anchor.get_path());
     }
 
@@ -295,9 +300,11 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
                         const auto &coords = (*coord_it)[i];
                         for (auto coord : coords) {
                             labeled_anchors.emplace_back(anchor).set_coord(coord);
+                            assert(labeled_anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                         }
                     } else {
                         labeled_anchors.emplace_back(anchor);
+                        assert(labeled_anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                     }
                 }
             }
@@ -1201,6 +1208,7 @@ class AlignmentGraph {
           : graph_(graph), anno_buffer_(&anno_buffer), target_(target) {}
 
     node_index traverse(node_index node, char c) const {
+        assert(c != boss::BOSS::kSentinel);
         node_index next = graph_.traverse(node, c);
         return next && has_labels(next) ? next : DeBruijnGraph::npos;
     }
@@ -1270,9 +1278,11 @@ class AlignmentGraph {
             std::vector<node_index> forward_n;
             std::vector<char> forward_c;
             graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-                forward_n.emplace_back(next);
-                forward_c.emplace_back(c);
-                anno_buffer_->queue_path(std::vector<node_index>{ next });
+                if (c != boss::BOSS::kSentinel) {
+                    forward_n.emplace_back(next);
+                    forward_c.emplace_back(c);
+                    anno_buffer_->queue_path(std::vector<node_index>{ next });
+                }
             });
             anno_buffer_->fetch_queued_annotations();
 
@@ -1289,21 +1299,27 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.adjacent_outgoing_nodes(node, callback);
         } else {
-            std::vector<node_index> forward_n;
-            graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
-                forward_n.emplace_back(next);
-                anno_buffer_->queue_path(std::vector<node_index>{ next });
+            // TODO: replace this once we can guarantee that we won't get
+            //       dummy nodes
+            call_outgoing_kmers(node, [&](node_index next, char) {
+                callback(next);
             });
-            anno_buffer_->fetch_queued_annotations();
+            // std::vector<node_index> forward_n;
+            // graph_.adjacent_outgoing_nodes(node, [&](node_index next) {
+            //     forward_n.emplace_back(next);
+            //     anno_buffer_->queue_path(std::vector<node_index>{ next });
+            // });
+            // anno_buffer_->fetch_queued_annotations();
 
-            for (node_index next : forward_n) {
-                if (has_labels(next))
-                    callback(next);
-            }
+            // for (node_index next : forward_n) {
+            //     if (has_labels(next))
+            //         callback(next);
+            // }
         }
     }
 
     node_index traverse_back(node_index node, char c) const {
+        assert(c != boss::BOSS::kSentinel);
         node_index prev = graph_.traverse_back(node, c);
         return prev && has_labels(prev) ? prev : DeBruijnGraph::npos;
     }
@@ -1327,9 +1343,11 @@ class AlignmentGraph {
             std::vector<node_index> backward_n;
             std::vector<char> backward_c;
             graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
-                backward_n.emplace_back(prev);
-                backward_c.emplace_back(c);
-                anno_buffer_->queue_path(std::vector<node_index>{ prev });
+                if (c != boss::BOSS::kSentinel) {
+                    backward_n.emplace_back(prev);
+                    backward_c.emplace_back(c);
+                    anno_buffer_->queue_path(std::vector<node_index>{ prev });
+                }
             });
             anno_buffer_->fetch_queued_annotations();
 
@@ -1346,17 +1364,22 @@ class AlignmentGraph {
         if (target_ == Anchor::nlabel) {
             graph_.adjacent_incoming_nodes(node, callback);
         } else {
-            std::vector<node_index> backward_n;
-            graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
-                backward_n.emplace_back(prev);
-                anno_buffer_->queue_path(std::vector<node_index>{ prev });
+            // TODO: replace this once we can guarantee that we won't get
+            //       dummy nodes
+            call_incoming_kmers(node, [&](node_index prev, char) {
+                callback(prev);
             });
-            anno_buffer_->fetch_queued_annotations();
+            // std::vector<node_index> backward_n;
+            // graph_.adjacent_incoming_nodes(node, [&](node_index prev) {
+            //     backward_n.emplace_back(prev);
+            //     anno_buffer_->queue_path(std::vector<node_index>{ prev });
+            // });
+            // anno_buffer_->fetch_queued_annotations();
 
-            for (node_index prev : backward_n) {
-                if (has_labels(prev))
-                    callback(prev);
-            }
+            // for (node_index prev : backward_n) {
+            //     if (has_labels(prev))
+            //         callback(prev);
+            // }
         }
     }
 
