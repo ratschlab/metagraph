@@ -5,6 +5,7 @@
 
 #include "aln_cigar.hpp"
 #include "aligner_config.hpp"
+#include "annotation_buffer.hpp"
 
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -83,11 +84,11 @@ std::ostream& operator<<(std::ostream &out, const Match &a);
 
 class Anchor : public Match {
   public:
-    using label_class_t = uint64_t;
-    static constexpr label_class_t nlabel = std::numeric_limits<label_class_t>::max();
-    static constexpr int64_t ncoord = std::numeric_limits<int64_t>::max();
+    using label_class_t = AnnotationBuffer::label_class_t;
+    static constexpr label_class_t nannot = AnnotationBuffer::nannot;
+    static constexpr int64_t ncoord = AnnotationBuffer::ncoord;
 
-    Anchor() : Match(), label_class_(nlabel), coord_(ncoord) {}
+    Anchor() : Match(), label_class_(nannot), coord_(ncoord) {}
 
     Anchor(std::string_view query,
            size_t begin,
@@ -95,7 +96,7 @@ class Anchor : public Match {
            bool orientation,
            std::vector<node_index>&& path,
            std::string&& suffix = "",
-           label_class_t label_class = nlabel,
+           label_class_t label_class = nannot,
            int64_t coord = ncoord)
           : Match(query, begin, end, orientation, std::move(path)),
             label_class_(label_class), coord_(coord), suffix_(std::move(suffix)) {
@@ -145,7 +146,7 @@ class Alignment : public Match {
               Cigar&& cigar,
               std::string&& path_spelling,
               size_t end_trim = 0,
-              Anchor::label_class_t label_class = Anchor::nlabel)
+              Anchor::label_class_t label_class = Anchor::nannot)
           : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
                   orientation, std::move(path)),
             end_trim_(end_trim),

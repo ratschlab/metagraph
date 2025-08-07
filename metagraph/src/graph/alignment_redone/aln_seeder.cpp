@@ -26,9 +26,9 @@ class AlignmentGraph {
 
     AlignmentGraph(const DeBruijnGraph &graph,
                    AnnotationBuffer *anno_buffer = nullptr,
-                   label_class_t target = Anchor::nlabel)
+                   label_class_t target = Anchor::nannot)
           : graph_(graph), anno_buffer_(anno_buffer), target_(target) {
-        assert((target == Anchor::nlabel) == !anno_buffer_);
+        assert((target == Anchor::nannot) == !anno_buffer_);
     }
 
     AnnotationBuffer* get_anno_buffer() const { return anno_buffer_; }
@@ -36,14 +36,14 @@ class AlignmentGraph {
     std::pair<node_index, label_class_t> traverse(node_index node, char c) const {
         assert(c != boss::BOSS::kSentinel);
         node_index next = graph_.traverse(node, c);
-        if (target_ == Anchor::nlabel)
+        if (target_ == Anchor::nannot)
             return std::make_pair(next, target_);
 
         if (!next)
             return std::make_pair(next, 0);
 
-        size_t next_labels = get_intersect_labels(next, target_);
-        assert(next_labels != Anchor::nlabel);
+        label_class_t next_labels = get_intersect_labels(next, target_);
+        assert(next_labels != Anchor::nannot);
         if (!next_labels)
             next = DeBruijnGraph::npos;
 
@@ -53,14 +53,14 @@ class AlignmentGraph {
     std::pair<node_index, label_class_t> traverse_back(node_index node, char c) const {
         assert(c != boss::BOSS::kSentinel);
         node_index prev = graph_.traverse_back(node, c);
-        if (target_ == Anchor::nlabel)
+        if (target_ == Anchor::nannot)
             return std::make_pair(prev, target_);
 
         if (!prev)
             return std::make_pair(prev, 0);
 
-        size_t prev_labels = get_intersect_labels(prev, target_);
-        assert(prev_labels != Anchor::nlabel);
+        label_class_t prev_labels = get_intersect_labels(prev, target_);
+        assert(prev_labels != Anchor::nannot);
         if (!prev_labels)
             prev = DeBruijnGraph::npos;
 
@@ -70,7 +70,7 @@ class AlignmentGraph {
     void traverse(node_index node, std::string_view seq,
                   const TraverseCallback &callback,
                   const Terminator &terminate = [](){ return false; }) const {
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.traverse(node, seq,
                             [&](node_index next) {
                                 assert(has_labels(next, target_));
@@ -86,10 +86,10 @@ class AlignmentGraph {
         anno_buffer_->queue_path(forward_nodes);
         anno_buffer_->fetch_queued_annotations();
 
-        size_t cur_target = target_;
+        label_class_t cur_target = target_;
         for (node_index next : forward_nodes) {
             cur_target = get_intersect_labels(next, cur_target);
-            assert(cur_target != Anchor::nlabel);
+            assert(cur_target != Anchor::nannot);
             if (cur_target) {
                 assert(has_labels(next, cur_target));
                 callback(next, cur_target);
@@ -102,7 +102,7 @@ class AlignmentGraph {
     void traverse_back(node_index node, std::string_view prefix_seq,
                        const TraverseCallback &callback,
                        const Terminator &terminate = [](){ return false; }) const {
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.traverse_back(node, prefix_seq,
                                  [&](node_index prev) {
                                      assert(has_labels(prev, target_));
@@ -120,10 +120,10 @@ class AlignmentGraph {
                                                          backward_nodes.rend()));
         anno_buffer_->fetch_queued_annotations();
 
-        size_t cur_target = target_;
+        label_class_t cur_target = target_;
         for (node_index prev : backward_nodes) {
             cur_target = get_intersect_labels(prev, cur_target);
-            assert(cur_target != Anchor::nlabel);
+            assert(cur_target != Anchor::nannot);
             if (cur_target) {
                 assert(has_labels(prev, cur_target));
                 callback(prev, cur_target);
@@ -134,7 +134,7 @@ class AlignmentGraph {
     }
 
     void call_outgoing_kmers(node_index node, const EdgeCallback &callback) const {
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.call_outgoing_kmers(node, [&](node_index next, char c) { callback(next, c, target_); });
         } else {
             std::vector<node_index> forward_n;
@@ -151,8 +151,8 @@ class AlignmentGraph {
             for (size_t i = 0; i < forward_n.size(); ++i) {
                 node_index next = forward_n[i];
                 char c = forward_c[i];
-                size_t next_target = get_intersect_labels(next, target_);
-                assert(next_target != Anchor::nlabel);
+                label_class_t next_target = get_intersect_labels(next, target_);
+                assert(next_target != Anchor::nannot);
                 if (next_target) {
                     assert(has_labels(next, next_target));
                     callback(next, c, next_target);
@@ -163,7 +163,7 @@ class AlignmentGraph {
 
     void call_incoming_kmers(node_index node, const EdgeCallback &callback) const {
         // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.call_incoming_kmers(node, [&](node_index prev, char c) { callback(prev, c, target_); });
         } else {
             std::vector<node_index> backward_n;
@@ -180,8 +180,8 @@ class AlignmentGraph {
             for (size_t i = 0; i < backward_n.size(); ++i) {
                 node_index prev = backward_n[i];
                 char c = backward_c[i];
-                size_t prev_target = get_intersect_labels(prev, target_);
-                assert(prev_target != Anchor::nlabel);
+                label_class_t prev_target = get_intersect_labels(prev, target_);
+                assert(prev_target != Anchor::nannot);
                 if (prev_target) {
                     assert(has_labels(prev, prev_target));
                     callback(prev, c, prev_target);
@@ -191,7 +191,7 @@ class AlignmentGraph {
     }
 
     bool has_single_outgoing(node_index node) const {
-        if (target_ == Anchor::nlabel)
+        if (target_ == Anchor::nannot)
             return graph_.has_single_outgoing(node);
 
         size_t outdegree = 0;
@@ -201,7 +201,7 @@ class AlignmentGraph {
 
     bool has_single_incoming(node_index node) const {
         // std::cerr << "hsi\t" << node << "\t" << target_ << std::endl;
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             return graph_.has_single_incoming(node);
         } else {
             size_t indegree = 0;
@@ -211,7 +211,7 @@ class AlignmentGraph {
     }
 
     void adjacent_outgoing_nodes(node_index node, const TraverseCallback &callback) const {
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.adjacent_outgoing_nodes(node, [&](node_index next) { callback(next, target_); });
         } else {
             // TODO: replace this once we can guarantee that we won't get
@@ -234,7 +234,7 @@ class AlignmentGraph {
     }
 
     void adjacent_incoming_nodes(node_index node, const TraverseCallback &callback) const {
-        if (target_ == Anchor::nlabel) {
+        if (target_ == Anchor::nannot) {
             graph_.adjacent_incoming_nodes(node, [&](node_index prev) { callback(prev, target_); });
         } else {
             // TODO: replace this once we can guarantee that we won't get
@@ -256,15 +256,15 @@ class AlignmentGraph {
         }
     }
 
-    bool has_labels(node_index node, size_t target_labels_id) const {
+    bool has_labels(node_index node, label_class_t target_labels_id) const {
         if (!anno_buffer_) {
-            assert(target_labels_id == Anchor::nlabel);
+            assert(target_labels_id == Anchor::nannot);
             return true;
         }
 
-        assert(target_labels_id != Anchor::nlabel);
-        size_t node_labels_id = get_label_class(node);
-        if (node_labels_id == Anchor::nlabel)
+        assert(target_labels_id != Anchor::nannot);
+        label_class_t node_labels_id = get_label_class(node);
+        if (node_labels_id == Anchor::nannot)
             return false;
 
         if (node_labels_id == target_labels_id)
@@ -285,22 +285,22 @@ class AlignmentGraph {
     label_class_t get_label_class(node_index node) const {
         assert(anno_buffer_);
 
-        size_t node_labels_id = anno_buffer_->get_labels_id(node);
-        if (node_labels_id == Anchor::nlabel) {
+        label_class_t node_labels_id = anno_buffer_->get_labels_id(node);
+        if (node_labels_id == Anchor::nannot) {
             anno_buffer_->queue_path(std::vector<node_index>{ node });
             anno_buffer_->fetch_queued_annotations();
             node_labels_id = anno_buffer_->get_labels_id(node);
         }
-        assert(node_labels_id != Anchor::nlabel);
+        assert(node_labels_id != Anchor::nannot);
         return node_labels_id;
     }
 
-    label_class_t get_intersect_labels(node_index node, size_t target_labels_id) const {
+    label_class_t get_intersect_labels(node_index node, label_class_t target_labels_id) const {
         assert(anno_buffer_);
-        assert(target_labels_id != Anchor::nlabel);
+        assert(target_labels_id != Anchor::nannot);
 
-        size_t node_labels_id = get_label_class(node);
-        assert(node_labels_id != Anchor::nlabel);
+        label_class_t node_labels_id = get_label_class(node);
+        assert(node_labels_id != Anchor::nannot);
 
         if (node_labels_id == target_labels_id)
             return node_labels_id;
@@ -998,8 +998,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                         assert(last_num_ops > 0);
                         assert(query_dist >= last_num_ops);
                         ssize_t next_ext_cost = cost + gap_ext;
-                        if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nlabel), query_dist + 1, node)
-                                && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0, Anchor::nlabel)
+                        if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nannot), query_dist + 1, node)
+                                && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)
                                 && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target)) {
                             // it = S[cost][query_dist].begin() + it_dist;
                         }
@@ -1008,8 +1008,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     // open an insertion
                     if (last_op != Cigar::DELETION) {
                         ssize_t next_opn_cost = cost + gap_opn;
-                        if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nlabel), query_dist + 1, node)
-                                && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0, Anchor::nlabel)
+                        if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nannot), query_dist + 1, node)
+                                && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)
                                 && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target)) {
                             // it = S[cost][query_dist].begin() + it_dist;
                         }
@@ -1436,7 +1436,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate_branch,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                AnnotationBuffer *anno_buffer = nullptr,
-               Anchor::label_class_t target = Anchor::nlabel) {
+               Anchor::label_class_t target = Anchor::nannot) {
     using StrItr = std::string_view::iterator;
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
@@ -1497,8 +1497,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                std::string_view suffix = "",
                AnnotationBuffer *anno_buffer = nullptr,
-               Anchor::label_class_t target = Anchor::nlabel) {
-    assert(!anno_buffer == (target == Anchor::nlabel));
+               Anchor::label_class_t target = Anchor::nannot) {
+    assert(!anno_buffer == (target == Anchor::nannot));
     using StrItr = std::reverse_iterator<std::string_view::iterator>;
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
@@ -1852,7 +1852,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     ssize_t k = graph.get_k();
 
     assert(!dynamic_cast<const LabeledSeeder*>(this) || std::all_of(anchors.begin(), anchors.end(),
-                                          [](const auto &a) { return a.get_label_class() != Anchor::nlabel; }));
+                                          [](const auto &a) { return a.get_label_class() != Anchor::nannot; }));
 
     // sdsl::bit_vector selected(anchors.size(), false);
 
@@ -2094,11 +2094,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
             // ret_val &= std::all_of(chain.begin(), chain.end(),
             //                        [&](const auto &a) { return !selected[a.first - anchors.begin()]
-            //                                                     && (a.first->get_label_class() == Anchor::nlabel
+            //                                                     && (a.first->get_label_class() == Anchor::nannot
             //                                                             || !found_labels.count(a.first->get_label_class())); });
 
             ret_val &= std::all_of(chain.begin(), chain.end(),
-                                   [&](const auto &a) { return a.first->get_label_class() == Anchor::nlabel
+                                   [&](const auto &a) { return a.first->get_label_class() == Anchor::nannot
                                                                         || !found_labels.count(a.first->get_label_class()); });
 
             if (!ret_val)
@@ -2118,7 +2118,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             //     ++num_chains;
             //     for (const auto &[it, dist] : chain) {
             //         // selected[it - anchors.begin()] = true;
-            //         if (it->get_label_class() != Anchor::nlabel)
+            //         if (it->get_label_class() != Anchor::nannot)
             //             found_labels.emplace(it->get_label_class());
             //     }
             // }
@@ -2368,7 +2368,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     first_chain = false;
                 }
                 for (auto label : aln.get_label_classes()) {
-                    if (label != Anchor::nlabel)
+                    if (label != Anchor::nannot)
                         found_labels.emplace(label);
                 }
             }

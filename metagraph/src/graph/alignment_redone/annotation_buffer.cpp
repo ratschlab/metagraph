@@ -2,6 +2,8 @@
 
 #include <sstream>
 
+#include "aln_match.hpp"
+
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
@@ -97,7 +99,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         assert(node_to_cols_[node] == nannot);
         assert(node_to_cols_[base_node] == nannot);
 
-        size_t label_i = cache_column_set(std::move(labels));
+        label_class_t label_i = cache_column_set(std::move(labels));
         auto it = node_to_cols_.find(base_node);
         it.value() = label_i;
         if (has_coordinates()) {
@@ -149,8 +151,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
 }
 
 auto AnnotationBuffer::get_labels_id_and_coords(node_index node) const
-        -> std::pair<size_t, const CoordinateSet*> {
-    std::pair<size_t, const CoordinateSet*> ret_val { nannot, nullptr };
+        -> std::pair<label_class_t, const CoordinateSet*> {
+    std::pair<label_class_t, const CoordinateSet*> ret_val { nannot, nullptr };
 
     if (canonical_)
         node = canonical_->get_base_node(node);
@@ -181,8 +183,8 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     );
 }
 
-std::string AnnotationBuffer::generate_column_set_str(size_t i, size_t spelling_size) const {
-    if (i == Anchor::nlabel)
+std::string AnnotationBuffer::generate_column_set_str(label_class_t i, size_t spelling_size) const {
+    if (i == nannot)
         return "*";
 
     std::ostringstream ostd;
@@ -200,7 +202,7 @@ std::string AnnotationBuffer::generate_column_set_str(size_t i, size_t spelling_
         }
     }
 
-    for (size_t c = 1; c < columns.size(); ++c) {
+    for (Column c = 1; c < columns.size(); ++c) {
         assert(columns[c] != ncolumn);
         assert(columns[c] < annotator_.get_label_encoder().size());
         ostd << ";" << annotator_.get_label_encoder().decode(columns[c]);

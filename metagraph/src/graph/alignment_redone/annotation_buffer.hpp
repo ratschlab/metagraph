@@ -1,7 +1,5 @@
 #pragma once
 
-#include "aln_match.hpp"
-
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vector_set.hpp"
@@ -17,16 +15,21 @@ namespace align_redone {
 // caches queried annotations to speed up next queries (labels with or w/o coordinates)
 class AnnotationBuffer {
   public:
-    typedef AnnotatedDBG::Annotator Annotator;
-    typedef DeBruijnGraph::node_index node_index;
+    using label_class_t = size_t;
+    using coord_t = int64_t;
+
+    using Annotator = AnnotatedDBG::Annotator;
+    using node_index = DeBruijnGraph::node_index;
+
     using Column = annot::matrix::BinaryMatrix::Column;
-    using Tuple = SmallVector<int64_t>;
+    using Tuple = SmallVector<coord_t>;
     using Columns = annot::matrix::BinaryMatrix::SetBitPositions;
     using CoordinateSet = Vector<Tuple>;
 
     // dummy index for an unfetched annotations
-    static constexpr Anchor::label_class_t nannot = Anchor::nlabel;
+    static constexpr label_class_t nannot = std::numeric_limits<label_class_t>::max();
     static constexpr Column ncolumn = std::numeric_limits<Column>::max();
+    static constexpr coord_t ncoord = std::numeric_limits<coord_t>::max();
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 
@@ -48,7 +51,7 @@ class AnnotationBuffer {
     std::pair<const Columns*, const CoordinateSet*>
     get_labels_and_coords(node_index node) const;
 
-    std::pair<size_t, const CoordinateSet*>
+    std::pair<label_class_t, const CoordinateSet*>
     get_labels_id_and_coords(node_index node) const;
 
     // get the labels of a node if they have been fetched
@@ -57,7 +60,7 @@ class AnnotationBuffer {
     }
 
     // get the labels of a node if they have been fetched
-    inline size_t get_labels_id(node_index node) const {
+    inline label_class_t get_labels_id(node_index node) const {
         return get_labels_id_and_coords(node).first;
     }
 
@@ -69,23 +72,23 @@ class AnnotationBuffer {
     // This method lets the caller push additional column sets to dictionary
     // `column_sets_`. These column sets can later be fetched with `get_cached_column_set()`
     template <typename... Args>
-    inline size_t cache_column_set(Args&&... args) {
+    inline label_class_t cache_column_set(Args&&... args) {
         auto it = column_sets_.emplace(std::forward<Args>(args)...).first;
         assert(std::is_sorted(it->begin(), it->end()));
         return it - column_sets_.begin();
     }
 
-    inline size_t cache_column(Column column) {
+    inline label_class_t cache_column(Column column) {
         return cache_column_set(Columns(1, column));
     }
 
     // Fetch a label set given its index returned by `cache_column_set()`
-    inline const Columns& get_cached_column_set(size_t i) const {
+    inline const Columns& get_cached_column_set(label_class_t i) const {
         assert(i < column_sets_.size());
         return column_sets_.data()[i];
     }
 
-    std::string generate_column_set_str(size_t i, size_t spelling_size) const;
+    std::string generate_column_set_str(label_class_t i, size_t spelling_size) const;
 
   private:
     const DeBruijnGraph &graph_;
@@ -97,7 +100,7 @@ class AnnotationBuffer {
     // the first element is the empty label set
     VectorSet<Columns, utils::VectorHash> column_sets_;
      // map node to index in |column_sets_|
-    VectorMap<node_index, size_t> node_to_cols_;
+    VectorMap<node_index, label_class_t> node_to_cols_;
     // coordinate sets for all nodes in |node_to_cols_| in the same order
     std::vector<CoordinateSet> label_coords_;
     // buffer of paths to later querying with fetch_queued_annotations()
