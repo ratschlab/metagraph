@@ -1202,7 +1202,7 @@ class AlignmentGraph {
 
     node_index traverse(node_index node, char c) const {
         node_index next = graph_.traverse(node, c);
-        return has_labels(next) ? next : DeBruijnGraph::npos;
+        return next && has_labels(next) ? next : DeBruijnGraph::npos;
     }
 
     void traverse(node_index node, std::string_view seq,
@@ -1305,7 +1305,7 @@ class AlignmentGraph {
 
     node_index traverse_back(node_index node, char c) const {
         node_index prev = graph_.traverse_back(node, c);
-        return has_labels(prev) ? prev : DeBruijnGraph::npos;
+        return prev && has_labels(prev) ? prev : DeBruijnGraph::npos;
     }
 
     bool has_single_incoming(node_index node) const {
@@ -1366,6 +1366,7 @@ class AlignmentGraph {
     label_class_t target_;
 
     bool has_labels(node_index node) const {
+        assert(node != DeBruijnGraph::npos);
         if (!anno_buffer_ || target_ == Anchor::nlabel)
             return true;
 
