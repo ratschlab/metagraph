@@ -203,6 +203,8 @@ class Alignment : public Match {
 
     const std::vector<label_class_t>& get_label_classes() const { return label_classes_; }
 
+    void set_coords(CoordinateSet&& coords) { coords_ = std::move(coords); }
+
   private:
     size_t end_trim_;
     std::string path_spelling_;

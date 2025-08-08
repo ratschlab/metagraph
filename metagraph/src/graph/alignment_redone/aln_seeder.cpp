@@ -1488,7 +1488,7 @@ Anchor::label_class_t subset_coords(AnnotationBuffer &anno_buffer,
         }
     );
 
-    assert(it == target_columns.end());
+    assert(it + 1 == target_columns.end());
 
     if (intersection.size() == target_columns.size())
         return target;
@@ -1740,9 +1740,17 @@ void align_fwd(const DeBruijnGraph &base_graph,
     );
 }
 
-void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&)> &callback, bool no_bwd, bool no_fwd) const {
+void Extender::extend(const Alignment &aln,
+                      const std::function<void(Alignment&&)> &callback,
+                      bool no_bwd, bool no_fwd) const {
     // std::cerr << "Base " << aln << "\n";
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
+
+    auto set_coords = [&](Alignment &aln) {
+        assert(aln.get_label_classes().size());
+        if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer())
+            aln.set_coords(anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes()));
+    };
 
     std::vector<Alignment> fwd_exts;
     if (no_fwd || !aln.get_end_clipping()) {
@@ -1858,6 +1866,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
         fwd_ext.trim_end();
         if (no_bwd || !fwd_ext.get_clipping()) {
             // std::cerr << "\tskipbwd\t" << fwd_ext << "\n";
+            set_coords(fwd_ext);
             callback(std::move(fwd_ext));
             continue;
         }
@@ -1916,6 +1925,7 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
 
                 // assert(next_aln.get_score() == best_score);
                 // std::cerr << "found\t" << next_aln << "\n";
+                set_coords(next_aln);
                 callback(std::move(next_aln));
                 found = true;
             },
@@ -1966,8 +1976,10 @@ void Extender::extend(const Alignment &aln, const std::function<void(Alignment&&
             fwd_ext.get_label_classes()[0]
         );
 
-        if (!found)
+        if (!found) {
+            set_coords(fwd_ext);
             callback(std::move(fwd_ext));
+        }
     }
 }
 
@@ -2298,11 +2310,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         },
         [this,align,match_score=config_.match_score("A")](
                 AnchorIt last,
-               AnchorIt next,
-               Alignment&& aln,
-               size_t next_to_last_dist,
-               DBGAlignerConfig::score_t score_up_to_now,
-               const AlignmentCallback &callback) {
+                AnchorIt next,
+                Alignment&& aln,
+                size_t next_to_last_dist,
+                DBGAlignerConfig::score_t score_up_to_now,
+                const AlignmentCallback &callback) {
             // std::cerr << "try\t" << *next << " -> " << aln << std::endl;
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
@@ -2531,6 +2543,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         },
         [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
             aln.trim_end();
+
+            assert(aln.get_label_classes().size());
+            if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer())
+                aln.set_coords(anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes()));
+
             if (!ext_success) {
                 ++num_chains;
                 ext_success = true;
@@ -2543,6 +2560,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         found_labels.emplace(label);
                 }
             }
+
             if (common::get_verbose()) {
                 common::logger->trace("Aln: {}\t{}\t{}\t{}",
                                       aln.get_orientation() ? "-" : "+",

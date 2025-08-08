@@ -7,6 +7,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/algorithms.hpp"
 
 namespace mtg {
 namespace graph {
@@ -181,6 +182,46 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         labels_i < column_sets_.size() ? &column_sets_.data()[labels_i] : nullptr,
         coords
     );
+}
+
+auto AnnotationBuffer
+::get_label_path_coords(const std::vector<node_index> &path,
+                        const std::vector<label_class_t> &label_path) const
+        -> CoordinateSet {
+    assert(path.size() == label_path.size());
+
+    if (!has_coordinates() || path.empty())
+        return {};
+
+    label_class_t source = label_path[0];
+    assert(std::all_of(path.begin() + 1, path.end(), [&](label_class_t t) { return t == source; }));
+
+    if (source < label_coords_.size())
+        return label_coords_[source];
+
+    CoordinateSet ret_val;
+
+    auto [source_full_columns, source_full_coords] = get_labels_and_coords(path[0]);
+    assert(source_full_columns);
+    assert(source_full_coords);
+    assert(source_full_coords->size() == source_full_columns->size());
+    auto it_f = source_full_columns->begin();
+    auto it_c = source_full_coords->begin();
+
+    const Columns &source_columns = get_cached_column_set(source);
+    for (Column c : source_columns) {
+        auto it = std::find(it_f, source_full_columns->end(), c);
+        assert(it != source_full_columns->end());
+        it_c += (it - it_f);
+        it_f = it;
+
+        ret_val.emplace_back(*it_f);
+    }
+
+    assert(it_f + 1 == source_full_columns->end());
+    assert(it_c + 1 == source_full_coords->end());
+
+    return ret_val;
 }
 
 std::string AnnotationBuffer::generate_column_set_str(label_class_t i, size_t spelling_size) const {
