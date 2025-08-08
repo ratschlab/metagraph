@@ -132,6 +132,15 @@ class DBGSSHash : public DeBruijnGraph {
     adjacent_incoming_nodes_with_rc(node_index node,
                                     const std::function<void(node_index, bool)>& callback) const;
 
+    sdsl::bit_vector get_invalid_char_mask(std::string_view sequence) const;
+
+    static constexpr node_index sshash_to_graph_index(uint64_t idx) {
+        return idx + 1;
+    }
+
+    static constexpr uint64_t graph_index_to_sshash(node_index idx) {
+        return idx - 1;
+    }
 
   private:
     static const std::string alphabet_;

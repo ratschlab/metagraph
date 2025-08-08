@@ -342,6 +342,17 @@ class AlignmentGraph {
     }
 };
 
+template <typename T>
+struct template_parameter;
+
+template <template <typename...> class C, typename T>
+struct template_parameter<C<T>> {
+    using type = T;
+};
+
+template <typename T>
+using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
+
 std::vector<Anchor> ExactSeeder::get_anchors() const {
     const DeBruijnGraph &graph = query_.get_graph();
     std::vector<Anchor> anchors;
@@ -380,11 +391,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
         if (config_.min_seed_length < graph.get_k()) {
             const DBGSuccinct *dbg_succ;
+            const DBGSSHash *sshash;
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
             if (canonical) {
                 dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+                sshash = dynamic_cast<const DBGSSHash*>(&canonical->get_graph());
             } else {
                 dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+                sshash = dynamic_cast<const DBGSSHash*>(&graph);
             }
 
             if (dbg_succ) {
@@ -542,9 +556,135 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         );
                     }
                 }
-            } else if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
-                // TODO
-                std::ignore = sshash;
+            } else if (sshash) {
+                auto invalid_char = sshash->get_invalid_char_mask(this_query);
+
+                std::visit([&](const auto &dict) {
+                    using kmer_t = get_kmer_t<decltype(dict)>;
+                    const auto &buckets = dict.data();
+                    const auto &minimizers = dict.get_minimizers();
+                    const auto &offsets = buckets.offsets;
+                    size_t m = dict.m();
+                    size_t k = dict.k();
+                    auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, m);
+                    for (size_t i = 0; i + m <= this_query.size(); ++i) {
+                        assert(i < invalid_kmer.size());
+                        if (invalid_kmer[i])
+                            continue;
+
+                        kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
+                            this_query.data() + i,
+                            m
+                        );
+
+                        uint64_t bucket_id = minimizers.lookup(uint64_t(mmer));
+                        auto [begin, end] = buckets.locate_bucket(bucket_id);
+
+                        for (size_t super_kmer_id = begin; super_kmer_id < end; ++super_kmer_id) {
+                            uint64_t offset = offsets.access(super_kmer_id);
+
+                            auto [res, contig_end] = buckets.offset_to_id(offset, k);
+                            assert(res.contig_size);
+                            assert(res.kmer_id_in_contig < res.contig_size);
+                            assert(contig_end > offset);
+                            auto contig_begin = offset - res.kmer_id_in_contig;
+                            assert(contig_begin < contig_end);
+                            assert(contig_begin <= offset);
+                            assert(contig_end - contig_begin == res.contig_size + k - 1);
+
+                            sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
+                            assert(contig_end + 1 >= offset + k);
+                            uint64_t window_size = std::min<uint64_t>(k - m + 1, contig_end - offset - k + 1);
+                            assert(contig_begin + res.kmer_id_in_contig + window_size + m <= contig_end);
+                            for (uint64_t j = 0; j != window_size; ++j) {
+                                kmer_t read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                if (read_kmer != mmer)
+                                    continue;
+
+                                auto bv_it = start_bv_it;
+                                for (size_t w = j; res.kmer_id_in_contig < res.contig_size + k - m; ++w) {
+                                    size_t i_shift = i + w - j;
+                                    if (i_shift + m > this_query.size() || i_shift >= invalid_kmer.size() || invalid_kmer[i_shift])
+                                        break;
+
+                                    kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
+                                        this_query.data() + i_shift,
+                                        m
+                                    );
+
+                                    // std::cerr << sshash::util::uint_kmer_to_string<kmer_t>(mmer, m) << " vs. "
+                                    //           << sshash::util::uint_kmer_to_string<kmer_t>(read_kmer, m) << "\n";
+                                    if (read_kmer != mmer)
+                                        break;
+
+                                    size_t i_in_contig = res.kmer_id_in_contig + w;
+                                    if (i_in_contig < res.contig_size && i_shift + k <= this_query.size()) {
+                                        // forward
+                                        assert(contig_begin + res.kmer_id_in_contig + w + k <= contig_end);
+                                        DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w);
+                                        // std::cerr << "\t" << graph.get_node_sequence(node) << "\n";
+                                        if (i_shift >= nodes.size() || node != nodes[i_shift]) {
+                                            std::string spelling = graph.get_node_sequence(node);
+                                            assert(std::equal(this_query.begin() + i_shift, this_query.begin() + i_shift + m,
+                                                              spelling.begin(), spelling.begin() + m));
+                                            auto jt = std::mismatch(spelling.begin() + m, spelling.end(),
+                                                                    this_query.begin() + i_shift + m, this_query.begin() + i_shift + k).first;
+                                            size_t full_match_size = jt - spelling.begin();
+                                            assert(full_match_size <= k);
+                                            if (full_match_size >= config_.min_seed_length) {
+                                                auto [it, inserted] = cur_max_seeds[i].try_emplace(node, Anchor());
+                                                if (full_match_size > it->second.get_seed().size()) {
+                                                    it.value() = Anchor(this_query,
+                                                                        i_shift, i_shift + full_match_size,
+                                                                        orientation,
+                                                                        std::vector<Match::node_index>{ node },
+                                                                        spelling.substr(full_match_size));
+                                                    assert(it->second.get_path_spelling().size() == graph.get_k());
+                                                    assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                                    assert(it->second.is_spelling_valid(graph));
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
+                                        // rev comp
+                                        assert(i_shift + m <= this_query.size());
+                                        assert(res.kmer_id + w + m >= k);
+                                        DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w + m - k);
+                                        std::string spelling = graph.get_node_sequence(node);
+                                        assert(std::equal(this_query.begin() + i_shift, this_query.begin() + i_shift + m,
+                                                          spelling.end() - m, spelling.end()));
+                                        auto jt = std::mismatch(spelling.rbegin() + m, spelling.rend(),
+                                                                std::make_reverse_iterator(this_query.begin() + i_shift),
+                                                                std::make_reverse_iterator(this_query.begin() + i_shift + m - k)).first;
+                                        size_t full_match_size = jt - spelling.rbegin();
+                                        assert(full_match_size <= k);
+                                        if (full_match_size >= config_.min_seed_length) {
+                                            size_t i_rc = this_query.size() - (i_shift + full_match_size);
+                                            node = canonical ? canonical->reverse_complement(node)
+                                                            : sshash->reverse_complement(node);
+                                            auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                            if (full_match_size > it->second.get_seed().size()) {
+                                                it.value() = Anchor(query_.get_query(!orientation),
+                                                                    i_rc, i_rc + full_match_size,
+                                                                    !orientation,
+                                                                    std::vector<Match::node_index>{ node },
+                                                                    spelling.substr(full_match_size));
+                                                assert(it->second.get_path_spelling().size() == graph.get_k());
+                                                assert(it->second.get_spelling().size() + it->second.get_end_trim() == graph.get_k());
+                                                assert(it->second.is_spelling_valid(graph));
+                                            }
+                                        }
+                                    }
+
+                                    if (res.kmer_id_in_contig + w + 1 + m <= contig_end)
+                                        read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                }
+                            }
+                        }
+                    }
+                }, sshash->data());
             }
         }
     }

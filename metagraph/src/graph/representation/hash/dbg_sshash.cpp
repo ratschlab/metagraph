@@ -35,13 +35,6 @@ using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
 
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
-constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) {
-    return idx + 1;
-}
-constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
-    return idx - 1;
-}
-
 size_t DBGSSHash::dict_size() const {
     return std::visit([](const auto& d) { return d.size(); }, dict_);
 }
@@ -109,7 +102,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     break;
                                 } else {
                                     found_fw = true;
-                                    next = sshash_to_graph_index(nb.forward[i].kmer_id);
+                                    next = DBGSSHash::sshash_to_graph_index(nb.forward[i].kmer_id);
                                     found_i = i;
                                     if (nb.forward[i].kmer_orientation)
                                         next = graph.reverse_complement(next);
@@ -134,7 +127,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     break;
                                 } else {
                                     found_bw = true;
-                                    prev = sshash_to_graph_index(nb.backward[i].kmer_id);
+                                    prev = DBGSSHash::sshash_to_graph_index(nb.backward[i].kmer_id);
                                     if (nb.backward[i].kmer_orientation)
                                         prev = graph.reverse_complement(prev);
                                 }
@@ -210,6 +203,19 @@ void DBGSSHash::add_sequence(std::string_view sequence,
     throw std::logic_error("adding sequences not supported");
 }
 
+sdsl::bit_vector DBGSSHash::get_invalid_char_mask(std::string_view sequence) const {
+    sdsl::bit_vector invalid_char(sequence.size());
+
+    std::visit([&](const auto& dict) {
+        using kmer_t = get_kmer_t<decltype(dict)>;
+        for (size_t i = 0; i < sequence.size(); ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
+        }
+    }, dict_);
+
+    return invalid_char;
+}
+
 template <bool with_rc, class Dict>
 void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
                                const Dict& dict,
@@ -240,11 +246,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
             callback(ret_val);
         }
     } else {
-        std::vector<bool> invalid_char(n);
-        for (size_t i = 0; i < n; ++i) {
-            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-        }
-
+        auto invalid_char = graph.get_invalid_char_mask(sequence);
         auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
         bool begin = true;
