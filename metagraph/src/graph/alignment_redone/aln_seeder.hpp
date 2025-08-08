@@ -91,4 +91,15 @@ class LabeledExtender : public Extender {
     virtual AlignmentGraph make_aln_graph(Anchor::label_class_t target) const override;
 };
 
+void align_query(const Query &query,
+                 const Seeder &seeder,
+                 const Extender &extender,
+                 const std::function<void(Alignment&&)> &callback,
+                 bool connect_anchors_in_chain = true);
+
+void align_query(const Query &query,
+                 const Seeder &seeder,
+                 const std::function<void(Alignment&&)> &callback,
+                 bool connect_anchors_in_chain = true);
+
 } // namespace mtg::graph::align

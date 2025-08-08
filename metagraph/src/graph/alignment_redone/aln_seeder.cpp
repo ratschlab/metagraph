@@ -15,6 +15,24 @@
 
 namespace mtg::graph::align_redone {
 
+void align_query(const Query &query,
+                 const Seeder &seeder,
+                 const Extender &extender,
+                 const std::function<void(Alignment&&)> &callback,
+                 bool connect_anchors_in_chain) {
+    align_query(query, seeder,
+                [&](Alignment&& base_path) { extender.extend(base_path, callback); });
+}
+
+void align_query(const Query &query,
+                 const Seeder &seeder,
+                 const std::function<void(Alignment&&)> &callback,
+                 bool connect_anchors_in_chain) {
+    for (Alignment &path : seeder.get_inexact_anchors(connect_anchors_in_chain)) {
+        callback(std::move(path));
+    }
+}
+
 using TraverseCallback = std::function<void(DeBruijnGraph::node_index, Anchor::label_class_t)>;
 using EdgeCallback = std::function<void(DeBruijnGraph::node_index, char, Anchor::label_class_t)>;
 using Terminator = std::function<bool()>;

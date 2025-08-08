@@ -440,32 +440,25 @@ int align_to_graph(Config *config) {
                         seeder = std::make_unique<align_redone::ExactSeeder>(aln_query, aligner_config);
                     }
 
-                    std::unique_ptr<align_redone::Extender> extender;
-                    if (anno_dbg) {
-                        extender = std::make_unique<align_redone::LabeledExtender>(*anno_buffer, aln_query, aligner_config);
-                    } else {
-                        extender = std::make_unique<align_redone::Extender>(aln_query, aligner_config);
-                    }
-
-                    // auto aln_sort = [](const auto &a, const auto &b) {
-                    //     return std::make_pair(a.get_score(), b.get_orientation())
-                    //          > std::make_pair(b.get_score(), a.get_orientation());
-                    // };
-
-                    auto chains = seeder->get_inexact_anchors(config->alignment_connect_anchors);
-                    // std::sort(chains.begin(), chains.end(), aln_sort);
-
                     std::vector<align_redone::Alignment> paths;
+                    auto aln_callback = [&](align_redone::Alignment&& aln) {
+                        paths.emplace_back(std::move(aln));
+                    };
 
                     if (config->alignment_extend_chains) {
-                        for (const auto &base_path : chains) {
-                            extender->extend(base_path, [&](align_redone::Alignment&& path) {
-                                paths.emplace_back(std::move(path));
-                            });
+                        std::unique_ptr<align_redone::Extender> extender;
+                        if (anno_dbg) {
+                            extender = std::make_unique<align_redone::LabeledExtender>(*anno_buffer, aln_query, aligner_config);
+                        } else {
+                            extender = std::make_unique<align_redone::Extender>(aln_query, aligner_config);
                         }
-                        // std::sort(paths.begin(), paths.end(), aln_sort);
+                        align_redone::align_query(aln_query, *seeder, *extender,
+                                                  aln_callback,
+                                                  config->alignment_connect_anchors);
                     } else {
-                        std::swap(paths, chains);
+                        align_redone::align_query(aln_query, *seeder,
+                                                  aln_callback,
+                                                  config->alignment_connect_anchors);
                     }
 
                     *out << header << "\t" << query;
