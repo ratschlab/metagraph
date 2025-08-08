@@ -93,6 +93,8 @@ class AnnotationBuffer {
     CoordinateSet get_label_path_coords(const std::vector<node_index> &path,
                                         const std::vector<label_class_t> &label_path) const;
 
+    bool node_has_labels(node_index node, label_class_t target) const;
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;

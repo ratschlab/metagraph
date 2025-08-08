@@ -1479,6 +1479,8 @@ Anchor::label_class_t subset_coords(AnnotationBuffer &anno_buffer,
         source_columns.begin(), source_columns.end(), source_coords.begin(),
         target_columns_full->begin(), target_columns_full->end(), target_coords_full->begin(),
         [&](AnnotationBuffer::Column c, const AnnotationBuffer::Tuple &source_coords, const AnnotationBuffer::Tuple &target_coords) {
+            assert(source_coords.size());
+            assert(target_coords.size());
 #ifndef NDEBUG
             it = std::find(it, target_columns.end(), c);
             assert(it != target_columns.end());
@@ -1510,6 +1512,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
                Anchor::label_class_t target = Anchor::nannot,
                const AnnotationBuffer::CoordinateSet &coords = {}) {
     assert(!anno_buffer == (target == Anchor::nannot));
+    assert(!anno_buffer || anno_buffer->node_has_labels(start_node, target));
     assert(!anno_buffer
             || (!anno_buffer->has_coordinates() && coords.empty())
             || anno_buffer->get_cached_column_set(target).size() == coords.size());
@@ -1519,17 +1522,18 @@ void align_bwd(const DeBruijnGraph &base_graph,
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
             if (coords.empty()) {
-                return AlignmentGraph(base_graph, anno_buffer, cur_target).has_single_incoming(node);
+                return aln_graph.has_single_incoming(node);
             } else {
                 assert(anno_buffer);
                 size_t indegree = 0;
-                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(
+                size_t next_dist = dist + 1;
+                aln_graph.call_incoming_kmers(
                     node,
-                    [&](DeBruijnGraph::node_index prev, char c, Anchor::label_class_t prev_target) {
-                        std::ignore = c;
-                        if (subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
-                                          -static_cast<ssize_t>(dist)))
+                    [&](DeBruijnGraph::node_index prev, char, Anchor::label_class_t prev_target) {
+                        if (subset_coords(*anno_buffer, target, coords, prev_target, prev,
+                                          -static_cast<ssize_t>(next_dist)))
                             ++indegree;
                     }
                 );
@@ -1543,8 +1547,9 @@ void align_bwd(const DeBruijnGraph &base_graph,
 
             assert(cur_target);
             if (begin != end) {
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
                 if (coords.empty()) {
-                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
+                    aln_graph.traverse_back(
                         node,
                         std::string_view(&*begin, end - begin),
                         callback, terminate
@@ -1552,12 +1557,13 @@ void align_bwd(const DeBruijnGraph &base_graph,
                 } else {
                     assert(anno_buffer);
                     bool stop_early = false;
-                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse_back(
+                    size_t next_dist = dist + 1;
+                    aln_graph.traverse_back(
                         node,
                         std::string_view(&*begin, end - begin),
                         [&](DeBruijnGraph::node_index prev, Anchor::label_class_t prev_target) {
-                            if (subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
-                                              -static_cast<ssize_t>(dist))) {
+                            if (subset_coords(*anno_buffer, target, coords, prev_target, prev,
+                                              -static_cast<ssize_t>(next_dist++))) {
                                 callback(prev, prev_target);
                             } else {
                                 stop_early = true;
@@ -1574,14 +1580,16 @@ void align_bwd(const DeBruijnGraph &base_graph,
 
             assert(cur_target);
 
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
             if (coords.empty()) {
-                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(node, callback);
+                aln_graph.call_incoming_kmers(node, callback);
             } else {
-                AlignmentGraph(base_graph, anno_buffer, cur_target).call_incoming_kmers(
+                size_t next_dist = dist + 1;
+                aln_graph.call_incoming_kmers(
                     node,
                     [&](DeBruijnGraph::node_index prev, char c, Anchor::label_class_t prev_target) {
-                        if (Anchor::label_class_t prev_target_s = subset_coords(*anno_buffer, cur_target, coords, prev_target, prev,
-                                                                                -static_cast<ssize_t>(dist)))
+                        if (Anchor::label_class_t prev_target_s = subset_coords(*anno_buffer, target, coords, prev_target, prev,
+                                                                                -static_cast<ssize_t>(next_dist)))
                             callback(prev, c, prev_target_s);
                     }
                 );
@@ -1622,6 +1630,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
                Anchor::label_class_t target = Anchor::nannot,
                const AnnotationBuffer::CoordinateSet &coords = {}) {
     assert(!anno_buffer == (target == Anchor::nannot));
+    assert(!anno_buffer || anno_buffer->node_has_labels(start_node, target));
     assert(!anno_buffer
             || (!anno_buffer->has_coordinates() && coords.empty())
             || anno_buffer->get_cached_column_set(target).size() == coords.size());
@@ -1630,22 +1639,23 @@ void align_fwd(const DeBruijnGraph &base_graph,
 
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
-            std::ignore = start_node;
             assert(cur_target);
-            assert(dist >= suffix.size() || node == start_node);
+            assert(dist > suffix.size() || node == start_node);
             if (dist < suffix.size())
                 return true;
 
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
             if (coords.empty()) {
-                return AlignmentGraph(base_graph, anno_buffer, target).has_single_outgoing(node);
+                return aln_graph.has_single_outgoing(node);
             } else {
                 assert(anno_buffer);
                 size_t outdegree = 0;
-                AlignmentGraph(base_graph, anno_buffer, cur_target).call_outgoing_kmers(
+                assert(dist >= suffix.size());
+                size_t next_dist = dist - suffix.size() + 1;
+                aln_graph.call_outgoing_kmers(
                     node,
-                    [&](DeBruijnGraph::node_index next, char c, Anchor::label_class_t next_target) {
-                        std::ignore = c;
-                        if (subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist))
+                    [&](DeBruijnGraph::node_index next, char, Anchor::label_class_t next_target) {
+                        if (subset_coords(*anno_buffer, target, coords, next_target, next, next_dist))
                             ++outdegree;
                     }
                 );
@@ -1657,9 +1667,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
             size_t dist, Anchor::label_class_t cur_target,
             const auto &callback, const auto &terminate) {
 
-            std::ignore = start_node;
             assert(cur_target);
-            assert(dist >= suffix.size() || node == start_node);
+            assert(dist > suffix.size() || node == start_node);
 
             auto begin = rend.base();
             auto end = rbegin.base();
@@ -1674,19 +1683,22 @@ void align_fwd(const DeBruijnGraph &base_graph,
             }
 
             if (begin != end) {
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
                 if (coords.empty()) {
-                    AlignmentGraph(base_graph, anno_buffer, target).traverse(
+                    aln_graph.traverse(
                         node, std::string_view(&*begin, end - begin),
                         callback, terminate
                     );
                 } else {
                     assert(anno_buffer);
                     bool stop_early = false;
-                    AlignmentGraph(base_graph, anno_buffer, cur_target).traverse(
+                    assert(dist >= suffix.size());
+                    size_t next_dist = dist - suffix.size() + 1;
+                    aln_graph.traverse(
                         node,
                         std::string_view(&*begin, end - begin),
                         [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
-                            if (subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist)) {
+                            if (subset_coords(*anno_buffer, target, coords, next_target, next, next_dist++)) {
                                 callback(next, next_target);
                             } else {
                                 stop_early = true;
@@ -1699,21 +1711,26 @@ void align_fwd(const DeBruijnGraph &base_graph,
         },
         [&](DeBruijnGraph::node_index node, const auto &callback,
             size_t dist, Anchor::label_class_t cur_target) {
+
             assert(cur_target);
             if (dist < suffix.size()) {
-                std::ignore = start_node;
                 assert(node == start_node);
                 callback(node, suffix[dist], cur_target);
-            } else if (coords.empty()) {
-                AlignmentGraph(base_graph, anno_buffer, target).call_outgoing_kmers(node, callback);
             } else {
-                AlignmentGraph(base_graph, anno_buffer, cur_target).call_outgoing_kmers(
-                    node,
-                    [&](DeBruijnGraph::node_index next, char c, Anchor::label_class_t next_target) {
-                        if (Anchor::label_class_t next_target_s = subset_coords(*anno_buffer, cur_target, coords, next_target, next, dist))
-                            callback(next, c, next_target_s);
-                    }
-                );
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+                if (coords.empty()) {
+                    aln_graph.call_outgoing_kmers(node, callback);
+                } else {
+                    assert(dist >= suffix.size());
+                    size_t next_dist = dist - suffix.size() + 1;
+                    aln_graph.call_outgoing_kmers(
+                        node,
+                        [&](DeBruijnGraph::node_index next, char c, Anchor::label_class_t next_target) {
+                            if (Anchor::label_class_t next_target_s = subset_coords(*anno_buffer, target, coords, next_target, next, next_dist))
+                                callback(next, c, next_target_s);
+                        }
+                    );
+                }
             }
         },
         config,
@@ -1748,8 +1765,13 @@ void Extender::extend(const Alignment &aln,
 
     auto set_coords = [&](Alignment &aln) {
         assert(aln.get_label_classes().size());
-        if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer())
-            aln.set_coords(anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes()));
+        if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer()) {
+            if (anno_buffer->has_coordinates()) {
+                auto coords = anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes());
+                assert(coords.size());
+                aln.set_coords(std::move(coords));
+            }
+        }
     };
 
     std::vector<Alignment> fwd_exts;
@@ -1779,7 +1801,8 @@ void Extender::extend(const Alignment &aln,
         size_t max_dist = 0;
         DBGAlignerConfig::score_t best_score = aln_score;
         size_t max_query_dist = 0;
-        auto aln_graph = make_aln_graph(aln.get_label_classes().back());
+        Anchor::label_class_t target = aln.get_label_classes().back();
+        auto *anno_buffer = make_aln_graph(target).get_anno_buffer();
         align_fwd(
             query_.get_graph(),
             config_, aln.get_path().back(), num_matches,
@@ -1806,6 +1829,8 @@ void Extender::extend(const Alignment &aln,
                     aln.get_end_trim() - std::min(aln.get_end_trim(), spelling.size()),
                     final_target
                 );
+
+                set_coords(fwd_exts.back());
 
                 // std::cerr << "\tend" << fwd_exts.back() << "\t" << fwd_exts.back().get_label_classes().back() << std::endl;
 
@@ -1854,8 +1879,11 @@ void Extender::extend(const Alignment &aln,
                 return query_dist == query_window.size();
             },
             aln.get_trim_spelling(),
-            aln_graph.get_anno_buffer(),
-            aln.get_label_classes().back()
+            anno_buffer,
+            target,
+            anno_buffer ? anno_buffer->get_label_path_coords({ aln.get_path().back() },
+                                                             { target })
+                        : AnnotationBuffer::CoordinateSet()
         );
 
         if (fwd_exts.empty())
@@ -1896,7 +1924,7 @@ void Extender::extend(const Alignment &aln,
         size_t max_dist = 0;
         size_t max_query_dist = 0;
         // std::cerr << "bwd extending\t" << fwd_ext << "\t" << fwd_ext.get_label_classes()[0] << "\n";
-        auto aln_graph = make_aln_graph(fwd_ext.get_label_classes()[0]);
+        auto *anno_buffer = make_aln_graph(fwd_ext.get_label_classes()[0]).get_anno_buffer();
         align_bwd(
             query_.get_graph(),
             config_, fwd_ext.get_path()[0], num_matches,
@@ -1972,8 +2000,11 @@ void Extender::extend(const Alignment &aln,
                 // return query_dist == query_window.size() && dist == max_dist;
                 return query_dist == query_window.size();
             },
-            aln_graph.get_anno_buffer(),
-            fwd_ext.get_label_classes()[0]
+            anno_buffer,
+            fwd_ext.get_label_classes()[0],
+            anno_buffer ? anno_buffer->get_label_path_coords({ fwd_ext.get_path()[0] },
+                                                             { fwd_ext.get_label_classes()[0] })
+                        : AnnotationBuffer::CoordinateSet()
         );
 
         if (!found) {
@@ -2455,8 +2486,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
 
             bool aln_found = false;
-            auto aln_graph = make_aln_graph(last->get_label_class());
-
+            auto *anno_buffer = make_aln_graph(last->get_label_class()).get_anno_buffer();
             align_bwd(
                 query_.get_graph(),
                 config_,
@@ -2533,8 +2563,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     //                  get_score(cost, query_dist, dist));
                     return aln_found || (query_dist == query_window.size() && node == target_node);
                 },
-                aln_graph.get_anno_buffer(),
-                last->get_label_class()
+                anno_buffer,
+                last->get_label_class(),
+                anno_buffer ? anno_buffer->get_label_path_coords({ aln.get_path()[0] },
+                                                                 { last->get_label_class() })
+                            : AnnotationBuffer::CoordinateSet()
             );
             if (!aln_found) {
                 std::cerr << "q: " << aln.get_clipping() - next->get_clipping() << "\td: " << next_to_last_dist - last->get_seed().size() + next->get_seed().size() << "\t" << *next << " " << next->get_path_spelling() << " -> " << aln << std::endl;
@@ -2545,8 +2578,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             aln.trim_end();
 
             assert(aln.get_label_classes().size());
-            if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer())
-                aln.set_coords(anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes()));
+            if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer()) {
+                if (anno_buffer->has_coordinates()) {
+                    auto coords = anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes());
+                    assert(coords.size());
+                    aln.set_coords(std::move(coords));
+                }
+            }
 
             if (!ext_success) {
                 ++num_chains;

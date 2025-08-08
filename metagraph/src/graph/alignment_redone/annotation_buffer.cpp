@@ -184,6 +184,17 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     );
 }
 
+bool AnnotationBuffer::node_has_labels(node_index node, label_class_t target) const {
+    assert(target != nannot);
+
+    auto node_full_columns = get_labels(node);
+    assert(node_full_columns);
+
+    const Columns &target_columns = get_cached_column_set(target);
+    return utils::count_intersection(node_full_columns->begin(), node_full_columns->end(),
+                                     target_columns.begin(), target_columns.end()) == target_columns.size();
+}
+
 auto AnnotationBuffer
 ::get_label_path_coords(const std::vector<node_index> &path,
                         const std::vector<label_class_t> &label_path) const
@@ -194,10 +205,12 @@ auto AnnotationBuffer
         return {};
 
     label_class_t source = label_path[0];
-    assert(std::all_of(path.begin() + 1, path.end(), [&](label_class_t t) { return t == source; }));
-
-    if (source < label_coords_.size())
-        return label_coords_[source];
+    assert(source);
+    assert(source != nannot);
+    assert(std::all_of(label_path.begin() + 1,
+                       label_path.end(),
+                       [&](label_class_t t) { return t == source; }));
+    assert(node_has_labels(path[0], source));
 
     CoordinateSet ret_val;
 
@@ -205,21 +218,36 @@ auto AnnotationBuffer
     assert(source_full_columns);
     assert(source_full_coords);
     assert(source_full_coords->size() == source_full_columns->size());
-    auto it_f = source_full_columns->begin();
-    auto it_c = source_full_coords->begin();
+
+    auto [target_full_columns, target_full_coords] = get_labels_and_coords(path.back());
+    assert(target_full_columns);
+    assert(target_full_coords);
+    assert(target_full_coords->size() == target_full_columns->size());
 
     const Columns &source_columns = get_cached_column_set(source);
-    for (Column c : source_columns) {
-        auto it = std::find(it_f, source_full_columns->end(), c);
-        assert(it != source_full_columns->end());
-        it_c += (it - it_f);
-        it_f = it;
+    assert(source_columns.size());
+    auto it_s = source_columns.begin();
 
-        ret_val.emplace_back(*it_f);
-    }
+    size_t coord_dist = path.size() - 1;
+    utils::match_indexed_values(
+        source_full_columns->begin(), source_full_columns->end(), source_full_coords->begin(),
+        target_full_columns->begin(), target_full_columns->end(), target_full_coords->begin(),
+        [&](Column c, const Tuple &source_c, const Tuple &target_c) {
+            assert(source_c.size());
+            assert(target_c.size());
+            if (it_s != source_columns.end() && c == *it_s) {
+                Tuple &out = ret_val.emplace_back();
+                utils::set_intersection(source_c.begin(), source_c.end(),
+                                        target_c.begin(), target_c.end(),
+                                        std::back_inserter(out),
+                                        coord_dist);
+                assert(out.size());
+                ++it_s;
+            }
+        }
+    );
 
-    assert(it_f + 1 == source_full_columns->end());
-    assert(it_c + 1 == source_full_coords->end());
+    assert(it_s == source_columns.end());
 
     return ret_val;
 }

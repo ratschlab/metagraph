@@ -318,4 +318,127 @@ TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
 }
 #endif
 
+TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoords) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 3;
+    /*  B                  AB  AB
+       CGA                 GCC-CCT
+          \ BC  BC  BC ABC/
+           GAA-AAT-ATG-TGC
+         C/               \  C   C
+       GGA                 GCA-CAT
+    */
+    const std::vector<std::string> sequences {
+        "TGCCT",
+        "CGAATGCCT",
+        "GGAATGCAT"
+    };
+    const std::vector<std::string> labels { "A", "B", "C" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+
+    std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+        { std::string("CGAATGCAT"), { // RC: ATGCATTCG
+            std::make_tuple(std::string("C"), std::string("GAATGCAT"), std::string("1S8=")),
+            std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("7=1X1=")),
+        } }
+    };
+
+    for (const auto &[query, mappings] : exp_alignments) {
+        run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+    }
+}
+
+TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsMiddle) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 3;
+    /*  B                  AB  AB
+       CGA                 GCC-CCT
+          \ BC  BC  BC ABC/
+           GAA-AAT-ATG-TGC
+         C/               \  C   C   C   C
+       GGA                 GCA-CAT-ATT-TTT
+    */
+    const std::vector<std::string> sequences {
+        "TGCCT",
+        "CGAATGCCT",
+        "GGAATGCATTTT"
+    };
+    const std::vector<std::string> labels { "A", "B", "C" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+
+    std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+        { std::string("CGAAAGCCTTTT"), { // RC: AAAGGCTTTCG
+            std::make_tuple(std::string("C"), std::string("GAATGCATTTT"), std::string("1S3=1X2=1X4=")),
+            std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("4=1X4=3S")),
+            std::make_tuple(std::string("A"), std::string("GCCT"), std::string("5S4=3S")),
+        } }
+    };
+
+    for (const auto &[query, mappings] : exp_alignments) {
+        run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+    }
+}
+
+TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 4;
+    /*
+        A    A    B    B    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCG-GCGC-CGCA
+    */
+    const std::vector<std::string> sequences {
+        "GCAAT",
+        "AATGCGCA"
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+
+    std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+        { std::string("ATGCGCAATGCG"), { // RC: CGCATTGCGCAT
+            std::make_tuple(std::string("B"), std::string("ATGCGCA"), std::string("7=5S")),
+            std::make_tuple(std::string("A"), std::string("GCAAT"), std::string("4S5=3S")),
+        } }
+    };
+
+    for (const auto &[query, mappings] : exp_alignments) {
+        run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+    }
+}
+
 } // namespace
