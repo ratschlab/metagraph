@@ -141,8 +141,10 @@ class LabeledAlignerRedoneTest : public ::testing::Test {};
 
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGSSHash, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
+                         std::pair<DBGSSHash, annot::RowFlatAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerRedoneTest, FewGraphAnnotationPairTypes);
 
@@ -216,22 +218,24 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
 }
 
 TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
-    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>
+                    && !std::is_base_of_v<DBGSSHash, typename TypeParam::first_type>) {
         return;
     }
 
-    size_t k = 5;
-    /*      B     B     B                 B    AB
-           GTCGA-TCGAA-CGAAT             ATGCC-TGCCT
-                            \ BC    BC  /
-                             GAATG-AATGC
-             C     C     C  /           \  C     C
-           GTGGA-TGGAA-GGAAT             ATGCA-TGCAT
+    size_t k = 6;
+    /*
+             B      B      B             B     AB     AB
+            GTCGAT-TCGATT-CGATTG        ATTGCC-TTGCCT-TGCCTT
+                                \ BC   /
+                                 GATTGC
+              C      C      C   /      \  C      C      C
+            GTGGAT-TGGATT-GGATTG        ATTGCA-TTGCAT-TGCATT
     */
     const std::vector<std::string> sequences {
-              "TGCCT",
-        "GTCGAATGCCT",
-        "GTGGAATGCAT"
+             "TTGCCTT",
+        "GTCGATTGCCTT",
+        "GTGGATTGCATT"
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
@@ -240,14 +244,14 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-    config.min_seed_length = 2;
+    config.min_seed_length = 3;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
 
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("GTGAAATGCAT"), {
-                std::make_tuple(std::string("C"), std::string("GTGGAATGCAT"), std::string("3=1X7=")),
+            { std::string("GTGAATTGCAT"), {
+                std::make_tuple(std::string("C"), std::string("GTGGATTGCAT"), std::string("3=1X7=")),
             } }
         };
 
@@ -257,9 +261,10 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
     }
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("GTGAAATGCAT"), {
-                std::make_tuple(std::string("C"), std::string("GTGGAATGCAT"), std::string("3=1X7=")),
-                std::make_tuple(std::string("B"), std::string("GTCGAATGCCT"), std::string("2=2X5=1X1=")),
+            { std::string("GTGAATTGCAT"), {
+                std::make_tuple(std::string("C"), std::string("GTGGATTGCAT"), std::string("3=1X7=")),
+                std::make_tuple(std::string("B"), std::string("GTCGATTGCCT"), std::string("2=2X5=1X1=")),
+                std::make_tuple(std::string("A"), std::string("TTGCCT"), std::string("5S4=1X1=")),
             } }
         };
 
@@ -271,7 +276,8 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
 
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
-    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, typename TypeParam::first_type>
+                    && !std::is_base_of_v<DBGSSHash, typename TypeParam::first_type>) {
         return;
     }
 

@@ -6,6 +6,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 // #include "graph/alignment/dbg_aligner.hpp"
 // #include "graph/alignment/aligner_labeled.hpp"
@@ -349,6 +350,13 @@ int align_to_graph(Config *config) {
     }
 
     align_redone::DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
+
+    if (auto sshash = std::dynamic_pointer_cast<DBGSSHash>(graph)) {
+        std::visit([&](const auto &dict) {
+            if (dict.m() > aligner_config.min_seed_length)
+                common::logger->warn("SSHash minimizer size is {}, only seeds of at least this length will be found.", dict.m());
+        }, sshash->data());
+    }
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
