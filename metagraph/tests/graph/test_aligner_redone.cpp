@@ -336,16 +336,17 @@ TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
 TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     size_t k = 5;
     std::vector<std::string> references = {
-                        "AGACAATTTTTTTTGGG",
-                        "AGACAATTTTTGTTGGG",
-                        "AGACAAGTTTTTTTGGG",
-                        "AGACAAGTTTTGTTGGG" };
-    std::string query = "AGACAACTTTTCTTG";
+                        "AGACAATTTTTTAAAAA",
+                        "AGACAATTTTTGAAAAA",
+                        "AGACAAGTTTTTAAAAA",
+                        "AGACAAGTTTTGAAAAA" };
+    std::string query = "AGACAACTTTTCAAA";
     //                         X    X
 
     auto graph = build_graph_batch<TypeParam>(k, references);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { "" }, { "6=1X4=1X3=" });
@@ -914,17 +915,17 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;
     std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGCAAAAA";
-    std::string query =        "GTAGTGCTACCTTGTAGTCGTGGTGATGC";
+    std::string query =        "GTAGTGCTACCTTGTAGTCGTGGTGATGCA";
     //                                   X            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
-        config.min_seed_length = 6;
-        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X6=" });
+        config.min_seed_length = 7;
+        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" });
     } else {
-        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X6=" }, 0, true, true);
+        run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" }, 0, true, true);
     }
 }
 

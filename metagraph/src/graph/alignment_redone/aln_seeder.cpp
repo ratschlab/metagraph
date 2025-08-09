@@ -574,10 +574,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     const auto &offsets = buckets.offsets;
                     size_t m = dict.m();
                     size_t k = dict.k();
-                    auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, m);
+                    assert(!dict.canonicalized());
+                    auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
-                        assert(i < invalid_kmer.size());
-                        if (invalid_kmer[i])
+                        assert(i < invalid_mmer.size());
+                        if (invalid_mmer[i])
                             continue;
 
                         kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
@@ -600,19 +601,24 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             assert(contig_begin <= offset);
                             assert(contig_end - contig_begin == res.contig_size + k - 1);
 
+                            // std::cerr << "foo\t" << i << "\t" << super_kmer_id << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(mmer, m) << "\t"
+                            //                      << contig_begin << "," << contig_end << "\t"
+                            //                      << offset << "\n";
+
                             sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                             assert(contig_end + 1 >= offset + k);
                             uint64_t window_size = std::min<uint64_t>(k - m + 1, contig_end - offset - k + 1);
                             assert(contig_begin + res.kmer_id_in_contig + window_size + m <= contig_end);
                             for (uint64_t j = 0; j != window_size; ++j) {
                                 kmer_t read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                // std::cerr << "\tbar" << j << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(read_kmer, m) << "\n";
                                 if (read_kmer != mmer)
                                     continue;
 
                                 auto bv_it = start_bv_it;
                                 for (size_t w = j; res.kmer_id_in_contig < res.contig_size + k - m; ++w) {
                                     size_t i_shift = i + w - j;
-                                    if (i_shift + m > this_query.size() || i_shift >= invalid_kmer.size() || invalid_kmer[i_shift])
+                                    if (i_shift + m > this_query.size() || i_shift >= invalid_mmer.size() || invalid_mmer[i_shift])
                                         break;
 
                                     kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
@@ -640,7 +646,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             size_t full_match_size = jt - spelling.begin();
                                             assert(full_match_size <= k);
                                             if (full_match_size >= config_.min_seed_length) {
-                                                auto [it, inserted] = cur_max_seeds[i].try_emplace(node, Anchor());
+                                                auto [it, inserted] = cur_max_seeds[i_shift].try_emplace(node, Anchor());
                                                 if (full_match_size > it->second.get_seed().size()) {
                                                     it.value() = Anchor(this_query,
                                                                         i_shift, i_shift + full_match_size,
@@ -2232,7 +2238,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
     // std::cerr << "Anchors\n";
     // for (const auto &a : anchors) {
-    //     std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\n";
+    //     std::cerr << "\t" << a << "\t" << a.get_path_spelling() << "\t" << fmt::format("{}", fmt::join(a.get_path(),",")) << "\n";
     // }
 
     std::vector<Alignment> alignments;
