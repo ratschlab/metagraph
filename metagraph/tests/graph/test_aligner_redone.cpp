@@ -897,10 +897,6 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
     std::string query =        "AAAAGTTTTCGAGGCCAA";
     //                               X
 
-    std::string reference_rc = "TTGGCCTCGAAAGCTTTT";
-    std::string query_rc =     "TTGGCCTCGAAAACTTTT";
-    //                                      X
-
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
