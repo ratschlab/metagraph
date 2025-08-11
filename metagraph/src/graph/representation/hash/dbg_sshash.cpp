@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include <query/streaming_query_regular_parsing.hpp>
+#include <query/streaming_query_canonical_parsing.hpp>
 #include <progress_bar.hpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
@@ -40,6 +40,9 @@ size_t DBGSSHash::dict_size() const {
 }
 
 DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
+    if (mode == PRIMARY)
+        mode_ = CANONICAL;
+
     size_t odd_k = (k_ | 1);
 
     if (odd_k * bits_per_char <= 64) {
@@ -156,6 +159,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
 
+    if (mode == CANONICAL && (k % 2) == 0)
+        throw std::domain_error("Primary graphs only supported for odd k");
+
     sshash::build_configuration build_config;
     build_config.k = k;
 
@@ -179,6 +185,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
+    build_config.canonical_parsing = mode != BASIC;
 
     // silence sshash construction messages when not verbose
     std::ios orig_state(nullptr);
@@ -236,9 +243,8 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
 
     using kmer_t = get_kmer_t<Dict>;
 
-    if (with_rc && (k & 1)) {
-        // TODO: the streaming parser only works for odd k (because of palindromes?)
-        auto parser = sshash::streaming_query_regular_parsing<kmer_t>(&dict);
+    if (with_rc) {
+        auto parser = sshash::streaming_query_canonical_parsing<kmer_t>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup_advanced(sequence.data() + i);
             assert(sshash::equal_lookup_result(ret_val,
@@ -305,7 +311,7 @@ DBGSSHash::map_to_nodes_with_rc<false>(std::string_view,
 void DBGSSHash::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)>& callback,
                              const std::function<bool()>& terminate) const {
-    if (mode_ != CANONICAL) {
+    if (mode_ == BASIC) {
         map_to_nodes_sequentially(sequence, callback, terminate);
     } else {
         map_to_nodes_with_rc<true>(
@@ -339,11 +345,11 @@ uint64_t DBGSSHash::num_nodes() const {
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)>& callback,
                                           const std::function<bool()>& terminate) const {
-    if (mode_ == CANONICAL) {
+    if (mode_ != BASIC) {
         map_to_nodes_with_rc<true>(
                 sequence,
                 [&](node_index n, bool orientation) {
-                    callback(orientation ? reverse_complement(n) : n);
+                    callback(n && orientation ? reverse_complement(n) : n);
                 },
                 terminate);
     } else {
@@ -535,7 +541,7 @@ template void DBGSSHash::call_incoming_kmers_with_rc<false>(
 
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
-    if (mode_ == CANONICAL) {
+    if (mode_ != BASIC) {
         call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool orientation) {
             callback(orientation ? reverse_complement(next) : next, c);
         });
@@ -548,7 +554,7 @@ void DBGSSHash::call_outgoing_kmers(node_index node,
 
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
-    if (mode_ == CANONICAL) {
+    if (mode_ != BASIC) {
         adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool orientation) {
             callback(orientation ? reverse_complement(next) : next);
         });
@@ -561,7 +567,7 @@ void DBGSSHash::adjacent_outgoing_nodes(node_index node,
 
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
-    if (mode_ == CANONICAL) {
+    if (mode_ != BASIC) {
         call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool orientation) {
             callback(orientation ? reverse_complement(prev) : prev, c);
         });
@@ -574,7 +580,7 @@ void DBGSSHash::call_incoming_kmers(node_index node,
 
 void DBGSSHash::adjacent_incoming_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
-    if (mode_ == CANONICAL) {
+    if (mode_ != BASIC) {
         adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool orientation) {
             callback(orientation ? reverse_complement(prev) : prev);
         });
@@ -730,6 +736,11 @@ bool DBGSSHash::load(std::istream& in) {
     loader.visit(num_nodes);
     loader.visit(k);
     loader.visit(mode);
+
+    if (mode == PRIMARY) {
+        common::logger->warn("Graph constructed with old version and is incompatible. Please rebuild only graph (not annotations).");
+        throw std::runtime_error("Incompatible graph");
+    }
 
     *this = DBGSSHash(k, mode);
     num_nodes_ = num_nodes;

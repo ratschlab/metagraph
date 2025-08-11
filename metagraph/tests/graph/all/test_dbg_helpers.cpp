@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include <cassert>
@@ -174,11 +175,10 @@ build_graph<DBGSSHash>(uint64_t k,
     writeFastaFile(contigs, dump_path);
 
     std::shared_ptr<DBGSSHash> graph;
-    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
-
     if (mode == DeBruijnGraph::PRIMARY)
-        return std::make_shared<CanonicalDBG>(
-                std::static_pointer_cast<DeBruijnGraph>(graph), 2 /* cache size */);
+        mode = DeBruijnGraph::CANONICAL;
+
+    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
 
     return graph;
 }
