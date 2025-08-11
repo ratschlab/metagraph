@@ -390,12 +390,12 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         auto &cur_max_seeds = max_seeds[orientation];
 
         if (config_.min_seed_length < graph.get_k()) {
-            const DBGSuccinct *dbg_succ;
-            const DBGSSHash *sshash;
+            const DBGSuccinct *dbg_succ = nullptr;
+            const DBGSSHash *sshash = nullptr;
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
             if (canonical) {
                 dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
-                sshash = dynamic_cast<const DBGSSHash*>(&canonical->get_graph());
+                assert(!dynamic_cast<const DBGSSHash*>(&canonical->get_graph()));
             } else {
                 dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
                 sshash = dynamic_cast<const DBGSSHash*>(&graph);
@@ -565,6 +565,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     }
                 }
             } else if (sshash) {
+                assert(!canonical);
                 auto invalid_char = sshash->get_invalid_char_mask(this_query);
 
                 std::visit([&](const auto &dict) {
@@ -575,7 +576,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     size_t m = dict.m();
                     size_t k = dict.k();
                     size_t min_match_length = std::max(m, config_.min_seed_length);
-                    assert(!dict.canonicalized());
                     auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
                         assert(i < invalid_mmer.size());
@@ -678,8 +678,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     if (sshash->get_mode() != DeBruijnGraph::BASIC && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
                                         // rev comp
                                         // std::cerr << "\t\t\trc\n";
-                                        assert((canonical && sshash->get_mode() == DeBruijnGraph::PRIMARY)
-                                                || sshash->get_mode() == DeBruijnGraph::CANONICAL);
+                                        assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w + m - k);
                                         std::string spelling = graph.get_node_sequence(node);
