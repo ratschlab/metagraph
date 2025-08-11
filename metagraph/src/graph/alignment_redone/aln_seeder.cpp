@@ -602,6 +602,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             assert(contig_begin <= offset);
 
                             size_t contig_length = contig_end - contig_begin;
+                            std::ignore = contig_length;
                             assert(contig_length == res.contig_size + k - 1);
 
                             sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);

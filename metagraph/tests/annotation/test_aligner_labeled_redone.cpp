@@ -24,6 +24,17 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+template <typename T>
+struct template_parameter;
+
+template <template <typename...> class C, typename T>
+struct template_parameter<C<T>> {
+    using type = T;
+};
+
+template <typename T>
+using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
+
 
 void run_alignment(const AnnotatedDBG &anno_graph,
                    DBGAlignerConfig config,
@@ -59,8 +70,8 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         }
 
         auto aln_sort = [&config](const auto &a, const auto &b) {
-            return std::make_pair(score_match(a, config), b.get_orientation())
-                 > std::make_pair(score_match(b, config), a.get_orientation());
+            return std::make_tuple(score_match(a, config), b.get_orientation(), b.get_label_classes()[0])
+                 > std::make_tuple(score_match(b, config), a.get_orientation(), a.get_label_classes()[0]);
         };
 
         std::sort(paths_no_extend.begin(), paths_no_extend.end(), aln_sort);
@@ -91,7 +102,7 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                     if (path_targets.size() > 1) {
                         ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                                 [&](auto node_target) { return node_target == path_targets[0]; }))
-                            << path_target_labels << "\t" << fmt::format("{}", fmt::join(path_targets, ","));
+                            << path << "\t" << path_target_labels << "\t" << fmt::format("{}", fmt::join(path_targets, ","));
                     }
                     // for (auto node_target : path_targets) {
                     //     for (auto column : anno_buffer.get_cached_column_set(node_target)) {
@@ -101,7 +112,7 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                     // }
                     ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                             [&](auto node_target) { return node_target == target; }))
-                        << path_target_labels << " vs. " << label << "\t"
+                        << path << "\t" << path_target_labels << " vs. " << label << "\t"
                         << fmt::format("{}", fmt::join(path_targets, ",")) << " vs. " << target;
                 }
 
@@ -206,8 +217,8 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
 
     std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
         { std::string("CGAATGCAT"), { // RC: ATGCATTCG
-            std::make_tuple(std::string("C"), std::string("GGAATGCAT"), std::string("1X8=")),
             std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("7=1X1=")),
+            std::make_tuple(std::string("C"), std::string("GGAATGCAT"), std::string("1X8=")),
             std::make_tuple(std::string("A"), std::string("ATGCCT"), std::string("4=1X1=3S")),
         } }
     };
@@ -223,19 +234,19 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
         return;
     }
 
-    size_t k = 6;
+    size_t k = 7;
     /*
-             B      B      B             B     AB     AB
-            GTCGAT-TCGATT-CGATTG        ATTGCC-TTGCCT-TGCCTT
-                                \ BC   /
-                                 GATTGC
-              C      C      C   /      \  C      C      C
-            GTGGAT-TGGATT-GGATTG        ATTGCA-TTGCAT-TGCATT
+         B       B       B       B       B       B               B       B      AB      AB
+        TATTGCC-ATTGCCG-TTGCCGA-TGCCGAT-GCCGATT-CCGATTG         GATTGCC-ATTGCCT-TTGCCTT-TGCCTTG
+                                                       \ BC    /
+                                                        CGATTGC
+           C      C       C       C       C       C    /       \  C       C       C       C
+        TATTGGC-ATTGGCG-TTGGCGA-TGGCGAT-GGCGATT-GCGATTG         GATTGCA-ATTGCAT-TTGCATT-TGCATTG
     */
     const std::vector<std::string> sequences {
-             "TTGCCTT",
-        "GTCGATTGCCTT",
-        "GTGGATTGCATT"
+                 "TTGCCTTG",
+        "TATTGCCGATTGCCTTG",
+        "TATTGGCGATTGCATTG"
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
@@ -244,27 +255,49 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-    config.min_seed_length = 3;
+    config.min_seed_length = 5;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
 
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("GTGAATTGCAT"), {
-                std::make_tuple(std::string("C"), std::string("GTGGATTGCAT"), std::string("3=1X7=")),
+            { std::string("TATTGACGATTGCATTG"), {
+                std::make_tuple(std::string("C"), std::string("TATTGGCGATTGCATTG"), std::string("5=1X11=")),
             } }
         };
 
-        for (const auto &[query, mappings] : exp_alignments) {
-            run_alignment(*anno_graph, config, query, mappings);
+        for (size_t i = 0; i < exp_alignments.size(); ++i) {
+            bool first_seed_matches = true;
+            if constexpr(std::is_same_v<DBGSSHash, typename TypeParam::first_type>) {
+                const auto &sshash = static_cast<const DBGSSHash&>(anno_graph->get_graph());
+                std::visit([&](const auto &dict) {
+                    ASSERT_GE(config.min_seed_length, dict.m());
+                    const auto &[query, mappings] = exp_alignments[i];
+                    ASSERT_LT(0u, mappings.size());
+                    using kmer_t = get_kmer_t<decltype(dict)>;
+                    auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
+                    auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
+                    // we can only find the first seed of it's also the minimizer
+                    if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
+                            || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
+                        first_seed_matches = false;
+                    }
+                }, sshash.data());
+            }
+
+            const auto &[query, mappings] = exp_alignments[i];
+            if (first_seed_matches) {
+                run_alignment(*anno_graph, config, query, mappings);
+            } else {
+                run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+            }
         }
     }
     {
         std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("GTGAATTGCAT"), {
-                std::make_tuple(std::string("C"), std::string("GTGGATTGCAT"), std::string("3=1X7=")),
-                std::make_tuple(std::string("B"), std::string("GTCGATTGCCT"), std::string("2=2X5=1X1=")),
-                std::make_tuple(std::string("A"), std::string("TTGCCT"), std::string("5S4=1X1=")),
+            { std::string("TATTGCCGATTGCATTG"), {
+                std::make_tuple(std::string("B"), std::string("TATTGCCGATTGCCTTG"), std::string("13=1X3=")),
+                std::make_tuple(std::string("C"), std::string("TATTGGCGATTGCATTG"), std::string("5=1X11=")),
             } }
         };
 
@@ -353,11 +386,13 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoords) {
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.left_end_bonus = 5;
+    config.right_end_bonus = 5;
 
     std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
         { std::string("CGAATGCAT"), { // RC: ATGCATTCG
-            std::make_tuple(std::string("C"), std::string("GAATGCAT"), std::string("1S8=")),
             std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("7=1X1=")),
+            std::make_tuple(std::string("C"), std::string("GGAATGCAT"), std::string("1X8=")),
         } }
     };
 
