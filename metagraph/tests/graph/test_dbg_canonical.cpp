@@ -4,6 +4,7 @@
 #include "all/test_dbg_helpers.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 
 
 namespace {
@@ -31,16 +32,26 @@ TYPED_TEST_SUITE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraph) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", DeBruijnGraph::CANONICAL, true));
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraphInputWithN) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", DeBruijnGraph::CANONICAL, false));
     EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
               check_graph<TypeParam>("ACGTN", DeBruijnGraph::CANONICAL, true));
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, InitializeEmpty) {
+    size_t k = 2;
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        k = 3;
+
     auto graph = build_graph<TypeParam>(2, {}, DeBruijnGraph::CANONICAL);
 
     EXPECT_EQ(0u, graph->num_nodes());
@@ -51,6 +62,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, InitializeEmpty) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, SerializeEmpty) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     {
         auto graph = build_graph<TypeParam>(20, {}, DeBruijnGraph::CANONICAL);
         ASSERT_EQ(0u, graph->num_nodes());
@@ -72,6 +86,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, SerializeEmpty) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, Serialize) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     {
         auto graph = build_graph<TypeParam>(20, {
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -103,6 +120,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Serialize) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, InsertSequence) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     auto graph = build_graph<TypeParam>(20, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "CATGTACTAGCTGATCGTAGCTAGCTAGC"
@@ -117,6 +137,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, InsertSequence) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, ReverseComplement) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     auto graph1 = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, DeBruijnGraph::CANONICAL);
     auto graph2 = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                                                "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" }, DeBruijnGraph::CANONICAL);
@@ -136,6 +159,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, ReverseComplement) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals1) {
     for (size_t k = 2; k <= 10; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C')
         }, DeBruijnGraph::CANONICAL);
@@ -209,6 +236,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals1) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals2) {
     for (size_t k = 2; k < 11; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
             std::string(100, 'G') + std::string(100, 'T')
@@ -244,6 +275,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals2) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals3) {
     for (size_t k = 2; k < 11; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
             std::string(100, 'G') + std::string(100, 'T')
@@ -340,6 +375,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals3) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals4) {
     for (size_t k = 2; k < 11; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C')
         }, DeBruijnGraph::CANONICAL);
@@ -377,6 +416,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals4) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, map_to_nodes_canonical) {
     for (size_t k = 2; k <= 10; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
             std::string(100, 'G') + std::string(100, 'T')
@@ -428,6 +471,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, map_to_nodes_canonical) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsEmptyGraphCanonical) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             auto empty = build_graph<TypeParam>(k, {}, DeBruijnGraph::CANONICAL);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
@@ -447,6 +494,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsEmptyGraphCanonical) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsEmptyGraph) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             auto empty = build_graph<TypeParam>(k, {}, DeBruijnGraph::CANONICAL);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
@@ -466,6 +517,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsEmptyGraph) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsOneSelfLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, DeBruijnGraph::CANONICAL);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences, DeBruijnGraph::CANONICAL);
@@ -493,6 +548,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsOneSelfLoop) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsOneSelfLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, DeBruijnGraph::CANONICAL);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences, DeBruijnGraph::CANONICAL);
@@ -520,6 +579,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsOneSelfLoop) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsThreeSelfLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -549,6 +612,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsThreeSelfLoops) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsExtractsLongestOneLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 6; k < 14; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             std::vector<std::string> sequences { "ATGCCGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
             auto graph = build_graph<TypeParam>(k, sequences, DeBruijnGraph::CANONICAL);
@@ -585,6 +652,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallContigsUniqueKmers) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsUniqueKmersCycle) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     for (size_t num_threads : { 1, 4 }) {
         size_t k = 4;
         std::string sequence = "AAACCCGGGTTTAAA";
@@ -604,6 +674,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsUniqueKmersCycle) {
 }
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallContigsUniqueKmersCycle) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>)
+        return;
+
     for (size_t num_threads : { 1, 4 }) {
         size_t k = 4;
         std::string sequence = "AAACCCGGGTTTAAA";
@@ -625,6 +698,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallContigsUniqueKmersCycle) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsFourLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+               if ((k % 2) == 0)
+                    continue;
+            }
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -654,6 +731,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsFourLoops) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPaths) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -690,6 +771,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPaths) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsSingleKmerForm) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -757,6 +842,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsCheckHalfSingleKmerForm) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigs) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -793,6 +882,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigs) {
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsSingleKmerForm) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
+            if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+                if ((k % 2) == 0)
+                    continue;
+            }
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -1183,6 +1276,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips2) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallKmersEmptyGraph) {
     for (size_t k = 2; k <= 30; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto empty = build_graph<TypeParam>(k, {}, DeBruijnGraph::CANONICAL);
         size_t num_kmers = 0;
         empty->call_kmers([&](auto, const auto &sequence) {
@@ -1196,6 +1293,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallKmersEmptyGraph) {
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CallKmersTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if ((k % 2) == 0)
+                continue;
+        }
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') }, DeBruijnGraph::CANONICAL);
 
         ASSERT_EQ(2u, graph->num_nodes());

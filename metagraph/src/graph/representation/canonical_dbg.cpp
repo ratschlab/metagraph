@@ -3,7 +3,6 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/logger.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/hash/dbg_sshash.hpp"
 
 
 namespace mtg {
@@ -62,13 +61,6 @@ void CanonicalDBG
 
     std::vector<node_index> path;
     path.reserve(sequence.size() - get_k() + 1);
-
-    if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->map_to_nodes_with_rc<true>(sequence, [&](node_index node, bool orientation) {
-            callback(node && orientation ? reverse_complement(node) : node);
-        }, terminate);
-        return;
-    }
 
     // map until the first mismatch
     bool stop = false;
@@ -179,13 +171,6 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
         return;
     }
 
-    if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool orientation) {
-            callback(orientation ? reverse_complement(next) : next, c);
-        });
-        return;
-    }
-
     // includes `$` for DBGSuccinct
     const auto &alphabet = graph_->alphabet();
 
@@ -268,13 +253,6 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
             assert(c == boss::BOSS::kSentinel
                 || traverse_back(node, c) == reverse_complement(prev));
             callback(reverse_complement(prev), c);
-        });
-        return;
-    }
-
-    if (const auto sshash = std::dynamic_pointer_cast<const DBGSSHash>(graph_)) {
-        sshash->call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool orientation) {
-            callback(orientation ? reverse_complement(prev) : prev, c);
         });
         return;
     }
