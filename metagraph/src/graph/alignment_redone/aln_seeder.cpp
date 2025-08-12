@@ -2336,6 +2336,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     if (base_score <= score_j)
                         return;
 
+                    if (a_i.get_coord() != Anchor::ncoord && a_j.get_coord() != Anchor::ncoord) {
+                        size_t a_i_pos = a_i.get_coord() + a_i.get_seed().size();
+                        size_t a_j_pos = a_j.get_coord() + a_j.get_seed().size();
+                        if (a_i_pos == a_j_pos)
+                            update_score(base_score, it, 0);
+
+                        return;
+                    }
+
                     std::string_view a_j_trim_spelling = a_j.get_trim_spelling();
                     // std::cerr << "extleft" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << a_j_trim_spelling.size() << "\n";
                     if (a_i.get_end_trim()) {
@@ -2376,6 +2385,23 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 // if (score < score_j || (score == score_j && dist >= dist_j))
                 if (score <= score_j)
                     return;
+
+                if (a_i.get_coord() != Anchor::ncoord && a_j.get_coord() != Anchor::ncoord) {
+                    size_t a_i_pos = a_i.get_coord() + a_i.get_seed().size();
+                    size_t a_j_pos = a_j.get_coord() + a_j.get_seed().size();
+                    if (a_j_pos > a_i_pos) {
+                        size_t traversed = a_j_pos - a_i_pos;
+                        size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
+                        if (gap) {
+                            score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                        }
+
+                        if (score > score_j)
+                            update_score(score, it, traversed);
+                    }
+
+                    return;
+                }
                 // std::cerr << "\tchhs\n";
 
                 size_t i_seed_size = k - a_i.get_end_trim();
