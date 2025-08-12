@@ -2315,6 +2315,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 // std::cerr << "chh\t" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << dist << "\n";
                 if (dist == 0 && a_j.get_end_trim()) {
                     assert(a_j.get_path().size() == 1);
+                    if (base_score <= score_j)
+                        return;
+
                     std::string_view a_j_trim_spelling = a_j.get_trim_spelling();
                     // std::cerr << "extleft" << a_i << "\t" << a_i.get_path_spelling() << " -> " << a_j << "\t" << a_j.get_path_spelling() << "\t" << a_j_trim_spelling.size() << "\n";
                     if (a_i.get_end_trim()) {
