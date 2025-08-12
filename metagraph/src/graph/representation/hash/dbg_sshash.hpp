@@ -58,6 +58,7 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<bool()>& terminate = []() { return false; }) const;
 
     uint64_t num_nodes() const override;
+    uint64_t max_index() const override;
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -108,6 +109,8 @@ class DBGSSHash : public DeBruijnGraph {
     void call_incoming_kmers_with_rc(
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
+
+    std::vector<seq_index> get_sequence_ids(node_index node) const override;
 
 
     const std::string& alphabet() const override final { return alphabet_; }

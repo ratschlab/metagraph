@@ -532,6 +532,12 @@ void DeBruijnGraph
     });
 }
 
+std::vector<DeBruijnGraph::seq_index> DeBruijnGraph
+::get_sequence_ids(node_index node) const {
+    // In the absence of contig information, treat each node as its own sequence
+    return std::vector<node_index>(1, node);
+}
+
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);

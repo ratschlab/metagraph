@@ -342,6 +342,10 @@ uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
 }
 
+uint64_t DBGSSHash::max_index() const {
+    return mode_ != BASIC ? dict_size() * 2 : dict_size();
+}
+
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)>& callback,
                                           const std::function<bool()>& terminate) const {
@@ -706,6 +710,20 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
         ::reverse_complement(str_kmer.begin(), str_kmer.end());
 
     return str_kmer;
+}
+
+std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) const {
+    if (node == npos)
+        return std::vector<seq_index>(1, node);
+
+    // treat each unitig as a sequence
+    size_t contig_id = succ_is_next_.rank1(node) + pred_is_prev_.rank1(node) + 1;
+    if (node > dict_size()) {
+        size_t num_base_contigs = succ_is_next_.num_set_bits() + pred_is_prev_.num_set_bits();
+        contig_id += num_base_contigs;
+    }
+
+    return std::vector<seq_index>(1, contig_id);
 }
 
 void DBGSSHash::serialize(std::ostream& out) const {
