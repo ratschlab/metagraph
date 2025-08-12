@@ -716,14 +716,31 @@ std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) c
     if (node == npos)
         return std::vector<seq_index>(1, node);
 
-    // treat each unitig as a sequence
-    size_t contig_id = succ_is_next_.rank1(node) + pred_is_prev_.rank1(node) + 1;
     if (node > dict_size()) {
         size_t num_base_contigs = succ_is_next_.num_set_bits() + pred_is_prev_.num_set_bits();
-        contig_id += num_base_contigs;
+        auto ret_val = get_sequence_ids(reverse_complement(node));
+        for (seq_index &id : ret_val) {
+            id += num_base_contigs;
+        }
+
+        return ret_val;
     }
 
-    return std::vector<seq_index>(1, contig_id);
+    // treat each unitig as a sequence
+    size_t srank = succ_is_next_.rank1(node);
+    size_t prank = pred_is_prev_.rank1(node);
+
+    seq_index contig_id = srank + prank;
+
+    bool s_unitig_back = succ_is_next_[node];
+    bool s_unitig_front = pred_is_prev_[node];
+
+    if (s_unitig_back && !s_unitig_front) {
+        assert(contig_id);
+        --contig_id;
+    }
+
+    return std::vector<seq_index>(1, contig_id + 1);
 }
 
 void DBGSSHash::serialize(std::ostream& out) const {
