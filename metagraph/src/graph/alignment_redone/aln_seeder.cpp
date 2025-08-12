@@ -2215,6 +2215,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     std::vector<Anchor> anchors = get_anchors();
 
     const auto &graph = query_.get_graph();
+    const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph);
 
     auto full_it = std::partition(anchors.begin(), anchors.end(), [](const auto &a) { return a.get_end_trim(); });
     std::sort(full_it, anchors.end(), AnchorLess<Anchor>());
@@ -2278,7 +2279,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     Anchor::score_t last_chain_score = 0;
     common::logger->trace("Chaining");
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
-        [this,k,&dummy](
+        [this,k,sshash,match_score=config_.match_score("A"),&dummy](
                 const Anchor &a_j,
                 ssize_t max_dist,
                 AnchorIt rbegin,
@@ -2300,6 +2301,23 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 const Anchor &a_i = *it;
                 assert(a_i.get_label_class() == a_j.get_label_class());
                 assert(a_i.get_orientation() == a_j.get_orientation());
+
+                auto get_sshash_distance = [&](DeBruijnGraph::node_index node, DeBruijnGraph::node_index target_node) -> size_t {
+                    DeBruijnGraph::seq_index contig = sshash->get_sequence_ids(node)[0];
+                    DeBruijnGraph::seq_index target_contig = sshash->get_sequence_ids(target_node)[0];
+                    if (contig == target_contig) {
+                        if (node < sshash->reverse_complement(node)) {
+                            // canonical strand
+                            if (target_node >= node)
+                                return target_node - node;
+                        } else if (node >= target_node) {
+                            // rc strand
+                            return node - target_node;
+                        }
+                    }
+
+                    return std::numeric_limits<size_t>::max();
+                };
 
                 auto graph = make_aln_graph(a_i.get_label_class());
 
@@ -2327,20 +2345,25 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                             return;
                         a_j_trim_spelling = a_j_trim_spelling.substr(a_i_trim_spelling.size());
                     }
-                    size_t traverse = 0;
                     DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(a_i.get_path().back(), a_j_trim_spelling,
-                                   [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
-                                       assert(next_target == a_i.get_label_class());
-                                       ++traverse;
-                                       node = next;
-                                   });
+                    size_t traverse = sshash
+                        ? get_sshash_distance(node, a_j.get_path()[0])
+                        : std::numeric_limits<size_t>::max();
+                    if (traverse == std::numeric_limits<size_t>::max() || traverse != a_j_trim_spelling.size()) {
+                        traverse = 0;
+                        graph.traverse(a_i.get_path().back(), a_j_trim_spelling,
+                                    [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
+                                        assert(next_target == a_i.get_label_class());
+                                        ++traverse;
+                                        node = next;
+                                    });
+                        assert(traverse != a_j_trim_spelling.size() || node == a_j.get_path()[0]);
+                    } else {
+                        node = a_j.get_path()[0];
+                    }
                     if (traverse == a_j_trim_spelling.size()) {
-                        assert(node == a_j.get_path()[0]);
-                        if (base_score > score_j) {
-                            // std::cerr << "\tworked!\t" << base_score << "\n";
-                            update_score(base_score, it, 0);
-                        }
+                        // std::cerr << "\tworked!\t" << base_score << "\n";
+                        update_score(base_score, it, 0);
                     }
                 }
 
@@ -2412,18 +2435,26 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                         if (std::equal(a_i_trim.end() - olap + del, a_i_trim.end(), a_j_spelling.begin(), a_j_spelling.begin() + olap - del)) {
                             // std::cerr << "\tfound\n";
-                            size_t traversed = 0;
                             DeBruijnGraph::node_index node = a_i.get_path().back();
-                            graph.traverse(node, a_j_spelling.substr(olap - del),
-                                [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
-                                    assert(next_target == a_i.get_label_class());
-                                    node = next;
-                                    ++traversed;
-                                }
-                            );
+                            size_t traversed = sshash
+                                ? get_sshash_distance(node, a_j.get_path()[0])
+                                : std::numeric_limits<size_t>::max();
+
+                            if (traversed == std::numeric_limits<size_t>::max() || traversed != a_j_spelling.size() - olap + del) {
+                                traversed = 0;
+                                graph.traverse(node, a_j_spelling.substr(olap - del),
+                                    [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
+                                        assert(next_target == a_i.get_label_class());
+                                        node = next;
+                                        ++traversed;
+                                    }
+                                );
+                                assert(traversed != a_j_spelling.size() - olap + del || node == a_j.get_path()[0]);
+                            } else {
+                                node = a_j.get_path()[0];
+                            }
 
                             if (traversed == a_j_spelling.size() - olap + del) {
-                                assert(node == a_j.get_path()[0]);
                                 traversed += a_i.get_path().size() - 1;
                                 assert(traversed >= del);
                                 assert(static_cast<ssize_t>(traversed - del) == query_j.begin() - query_i.begin());
@@ -2450,36 +2481,56 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
 
                     // don't try inserting if the previous character matches
-                    if (graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)).first)
-                        return;
-
-                    size_t traversed = 0;
-                    auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
-                    DeBruijnGraph::node_index node = a_i.get_path().back();
-                    graph.traverse(node, a_j_spelling,
-                        [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
-                            assert(next_target == a_i.get_label_class());
-                            node = next;
-                            ++traversed;
+                    if (!graph.traverse_back(a_j.get_path()[0], *(query_j.data() - 1)).first) {
+                        DeBruijnGraph::node_index node = a_i.get_path().back();
+                        size_t traversed = sshash
+                            ? get_sshash_distance(node, a_j.get_path()[0])
+                            : std::numeric_limits<size_t>::max();
+                        if (traversed == std::numeric_limits<size_t>::max() || traversed != query_i.size() - a_i.get_path().size() + 1) {
+                            traversed = 0;
+                            auto a_j_spelling = a_j.get_path_spelling().substr(0, k);
+                            graph.traverse(node, a_j_spelling,
+                                [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
+                                    assert(next_target == a_i.get_label_class());
+                                    node = next;
+                                    ++traversed;
+                                }
+                            );
+                            assert(traversed != query_i.size() - a_i.get_path().size() + 1 || node == a_j.get_path()[0]);
+                        } else {
+                            node = a_j.get_path()[0];
                         }
-                    );
-                    if (traversed == query_i.size() - a_i.get_path().size() + 1) {
-                        assert(node == a_j.get_path()[0]);
-                        size_t query_dist = a_j.get_clipping() - (a_i.get_clipping() + a_i.get_path().size() - 1);
-                        assert(query_dist >= traversed);
-                        size_t gap = query_dist - traversed;
-                        if (gap > 0)
-                            score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+                        if (traversed == query_i.size() - a_i.get_path().size() + 1) {
+                            size_t query_dist = a_j.get_clipping() - (a_i.get_clipping() + a_i.get_path().size() - 1);
+                            assert(query_dist >= traversed);
+                            size_t gap = query_dist - traversed;
+                            if (gap > 0)
+                                score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
 
-                        if (score > score_j) {
-                            // std::cerr << "\t\tworked! " << score << "\n";
-                            update_score(score, it, traversed - (query_i.size() - a_i.get_path().size() + 1) + query_j.size());
+                            if (score > score_j) {
+                                // std::cerr << "\t\tworked! " << score << "\n";
+                                update_score(score, it, traversed - (query_i.size() - a_i.get_path().size() + 1) + query_j.size());
+                            }
                         }
                     }
                 }
 
                 // TODO: if a_i.get_end_trim() != 0, then we need to deal with
                 //       a combination of D from the trim, X to the trim, then I of the query
+                if (!sshash)
+                    return;
+
+                size_t traversed = get_sshash_distance(a_i.get_path().back(), a_j.get_path()[0]);
+                if (traversed > 0 && traversed != std::numeric_limits<size_t>::max()) {
+                    traversed += a_j.get_path().size() - 1;
+                    size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
+                    if (gap) {
+                        score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                    }
+
+                    if (score > score_j)
+                        update_score(score, it, traversed);
+                }
             };
 
             // for (auto it = rbegin; it != rend; ++it, ++rchain_scores) {
