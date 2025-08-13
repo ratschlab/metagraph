@@ -178,7 +178,8 @@ build_graph<DBGSSHash>(uint64_t k,
     if (mode == DeBruijnGraph::PRIMARY)
         mode = DeBruijnGraph::CANONICAL;
 
-    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars);
+    graph = std::make_shared<DBGSSHash>(dump_path, k, mode, num_chars,
+                                        "../tests/data/sshash_sequences/");
 
     return graph;
 }

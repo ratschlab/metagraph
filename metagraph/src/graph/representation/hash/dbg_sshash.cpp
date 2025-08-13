@@ -154,8 +154,12 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                           bit_vector_smart(std::move(pred_is_prev)));
 }
 
-DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, size_t num_chars)
-    : DBGSSHash(k, mode) {
+DBGSSHash::DBGSSHash(const std::string& input_filename,
+                     size_t k,
+                     Mode mode,
+                     size_t num_chars,
+                     const std::filesystem::path &swap_dir)
+          : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
 
@@ -186,6 +190,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
     build_config.canonical_parsing = mode != BASIC;
+    build_config.tmp_dirname = swap_dir;
 
     // silence sshash construction messages when not verbose
     std::ios orig_state(nullptr);

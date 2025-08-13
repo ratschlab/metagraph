@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <variant>
+#include <filesystem>
 
 #include <dictionary.hpp>
 #include <sdsl/uint256_t.hpp>
@@ -34,7 +35,8 @@ class DBGSSHash : public DeBruijnGraph {
     DBGSSHash(const std::string& input_filename,
               size_t k,
               Mode mode = BASIC,
-              size_t num_chars = 0);
+              size_t num_chars = 0,
+              const std::filesystem::path &swap_dir = "/tmp/");
 
     // SequenceGraph overrides
     void add_sequence(
