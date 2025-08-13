@@ -765,6 +765,12 @@ void DBGSSHash::serialize(std::ostream& out) const {
 void DBGSSHash::serialize(const std::string& filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     std::ofstream fout(suffixed_filename, std::ios::binary);
+
+    if (!fout.good()) {
+        common::logger->error("Failed to create file {}", suffixed_filename);
+        throw std::runtime_error("Invalid out file");
+    }
+
     serialize(fout);
 }
 
@@ -797,7 +803,7 @@ bool DBGSSHash::load(std::istream& in) {
 bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     std::ifstream fin(suffixed_filename, std::ios::binary);
-    return load(fin);
+    return fin.good() && load(fin);
 }
 
 } // namespace graph
