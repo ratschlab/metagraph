@@ -205,6 +205,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename,
                    size_t num_chunks_open = 2000) {
+    size_t cur_chunk_id = 0;
     auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
     const size_t k = anno_graph->get_graph().get_k();
 
@@ -222,6 +223,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
 
+    std::vector<std::string> last_labels;
     if (config.coordinates) {
         for (const auto &file : files) {
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
@@ -264,6 +266,18 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                     if (sequence.size() >= k) {
                         uint64_t num_kmers = sequence.size() - k + 1;
+                        if (config.separate_header) {
+                            bool flush = last_labels.size() && labels != last_labels;
+                            last_labels = labels;
+                            if (flush) {
+                                batcher.process_all_buffered();
+                                thread_pool.join();
+                                anno_graph->get_annotator().serialize(
+                                    fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
+                                );
+                                anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
+                            }
+                        }
                         batcher.push_and_pay(sequence.size(),
                                              std::move(sequence), std::move(labels), coord);
                         if (!config.annotate_sequence_headers)
@@ -275,7 +289,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         thread_pool.join();
 
-        anno_graph->get_annotator().serialize(annotator_filename);
+        if (config.separate_header) {
+            anno_graph->get_annotator().serialize(
+                fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
+            );
+        } else {
+            anno_graph->get_annotator().serialize(annotator_filename);
+        }
 
         return;
     }
@@ -304,6 +324,18 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
                 if (sequence.size() >= k) {
+                    if (config.separate_header) {
+                        bool flush = last_labels.size() && labels != last_labels;
+                        last_labels = labels;
+                        if (flush) {
+                            batcher.process_all_buffered();
+                            thread_pool.join();
+                            anno_graph->get_annotator().serialize(
+                                fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
+                            );
+                            anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
+                        }
+                    }
                     batcher.push_and_pay(sequence.size(),
                                          std::move(sequence), std::move(labels));
                 }
@@ -314,6 +346,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     thread_pool.join();
 
     if (config.count_kmers) {
+        assert(!config.separate_header);
+
         // add k-mer counts to existing binary annotations
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
@@ -386,7 +420,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     thread_pool.join();
 
-    anno_graph->get_annotator().serialize(annotator_filename);
+    if (config.separate_header) {
+        anno_graph->get_annotator().serialize(
+            fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
+        );
+    } else {
+        anno_graph->get_annotator().serialize(annotator_filename);
+    }
 }
 
 

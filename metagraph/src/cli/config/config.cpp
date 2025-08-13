@@ -302,6 +302,8 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
+        } else if (!strcmp(argv[i], "--separate-header")) {
+            separate_header = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -664,10 +666,20 @@ Config::Config(int argc, char *argv[]) {
 
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
-                    || (separately
+                    || ((separately || separate_header)
                         && std::filesystem::is_directory(std::filesystem::status(outfbase))))) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
                   << "Check if the path is correct" << std::endl;
+        exit(1);
+    }
+
+    if (separately && separate_header) {
+        std::cerr << "Error: only one of --separately and --separate-header can be set at the same time" << std::endl;
+        exit(1);
+    }
+
+    if (separate_header && count_kmers) {
+        std::cerr << "Error: annotating k-mer counts with --separate-header not supported" << std::endl;
         exit(1);
     }
 
@@ -1212,6 +1224,7 @@ if (advanced) {
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
+            fprintf(stderr, "\t   --separate-header \tannotate each header independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --threads-each [INT]\tnumber of threads to use when annotating each file with --separately [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
