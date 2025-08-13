@@ -1936,7 +1936,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
         max_dist,
         [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost, Anchor::label_class_t final_target) {
             assert(final_target);
-            path.resize(path.size() - suffix.size());
+            path.resize(path.size() - std::min(path.size(), suffix.size()));
             assert(std::all_of(path.begin(), path.end(),
                                [&](auto node) {
                                    return AlignmentGraph(base_graph, anno_buffer, final_target).has_labels(node, target);
@@ -2004,6 +2004,14 @@ void Extender::extend(const Alignment &aln,
             config_, aln.get_path().back(), num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& spelling, auto&& path, auto&& cigar, size_t, Anchor::label_class_t final_target) {
+                size_t new_end_trim = aln.get_end_trim() - std::min(aln.get_end_trim(), spelling.size());
+
+                assert(path.empty() == (spelling.size() <= aln.get_end_trim()));
+
+                std::string new_spelling = spelling.size() > aln.get_end_trim()
+                    ? std::string(aln.get_spelling()) + spelling
+                    : aln.get_path_spelling();
+
                 auto ext_path = aln.get_path();
                 ext_path.insert(ext_path.end(), path.begin(), path.end());
 
@@ -2021,8 +2029,8 @@ void Extender::extend(const Alignment &aln,
                     aln.get_orientation(),
                     std::move(ext_path),
                     std::move(ext_cigar),
-                    std::string(aln.get_spelling()) + spelling,
-                    aln.get_end_trim() - std::min(aln.get_end_trim(), spelling.size()),
+                    std::move(new_spelling),
+                    new_end_trim,
                     final_target
                 );
 
@@ -2573,14 +2581,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         },
         [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
             assert(chain.size());
-            // common::logger->info("Try Chain\t{}", score_traceback.back());
 
             ext_success = false;
 
             bool ret_val = (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping())
                             || chain.size() > 1
                             || std::any_of(chain.begin(), chain.end(),
-                                           [](const auto &a) { return a.first->get_path().size() > 1; });
+                                           [this](const auto &a) { return a.first->get_seed().size() > config_.min_seed_length
+                                                                            || a.first->get_path().size() > 1; });
 
             // ret_val &= std::all_of(chain.begin(), chain.end(),
             //                        [&](const auto &a) { return !selected[a.first - anchors.begin()]
@@ -2591,6 +2599,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                    [&](const auto &a) { return a.first->get_label_class() == Anchor::nannot
                                                                         || !found_labels.count(a.first->get_label_class()); });
 
+            // common::logger->info("Try Chain\t{}\t{}", score_traceback.back(), ret_val);
             if (!ret_val)
                 return false;
 

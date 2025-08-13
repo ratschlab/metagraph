@@ -1068,6 +1068,24 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
     }
 }
 
+TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short2) {
+    size_t k = 31;
+    std::string reference = "GCTAGTCTATAGCGTACGATCTAGCTAGTCT";
+    std::string query =     "GCTAGTCTATAGCGTACGATCTTTTTAGTC";
+    //                                             XXX
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+
+    run_alignment(*graph, config, query, {}, {});
+
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+        config.min_seed_length = 19;
+        run_alignment(*graph, config, query, { reference.substr(0, 30) }, { "22=3X5=" }, 1, true, true);
+    }
+}
+
 TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGATT";
