@@ -67,7 +67,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
             [&](const auto& dict) {
                 using kmer_t = get_kmer_t<decltype(dict)>;
 
-                ProgressBar progress_bar(graph.num_nodes(), "Checking succ/pred",
+                ProgressBar progress_bar(num_nodes, "Checking succ/pred",
                                          std::cerr, !common::get_verbose());
 
                 static const uint64_t BS = 1'048'576;
