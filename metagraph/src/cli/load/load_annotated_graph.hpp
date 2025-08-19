@@ -1,17 +1,20 @@
 #ifndef __LOAD_ANNOTATED_GRAPH_HPP__
 #define __LOAD_ANNOTATED_GRAPH_HPP__
 
-
+#include <future>
 #include <memory>
 
 namespace mtg {
 
 namespace graph {
-
 class DeBruijnGraph;
 class AnnotatedDBG;
-
 } // namespace graph
+
+namespace annot {
+template <typename LabelType>
+class MultiLabelAnnotation;
+} // namespace annot
 
 namespace cli {
 
@@ -21,6 +24,16 @@ std::unique_ptr<graph::AnnotatedDBG>
 initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
                          const Config &config,
                          size_t max_chunks_open = 2000);
+
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_ptr<graph::DeBruijnGraph> graph,
+                const Config &config,
+                size_t max_chunks_open = 2000);
+
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_future<std::shared_ptr<graph::DeBruijnGraph>> graph,
+                const Config &config,
+                size_t max_chunks_open = 2000);
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
