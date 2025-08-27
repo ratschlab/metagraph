@@ -69,9 +69,11 @@ void run_alignment(const AnnotatedDBG &anno_graph,
             });
         }
 
-        auto aln_sort = [&config](const auto &a, const auto &b) {
-            return std::make_tuple(score_match(a, config), b.get_orientation(), b.get_label_classes()[0])
-                 > std::make_tuple(score_match(b, config), a.get_orientation(), a.get_label_classes()[0]);
+        auto aln_sort = [&config,&anno_buffer](const auto &a, const auto &b) {
+            return std::make_tuple(score_match(a, config),
+                                   anno_buffer.get_cached_column_set(b.get_label_classes()[0])[0])
+                 > std::make_tuple(score_match(b, config),
+                                   anno_buffer.get_cached_column_set(a.get_label_classes()[0])[0]);
         };
 
         std::sort(paths_no_extend.begin(), paths_no_extend.end(), aln_sort);
@@ -86,7 +88,16 @@ void run_alignment(const AnnotatedDBG &anno_graph,
             Cigar cigar(cigar_str);
 
             auto check_ref = [&](const Alignment &path, const std::string &type) {
-                const auto &[label, reference, cigar_str] = mappings[i];
+                const auto &label = std::get<0>(mappings[i]);
+                std::string reference = std::get<1>(mappings[i]);
+                std::string cigar_str = std::get<2>(mappings[i]);
+
+                if (path.get_orientation() && !path.get_end_trim()) {
+                    ::reverse_complement(reference.begin(), reference.end());
+                    cigar = Cigar(cigar_str);
+                    std::reverse(cigar.data().begin(), cigar.data().end());
+                    cigar_str = cigar.to_string();
+                }
 
                 if (label.size()) {
                     // make sure the labels are correct before moving on
@@ -174,6 +185,9 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleLinearGraph) {
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(k, sequences, labels);
 
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
+
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
 
@@ -208,6 +222,11 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(k, sequences, labels);
 
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("B"),
+              anno_graph->get_annotator().get_label_encoder().encode("C"));
+
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -2, -2);
     config.gap_opening_penalty = -4;
@@ -219,7 +238,7 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
         { std::string("CGAATGCAT"), { // RC: ATGCATTCG
             std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("7=1X1=")),
             std::make_tuple(std::string("C"), std::string("GGAATGCAT"), std::string("1X8=")),
-            std::make_tuple(std::string("A"), std::string("ATGCCT"), std::string("4=1X1=3S")),
+            std::make_tuple(std::string("A"), std::string("AGGCAT"), std::string("3S1=1X4=")),
         } }
     };
 
@@ -252,6 +271,11 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
 
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(k, sequences, labels);
+
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("B"),
+              anno_graph->get_annotator().get_label_encoder().encode("C"));
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
@@ -314,24 +338,11 @@ TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
         return;
     }
 
-    size_t k = 5;
-    /*   B     B                AB    AB
-       TTAGT-TAGTC             TCGAA-CGAAA
-                  \  BC   ABC /
-                   AGTCG-GTCGA
-          C     C /           \   C     C
-       TCAGT-CAGTC             TCGAT-CGATT
-        AB    AB                 B     B
-       TTTCG-TTCGA             GACTA-ACTAA
-                  \ ABC    BC /
-                   TCGAC-CGACT
-          C     C /           \   C     C
-       AATCG-ATCGA             GACTG-ACTGA
-    */
+    size_t k = 7;
     const std::vector<std::string> sequences {
-        "GTCGAAA", // "TTTCGAC"
-        "TTAGTCGAAA", // "TTTCGACTAA"
-        "TCAGTCGATT" // "AATCGACTGA"
+                 "CAAGGCAA",
+        "CAAGGCAATCGGCAATA",
+        "CAATGCAATCGCCAATA"
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
@@ -341,17 +352,62 @@ TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
             k, sequences, labels, mode
         );
 
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-        config.min_seed_length = 4;
-        std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
-            { std::string("TTAGTTCAAA"), { // RC: TTTGAACTAA
-                std::make_tuple(std::string("B"), std::string("TTAGTCGAAA"), std::string("5=2X3=")),
-            } }
-        };
+        ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+                  anno_graph->get_annotator().get_label_encoder().encode("B"));
+        ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("B"),
+                  anno_graph->get_annotator().get_label_encoder().encode("C"));
 
-        for (const auto &[query, mappings] : exp_alignments) {
-            run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 5;
+        config.left_end_bonus = 5;
+        config.right_end_bonus = 5;
+
+        {
+            std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+                { std::string("TATTGACGATTGCATTG"), {
+                    std::make_tuple(std::string("C"), std::string("TATTGGCGATTGCATTG"), std::string("5=1X11=")),
+                } }
+            };
+
+            for (size_t i = 0; i < exp_alignments.size(); ++i) {
+                bool first_seed_matches = true;
+                if constexpr(std::is_same_v<DBGSSHash, typename TypeParam::first_type>) {
+                    const auto &sshash = static_cast<const DBGSSHash&>(anno_graph->get_graph());
+                    std::visit([&](const auto &dict) {
+                        ASSERT_GE(config.min_seed_length, dict.m());
+                        const auto &[query, mappings] = exp_alignments[i];
+                        ASSERT_LT(0u, mappings.size());
+                        using kmer_t = get_kmer_t<decltype(dict)>;
+                        auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
+                        auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
+                        // we can only find the first seed of it's also the minimizer
+                        if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
+                                || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
+                            first_seed_matches = false;
+                        }
+                    }, sshash.data());
+                }
+
+                const auto &[query, mappings] = exp_alignments[i];
+                if (first_seed_matches) {
+                    run_alignment(*anno_graph, config, query, mappings);
+                } else {
+                    run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+                }
+            }
+        }
+        {
+            std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
+                { std::string("TATTGCCGATTGCATTG"), {
+                    std::make_tuple(std::string("B"), std::string("TATTGCCGATTGCCTTG"), std::string("13=1X3=")),
+                    std::make_tuple(std::string("C"), std::string("TATTGGCGATTGCATTG"), std::string("5=1X11=")),
+                } }
+            };
+
+            for (const auto &[query, mappings] : exp_alignments) {
+                run_alignment(*anno_graph, config, query, mappings, 0, true, true);
+            }
         }
     }
 }
@@ -383,6 +439,11 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoords) {
                                        typename TypeParam::second_type>(
         k, sequences, labels, DeBruijnGraph::BASIC, true
     );
+
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("B"),
+              anno_graph->get_annotator().get_label_encoder().encode("C"));
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
@@ -428,6 +489,11 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsMiddle) {
         k, sequences, labels, DeBruijnGraph::BASIC, true
     );
 
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("B"),
+              anno_graph->get_annotator().get_label_encoder().encode("C"));
+
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
 
@@ -466,6 +532,9 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
                                        typename TypeParam::second_type>(
         k, sequences, labels, DeBruijnGraph::BASIC, true
     );
+
+    ASSERT_LT(anno_graph->get_annotator().get_label_encoder().encode("A"),
+              anno_graph->get_annotator().get_label_encoder().encode("B"));
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
