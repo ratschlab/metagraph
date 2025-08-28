@@ -401,7 +401,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 sshash = dynamic_cast<const DBGSSHash*>(&graph);
             }
 
-            if (dbg_succ) {
+            if (dbg_succ && (!orientation || canonical)) {
                 const auto &boss = dbg_succ->get_boss();
                 auto encoded = boss.encode(this_query);
 
@@ -428,7 +428,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
                     // std::cerr << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\t" << first << "," << last << "\t" << std::flush << graph.get_node_sequence(first) << "\t" << graph.get_node_sequence(last) << "\n";
 
-                    if (canonical) {
+                    if (canonical && orientation) {
                         if (dbg_succ->in_graph(last)) {
                             size_t i_rc = this_query.size() - (i + match_size);
                             dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
@@ -472,7 +472,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         size_t cur_match_size = match_size + suffix.size();
 
                         assert(cur_match_size < k);
-                        if (cur_match_size == k - 1) {
+                        if (!orientation && cur_match_size == k - 1) {
                             assert(first == last || !boss.get_last(first));
                             assert(boss.succ_last(first) == last);
                             // std::cerr << "foo\t" << i << "\t" << std::string_view(this_query.begin() + i, match_size) << "\n";
@@ -520,7 +520,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     traverse.emplace_back(next_first, next_last, suffix + c,
                                                         next_is_exact_match);
                                 }
-                                if (canonical && next_is_exact_match) {
+                                if (canonical && orientation && next_is_exact_match) {
                                     size_t next_match_size = cur_match_size + 1;
                                     size_t i_rc = this_query.size() - (i + next_match_size);
 
@@ -648,7 +648,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     size_t i_in_contig = res.kmer_id_in_contig + w;
 
-                                    if (i_in_contig < res.contig_size && i_shift + min_match_length <= this_query.size()) {
+                                    if (!orientation && i_in_contig < res.contig_size && i_shift + min_match_length <= this_query.size()) {
                                         // std::cerr << "\t\t\tfw\n";
                                         // forward
                                         assert(res.kmer_id_in_contig + w + k <= contig_length);
@@ -679,7 +679,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
 
-                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && !orientation && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
                                         // rev comp
                                         // std::cerr << "\t\t\trc\n";
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
