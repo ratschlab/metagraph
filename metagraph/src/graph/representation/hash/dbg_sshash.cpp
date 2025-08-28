@@ -718,11 +718,13 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
 }
 
 std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) const {
+    assert(node <= max_index());
     if (node == npos)
         return std::vector<seq_index>(1, node);
 
     if (node > dict_size()) {
-        size_t num_base_contigs = succ_is_next_.num_set_bits() + pred_is_prev_.num_set_bits();
+        assert(mode_ == CANONICAL);
+        size_t num_base_contigs = succ_is_next_.size() + pred_is_prev_.size() - succ_is_next_.num_set_bits() - pred_is_prev_.num_set_bits();
         auto ret_val = get_sequence_ids(reverse_complement(node));
         for (seq_index &id : ret_val) {
             id += num_base_contigs;
@@ -732,13 +734,13 @@ std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) c
     }
 
     // treat each unitig as a sequence
-    size_t srank = succ_is_next_.rank1(node);
-    size_t prank = pred_is_prev_.rank1(node);
+    size_t srank = succ_is_next_.rank0(node);
+    size_t prank = pred_is_prev_.rank0(node);
 
     seq_index contig_id = srank + prank;
 
-    bool s_unitig_back = succ_is_next_[node];
-    bool s_unitig_front = pred_is_prev_[node];
+    bool s_unitig_back = !succ_is_next_[node];
+    bool s_unitig_front = !pred_is_prev_[node];
 
     if (s_unitig_back && !s_unitig_front) {
         assert(contig_id);

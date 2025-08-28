@@ -106,17 +106,26 @@ void run_alignment(const DeBruijnGraph &graph,
                 EXPECT_EQ(cigar.get_end_clipping(), path.get_end_clipping()) << mx << "\t" << type;
             };
 
-            check_ref(paths[i], reference[i], "extend");
+            std::string cur_reference = reference[i];
+            if (paths[i].get_orientation() && !paths[i].get_end_trim())
+                ::reverse_complement(cur_reference.begin(), cur_reference.end());
+
+            check_ref(paths[i], cur_reference, "extend");
 
             if (i < cigar_str.size() && cigar_str[i].size()) {
-                Cigar cigar(cigar_str[i]);
-                check_aln(paths[i], cigar, reference[i], "extend");
+                std::string cur_cigar = cigar_str[i];
+                Cigar cigar(cur_cigar);
+                if (paths[i].get_orientation() && !paths[i].get_end_trim()) {
+                    std::reverse(cigar.data().begin(), cigar.data().end());
+                    cur_cigar = cigar.to_string();
+                }
+                check_aln(paths[i], cigar, cur_reference, "extend");
 
                 if (check_chaining) {
                     // this alignment should work with chaining alone
                     ASSERT_LT(i, paths_no_extend.size());
-                    check_ref(paths_no_extend[i], reference[i], "chain");
-                    check_aln(paths_no_extend[i], cigar, reference[i], "chain");
+                    check_ref(paths_no_extend[i], cur_reference, "chain");
+                    check_aln(paths_no_extend[i], cigar, cur_reference, "chain");
 
                     ASSERT_LT(i, paths_no_align.size());
                     EXPECT_EQ(cigar.to_string(), paths_no_align[i].get_cigar().to_string()) << mx << "\tnoalign";
@@ -560,7 +569,12 @@ TYPED_TEST(DBGAlignerRedoneTest, align_drop_seed) {
     config.gap_opening_penalty = -10;
     config.gap_extension_penalty = -4;
     config.xdrop = 6;
-    run_alignment(*graph, config, query, { reference.substr(7) }, { "7S9=" });
+    if constexpr(std::is_base_of_v<DBGSSHash, TypeParam>) {
+        // xdrop is ignored when the connection happens via extension
+        run_alignment(*graph, config, query, { reference }, { "5=2X9=" });
+    } else {
+        run_alignment(*graph, config, query, { reference.substr(7) }, { "7S9=" });
+    }
 }
 
 // TODO: double-check

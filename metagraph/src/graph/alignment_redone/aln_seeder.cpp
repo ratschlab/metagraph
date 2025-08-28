@@ -2316,17 +2316,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     DeBruijnGraph::seq_index contig = sshash->get_sequence_ids(node)[0];
                     DeBruijnGraph::seq_index target_contig = sshash->get_sequence_ids(target_node)[0];
                     if (contig == target_contig) {
-#ifndef NDEBUG
-                        std::visit([&](const auto &dict) {
-                            std::string node_spelling = sshash->get_node_sequence(node);
-                            std::string target_node_spelling = sshash->get_node_sequence(target_node);
-                            auto res = dict.lookup_advanced(node_spelling.c_str(), sshash->get_mode() == DeBruijnGraph::CANONICAL);
-                            auto target_res = dict.lookup_advanced(target_node_spelling.c_str(), sshash->get_mode() == DeBruijnGraph::CANONICAL);
-                            assert(res.contig_id != sshash::constants::invalid_uint64);
-                            assert(target_res.contig_id != sshash::constants::invalid_uint64);
-                            assert(res.contig_id == target_res.contig_id);
-                        }, sshash->data());
-#endif
                         if (node < sshash->reverse_complement(node)) {
                             // canonical strand
                             if (target_node >= node) {
@@ -2340,14 +2329,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 #endif
                                 return target_node - node;
                             }
-                        } else if (node >= target_node) {
+                        } else if (node >= target_node && target_node > sshash->reverse_complement(target_node) && node > sshash->reverse_complement(node)) {
                             // rc strand
 #ifndef NDEBUG
                             if (target_node != node) {
                                 std::vector<DeBruijnGraph::node_index> path(node - target_node + 1);
                                 std::iota(path.begin(), path.end(), target_node);
                                 assert(path.back() == node);
-                                std::reverse(path.begin(), path.end());
                                 assert(spell_path(*sshash, path) != "");
                             }
 #endif
