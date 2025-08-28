@@ -2336,6 +2336,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 std::vector<DeBruijnGraph::node_index> path(node - target_node + 1);
                                 std::iota(path.begin(), path.end(), target_node);
                                 assert(path.back() == node);
+                                std::reverse(path.begin(), path.end());
                                 assert(spell_path(*sshash, path) != "");
                             }
 #endif
