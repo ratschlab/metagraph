@@ -534,7 +534,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     }
 
                                     for (edge_index e : succs) {
+                                        assert(e);
                                         auto node = canonical->reverse_complement(e);
+                                        if (!graph.in_graph(node))
+                                            continue;
+
                                         bool inserted = true;
                                         auto it = max_seeds[!orientation][i_rc].find(node);
                                         if (it != max_seeds[!orientation][i_rc].end() && next_match_size <= it->second.get_seed().size())
