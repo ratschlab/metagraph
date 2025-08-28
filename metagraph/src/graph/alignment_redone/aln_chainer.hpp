@@ -280,10 +280,45 @@ AnchorIt chain_anchors(const Query &query,
 
     sdsl::bit_vector used(chain_scores.size());
 
-    tsl::ordered_map<AnchorChain<AnchorIt>,
-                     tsl::hopscotch_set<Anchor::label_class_t>,
-                     ChainHash<AnchorIt>,
-                     ChainEqual<AnchorIt>> chain_map;
+    tsl::hopscotch_set<Anchor::label_class_t> label_classes;
+    AnchorChain<AnchorIt> last_chain;
+
+    auto flush_chains = [&]() {
+        if (last_chain.size()) {
+            if (label_classes.size() == 1) {
+                extend_chain<AnchorIt>(last_chain, anchor_extender, callback, terminate);
+            } else {
+                AnnotationBuffer::Columns merged_columns;
+                for (auto label_class : label_classes) {
+                    if (merged_columns.empty()) {
+                        merged_columns = anno_buffer->get_cached_column_set(label_class);
+                    } else {
+                        const auto &next_columns = anno_buffer->get_cached_column_set(label_class);
+                        AnnotationBuffer::Columns next_merged;
+                        std::set_union(merged_columns.begin(), merged_columns.end(),
+                                        next_columns.begin(), next_columns.end(),
+                                        std::back_inserter(next_merged));
+                        std::swap(next_merged, merged_columns);
+                    }
+                }
+                auto merged_label_class = anno_buffer->cache_column_set(std::move(merged_columns));
+                std::vector<Anchor> relabeled_anchors;
+                relabeled_anchors.reserve(last_chain.size());
+                for (const auto &[it, dist] : last_chain) {
+                    relabeled_anchors.emplace_back(*it).set_label_class(merged_label_class);
+                }
+                for (size_t i = 0; i < last_chain.size(); ++i) {
+                    static_assert(std::is_same_v<AnchorIt, std::vector<Anchor>::iterator>);
+                    last_chain[i].first = relabeled_anchors.begin() + i;
+                }
+                extend_chain<AnchorIt>(last_chain, anchor_extender, callback, terminate);
+            }
+        }
+
+        last_chain.clear();
+        label_classes.clear();
+    };
+
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
         if (terminate())
             return end;
@@ -315,45 +350,22 @@ AnchorIt chain_anchors(const Query &query,
         std::reverse(scores.begin(), scores.end());
 
         if (chain.size() && extension_starter(chain, scores)) {
-            chain_map[chain].emplace(chain[0].first->get_label_class());
-            // if (extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate)) {
+            if (!anno_buffer) {
+                extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
+            } else {
+                if (label_classes.empty() || !ChainEqual<AnchorIt>()(last_chain, chain)) {
+                    flush_chains();
+                    last_chain = chain;
+                }
+                label_classes.emplace(chain[0].first->get_label_class());
+            }
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - begin] = true;
             }
-            // }
         }
     }
 
-    for (const auto &[base_chain, label_classes] : chain_map) {
-        if (label_classes.size() == 1) {
-            extend_chain<AnchorIt>(base_chain, anchor_extender, callback, terminate);
-        } else {
-            assert(anno_buffer);
-            auto it = label_classes.begin();
-            AnnotationBuffer::Columns merged_columns = anno_buffer->get_cached_column_set(*it);
-            for ( ; it != label_classes.end(); ++it) {
-                const auto &next_columns = anno_buffer->get_cached_column_set(*it);
-                AnnotationBuffer::Columns next_merged;
-                std::set_union(merged_columns.begin(), merged_columns.end(),
-                               next_columns.begin(), next_columns.end(),
-                               std::back_inserter(next_merged));
-                std::swap(next_merged, merged_columns);
-            }
-            auto merged_label_class = anno_buffer->cache_column_set(std::move(merged_columns));
-            std::vector<Anchor> relabeled_anchors;
-            relabeled_anchors.reserve(base_chain.size());
-            for (const auto &[it, dist] : base_chain) {
-                relabeled_anchors.emplace_back(*it).set_label_class(merged_label_class);
-            }
-            AnchorChain<AnchorIt> chain;
-            chain.reserve(base_chain.size());
-            for (size_t i = 0; i < base_chain.size(); ++i) {
-                static_assert(std::is_same_v<AnchorIt, std::vector<Anchor>::iterator>);
-                chain.emplace_back(relabeled_anchors.begin() + i, base_chain[i].second);
-            }
-            extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
-        }
-    }
+    flush_chains();
 
     return end;
 }
