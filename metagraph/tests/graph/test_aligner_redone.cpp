@@ -569,12 +569,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_drop_seed) {
     config.gap_opening_penalty = -10;
     config.gap_extension_penalty = -4;
     config.xdrop = 6;
-    if constexpr(std::is_base_of_v<DBGSSHash, TypeParam>) {
-        // xdrop is ignored when the connection happens via extension
-        run_alignment(*graph, config, query, { reference }, { "5=2X9=" });
-    } else {
-        run_alignment(*graph, config, query, { reference.substr(7) }, { "7S9=" });
-    }
+    run_alignment(*graph, config, query, { reference.substr(7) }, { "7S9=" });
 }
 
 // TODO: double-check

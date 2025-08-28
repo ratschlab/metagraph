@@ -2583,8 +2583,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     traversed += a_j.get_path().size() - 1 + a_i.get_end_trim();
                     size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
                     if (gap) {
-                        score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                        //score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                        score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
                     }
+                    size_t nmismatch = std::min<ssize_t>(traversed, dist);
+                    std::string_view query_trim_window(query_i.data() + query_i.size(), nmismatch);
+                    auto cur_mismatch = config_.score_sequences(query_trim_window,
+                                                                std::string_view(dummy.c_str(), nmismatch));
+                    score += cur_mismatch;
 
                     if (score > score_j)
                         update_score(score, it, traversed);
