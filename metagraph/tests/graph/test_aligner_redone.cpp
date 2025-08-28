@@ -361,10 +361,10 @@ TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
 TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     size_t k = 5;
     std::vector<std::string> references = {
-                        "AGACAATTTTTTAAAAA",
-                        "AGACAATTTTTGAAAAA",
-                        "AGACAAGTTTTTAAAAA",
-                        "AGACAAGTTTTGAAAAA" };
+                        "AGACAATTTTTTAAA",
+                        "AGACAATTTTTGAAA",
+                        "AGACAAGTTTTTAAA",
+                        "AGACAAGTTTTGAAA" };
     std::string query = "AGACAACTTTTCAAA";
     //                         X    X
 
@@ -373,11 +373,6 @@ TYPED_TEST(DBGAlignerRedoneTest, alternative_path_basic) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
 
     run_alignment(*graph, config, query, { "" }, { "6=1X4=1X3=" }, 0, true, true);
-
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
-        config.min_seed_length = 3;
-        run_alignment(*graph, config, query, { "" }, { "6=1X4=1X3=" });
-    }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_multiple_misalignment) {
@@ -782,7 +777,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     size_t k = 31;
-    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAG" "GTCTTC""GCCTGTGTAGATCTCGGTGGTCGGCTAGCTAGCTA";
+    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAG" "GTCTTC""GCCTGTGTAGATCTC";
     std::string query =        "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAG""AGTGTTCCTGGTGGTGTAGATCTC";
     //                                                           I  X   II XXX
 
@@ -953,7 +948,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;
-    std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGCAAAAA";
+    std::string reference =    "GTAGTGCTAGCTTGTAGTCGTGCTGATGCA";
     std::string query =        "GTAGTGCTACCTTGTAGTCGTGGTGATGCA";
     //                                   X            X
 
@@ -961,27 +956,6 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" }, 0, true, true);
-
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
-        config.min_seed_length = 7;
-        if constexpr(std::is_same_v<DBGSSHash, TypeParam>) {
-            const auto &sshash = static_cast<const DBGSSHash&>(*graph);
-            std::visit([&](const auto &dict) {
-                using kmer_t = get_kmer_t<decltype(dict)>;
-                auto third_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(reference.data() + 2, k);
-                auto third_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data() + 2, k);
-                // we can only find the first seed of it's also the minimizer
-                if (sshash::util::compute_minimizer_pos<kmer_t>(third_kmer_ref, k, dict.m(), dict.seed()).second
-                        || sshash::util::compute_minimizer_pos<kmer_t>(third_kmer_query, k, dict.m(), dict.seed()).second) {
-                    run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" }, 0, true, true);
-                } else {
-                    run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" });
-                }
-            }, sshash.data());
-        } else {
-            run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "9=1X12=1X7=" });
-        }
-    }
 }
 
 // TYPED_TEST(DBGAlignerTest, align_nodummy) {

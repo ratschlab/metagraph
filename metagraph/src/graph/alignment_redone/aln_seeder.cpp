@@ -2316,6 +2316,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 assert(a_i.get_label_class() == a_j.get_label_class());
                 assert(a_i.get_orientation() == a_j.get_orientation());
 
+                if (a_j.get_clipping() + k > query_.get_query(a_i.get_orientation()).size())
+                    return;
+
                 auto get_sshash_distance = [&](DeBruijnGraph::node_index node, DeBruijnGraph::node_index target_node) -> size_t {
                     DeBruijnGraph::seq_index contig = sshash->get_sequence_ids(node)[0];
                     DeBruijnGraph::seq_index target_contig = sshash->get_sequence_ids(target_node)[0];
