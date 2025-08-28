@@ -5,6 +5,7 @@
 #include "aligner_config.hpp"
 #include "aln_query.hpp"
 #include "aln_match.hpp"
+#include "annotation_buffer.hpp"
 
 #include "common/logger.hpp"
 
@@ -48,8 +49,52 @@ using AnchorExtender = std::function<void(AnchorIt, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename AnchorIt>
+struct ChainHash {
+    inline std::size_t operator()(const AnchorChain<AnchorIt> &chain) const {
+        uint64_t hash = 0;
+
+        auto update_hash = [&](auto val) {
+            hash ^= val + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        };
+
+        for (const auto &[anchor_it, dist] : chain) {
+            std::for_each(anchor_it->get_path().begin(), anchor_it->get_path().end(),
+                          update_hash);
+            update_hash(dist);
+            update_hash(anchor_it->get_coord());
+        }
+        return hash;
+    }
+};
+
+template <typename AnchorIt>
+struct ChainEqual {
+    inline std::size_t operator()(const AnchorChain<AnchorIt> &a,
+                                  const AnchorChain<AnchorIt> &b) const {
+        if (a.size() != b.size())
+            return false;
+
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i].second != b[i].second)
+                return false;
+        }
+
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i].first->get_coord() != b[i].first->get_coord())
+                return false;
+
+            const Match &a_i = static_cast<const Match&>(*a[i].first);
+            const Match &b_i = static_cast<const Match&>(*b[i].first);
+            if (!(a_i == b_i))
+                return false;
+        }
+
+        return true;
+    }
+};
+
+template <typename AnchorIt>
 bool extend_chain(const AnchorChain<AnchorIt> &chain,
-                  const std::vector<DBGAlignerConfig::score_t> &score_traceback,
                   const AnchorExtender<AnchorIt> &anchor_extender,
                   const AlignmentCallback &callback,
                   const std::function<bool()> &terminate = []() { return false; }) {
@@ -102,7 +147,8 @@ AnchorIt chain_anchors(const Query &query,
                        const ExtensionStarter<AnchorIt> &extension_starter,
                        const AnchorExtender<AnchorIt> &anchor_extender,
                        const AlignmentCallback &callback = [](Alignment&&) {},
-                       const std::function<bool()> &terminate = []() { return false; }) {
+                       const std::function<bool()> &terminate = []() { return false; },
+                       AnnotationBuffer *anno_buffer = nullptr) {
     if (terminate() || begin == end)
         return end;
 
@@ -233,6 +279,11 @@ AnchorIt chain_anchors(const Query &query,
     std::sort(best_chains.begin(), best_chains.end());
 
     sdsl::bit_vector used(chain_scores.size());
+
+    tsl::ordered_map<AnchorChain<AnchorIt>,
+                     tsl::hopscotch_set<Anchor::label_class_t>,
+                     ChainHash<AnchorIt>,
+                     ChainEqual<AnchorIt>> chain_map;
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
         if (terminate())
             return end;
@@ -264,11 +315,43 @@ AnchorIt chain_anchors(const Query &query,
         std::reverse(scores.begin(), scores.end());
 
         if (chain.size() && extension_starter(chain, scores)) {
-            if (extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate)) {
-                for (const auto &[a_ptr, dist] : chain) {
-                    used[a_ptr - begin] = true;
-                }
+            chain_map[chain].emplace(chain[0].first->get_label_class());
+            // if (extend_chain<AnchorIt>(chain, scores, anchor_extender, callback, terminate)) {
+            for (const auto &[a_ptr, dist] : chain) {
+                used[a_ptr - begin] = true;
             }
+            // }
+        }
+    }
+
+    for (const auto &[base_chain, label_classes] : chain_map) {
+        if (label_classes.size() == 1) {
+            extend_chain<AnchorIt>(base_chain, anchor_extender, callback, terminate);
+        } else {
+            assert(anno_buffer);
+            auto it = label_classes.begin();
+            AnnotationBuffer::Columns merged_columns = anno_buffer->get_cached_column_set(*it);
+            for ( ; it != label_classes.end(); ++it) {
+                const auto &next_columns = anno_buffer->get_cached_column_set(*it);
+                AnnotationBuffer::Columns next_merged;
+                std::set_union(merged_columns.begin(), merged_columns.end(),
+                               next_columns.begin(), next_columns.end(),
+                               std::back_inserter(next_merged));
+                std::swap(next_merged, merged_columns);
+            }
+            auto merged_label_class = anno_buffer->cache_column_set(std::move(merged_columns));
+            std::vector<Anchor> relabeled_anchors;
+            relabeled_anchors.reserve(base_chain.size());
+            for (const auto &[it, dist] : base_chain) {
+                relabeled_anchors.emplace_back(*it).set_label_class(merged_label_class);
+            }
+            AnchorChain<AnchorIt> chain;
+            chain.reserve(base_chain.size());
+            for (size_t i = 0; i < base_chain.size(); ++i) {
+                static_assert(std::is_same_v<AnchorIt, std::vector<Anchor>::iterator>);
+                chain.emplace_back(relabeled_anchors.begin() + i, base_chain[i].second);
+            }
+            extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
         }
     }
 

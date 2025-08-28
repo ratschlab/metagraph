@@ -2290,7 +2290,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
     std::string dummy(query_.get_query().size(), '$');
 
-    tsl::hopscotch_set<Anchor::label_class_t> found_labels;
+    auto *anno_buffer = make_aln_graph(anchors[0].get_label_class()).get_anno_buffer();
 
     bool ext_success = false;
     Anchor::score_t last_chain_score = 0;
@@ -2631,9 +2631,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             //                                                     && (a.first->get_label_class() == Anchor::nannot
             //                                                             || !found_labels.count(a.first->get_label_class())); });
 
-            ret_val &= std::all_of(chain.begin(), chain.end(),
-                                   [&](const auto &a) { return a.first->get_label_class() == Anchor::nannot
-                                                                        || !found_labels.count(a.first->get_label_class()); });
+            // ret_val &= std::all_of(chain.begin(), chain.end(),
+            //                        [&](const auto &a) { return a.first->get_label_class() == Anchor::nannot
+            //                                                             || !found_labels.count(a.first->get_label_class()); });
 
             // common::logger->info("Try Chain\t{}\t{}", score_traceback.back(), ret_val);
             if (!ret_val)
@@ -2660,7 +2660,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
             return ret_val;
         },
-        [this,align,match_score=config_.match_score("A")](
+        [this,align,anno_buffer,match_score=config_.match_score("A")](
                 AnchorIt last,
                 AnchorIt next,
                 Alignment&& aln,
@@ -2807,7 +2807,6 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
 
             bool aln_found = false;
-            auto *anno_buffer = make_aln_graph(last->get_label_class()).get_anno_buffer();
             align_bwd(
                 query_.get_graph(),
                 config_,
@@ -2897,7 +2896,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 throw std::runtime_error("Failed to connect anchors");
             }
         },
-        [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score,&found_labels](Alignment&& aln) {
+        [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score](Alignment&& aln) {
             aln.trim_end();
 
             assert(aln.get_label_classes().size());
@@ -2916,10 +2915,10 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     first_chain_score = last_chain_score;
                     first_chain = false;
                 }
-                for (auto label : aln.get_label_classes()) {
-                    if (label != Anchor::nannot)
-                        found_labels.emplace(label);
-                }
+                // for (auto label : aln.get_label_classes()) {
+                //     if (label != Anchor::nannot)
+                //         found_labels.emplace(label);
+                // }
             }
 
             if (common::get_verbose()) {
@@ -2929,7 +2928,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
             // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
             alignments.emplace_back(std::move(aln));
-        }
+        },
+        []() { return false; },
+        anno_buffer
     );
 
     // size_t num_selected = sdsl::util::cnt_one_bits(selected);

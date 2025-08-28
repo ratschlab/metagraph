@@ -4,6 +4,8 @@
 #include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
+#include <tsl/hopscotch_set.h>
+
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -83,6 +85,8 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         ASSERT_LE(mappings.size(), paths.size()) << mx;
         paths.resize(mappings.size());
 
+        tsl::hopscotch_set<std::string> seen_labels;
+
         for (size_t i = 0; i < mappings.size(); ++i) {
             const auto &[label, reference, cigar_str] = mappings[i];
             Cigar cigar(cigar_str);
@@ -109,7 +113,8 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                     ASSERT_LE(target, old_num_column_sets);
 
                     const auto &path_targets = path.get_label_classes();
-                    std::string path_target_labels = anno_buffer.generate_column_set_str(target, path.get_spelling().size());
+                    std::string path_target_labels = anno_buffer.generate_column_set_str(path_targets[0], path.get_spelling().size());
+
                     if (path_targets.size() > 1) {
                         ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                                 [&](auto node_target) { return node_target == path_targets[0]; }))
@@ -238,7 +243,6 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {
         { std::string("CGAATGCAT"), { // RC: ATGCATTCG
             std::make_tuple(std::string("B"), std::string("CGAATGCCT"), std::string("7=1X1=")),
             std::make_tuple(std::string("C"), std::string("GGAATGCAT"), std::string("1X8=")),
-            std::make_tuple(std::string("A"), std::string("AGGCAT"), std::string("3S1=1X4=")),
         } }
     };
 
@@ -542,7 +546,6 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
     std::vector<std::pair<std::string, std::vector<std::tuple<std::string, std::string, std::string>>>> exp_alignments {
         { std::string("ATGCGCAATGCG"), { // RC: CGCATTGCGCAT
             std::make_tuple(std::string("B"), std::string("ATGCGCA"), std::string("7=5S")),
-            std::make_tuple(std::string("A"), std::string("GCAAT"), std::string("4S5=3S")),
         } }
     };
 
