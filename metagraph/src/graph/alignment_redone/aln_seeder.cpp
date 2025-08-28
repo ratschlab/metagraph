@@ -2060,7 +2060,8 @@ void Extender::extend(const Alignment &aln,
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                if (query_dist == query_window.size())
+                //if (query_dist == query_window.size())
+                if (query_dist > query_window.size())
                     return true;
 
                 size_t dist = std::get<0>(data);
@@ -2182,7 +2183,8 @@ void Extender::extend(const Alignment &aln,
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate branch
-                if (query_dist == query_window.size())
+                //if (query_dist == query_window.size())
+                if (query_dist > query_window.size())
                     return true;
 
                 size_t dist = std::get<0>(data);
@@ -2827,6 +2829,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     // common::logger->info("Check: n: {}, d: {}, qd: {} / {}, s: {}",
                     //                      query_.get_graph().get_node_sequence(node), dist, query_dist, query_window.size(),
                     //                      get_score(cost, query_dist, dist));
+
+                    return dist > traversal_dist || query_dist > query_window.size();
 
                     if (dist == 0 && query_dist == 0)
                         return false;
