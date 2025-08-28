@@ -745,6 +745,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 assert(anchors.back().get_spelling().size() + anchors.back().get_end_trim() == graph.get_k());
             }
         }
+
+        if (graph.get_mode() != DeBruijnGraph::BASIC)
+            break;
     }
 
     size_t num_covered = std::max(sdsl::util::cnt_one_bits(coverage[false]),
