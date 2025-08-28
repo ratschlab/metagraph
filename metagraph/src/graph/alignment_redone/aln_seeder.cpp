@@ -2575,7 +2575,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                 size_t traversed = get_sshash_distance(a_i.get_path().back(), a_j.get_path()[0]);
                 if (traversed > 0 && traversed != std::numeric_limits<size_t>::max()) {
-                    traversed += a_j.get_path().size() - 1;
+                    traversed += a_j.get_path().size() - 1 + a_i.get_end_trim();
                     size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
                     if (gap) {
                         score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
