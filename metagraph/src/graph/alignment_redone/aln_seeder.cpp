@@ -2585,8 +2585,15 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return;
 
                 size_t traversed = get_sshash_distance(a_i.get_path().back(), a_j.get_path()[0]);
-                if (traversed > 0 && traversed != std::numeric_limits<size_t>::max()) {
-                    traversed += a_j.get_path().size() - 1 + a_i.get_end_trim();
+                if (traversed > 0
+                        && traversed != std::numeric_limits<size_t>::max()
+                        && traversed + a_i.get_path().size() + query_j.size() > query_i.size() + 1) {
+                    traversed += a_i.get_path().size() - 1 - query_i.size() + query_j.size();
+                    // if (traversed + a_j.get_path().size() + a_i.get_end_trim() <= a_j.get_end_trim() + 1) {
+                    //     std::cerr << a_i << "\t" << a_i.get_path_spelling() << "\t" << traversed << "\t" << a_j << "\t" << a_j.get_path_spelling() << std::endl;
+                    // }
+                    // assert(traversed + a_j.get_path().size() + a_i.get_end_trim() > a_j.get_end_trim() + 1);
+                    // traversed += a_j.get_path().size() - 1 + a_i.get_end_trim() - a_j.get_end_trim();
                     size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
                     if (gap) {
                         //score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
