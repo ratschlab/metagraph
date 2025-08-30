@@ -5,6 +5,7 @@
 #include "aln_match.hpp"
 
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/algorithms.hpp"
@@ -39,6 +40,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
     std::vector<Row> queued_rows;
 
     const DeBruijnGraph *base_graph = &graph_;
+    const auto *sshash = dynamic_cast<const DBGSSHash*>(base_graph);
 
     if (canonical_)
         base_graph = &canonical_->get_graph();
@@ -53,6 +55,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
             base_path.reserve(path.size());
             std::transform(path.begin(), path.end(), std::back_inserter(base_path),
                            [&](node_index node) { return canonical_->get_base_node(node); });
+        } else if (sshash) {
+            base_path.reserve(path.size());
+            std::transform(path.begin(), path.end(), std::back_inserter(base_path),
+                           [&](node_index node) { return sshash->get_base_node(node); });
         } else {
             base_path = map_to_nodes(graph_, spell_path(graph_, path));
         }

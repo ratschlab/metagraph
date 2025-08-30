@@ -120,6 +120,7 @@ class DBGSSHash : public DeBruijnGraph {
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
+    node_index get_base_node(node_index node) const;
 
     void adjacent_outgoing_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;

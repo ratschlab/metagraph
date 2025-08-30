@@ -343,6 +343,15 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
 }
 
+DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
+    if (node == npos)
+        return npos;
+
+    assert(in_graph(node));
+
+    return node > dict_size() ? node - dict_size() : node;
+}
+
 uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
 }
