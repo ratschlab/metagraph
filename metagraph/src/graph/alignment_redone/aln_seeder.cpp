@@ -581,19 +581,36 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     size_t k = dict.k();
                     size_t min_match_length = std::max(m, config_.min_seed_length);
                     auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
+
+                    if (m > this_query.size())
+                        return;
+
+                    std::vector<kmer_t> mmers(this_query.size() - m + 1);
+                    bool flush_mmer = true;
+                    kmer_t mmer;
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
                         assert(i < invalid_mmer.size());
-                        if (invalid_mmer[i])
+                        if (invalid_mmer[i]) {
+                            flush_mmer = true;
                             continue;
+                        }
 
-                        kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
-                            this_query.data() + i,
-                            m
-                        );
-
+                        if (flush_mmer) {
+                            mmer = sshash::util::string_to_uint_kmer<kmer_t>(
+                                this_query.data() + i,
+                                m
+                            );
+                            flush_mmer = false;
+                        } else {
+                            mmer.drop_char();
+                            mmer.kth_char_or(m - 1, kmer_t::char_to_uint(this_query[i + m - 1]));
+                        }
+                        mmers[i] = mmer;
+                    }
+                    for (size_t i = 0; i + m <= this_query.size(); ++i) {
+                        kmer_t mmer = mmers[i];
                         uint64_t bucket_id = minimizers.lookup(uint64_t(mmer));
                         auto [begin, end] = buckets.locate_bucket(bucket_id);
-
                         for (size_t super_kmer_id = begin; super_kmer_id < end; ++super_kmer_id) {
                             uint64_t offset = offsets.access(super_kmer_id);
 
@@ -632,10 +649,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     if (i_shift + m > this_query.size() || invalid_mmer[i_shift])
                                         break;
 
-                                    kmer_t mmer = sshash::util::string_to_uint_kmer<kmer_t>(
-                                        this_query.data() + i_shift,
-                                        m
-                                    );
+                                    kmer_t mmer = mmers[i_shift];
 
                                     // std::cerr << "\t\t" << i_shift << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(mmer, m) << " vs. "
                                     //           << sshash::util::uint_kmer_to_string<kmer_t>(read_kmer, m) << "\n";
