@@ -87,7 +87,8 @@ class AlignmentGraph {
 
     void traverse(node_index node, std::string_view seq,
                   const TraverseCallback &callback,
-                  const Terminator &terminate = [](){ return false; }) const {
+                  const Terminator &terminate = [](){ return false; },
+                  size_t min_dist_before_check_anno = 0) const {
         if (target_ == Anchor::nannot) {
             graph_.traverse(node, seq,
                             [&](node_index next) {
@@ -101,6 +102,9 @@ class AlignmentGraph {
         graph_.traverse(node, seq,
                         [&](node_index next) { forward_nodes.emplace_back(next); },
                         terminate);
+        if (forward_nodes.size() < min_dist_before_check_anno)
+            return;
+
         anno_buffer_->queue_path(forward_nodes);
         anno_buffer_->fetch_queued_annotations();
 
@@ -119,7 +123,8 @@ class AlignmentGraph {
 
     void traverse_back(node_index node, std::string_view prefix_seq,
                        const TraverseCallback &callback,
-                       const Terminator &terminate = [](){ return false; }) const {
+                       const Terminator &terminate = [](){ return false; },
+                       size_t min_dist_before_check_anno = 0) const {
         if (target_ == Anchor::nannot) {
             graph_.traverse_back(node, prefix_seq,
                                  [&](node_index prev) {
@@ -134,6 +139,9 @@ class AlignmentGraph {
         graph_.traverse_back(node, prefix_seq,
                              [&](node_index prev) { backward_nodes.emplace_back(prev); },
                              terminate);
+        if (backward_nodes.size() < min_dist_before_check_anno)
+            return;
+
         anno_buffer_->queue_path(std::vector<node_index>(backward_nodes.rbegin(),
                                                          backward_nodes.rend()));
         anno_buffer_->fetch_queued_annotations();
@@ -2417,7 +2425,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                         assert(next_target == a_i.get_label_class());
                                         ++traverse;
                                         node = next;
-                                    });
+                                    },
+                                    []() { return false; },
+                                    a_j_trim_spelling.size());
                         assert(traverse != a_j_trim_spelling.size() || node == a_j.get_path()[0]);
                     } else {
                         node = a_j.get_path()[0];
@@ -2525,7 +2535,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                         assert(next_target == a_i.get_label_class());
                                         node = next;
                                         ++traversed;
-                                    }
+                                    },
+                                    []() { return false; },
+                                    a_j_spelling.size() - olap + del
                                 );
                                 assert(traversed != a_j_spelling.size() - olap + del || node == a_j.get_path()[0]);
                             } else {
@@ -2572,7 +2584,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                     assert(next_target == a_i.get_label_class());
                                     node = next;
                                     ++traversed;
-                                }
+                                },
+                                []() { return false; },
+                                query_i.size() - a_i.get_path().size() + 1
                             );
                             assert(traversed != query_i.size() - a_i.get_path().size() + 1 || node == a_j.get_path()[0]);
                         } else {
