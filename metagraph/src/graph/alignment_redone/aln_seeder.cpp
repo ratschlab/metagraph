@@ -745,6 +745,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     if (w + 1 < window_size)
                                         read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
                                 }
+                                break;
                             }
                         }
                     }
