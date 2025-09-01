@@ -394,6 +394,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
     for (bool orientation : { false, true }) {
         std::string_view this_query = query_.get_query(orientation);
+        std::string_view rc_query = query_.get_query(!orientation);
         auto &nodes = mapped_nodes[orientation];
         auto &cur_max_seeds = max_seeds[orientation];
 
@@ -450,12 +451,12 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 if (spelling.find(boss::BOSS::kSentinel) != std::string::npos)
                                     return;
 
-                                assert(std::equal(query_.get_query(!orientation).begin() + i_rc,
-                                                  query_.get_query(!orientation).begin() + i_rc + match_size,
+                                assert(std::equal(rc_query.begin() + i_rc,
+                                                  rc_query.begin() + i_rc + match_size,
                                                   spelling.begin(), spelling.begin() + match_size));
 
                                 std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                it.value() = Anchor(query_.get_query(!orientation),
+                                it.value() = Anchor(rc_query,
                                                     i_rc, i_rc + match_size,
                                                     !orientation,
                                                     std::vector<Match::node_index>{ node },
@@ -556,12 +557,12 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         if (spelling.find(boss::BOSS::kSentinel) != std::string::npos)
                                             continue;
 
-                                        assert(std::equal(query_.get_query(!orientation).begin() + i_rc,
-                                                          query_.get_query(!orientation).begin() + i_rc + next_match_size,
+                                        assert(std::equal(rc_query.begin() + i_rc,
+                                                          rc_query.begin() + i_rc + next_match_size,
                                                           spelling.begin(), spelling.begin() + next_match_size));
 
                                         std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                        it.value() = Anchor(query_.get_query(!orientation),
+                                        it.value() = Anchor(rc_query,
                                                             i_rc, i_rc + next_match_size,
                                                             !orientation,
                                                             std::vector<Match::node_index>{ node },
@@ -594,8 +595,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         return;
 
                     std::vector<kmer_t> mmers(this_query.size() - m + 1);
+                    std::vector<kmer_t> mmers_rc(this_query.size() - m + 1);
+
                     bool flush_mmer = true;
                     kmer_t mmer;
+
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
                         assert(i < invalid_mmer.size());
                         if (invalid_mmer[i]) {
@@ -608,6 +612,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 this_query.data() + i,
                                 m
                             );
+
                             flush_mmer = false;
                         } else {
                             mmer.drop_char();
@@ -615,9 +620,43 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         }
                         mmers[i] = mmer;
                     }
+
+                    if (sshash->get_mode() == DeBruijnGraph::CANONICAL) {
+                        flush_mmer = true;
+                        kmer_t mmer_rc;
+                        for (size_t i = 0; i + m <= rc_query.size(); ++i) {
+                            if (invalid_mmer[i]) {
+                                flush_mmer = true;
+                                continue;
+                            }
+                            if (flush_mmer) {
+                                mmer_rc = sshash::util::string_to_uint_kmer<kmer_t>(
+                                    rc_query.data() + i,
+                                    m
+                                );
+                                flush_mmer = false;
+                            } else {
+                                mmer_rc.drop_char();
+                                mmer_rc.kth_char_or(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
+                            }
+
+                            size_t j = rc_query.size() - m - i;
+                            assert(j < mmers_rc.size());
+                            mmers_rc[j] = mmer_rc;
+                        }
+                    }
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
+                        if (invalid_mmer[i])
+                            continue;
+
                         kmer_t mmer = mmers[i];
-                        uint64_t bucket_id = minimizers.lookup(uint64_t(mmer));
+                        kmer_t mmer_rc = mmers_rc[i];
+
+                        uint64_t mmer_lookup = uint64_t(sshash->get_mode() == DeBruijnGraph::BASIC
+                            ? mmer : std::min(mmer, mmer_rc)
+                        );
+
+                        uint64_t bucket_id = minimizers.lookup(mmer_lookup);
                         auto [begin, end] = buckets.locate_bucket(bucket_id);
                         for (size_t super_kmer_id = begin; super_kmer_id < end; ++super_kmer_id) {
                             uint64_t offset = offsets.access(super_kmer_id);
@@ -641,15 +680,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 contig_end - offset - m
                             });
                             assert(offset + window_size + m <= contig_end);
-                            // std::cerr << "foo\t" << i << "\t" << super_kmer_id << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(mmer, m) << "\t"
-                            //                      << contig_begin << "," << offset << "," << contig_end << "\t" << window_size << "\n";
                             for (uint64_t j = 0; j < window_size; ++j) {
                                 kmer_t read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
-                                // std::cerr << "\tbar\t" << i + j << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(read_kmer, m) << "\n";
                                 if (read_kmer != mmer)
                                     continue;
-
-                                // std::cerr << "\t\tgo!\n";
 
                                 auto bv_it = start_bv_it;
                                 for (size_t w = j; w < window_size; ++w) {
@@ -658,24 +692,17 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         break;
 
                                     kmer_t mmer = mmers[i_shift];
+                                    kmer_t mmer_rc = mmers_rc[i_shift];
 
-                                    // std::cerr << "\t\t" << i_shift << "\t" << sshash::util::uint_kmer_to_string<kmer_t>(mmer, m) << " vs. "
-                                    //           << sshash::util::uint_kmer_to_string<kmer_t>(read_kmer, m) << "\n";
                                     if (read_kmer != mmer)
                                         break;
-
-                                    // std::cerr << "\t\t\tnext\t" << contig_begin << "," << offset + w << "," << contig_end << "\n";
-                                    // assert((res.kmer_id_in_contig + w + k <= contig_length)
-                                    //         == (res.kmer_id_in_contig + w < res.contig_size));
 
                                     size_t i_in_contig = res.kmer_id_in_contig + w;
 
                                     if (!orientation && i_in_contig < res.contig_size && i_shift + min_match_length <= this_query.size()) {
-                                        // std::cerr << "\t\t\tfw\n";
                                         // forward
                                         assert(res.kmer_id_in_contig + w + k <= contig_length);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w);
-                                        // std::cerr << "\t" << graph.get_node_sequence(node) << "\n";
                                         if (i_shift >= nodes.size() || node != nodes[i_shift]) {
                                             std::string spelling = graph.get_node_sequence(node);
                                             assert(std::equal(this_query.begin() + i_shift, this_query.begin() + i_shift + m,
@@ -703,7 +730,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     if (sshash->get_mode() != DeBruijnGraph::BASIC && !orientation && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
                                         // rev comp
-                                        // std::cerr << "\t\t\trc\n";
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w + m - k);
@@ -727,10 +753,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             if (full_match_size > it->second.get_seed().size()) {
                                                 ::reverse_complement(spelling.begin(), spelling.end());
                                                 assert(graph.get_node_sequence(node) == spelling);
-                                                assert(std::equal(query_.get_query(!orientation).begin() + i_rc,
-                                                                  query_.get_query(!orientation).begin() + i_rc + full_match_size,
+                                                assert(std::equal(rc_query.begin() + i_rc,
+                                                                  rc_query.begin() + i_rc + full_match_size,
                                                                   spelling.begin(), spelling.begin() + full_match_size));
-                                                it.value() = Anchor(query_.get_query(!orientation),
+                                                it.value() = Anchor(rc_query,
                                                                     i_rc, i_rc + full_match_size,
                                                                     !orientation,
                                                                     std::vector<Match::node_index>{ node },
