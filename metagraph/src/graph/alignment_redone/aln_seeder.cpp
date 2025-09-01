@@ -649,6 +649,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         if (invalid_mmer[i])
                             continue;
 
+                        // std::cerr << "start " << (orientation ? "rc" : "fw") << "\t" << i << "\tm=" << m << "\n";
+
                         kmer_t mmer = mmers[i];
                         kmer_t mmer_rc = mmers_rc[i];
 
@@ -659,6 +661,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         uint64_t bucket_id = minimizers.lookup(mmer_lookup);
                         auto [begin, end] = buckets.locate_bucket(bucket_id);
                         for (size_t super_kmer_id = begin; super_kmer_id < end; ++super_kmer_id) {
+                            // std::cerr << "\t" << super_kmer_id << "\n";
                             uint64_t offset = offsets.access(super_kmer_id);
 
                             auto [res, contig_end] = buckets.offset_to_id(offset, k);
@@ -681,21 +684,38 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             });
                             assert(offset + window_size + m <= contig_end);
                             for (uint64_t j = 0; j < window_size; ++j) {
-                                kmer_t read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
-                                if (read_kmer != mmer)
+                                kmer_t start_read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                if (start_read_kmer != mmer)
                                     continue;
 
-                                auto bv_it = start_bv_it;
-                                for (size_t w = j; w < window_size; ++w) {
+                                sshash::bit_vector_iterator<kmer_t> bv_it(dict.strings(), kmer_t::bits_per_char * offset);
+                                for (size_t w = 0; w < window_size; ++w) {
+                                    kmer_t read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                    assert(w != j || read_kmer == start_read_kmer);
+                                    if (i + w < j)
+                                        continue;
+
                                     size_t i_shift = i + w - j;
-                                    if (i_shift + m > this_query.size() || invalid_mmer[i_shift])
+                                    if (i_shift + m > this_query.size())
                                         break;
+
+                                    if (invalid_mmer[i_shift]) {
+                                        if (w >= j)
+                                            break;
+
+                                        continue;
+                                    }
 
                                     kmer_t mmer = mmers[i_shift];
-                                    kmer_t mmer_rc = mmers_rc[i_shift];
 
-                                    if (read_kmer != mmer)
-                                        break;
+                                    if (read_kmer != mmer) {
+                                        if (w >= j)
+                                            break;
+
+                                        continue;
+                                    }
+
+                                    // std::cerr << "\t\t" << i_shift << "\n";
 
                                     size_t i_in_contig = res.kmer_id_in_contig + w;
 
@@ -728,7 +748,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
 
-                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && !orientation && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
                                         // rev comp
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
@@ -767,9 +787,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             }
                                         }
                                     }
-
-                                    if (w + 1 < window_size)
-                                        read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
                                 }
                                 break;
                             }
