@@ -448,6 +448,7 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
+  folly
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
