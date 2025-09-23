@@ -357,6 +357,10 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
+add_library(folly STATIC
+  external-libraries/folly/folly/lang/SafeAssert.cpp
+)
+
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
