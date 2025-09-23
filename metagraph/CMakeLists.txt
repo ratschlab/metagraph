@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16...3.30)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
 
 # Read version from JSON
