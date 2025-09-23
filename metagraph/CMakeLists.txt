@@ -113,12 +113,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-exit-time-destructors
     -Wno-deprecated-declarations
     -Wno-vla-extension
+    -Wno-deprecated-copy
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
     add_compile_options(
      -Wno-suggest-destructor-override
-     -Wno-deprecated-copy
      -Wno-deprecated-declarations
     )
   endif()
@@ -131,6 +131,13 @@ if(APPLE)
   link_directories(/usr/local/lib)
   if(EXISTS /opt/homebrew/lib)
     link_directories(/opt/homebrew/lib)
+  endif()
+  if(EXISTS /opt/homebrew/opt/icu4c/lib)
+    link_directories(/opt/homebrew/opt/icu4c/lib)
+  elseif(EXISTS /usr/local/opt/icu4c/lib)
+    link_directories(/usr/local/opt/icu4c/lib)
+  else()
+    message(FATAL_ERROR "ICU libs not found. Install with `brew install icu4c`.")
   endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
