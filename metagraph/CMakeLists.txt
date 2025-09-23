@@ -359,6 +359,7 @@ target_compile_options(zlib
 
 add_library(folly STATIC
   external-libraries/folly/folly/lang/SafeAssert.cpp
+  external-libraries/folly/folly/lang/ToAscii.cpp
 )
 
 add_library(progress_bar STATIC
