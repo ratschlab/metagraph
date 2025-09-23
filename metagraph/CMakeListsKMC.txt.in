@@ -10,7 +10,7 @@ endif()
 
 if(@BUILD_STATIC@)
 string(APPEND CMAKE_CXX_FLAGS " -static ")
-set(BZip2_USE_STATIC_LIBS TRUE)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 endif()
 
 set(KMC_MAIN_DIR @KMC_MAIN_DIR@)
