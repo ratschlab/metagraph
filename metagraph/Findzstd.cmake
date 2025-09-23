@@ -12,7 +12,7 @@ find_path(ZSTD_INCLUDE_DIRS
 
 find_library(ZSTD_LIBRARIES
   NAMES zstd
-  HINTS ${zstd_ROOT_DIR}/lib)
+  HINTS ${zstd_ROOT_DIR}/lib /opt/homebrew/opt/icu4c/lib /usr/local/opt/icu4c/lib)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(zstd DEFAULT_MSG ZSTD_LIBRARIES ZSTD_INCLUDE_DIRS)
