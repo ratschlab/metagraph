@@ -20,7 +20,7 @@ class BinaryMatrix {
     typedef uint64_t Row;
     typedef uint32_t Column;
 
-    typedef SmallVector<Column> SetBitPositions;
+    typedef Vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
 
