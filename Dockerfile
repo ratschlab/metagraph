@@ -75,6 +75,7 @@ RUN apt-get update && apt-get install -y \
     libdeflate-dev \
     libzstd-dev \
     libgomp1 \
+    libhts3 \
     libjemalloc2 \
     python3 \
     python3-pip \
