@@ -23,6 +23,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libevent-dev \
     libgflags-dev \
     libgoogle-glog-dev \
+    libhts-dev \
     libiberty-dev \
     libjemalloc-dev \
     liblz4-dev \
