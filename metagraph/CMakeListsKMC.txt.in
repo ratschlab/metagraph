@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.5)
 
 project(KMC)
 
@@ -10,6 +10,7 @@ endif()
 
 if(@BUILD_STATIC@)
 string(APPEND CMAKE_CXX_FLAGS " -static ")
+set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 endif()
 
 set(KMC_MAIN_DIR @KMC_MAIN_DIR@)

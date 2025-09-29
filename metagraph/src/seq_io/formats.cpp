@@ -16,7 +16,7 @@ std::string file_format(const std::string &fname) {
     if (ext == ".kmc_pre" || ext == ".kmc_suf")
         return "KMC";
 
-    if (ext == ".gz" || ext == ".bgz") {
+    if (ext == ".gz" || ext == ".bgz" || ext == "zst") {
         size_t nextind = fname.substr(0, dotind - 1).rfind(".");
         if (nextind == std::string::npos)
             return "";

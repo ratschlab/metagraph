@@ -23,10 +23,12 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libevent-dev \
     libgflags-dev \
     libgoogle-glog-dev \
+    libhts-dev \
     libiberty-dev \
     libjemalloc-dev \
     liblz4-dev \
     liblzma-dev \
+    libzstd-dev \
     libsnappy-dev \
     libssl-dev \
     libtool \
@@ -71,7 +73,9 @@ RUN apt-get update && apt-get install -y \
     libatomic1 \
     libcurl4-gnutls-dev \
     libdeflate-dev \
+    libzstd-dev \
     libgomp1 \
+    libhts3 \
     libjemalloc2 \
     python3 \
     python3-pip \

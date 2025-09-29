@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.16...3.30)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
 
 # Read version from JSON
@@ -112,12 +114,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-exit-time-destructors
     -Wno-deprecated-declarations
     -Wno-vla-extension
+    -Wno-deprecated-copy
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
     add_compile_options(
      -Wno-suggest-destructor-override
-     -Wno-deprecated-copy
      -Wno-deprecated-declarations
     )
   endif()
@@ -130,6 +132,13 @@ if(APPLE)
   link_directories(/usr/local/lib)
   if(EXISTS /opt/homebrew/lib)
     link_directories(/opt/homebrew/lib)
+  endif()
+  if(EXISTS /opt/homebrew/opt/icu4c/lib)
+    link_directories(/opt/homebrew/opt/icu4c/lib)
+  elseif(EXISTS /usr/local/opt/icu4c/lib)
+    link_directories(/usr/local/opt/icu4c/lib)
+  else()
+    message(FATAL_ERROR "ICU libs not found. Install with `brew install icu4c`.")
   endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
@@ -294,8 +303,18 @@ add_library(eigen INTERFACE)
 target_include_directories(eigen INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+
+find_package(zstd)
+if(ZSTD_FOUND)
+  add_definitions(-D_SUPPORT_ZSTD)
+else()
+  message(WARNING "Disabling zstd support.")
+endif()
 
 set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost REQUIRED COMPONENTS iostreams)
+
 findFolly()
 if(FOLLY_FOUND)
   add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
@@ -306,7 +325,7 @@ if(FOLLY_FOUND)
   set(METALIBS ${METALIBS} fbvector)
 else()
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost and jemalloc to compile with folly and enable various"
+  " Install jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
@@ -336,6 +355,11 @@ target_compile_options(zlib
     -Wno-unknown-warning-option
     -Wno-unused-parameter
     -Wno-maybe-uninitialized
+)
+
+add_library(folly STATIC
+  external-libraries/folly/folly/lang/SafeAssert.cpp
+  external-libraries/folly/folly/lang/ToAscii.cpp
 )
 
 add_library(progress_bar STATIC
@@ -410,7 +434,10 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts zlib deflate
+  -lhts
+  zlib
+  deflate
+  Boost::iostreams
   -lsdsl
   jsoncpp_lib
   progress_bar
@@ -422,12 +449,17 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
+  folly
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
 endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)
+endif()
+
+if(ZSTD_FOUND)
+  set(METALIBS ${METALIBS} zstd::zstd)
 endif()
 
 if(BUILD_STATIC AND NOT APPLE)
