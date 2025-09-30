@@ -12,17 +12,12 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     g++-11 \
     git \
     cmake \
+    make \
     libboost-all-dev \
     libbz2-dev \
     libdeflate-dev \
     libjemalloc-dev \
     libzstd-dev \
-    libssl-dev \
-    make \
-    pkg-config \
-    python3 \
-    python3-pip \
-    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
@@ -71,5 +66,8 @@ COPY . ${CODE_BASE}
 
 RUN pip3 install ${CODE_BASE}/metagraph/api/python
 RUN pip3 install ${CODE_BASE}/metagraph/workflows
+
+# check that it runs fine
+RUN metagraph_DNA --version
 
 ENTRYPOINT ["metagraph"]
