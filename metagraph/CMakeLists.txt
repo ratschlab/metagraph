@@ -376,10 +376,32 @@ add_library(sdust STATIC
 
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
+# (macOS) make arch flags string like "-arch arm64" or "-arch arm64 -arch x86_64"
+function(make_osx_arch_flags outvar)
+  if(APPLE)
+    message(STATUS "Compiling for architecture: ${CMAKE_OSX_ARCHITECTURES}")
+    set(f "")
+    foreach(a ${CMAKE_OSX_ARCHITECTURES})
+      list(APPEND f -arch ${a})
+    endforeach()
+    string(REPLACE ";" " " f "${f}")
+    set(${outvar} "${f}" PARENT_SCOPE)
+  else()
+    set(${outvar} "" PARENT_SCOPE)
+  endif()
+endfunction()
+make_osx_arch_flags(OSX_ARCH_FLAGS)
+
 include(ExternalProject)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+  CONFIGURE_COMMAND
+    ${CMAKE_COMMAND} -E env
+      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_BINARY_DIR}/external-libraries/zlib\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_BINARY_DIR}/external-libraries/zlib\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
+    /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma"
+  DEPENDS zlib
 )
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
