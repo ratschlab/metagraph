@@ -47,10 +47,8 @@ ARG CODE_BASE
 # the metagraph binary and python API code. This image is published on github's container registry (`ghcr.io/ratschlab/metagraph`).
 
 RUN apt-get update && apt-get install -y \
-    libatomic1 \
     libdeflate-dev \
     libzstd-dev \
-    libgomp1 \
     libjemalloc2 \
     python3 \
     python3-pip \
