@@ -68,6 +68,6 @@ RUN pip3 install ${CODE_BASE}/metagraph/api/python
 RUN pip3 install ${CODE_BASE}/metagraph/workflows
 
 # check that it runs fine
-RUN metagraph_DNA --version
+RUN metagraph_DNA --version && metagraph_Protein --version
 
 ENTRYPOINT ["metagraph"]
