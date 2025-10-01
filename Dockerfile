@@ -55,7 +55,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/metagraph_* /usr/local/bin/
-COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/external-libraries/htslib/lib/lib* /usr/lib/
 
 RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 
