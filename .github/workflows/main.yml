@@ -162,7 +162,7 @@ jobs:
           - alphabet: DNA
             build_type: Debug
             platform: macos-latest
-            target_arch: x86_64
+            target_arch: arm64
 
     runs-on: ${{ matrix.platform }}
 
