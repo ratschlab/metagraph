@@ -184,7 +184,6 @@ jobs:
           echo "Installing Intel Homebrew to /usr/local under Rosetta..."
           arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
         fi
-
         # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
         if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
           echo "Replacing legacy brew wrapper..."
@@ -196,21 +195,6 @@ jobs:
         fi
         echo "/usr/local/bin" >> "$GITHUB_PATH"
         echo "/usr/local/sbin" >> "$GITHUB_PATH"
-        echo 'HOMEBREW_PREFIX=/usr/local' >> "$GITHUB_ENV"
-        echo 'HOMEBREW_CELLAR=/usr/local/Cellar' >> "$GITHUB_ENV"
-        echo 'HOMEBREW_REPOSITORY=/usr/local/Homebrew' >> "$GITHUB_ENV"
-        # Verify shells & brew arch
-        echo "Runner uname -m (inside your arch shell): $(uname -m)"
-        which brew || true
-        file "$(command -v brew)" || true
-        brew config || true
-        echo "PATH=$PATH"
-        command -v readlink
-        command -v dirname
-        ls -l /usr/local/bin/brew || true
-        head -50 /usr/local/bin/brew || true
-        /usr/local/bin/brew --version
-        /usr/local/bin/brew config
 
     - name: install dependencies
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
