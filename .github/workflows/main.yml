@@ -140,29 +140,31 @@ jobs:
           cd metagraph/build && make check
 
   MacOS:
-    runs-on: macos-latest
-
     strategy:
       matrix:
         include:
-          # Intel Release
-          - alphabet: DNA
-            build_type: Release
-            platform: x64
-            target_arch: x86_64
           # Apple Silicon Release
           - alphabet: DNA
             build_type: Release
+            runs-on: macos-latest
             platform: arm64
             target_arch: arm64
+          # Intel Release
+          - alphabet: DNA
+            build_type: Release
+            runs-on: macos-13
+            platform: x64
+            target_arch: x86_64
           # Apple Silicon runner + Rosetta for x86_64
           - alphabet: DNA
             build_type: Release
+            runs-on: macos-latest
             platform: arm64
             target_arch: x86_64
-          # Debug run on Intel
+          # Debug run on Apple Silicon
           - alphabet: DNA
             build_type: Debug
+            runs-on: macos-latest
             platform: x64
             target_arch: x86_64
 
