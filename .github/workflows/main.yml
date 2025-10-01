@@ -176,18 +176,26 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
-    - name: Install Rosetta Homebrew in /usr/local
+    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
       if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
       run: |
+        # Install Intel Homebrew into /usr/local if missing
         if [[ ! -d /usr/local/Homebrew ]]; then
-          echo "Installing Intel Homebrew to /usr/local under Rosetta…"
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        else
-          echo "Intel Homebrew already present at /usr/local."
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
         fi
-        # Switch PATH to Intel Homebrew for x86_64 steps
-        # Prefer /usr/local brew/bin over /opt/homebrew
-        echo 'PATH=/usr/local/bin:/usr/local/sbin:$PATH' >> "$GITHUB_ENV"
+
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
         echo 'HOMEBREW_PREFIX=/usr/local' >> "$GITHUB_ENV"
         echo 'HOMEBREW_CELLAR=/usr/local/Cellar' >> "$GITHUB_ENV"
         echo 'HOMEBREW_REPOSITORY=/usr/local/Homebrew' >> "$GITHUB_ENV"
@@ -196,6 +204,13 @@ jobs:
         which brew || true
         file "$(command -v brew)" || true
         brew config || true
+        echo "PATH=$PATH"
+        command -v readlink
+        command -v dirname
+        ls -l /usr/local/bin/brew || true
+        head -50 /usr/local/bin/brew || true
+        /usr/local/bin/brew --version
+        /usr/local/bin/brew config
 
     - name: install dependencies
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
@@ -218,13 +233,13 @@ jobs:
               ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make -j3 metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make -j 2 unit_tests
+      run: cd metagraph/build && make -j3 unit_tests
 
     - name: build other
-      run: cd metagraph/build && make -j 2
+      run: cd metagraph/build && make -j3
 
     - name: run unit tests
       run: cd metagraph/build && ./unit_tests
