@@ -414,15 +414,15 @@ ExternalProject_Add(HTSLIB
       "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
-  DEPENDS zlib
   BUILD_COMMAND $(MAKE) -j${N} lib-static
-  #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}
+  #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
   # Install only static lib to avoid the dependency
   INSTALL_COMMAND
     ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
     && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
     && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
     && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
+  DEPENDS zlib
 )
 
 set(OTHER_COMPILER_FLAGS "")
