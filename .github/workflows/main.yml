@@ -144,22 +144,25 @@ jobs:
 
     strategy:
       matrix:
-        alphabet: [DNA]
         include:
           # Intel Release
-          - build_type: Release
+          - alphabet: DNA
+            build_type: Release
             platform: x64
             target_arch: x86_64
           # Apple Silicon Release
-          - build_type: Release
+          - alphabet: DNA
+            build_type: Release
             platform: arm64
             target_arch: arm64
           # Apple Silicon runner + Rosetta for x86_64
-          - build_type: Release
+          - alphabet: DNA
+            build_type: Release
             platform: arm64
             target_arch: x86_64
           # Debug run on Intel
-          - build_type: Debug
+          - alphabet: DNA
+            build_type: Debug
             platform: x64
             target_arch: x86_64
 
