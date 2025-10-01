@@ -154,6 +154,15 @@ else()
   message(WARNING "Could only find OpenMP ${OpenMP_CXX_VERSION} < 5.0, non-rectangular nested loops will not be parallelized")
 endif()
 
+if(APPLE)
+  if(CMAKE_OSX_ARCHITECTURES MATCHES "")
+    set(CMAKE_OSX_ARCHITECTURES ${CMAKE_SYSTEM_PROCESSOR})
+  elseif(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
+    set(CMAKE_SYSTEM_PROCESSOR arm64)
+    set(CMAKE_HOST_SYSTEM_PROCESSOR arm64)
+  endif()
+endif()
+
 # Check if 128 bit integers are supported
 try_compile(MODE_TI
   "${PROJECT_BINARY_DIR}"
@@ -168,7 +177,7 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
   execute_process(COMMAND sysctl -n machdep.cpu.features
                   OUTPUT_VARIABLE _cpuinfo OUTPUT_STRIP_TRAILING_WHITESPACE)
   execute_process(COMMAND sysctl -n machdep.cpu.leaf7_features
@@ -263,6 +272,7 @@ set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
+  ${CMAKE_BINARY_DIR}/external-libraries/htslib/lib
   ${CMAKE_BINARY_DIR}/KMC
   external-libraries/sdsl-lite/lib
 )
@@ -277,6 +287,7 @@ include_directories(
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  ${CMAKE_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
@@ -376,13 +387,43 @@ add_library(sdust STATIC
 
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
+# (macOS) make arch flags string like "-arch arm64" or "-arch arm64 -arch x86_64"
+function(make_osx_arch_flags outvar)
+  if(APPLE)
+    message(STATUS "Compiling for architecture: ${CMAKE_OSX_ARCHITECTURES}")
+    set(f "")
+    foreach(a ${CMAKE_OSX_ARCHITECTURES})
+      list(APPEND f -arch ${a})
+    endforeach()
+    string(REPLACE ";" " " f "${f}")
+    set(${outvar} "${f}" PARENT_SCOPE)
+  else()
+    set(${outvar} "" PARENT_SCOPE)
+  endif()
+endfunction()
+make_osx_arch_flags(OSX_ARCH_FLAGS)
+
 include(ExternalProject)
+set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+  PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
+  CONFIGURE_COMMAND
+    ${CMAKE_COMMAND} -E env
+      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
+    /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
+  BUILD_COMMAND $(MAKE) -j${N} lib-static
+  #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
+  # Install only static lib to avoid the dependency
+  INSTALL_COMMAND
+    ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
+    && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
+    && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
+    && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
+  DEPENDS zlib
 )
-link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
-include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
