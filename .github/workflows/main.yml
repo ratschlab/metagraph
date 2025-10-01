@@ -147,6 +147,18 @@ jobs:
         alphabet: [DNA]
         build_type: [Debug, Release]
         platform: [x64, arm64]
+        target_arch: [x86_64, arm64]
+        exclude:
+          - platform: x64
+            target_arch: arm64
+          - build_type: Debug
+            platform: x64
+            target_arch: arm64
+          - build_type: Debug
+            platform: arm64
+        defaults:
+          run:
+            shell: arch -${{ matrix.arch }} /bin/bash -eo pipefail {0}
 
     steps:
     - uses: actions/checkout@v1
