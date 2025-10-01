@@ -176,8 +176,8 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
-  - name: Install Rosetta Homebrew in /usr/local (if missing)
-    if: matrix.platform == 'arm64' && matrix.target_arch == 'x86_64'
+  - name: Install Rosetta Homebrew in /usr/local
+    if: ${{ matrix.platform == 'arm64' && matrix.target_arch == 'x86_64' }}
     run: |
       if [[ ! -d /usr/local/Homebrew ]]; then
         echo "Installing Intel Homebrew to /usr/local under Rosetta…"
