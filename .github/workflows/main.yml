@@ -177,7 +177,6 @@ jobs:
       run: git submodule update --init --recursive
 
   - name: Install Rosetta Homebrew in /usr/local
-    if: ${{ matrix.platform == 'arm64' && matrix.target_arch == 'x86_64' }}
     run: |
       brew config || true
 
