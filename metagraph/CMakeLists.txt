@@ -404,17 +404,25 @@ endfunction()
 make_osx_arch_flags(OSX_ARCH_FLAGS)
 
 include(ExternalProject)
+set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
+  PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
-      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_BINARY_DIR}/external-libraries/zlib\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
-      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_BINARY_DIR}/external-libraries/zlib\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
-    /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma"
+    /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
   DEPENDS zlib
-  BUILD_COMMAND $(MAKE)
-  INSTALL_COMMAND $(MAKE) install
+  BUILD_COMMAND $(MAKE) -j${N} lib-static
+  #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}
+  # Install only static lib to avoid the dependency
+  INSTALL_COMMAND
+    ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
+    && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
+    && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
+    && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
 )
 
 set(OTHER_COMPILER_FLAGS "")
