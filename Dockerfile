@@ -8,39 +8,16 @@ FROM ubuntu:22.04 AS metagraph_dev_env
 RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install -y \
     autoconf \
     automake \
-    binutils-dev \
     ccache \
-    curl \
     g++-11 \
     git \
     cmake \
-    libcurl4-gnutls-dev \
+    make \
     libboost-all-dev \
-    libbrotli-dev \
     libbz2-dev \
     libdeflate-dev \
-    libdouble-conversion-dev \
-    libevent-dev \
-    libgflags-dev \
-    libgoogle-glog-dev \
-    libhts-dev \
-    libiberty-dev \
     libjemalloc-dev \
-    liblz4-dev \
-    liblzma-dev \
     libzstd-dev \
-    libsnappy-dev \
-    libssl-dev \
-    libtool \
-    libunwind-dev \
-    make \
-    pkg-config \
-    python3 \
-    python3-pip \
-    python3-venv \
-    vim \
-    wget \
-    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
@@ -70,12 +47,8 @@ ARG CODE_BASE
 # the metagraph binary and python API code. This image is published on github's container registry (`ghcr.io/ratschlab/metagraph`).
 
 RUN apt-get update && apt-get install -y \
-    libatomic1 \
-    libcurl4-gnutls-dev \
     libdeflate-dev \
     libzstd-dev \
-    libgomp1 \
-    libhts3 \
     libjemalloc2 \
     python3 \
     python3-pip \
@@ -90,5 +63,8 @@ COPY . ${CODE_BASE}
 
 RUN pip3 install ${CODE_BASE}/metagraph/api/python
 RUN pip3 install ${CODE_BASE}/metagraph/workflows
+
+# check that it runs fine
+RUN metagraph --version && metagraph_DNA --version && metagraph_Protein --version
 
 ENTRYPOINT ["metagraph"]
