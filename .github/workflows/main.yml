@@ -145,9 +145,6 @@ jobs:
     strategy:
       matrix:
         alphabet: [DNA]
-        build_type: [Debug, Release]
-        platform: [x64, arm64]
-        target_arch: [x86_64, arm64]
         include:
           # Intel Release
           - build_type: Release
@@ -161,7 +158,7 @@ jobs:
           - build_type: Release
             platform: arm64
             target_arch: x86_64
-          # Debug run on Intel runner
+          # Debug run on Intel
           - build_type: Debug
             platform: x64
             target_arch: x86_64
