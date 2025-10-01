@@ -155,7 +155,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c zstd
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
@@ -172,7 +172,7 @@ jobs:
 
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+              ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
