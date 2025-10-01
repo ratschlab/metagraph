@@ -176,9 +176,26 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
-  - name: Install Rosetta Homebrew in /usr/local
-    run: |
-      brew config || true
+    - name: Install Rosetta Homebrew in /usr/local
+      if: ${{ matrix.platform == 'arm64' && matrix.target_arch == 'x86_64' }}
+      run: |
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta…"
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        else
+          echo "Intel Homebrew already present at /usr/local."
+        fi
+        # Switch PATH to Intel Homebrew for x86_64 steps
+        # Prefer /usr/local brew/bin over /opt/homebrew
+        echo 'PATH=/usr/local/bin:/usr/local/sbin:$PATH' >> "$GITHUB_ENV"
+        echo 'HOMEBREW_PREFIX=/usr/local' >> "$GITHUB_ENV"
+        echo 'HOMEBREW_CELLAR=/usr/local/Cellar' >> "$GITHUB_ENV"
+        echo 'HOMEBREW_REPOSITORY=/usr/local/Homebrew' >> "$GITHUB_ENV"
+        # Verify shells & brew arch
+        echo "Runner uname -m (inside your arch shell): $(uname -m)"
+        which brew || true
+        file "$(command -v brew)" || true
+        brew config || true
 
     - name: install dependencies
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
