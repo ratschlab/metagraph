@@ -148,17 +148,27 @@ jobs:
         build_type: [Debug, Release]
         platform: [x64, arm64]
         target_arch: [x86_64, arm64]
-        exclude:
-          - platform: x64
+        include:
+          # Intel Release
+          - build_type: Release
+            platform: x64
+            target_arch: x86_64
+          # Apple Silicon Release
+          - build_type: Release
+            platform: arm64
             target_arch: arm64
+          # Apple Silicon runner + Rosetta for x86_64
+          - build_type: Release
+            platform: arm64
+            target_arch: x86_64
+          # Debug run on Intel runner
           - build_type: Debug
             platform: x64
-            target_arch: arm64
-          - build_type: Debug
-            platform: arm64
-        defaults:
-          run:
-            shell: arch -${{ matrix.arch }} /bin/bash -eo pipefail {0}
+            target_arch: x86_64
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
     - uses: actions/checkout@v1
