@@ -146,27 +146,25 @@ jobs:
           # Apple Silicon Release
           - alphabet: DNA
             build_type: Release
-            runs-on: macos-latest
-            platform: arm64
+            platform: macos-latest
             target_arch: arm64
           # Intel Release
           - alphabet: DNA
             build_type: Release
-            runs-on: macos-13
-            platform: x64
+            platform: macos-13
             target_arch: x86_64
           # Apple Silicon runner + Rosetta for x86_64
           - alphabet: DNA
             build_type: Release
-            runs-on: macos-latest
-            platform: arm64
+            platform: macos-latest
             target_arch: x86_64
           # Debug run on Apple Silicon
           - alphabet: DNA
             build_type: Debug
-            runs-on: macos-latest
-            platform: x64
+            platform: macos-latest
             target_arch: x86_64
+
+    runs-on: ${{ matrix.platform }}
 
     defaults:
       run:
@@ -179,7 +177,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: Install Rosetta Homebrew in /usr/local
-      if: ${{ matrix.platform == 'arm64' && matrix.target_arch == 'x86_64' }}
+      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
       run: |
         if [[ ! -d /usr/local/Homebrew ]]; then
           echo "Installing Intel Homebrew to /usr/local under Rosetta…"
