@@ -345,6 +345,8 @@ int run_server(Config *config) {
                     for (const auto &item : content_json["graphs"]) {
                         graphs_to_query.push_back(item.asString());
                     }
+                    if (!indexes.count(graphs_to_query.back()))
+                        throw std::invalid_argument("Trying to query uninitialized graph " + graphs_to_query.back());
                 } else {
                     for (const auto &[name, _] : indexes) {
                         graphs_to_query.push_back(name);
@@ -376,7 +378,10 @@ int run_server(Config *config) {
         }
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &content) {
-                return process_search_request(parse_json_string(content), *anno_graph.get(), *config);
+                Json::Value content_json = parse_json_string(content);
+                if (content_json.isMember("graphs"))
+                    throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
+                return process_search_request(content_json, *anno_graph.get(), *config);
             });
         }
     };
