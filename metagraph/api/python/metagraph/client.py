@@ -312,7 +312,7 @@ class MultiGraphClient:
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_threshold, with_signature,
                                             abundance_sum, query_counts, query_coords,
-                                            align, **align_params)
+                                            graphs, align, **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 
