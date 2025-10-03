@@ -579,8 +579,10 @@ Config::Config(int argc, char *argv[]) {
     if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
-    if (identity == SERVER_QUERY && (fnames.size() > 1 ||
-            !(!fnames.empty() ^ (infbase.size() && infbase_annotators.size() == 1))))
+    if (identity == SERVER_QUERY
+            && (fnames.size() > 1
+                || (fnames.size() && (infbase.size() || infbase_annotators.size()))
+                || (fnames.empty() && (infbase.empty() && infbase_annotators.size() != 1))))
         print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
 
     if ((identity == TRANSFORM
