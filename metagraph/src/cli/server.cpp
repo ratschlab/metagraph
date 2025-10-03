@@ -1,4 +1,5 @@
 #include <json/json.h>
+#include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
 
 #include "common/logger.hpp"
@@ -27,11 +28,9 @@ using namespace mtg::graph;
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 
-std::string process_search_request(const std::string &received_message,
+Json::Value process_search_request(const Json::Value &json,
                                    const graph::AnnotatedDBG &anno_graph,
                                    const Config &config_orig) {
-    Json::Value json = parse_json_string(received_message);
-
     const auto &fasta = json["FASTA"];
     if (fasta.isNull())
         throw std::domain_error("No input sequences received from client");
@@ -132,13 +131,11 @@ std::string process_search_request(const std::string &received_message,
         search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
     }
 
-    // Return JSON string
-    Json::StreamWriterBuilder builder;
-    return Json::writeString(builder, search_response);
+    return search_response;
 }
 
 // TODO: implement alignment_result.to_json as in process_search_request
-std::string process_align_request(const std::string &received_message,
+Json::Value process_align_request(const std::string &received_message,
                                   const graph::DeBruijnGraph &graph,
                                   const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
@@ -205,11 +202,10 @@ std::string process_align_request(const std::string &received_message,
         root.append(align_entry);
     });
 
-    Json::StreamWriterBuilder builder;
-    return Json::writeString(builder, root);
+    return root;
 }
 
-std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
+Json::Value process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
     auto labels = anno_graph.get_annotator().get_label_encoder().get_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
@@ -219,11 +215,10 @@ std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) 
         root.append(entry);
     }
 
-    Json::StreamWriterBuilder builder;
-    return Json::writeString(builder, root);
+    return root;
 }
 
-std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
+Json::Value process_stats_request(const graph::AnnotatedDBG &anno_graph,
                                   const std::string &graph_filename,
                                   const std::string &annotation_filename) {
     Json::Value root;
@@ -245,8 +240,7 @@ std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
 
     root["annotation"] = annotation_stats;
 
-    Json::StreamWriterBuilder builder;
-    return Json::writeString(builder, root);
+    return root;
 }
 
 std::thread start_server(HttpServer &server_startup, Config &config) {
@@ -277,37 +271,122 @@ bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Respon
 int run_server(Config *config) {
     assert(config);
 
-    assert(config->infbase_annotators.size() == 1);
-
     ThreadPool graph_loader(1, 1);
+    std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
 
-    logger->info("[Server] Loading graph...");
+    tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
-    auto anno_graph = graph_loader.enqueue([&]() {
-        auto graph = load_critical_dbg(config->infbase);
-        logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+    if (config->infbase_annotators.size() == 1) {
+        assert(config->fnames.empty());
+        anno_graph = graph_loader.enqueue([&]() {
+            logger->info("[Server] Loading graph...");
+            auto graph = load_critical_dbg(config->infbase);
+            logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
-        logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
-        return anno_graph;
-    });
+            auto anno_graph = initialize_annotated_dbg(graph, *config);
+            logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+            return anno_graph;
+        });
+    } else {
+        assert(config->fnames.size() == 1);
 
-    // defaults for the server
-    config->num_top_labels = 10000;
+        std::ifstream file(config->fnames[0]);
+
+        if (!file.is_open()) {
+            logger->error("[Server] Could not open file {} for reading", config->fnames[0]);
+            std::exit(1);
+        }
+
+        size_t num_indexes = 0;
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty())
+                continue; // skip empty lines
+
+            std::stringstream ss(line);
+
+            std::string name;
+            std::string graph_path;
+            std::string annotation_path;
+
+            std::getline(ss, name, ',');
+            std::getline(ss, graph_path, ',');
+            if (ss.eof()) {
+                logger->error("[Server] Invalid line in the csv file: `{}`", line);
+                std::exit(1);
+            }
+            std::getline(ss, annotation_path, ',');
+
+            indexes[name].emplace_back(std::move(graph_path), std::move(annotation_path));
+            num_indexes++;
+        }
+        std::vector<std::string> names;
+        for (const auto &[name, _] : indexes) {
+            names.push_back(name);
+        }
+        logger->info("[Server] Loaded paths for {} graphs for {} names: {}",
+                     num_indexes, indexes.size(), fmt::join(names, ", "));
+        if (!utils::with_mmap()) {
+            logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap. Make sure they're on a fast disk.");
+            utils::with_mmap(true);
+        }
+    }
 
     // the actual server
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
+        if (config->fnames.size()) {
+            process_request(response, request, [&](const std::string &content) {
+                std::vector<std::string> graphs_to_query;
+
+                Json::Value content_json = parse_json_string(content);
+                if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
+                    for (const auto &item : content_json["graphs"]) {
+                        graphs_to_query.push_back(item.asString());
+                    }
+                } else {
+                    for (const auto &[name, _] : indexes) {
+                        graphs_to_query.push_back(name);
+                    }
+                }
+
+                Json::Value merged;
+                for (const auto &name : graphs_to_query) {
+                    for (const auto &[graph_fname, anno_fname] : indexes[name]) {
+                        config->infbase = graph_fname;
+                        config->infbase_annotators = { anno_fname };
+                        auto index = initialize_annotated_dbg(*config);
+                        auto json = process_search_request(content_json, *index, *config);
+                        if (merged.empty()) {
+                            merged = std::move(json);
+                        } else {
+                            assert(json.size() == merged.size());
+                            for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
+                                for (auto&& value : json[i]["results"]) {
+                                    merged[i]["results"].append(std::move(value));
+                                }
+                            }
+                        }
+                    }
+                }
+                return merged;
+            });
+            return;
+        }
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &content) {
-                return process_search_request(content, *anno_graph.get(), *config);
+                return process_search_request(parse_json_string(content), *anno_graph.get(), *config);
             });
         }
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
+        if (config->fnames.size()) {
+            // TODO
+            return;
+        }
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &content) {
                 return process_align_request(content, anno_graph.get()->get_graph(), *config);
@@ -317,6 +396,10 @@ int run_server(Config *config) {
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
+        if (config->fnames.size()) {
+            // TODO
+            return;
+        }
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &) {
                 return process_column_label_request(*anno_graph.get());
@@ -326,6 +409,10 @@ int run_server(Config *config) {
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
+        if (config->fnames.size()) {
+            // TODO
+            return;
+        }
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &) {
                 return process_stats_request(*anno_graph.get(), config->infbase,

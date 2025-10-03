@@ -99,14 +99,16 @@ std::string json_str_with_error_msg(const std::string &msg) {
 
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
-                     const std::function<std::string(const std::string &)> &process) {
+                     const std::function<Json::Value(const std::string &)> &process) {
     // Retrieve string:
     std::string content = request->content.string();
     logger->info("[Server] {} request from {}", request->path,
                  request->remote_endpoint().address().to_string());
 
     try {
-        std::string ret = process(content);
+        // Return JSON string
+        Json::StreamWriterBuilder builder;
+        std::string ret = Json::writeString(builder, process(content));
         write_response(SimpleWeb::StatusCode::success_ok, ret, response,
                        is_compression_requested(request));
     } catch (const std::exception &e) {

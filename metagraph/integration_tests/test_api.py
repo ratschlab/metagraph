@@ -356,6 +356,142 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, abundance_sum=True)
 
+    @unittest.expectedFailure
+    def test_api_search_multiple(self):
+        df = self.graph_client.search(self.sample_query, parallel=False, graphs=['X'])
+
+
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+class TestAPIClientMultiple(TestingBase):
+    @classmethod
+    def setUpClass(
+        cls,
+        fasta_paths=[
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            TEST_DATA_DIR + '/transcripts_1000.fa'
+        ],
+        anno_repr='column'
+    ):
+        super().setUpClass()
+
+        graph_paths = [
+            cls.tempdir.name + '/graph_1.dbg',
+            cls.tempdir.name + '/graph_2.dbg',
+        ]
+        annotation_path_bases = [
+            cls.tempdir.name + '/annotation_1',
+            cls.tempdir.name + '/annotation_2',
+        ]
+
+        cls._build_graph(fasta_paths[0], graph_paths[0], 6, 'succinct', mode=cls.mode)
+        cls._annotate_graph(fasta_paths[0], graph_paths[0], annotation_path_bases[0], anno_repr)
+
+        cls._build_graph(fasta_paths[1], graph_paths[1], 6, 'succinct', mode=cls.mode)
+        cls._annotate_graph(fasta_paths[1], graph_paths[1], annotation_path_bases[1], anno_repr)
+
+        graphs_file = cls.tempdir.name + '/graphs.txt'
+        with open(graphs_file, 'w') as f:
+            f.write('\n'.join([
+                f'G1,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G3,{graph_paths[1]},{annotation_path_bases[1]}.{anno_repr}.annodbg',
+            ]))
+
+        cls.host = '127.0.0.1'
+        os.environ['NO_PROXY'] = cls.host
+        cls.port = 3456
+        num_retries = 100
+        while num_retries > 0:
+            cls.server_process = subprocess.Popen(shlex.split(
+                f'{METAGRAPH} server_query {graphs_file} \
+                --port {cls.port} --address {cls.host} -p {2}'
+            ))
+            try:
+                cls.server_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                break
+            cls.port += 1
+            num_retries -= 1
+        if num_retries == 0:
+            raise "Couldn't start server"
+
+        wait_time_sec = 1
+        print("Waiting {} sec for the server (PID {}) to start up".format(
+            wait_time_sec, cls.server_process.pid), flush=True)
+        time.sleep(wait_time_sec)
+
+        cls.graph_client = MultiGraphClient()
+        cls.graph_name = 'G1,G2x2,G3'
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+
+        cls.sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.expected_rows_1 = 98 if cls.mode == 'basic' else 99
+        cls.expected_matches_1 = 840 if cls.mode == 'basic' else 1381
+
+        cls.expected_rows_2 = cls.expected_rows_1 * 2
+        cls.expected_matches_2 = cls.expected_matches_1 * 2
+
+        cls.expected_rows_3 = 100
+        cls.expected_matches_3 = 2843 if cls.mode == 'basic' else 3496
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server_process.kill()
+
+    def test_api_query_df_multiple_1(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_1)
+
+    def test_api_query_df_multiple_2(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G2'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_2, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_2)
+
+    def test_api_query_df_multiple_3(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G3'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_3)
+
+    def test_api_query_df_multiple_12(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1', 'G2'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2)
+
+    def test_api_query_df_multiple_all(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1', 'G2', 'G3'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
+
+    def test_api_query_df_multiple(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01)
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
+
+    @unittest.expectedFailure
+    def test_api_query_df_multiple_bad(self):
+        df = self.graph_client.search(self.sample_query, parallel=False, graphs=['G1', 'X'])
+
 
 # No canonical mode for Protein alphabets
 @parameterized_class(('mode',),
