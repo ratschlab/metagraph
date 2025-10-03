@@ -12,6 +12,7 @@ import pandas as pd
 from metagraph.client import GraphClientJson, MultiGraphClient
 from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
+from itertools import product
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
@@ -357,13 +358,17 @@ class TestAPIClient(TestAPIBase):
                                        discovery_threshold=0.01, abundance_sum=True)
 
     @unittest.expectedFailure
-    def test_api_search_multiple(self):
+    def test_api_search_bad_graphs(self):
         df = self.graph_client.search(self.sample_query, parallel=False, graphs=['X'])
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode', 'threads_each'),
+    input_values=list(product(
+        ['basic'] + ([] if PROTEIN_MODE else ['canonical', 'primary',]),
+        [1,]
+    )) + [('basic', 4)]
+)
 class TestAPIClientMultiple(TestingBase):
     @classmethod
     def setUpClass(
@@ -372,7 +377,7 @@ class TestAPIClientMultiple(TestingBase):
             TEST_DATA_DIR + '/transcripts_100.fa',
             TEST_DATA_DIR + '/transcripts_1000.fa'
         ],
-        anno_repr='column'
+        anno_repr='column',
     ):
         super().setUpClass()
 
@@ -391,6 +396,8 @@ class TestAPIClientMultiple(TestingBase):
         cls._build_graph(fasta_paths[1], graph_paths[1], 6, 'succinct', mode=cls.mode)
         cls._annotate_graph(fasta_paths[1], graph_paths[1], annotation_path_bases[1], anno_repr)
 
+        mult = 1 if cls.threads_each < 2 else 200  # duplicate graphs so that there are more to query
+
         graphs_file = cls.tempdir.name + '/graphs.txt'
         with open(graphs_file, 'w') as f:
             f.write('\n'.join([
@@ -398,7 +405,7 @@ class TestAPIClientMultiple(TestingBase):
                 f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
                 f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
                 f'G3,{graph_paths[1]},{annotation_path_bases[1]}.{anno_repr}.annodbg',
-            ]))
+            ] * mult))
 
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
@@ -407,7 +414,7 @@ class TestAPIClientMultiple(TestingBase):
         while num_retries > 0:
             cls.server_process = subprocess.Popen(shlex.split(
                 f'{METAGRAPH} server_query {graphs_file} \
-                --port {cls.port} --address {cls.host} -p {2}'
+                --port {cls.port} --address {cls.host} -p {2} --threads-each {cls.threads_each}'
             ))
             try:
                 cls.server_process.wait(timeout=1)
@@ -430,14 +437,14 @@ class TestAPIClientMultiple(TestingBase):
         cls.sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
         # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
         # they get more matches
-        cls.expected_rows_1 = 98 if cls.mode == 'basic' else 99
-        cls.expected_matches_1 = 840 if cls.mode == 'basic' else 1381
+        cls.expected_rows_1 = (98 if cls.mode == 'basic' else 99) * mult
+        cls.expected_matches_1 = (840 if cls.mode == 'basic' else 1381) * mult
 
         cls.expected_rows_2 = cls.expected_rows_1 * 2
         cls.expected_matches_2 = cls.expected_matches_1 * 2
 
-        cls.expected_rows_3 = 100
-        cls.expected_matches_3 = 2843 if cls.mode == 'basic' else 3496
+        cls.expected_rows_3 = (100) * mult
+        cls.expected_matches_3 = (2843 if cls.mode == 'basic' else 3496) * mult
 
     @classmethod
     def tearDownClass(cls):

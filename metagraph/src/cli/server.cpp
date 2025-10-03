@@ -251,8 +251,10 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
     }
     server_startup.config.port = config.port;
 
-    logger->info("[Server] Will listen on {} port {}", config.host_address,
-                 server_startup.config.port);
+    logger->info("[Server] Will listen on {} port {}",
+                 server_startup.config.address, server_startup.config.port);
+    logger->info("[Server] Maximum connections: {}, threads per connection: {}",
+                 get_num_threads(), config.parallel_each);
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
@@ -327,7 +329,8 @@ int run_server(Config *config) {
         logger->info("[Server] Loaded paths for {} graphs for {} names: {}",
                      num_indexes, indexes.size(), fmt::join(names, ", "));
         if (!utils::with_mmap()) {
-            logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap. Make sure they're on a fast disk.");
+            logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
+                         " Make sure they're on a fast disk.");
             utils::with_mmap(true);
         }
     }
@@ -354,24 +357,31 @@ int run_server(Config *config) {
                 }
 
                 Json::Value merged;
+                ThreadPool graphs_pool(config->parallel_each);
+                std::mutex mu;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        config->infbase = graph_fname;
-                        config->infbase_annotators = { anno_fname };
-                        auto index = initialize_annotated_dbg(*config);
-                        auto json = process_search_request(content_json, *index, *config);
-                        if (merged.empty()) {
-                            merged = std::move(json);
-                        } else {
-                            assert(json.size() == merged.size());
-                            for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
-                                for (auto&& value : json[i]["results"]) {
-                                    merged[i]["results"].append(std::move(value));
+                        Config config_copy = *config;
+                        config_copy.infbase = graph_fname;
+                        config_copy.infbase_annotators = { anno_fname };
+                        graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
+                            auto index = initialize_annotated_dbg(config_copy);
+                            auto json = process_search_request(content_json, *index, config_copy);
+                            std::lock_guard<std::mutex> lock(mu);
+                            if (merged.empty()) {
+                                merged = std::move(json);
+                            } else {
+                                assert(json.size() == merged.size());
+                                for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
+                                    for (auto&& value : json[i]["results"]) {
+                                        merged[i]["results"].append(std::move(value));
+                                    }
                                 }
                             }
-                        }
+                        });
                     }
                 }
+                graphs_pool.join();
                 return merged;
             });
             return;
