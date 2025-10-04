@@ -91,13 +91,11 @@ def run_test_parallel(test_info, filter_pattern="*"):
 
 def run_tests_parallel(filter_pattern="*", max_workers=4):
     """Run test files in parallel with chunking"""
-    # Find and filter test files
+    # Find all test files - filtering happens at the test level, not file level
     test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
-    if filter_pattern != "*":
-        test_files = [f for f in test_files if fnmatch.fnmatchcase(os.path.basename(f)[:-3], filter_pattern)]
     
     if not test_files:
-        print("No test files found!" if filter_pattern == "*" else f"No test files match filter: {filter_pattern}")
+        print("No test files found!")
         return False
     
     # Create chunks from test files, respecting class boundaries
@@ -194,13 +192,20 @@ def run_tests_parallel(filter_pattern="*", max_workers=4):
     print("-" * 60)
     
     # Set up signal handling for graceful shutdown
-    original_sigint = signal.signal(signal.SIGINT, lambda s, f: sys.exit(1))
-    original_sigterm = signal.signal(signal.SIGTERM, lambda s, f: sys.exit(1))
+    executor = None
+    def signal_handler(signum, frame):
+        print("\n\nInterrupted! Shutting down workers...")
+        if executor:
+            executor.shutdown(wait=False, cancel_futures=True)
+        sys.exit(1)
+    
+    original_sigint = signal.signal(signal.SIGINT, signal_handler)
+    original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
     
     try:
         start_time = time.time()
         results = []
-        
+
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             future_to_chunk = {executor.submit(run_test_parallel, chunk, filter_pattern): chunk 
                               for chunk in all_chunks}

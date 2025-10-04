@@ -403,7 +403,13 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
+        res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            print(f"\n{'='*60}\nMETAGRAPH COMMAND FAILED (return code {res.returncode}):")
+            print(f"Command: {query_command}")
+            print(f"STDERR:\n{res.stderr.decode()}")
+            print(f"STDOUT:\n{res.stdout.decode()[:500]}")
+            print('='*60)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
             self.assertEqual(len(res.stdout), 12249)
@@ -416,7 +422,13 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
         )
-        res = subprocess.run(query_command.split(), stdout=PIPE)
+        res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            print(f"\n{'='*60}\nMETAGRAPH COMMAND FAILED (return code {res.returncode}):")
+            print(f"Command: {query_command}")
+            print(f"STDERR:\n{res.stderr.decode()}")
+            print(f"STDOUT:\n{res.stdout.decode()[:500]}")
+            print('='*60)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
             self.assertEqual(len(res.stdout), 12355)
@@ -431,7 +443,13 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
+        res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            print(f"\n{'='*60}\nMETAGRAPH COMMAND FAILED (return code {res.returncode}):")
+            print(f"Command: {query_command}")
+            print(f"STDERR:\n{res.stderr.decode()}")
+            print(f"STDOUT:\n{res.stdout.decode()[:500]}")
+            print('='*60)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
             self.assertEqual(len(res.stdout), 12249)
@@ -445,7 +463,13 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
+        res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            print(f"\n{'='*60}\nMETAGRAPH COMMAND FAILED (return code {res.returncode}):")
+            print(f"Command: {query_command}")
+            print(f"STDERR:\n{res.stderr.decode()}")
+            print(f"STDOUT:\n{res.stdout.decode()[:500]}")
+            print('='*60)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
             self.assertEqual(len(res.stdout), 12355)
