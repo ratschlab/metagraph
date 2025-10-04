@@ -61,7 +61,7 @@ Json::Value process_search_request(const Json::Value &json,
                 + std::to_string(config.alignment_min_exact_match));
     }
 
-    config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+    config.num_top_labels = json.get("top_labels", config.num_top_labels).asInt();
 
     if (json.get("query_coords", false).asBool()) {
         config.query_mode = COORDS;

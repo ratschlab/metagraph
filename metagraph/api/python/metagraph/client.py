@@ -76,7 +76,7 @@ class GraphClientJson:
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
-                      "num_labels": top_labels,
+                      "top_labels": top_labels,
                       "with_signature": with_signature,
                       "abundance_sum": abundance_sum,
                       "query_counts": query_counts,

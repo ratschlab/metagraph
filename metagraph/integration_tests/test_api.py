@@ -81,7 +81,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
-                    "num_labels": 'not_a_number',
+                    "top_labels": 'not_a_number',
                     "FASTA": "\n".join([">query",
                                         'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA',
                                         ]),
@@ -95,7 +95,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_missing_params(self):
         payload = json.dumps({
-            "num_labels": 100,
+            "top_labels": 100,
             "discovery_fraction": 1 / 100
         })
 
@@ -110,13 +110,13 @@ class TestAPIRaw(TestAPIBase):
                                 'TCGA',
                                 ]),
             "discovery_fraction": 1.1,
-            "num_labels": 1,
+            "top_labels": 1,
         })
         ret = self.raw_post_request('search', payload)
 
         self.assertEqual(ret.status_code, 400)
 
-    def test_api_raw_missing_num_labels(self):
+    def test_api_raw_missing_top_labels(self):
         payload = json.dumps({
             "FASTA": "\n".join([">query",
                                 'TCGA',
@@ -138,7 +138,7 @@ class TestAPIRaw(TestAPIBase):
                                         'SEQUENCE_NOT_IN_GRAPH',
                                         ]),
                     "discovery_fraction": 1 / 100,
-                    "num_labels": 1,
+                    "top_labels": 1,
                     })
         ret = self.raw_post_request('search', payload)
         json_ret = ret.json()
@@ -223,14 +223,14 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_search_empty_fasta_desc(self):
         fasta_str = ">\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1})
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1})
         ret = self.raw_post_request('search', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
 
     def test_api_raw_search_no_coordinate_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1,
                               'query_coords': True})
 
         ret = self.raw_post_request('search', payload)
@@ -240,7 +240,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_search_no_count_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1,
                               'abundance_sum': True})
 
         ret = self.raw_post_request('search', payload)
