@@ -291,10 +291,6 @@ include_directories(
   PUBLIC SYSTEM
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
-  external-libraries/sshash
-  external-libraries/sshash/include
-  external-libraries/sshash/external/pthash
-  external-libraries/sshash/external/pthash/external/essentials/include
 )
 
 add_library(ips4o INTERFACE)
@@ -661,18 +657,18 @@ add_custom_target(install_test_environment
 )
 
 # --- integration tests ---
-add_custom_target(check
+add_custom_target(integration_tests
   COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
   DEPENDS metagraph
   DEPENDS install_test_environment
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
-  COMMAND make check
+  COMMAND make integration_tests
   COMMAND unit_tests
-  DEPENDS check unit_tests
+  DEPENDS integration_tests unit_tests
 )
-add_test(NAME integration_tests COMMAND make check)
+add_test(NAME integration_tests COMMAND make integration_tests)
 add_test(NAME unit_tests COMMAND unit_tests)
 
 # --- integration tests runner ---
