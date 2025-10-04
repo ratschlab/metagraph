@@ -71,4 +71,4 @@ RUN metagraph --version \
     && metagraph_DNA5 --version \
     && metagraph_Protein --version
 
-ENTRYPOINT ["metagraph"]
+ENTRYPOINT []
