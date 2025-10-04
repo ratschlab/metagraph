@@ -421,7 +421,7 @@ then the second k-mer of the third read has coordinate 211). Depending on the ta
 both possible to consider each sequence of the input as a separate label and index the coordinates of its k-mers separately
 or, for the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
 of each indexed sequence in post-processing query results. In all cases, it is possible to reconstruct the original input
-from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://www.biorxiv.org/content/10.1101/2021.11.09.467907>`_).
+from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://pmc.ncbi.nlm.nih.gov/articles/PMC9528980>`_).
 
 .. TODO: mention trace-consistent alignment
 
@@ -527,19 +527,28 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 
 1.  Transform annotation columns ``*.column.annodbg`` to ``row_diff`` in three stages::
 
+        mkdir ./rd_columns
+
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 0 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 1 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 2 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
     Note that this requires to pass the graph ``graph.dbg`` as well in order to derive the topology for the diff-transform.
+
+    The value for flag ``-o`` should contain a file name in a directory where the transformed columns
+    need to be written to. E.g., for ``./rd_columns/out`` as here, the outputs will be written to ``./rd_columns/``.
+    However, the exact filenames will be derived from the file names of the input columns.
+
+    .. tip::
+        We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
 
 2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
 
@@ -583,7 +592,36 @@ For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the s
 First, an additional flag ``--count-kmers`` has to be passed on step 1 (the row-diff transform).
 Second, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
 These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_int_brwt`` command.
-The corresponding transformed delta counts will be loaded automatically.
+The corresponding transformed delta counts will be loaded automatically::
+
+    metagraph annotate --count-kmers -o annotation ...
+
+    mkdir ./rd_columns
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 0 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 1 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 2 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find ./rd_columns/ -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff_int_brwt \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./transformed
+
+.. tip::
+    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
+
+.. warning::
+    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
 
 For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
@@ -595,11 +633,44 @@ Conversion to ``column_coord`` is straightforward.
 
 Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 
-Conversion to ``row_diff_brwt_coord`` is analogous to ``row_diff_brwt`` and ``row_diff_int_brwt``, where an additional flag ``--coordinates`` has to be passed.
+Conversion to RowDiff<Tuple-Multi-BRWT> (``row_diff_brwt_coord``) is analogous to ``row_diff_brwt``, where an additional flag ``--coordinates`` has to be passed to the ``transform_anno`` stages. Also, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
+These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_brwt_coord`` command.
+The corresponding transformed delta counts will be loaded automatically::
+
+    metagraph annotate --coordinates -o annotation ...
+
+    mkdir ./rd_columns
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 0 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 1 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 2 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find ./rd_columns/ -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff_brwt_coord \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./transformed
+
+.. tip::
+    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
+
+.. warning::
+    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
 
 Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
 directly to the ColumnCompressed format (``row_diff_coord``), equivalent to ``row_diff_brwt_coord`` with the arity set to infinity,
 that is, all leaves (original labels) directly connected to the root of the BRWT tree.
+
+For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
 Query index
 -----------
