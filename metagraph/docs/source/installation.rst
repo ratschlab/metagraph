@@ -24,7 +24,7 @@ Docker container
 If docker is available on your system, you can immediately get started with::
 
     docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
-        build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+        metagraph build -v -k 31 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 
 
 where ``${DATA_DIR_HOST}`` should be replaced with a directory on the host system that will be
@@ -33,18 +33,27 @@ the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch
 See also the `image overview <https://github.com/ratschlab/metagraph/pkgs/container/metagraph>`_ for
 other versions of the image.
 
-By default, it executes the binary compiled for the DNA alphabet.
-To run the binary compiled for the `Protein` alphabet, just add ``--entrypoint metagraph_Protein``::
+By default, it executes the binary compiled for the `DNA` alphabet {A,C,G,T}.
+To run the binary compiled for the `DNA5` or `Protein` alphabet, replace ``metagraph`` with ``metagraph_DNA5`` or ``metagraph_Protein``, respectively::
 
-    docker run --entrypoint metagraph_Protein \
-               -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
-        build -v -k 10 -o /mnt/graph /mnt/protein.fa
+    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
+        metagraph_DNA5 build -v -k 31 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+
+    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
+        metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 
 As you can see, running MetaGraph from docker containers is very easy.
-Also, the following command (or similar) may be handy to see what directory is mounted in the
-container or to do other sorts of debugging::
+The following command (or similar) is handy to see what directory is mounted in the
+container::
 
-    docker run -v ${DATA_DIR_HOST}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
+    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
+
+For more complex workflows, consider running docker in the interactive mode::
+
+    $ docker run -it --entrypoint /bin/bash -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master
+
+    root@5c42291cc9cf:/# ls /mnt/
+    root@5c42291cc9cf:/# metagraph --version
 
 
 Install from source
