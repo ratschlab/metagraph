@@ -37,8 +37,9 @@ COPY . ${CODE_BASE}
 
 WORKDIR ${CODE_BASE}
 RUN make build-sdsl-lite \
-    && make build-metagraph alphabet=Protein \
-    && make build-metagraph alphabet=DNA
+    && make build-metagraph alphabet=DNA \
+    && make build-metagraph alphabet=DNA5 \
+    && make build-metagraph alphabet=Protein
 
 FROM ubuntu:22.04
 ARG CODE_BASE
@@ -65,6 +66,9 @@ RUN pip3 install ${CODE_BASE}/metagraph/api/python
 RUN pip3 install ${CODE_BASE}/metagraph/workflows
 
 # check that it runs fine
-RUN metagraph --version && metagraph_DNA --version && metagraph_Protein --version
+RUN metagraph --version \
+    && metagraph_DNA --version \
+    && metagraph_DNA5 --version \
+    && metagraph_Protein --version
 
 ENTRYPOINT ["metagraph"]
