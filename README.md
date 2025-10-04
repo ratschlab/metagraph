@@ -51,19 +51,19 @@ docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
 ```
 and replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.
 
-By default, it executes the binary compiled for the DNA alphabet {A,C,G,T}.
+By default, it executes the binary compiled for the `DNA` alphabet {A,C,G,T}.
 To run the binary compiled for the `DNA5` or `Protein` alphabet, just replace `metagraph` with `metagraph_DNA5` or `metagraph_Protein`, respectively, e.g.:
 ```
 docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
     metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 ```
 
-As you see, running MetaGraph from docker containers is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container or other sort of debugging of the command:
+One can see that running MetaGraph with docker is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container:
 ```
 docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
 ```
 
-For more complex workflows, consider running docker in the interactive regime:
+For more complex workflows, consider running docker in the interactive mode:
 ```
 $ docker run -it --entrypoint /bin/bash -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master
 
