@@ -47,19 +47,28 @@ If docker is available on the system, immediately get started with
 ```
 docker pull ghcr.io/ratschlab/metagraph:master
 docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
-    build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+    metagraph build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 ```
 and replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.
 
-To run the binary compiled for the `Protein` alphabet, just add `--entrypoint metagraph_Protein`:
+By default, it executes the binary compiled for the `DNA` alphabet {A,C,G,T}.
+To run the binary compiled for the `DNA5` or `Protein` alphabet, just replace `metagraph` with `metagraph_DNA5` or `metagraph_Protein`, respectively, e.g.:
 ```
-docker run -v ${HOME}:/mnt --entrypoint metagraph_Protein ghcr.io/ratschlab/metagraph:master \
-    build -v -k 10 -o /mnt/graph /mnt/protein.fa
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
+    metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 ```
 
-As you see, running MetaGraph from docker containers is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container or other sort of debugging of the command:
+One can see that running MetaGraph with docker is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container:
 ```
-docker run -v ${HOME}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
+```
+
+For more complex workflows, consider running docker in the interactive mode:
+```
+$ docker run -it --entrypoint /bin/bash -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master
+
+root@5c42291cc9cf:/# ls /mnt/
+root@5c42291cc9cf:/# metagraph --version
 ```
 
 All different versions of the container image are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
@@ -194,6 +203,10 @@ Stats for both
 ```
 
 ## Developer Notes
+
+### Build a docker container
+
+Simply run `docker build .`
 
 ### Makefile
 

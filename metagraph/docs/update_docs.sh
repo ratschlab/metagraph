@@ -13,6 +13,6 @@ scp -r build/html $HOST:~/projects2019-dna_web_search/static/docs
 
 ssh $HOST <<'ENDSSH'
 cd ~/projects2019-dna_web_search
-docker build . -t dnaloc:prod
+docker build . -t dnaloc:latest
 export $(cat ~/projects2021-metagraph-indices-deployment/lab-machine/.env | xargs); docker-compose -f ~/projects2021-metagraph-indices-deployment/lab-machine/docker-compose.yml up -d dnaloc
 ENDSSH
