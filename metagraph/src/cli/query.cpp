@@ -1332,7 +1332,6 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                #pragma omp critical
                 callback(search_result);
             }
 
