@@ -545,8 +545,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (config_.chain_alignments) {
         if (!has_coordinates()) {
-            logger->warn("Chaining only supported for seeds with coordinates. Disabling seed chaining.");
-            config_.chain_alignments = false;
+            logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
+            exit(1);
         }
 
         auto fwd_seeds = forward_seeder.get_seeds();

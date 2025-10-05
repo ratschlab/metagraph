@@ -1272,8 +1272,9 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(config_.parallel_each);
+    ThreadPool thread_pool(0);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+    std::mutex callback_mutex;  // Shared across all batches
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
@@ -1320,7 +1321,6 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            std::mutex callback_mutex;
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
