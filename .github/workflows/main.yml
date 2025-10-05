@@ -107,17 +107,14 @@ jobs:
         cd metagraph/build && ./unit_tests
 
     - name: run integration tests
-      uses: nick-fields/retry@v2
-      with:
-        timeout_minutes: 1000
-        command: |
-          export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-          cd metagraph/build
-          make check || echo "TEST_FAILED" > test_failed.status
-          if [ -f test_failed.status ]; then
-            echo "Test step failed! Printing memory usage:"
-            free -h
-            cat /proc/meminfo
-            df -h /
-            exit 1  # Fail the workflow
-          fi
+      run: |
+        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+        cd metagraph/build
+        make check || echo "TEST_FAILED" > test_failed.status
+        if [ -f test_failed.status ]; then
+          echo "Test step failed! Printing memory usage:"
+          free -h
+          cat /proc/meminfo
+          df -h /
+          exit 1  # Fail the workflow
+        fi
