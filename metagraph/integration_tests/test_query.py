@@ -10,6 +10,9 @@ import numpy as np
 from helpers import get_test_class_name
 from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 import hashlib
+import platform
+import re
+import psutil
 
 
 """Test graph construction"""
@@ -64,6 +67,59 @@ def product(graph_types, anno_types):
     class_name_func=get_test_class_name
 )
 class TestQuery(TestingBase):
+    def _run_with_memory_monitor(self, query_command, expected_stdout_len):
+        """Run command with /usr/bin/time and report memory usage"""
+        # Get system memory before
+        mem_before = psutil.virtual_memory()
+        sys_before_gb = mem_before.used / 1024 / 1024 / 1024
+        sys_total_gb = mem_before.total / 1024 / 1024 / 1024
+        sys_before_pct = mem_before.percent
+        print(f"\n\033[33m[MEM BEFORE]\033[0m {self.graph_repr}+{self.anno_repr}: System before: {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%)", flush=True)
+        
+        # Use /usr/bin/time to measure memory
+        if platform.system() == 'Darwin':  # macOS
+            time_cmd = '/usr/bin/time -l'
+        else:  # Linux
+            time_cmd = '/usr/bin/time -v'
+        
+        full_command = f"{time_cmd} {query_command}"
+        res = subprocess.run(full_command, shell=True, stdout=PIPE, stderr=PIPE)
+        
+        # Get system memory after
+        mem_after = psutil.virtual_memory()
+        sys_after_gb = mem_after.used / 1024 / 1024 / 1024
+        sys_after_pct = mem_after.percent
+        
+        # Extract memory info from stderr
+        stderr_text = res.stderr.decode()
+        if 'maximum resident set size' in stderr_text.lower():
+            # Linux format: "	Maximum resident set size (kbytes): 3076"
+            # macOS format: "  1234567  maximum resident set size"
+            match = re.search(r'maximum resident set size \(kbytes\):\s*(\d+)', stderr_text, re.IGNORECASE)
+            if match:
+                mem_kb = int(match.group(1))
+                mem_mb = mem_kb / 1024
+            else:
+                match = re.search(r'\s+(\d+)\s+maximum resident set size', stderr_text)
+                if match:
+                    mem_bytes = int(match.group(1))
+                    mem_mb = mem_bytes / 1024 / 1024
+                else:
+                    mem_mb = 0
+            
+            if mem_mb > 0:
+                print(f"\033[33m[ MEM AFTER]\033[0m {self.graph_repr}+{self.anno_repr}: Peak={mem_mb:.1f}MB | System after: {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%)", flush=True)
+        
+        if res.returncode != 0:
+            print(f"\n[ERROR] Command failed with return code {res.returncode}")
+            print(f"STDERR: {stderr_text[:500]}")
+        
+        self.assertEqual(res.returncode, 0)
+        if expected_stdout_len is not None:
+            self.assertEqual(len(res.stdout), expected_stdout_len)
+        
+        return res
+
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -207,9 +263,8 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 261390)
+        
+        self._run_with_memory_monitor(query_command, 261390)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -356,9 +411,8 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137140)
+        
+        self._run_with_memory_monitor(query_command, 137140)
 
         query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -454,18 +508,8 @@ class TestQuery(TestingBase):
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
-        res = subprocess.run(query_command.split(), stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            print(f"\n{'='*60}\nMETAGRAPH COMMAND FAILED (return code {res.returncode}):")
-            print(f"Command: {query_command}")
-            print(f"STDERR:\n{res.stderr.decode()}")
-            print(f"STDOUT:\n{res.stdout.decode()[:500]}")
-            print('='*60)
-        self.assertEqual(res.returncode, 0)
-        if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12249)
-        else:
-            self.assertEqual(len(res.stdout), 12244)
+        expected_len = 12249 if DNA_MODE else 12244
+        self._run_with_memory_monitor(query_command, expected_len)
 
         query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -498,9 +542,8 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 24567)
+        
+        self._run_with_memory_monitor(query_command, 24567)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
