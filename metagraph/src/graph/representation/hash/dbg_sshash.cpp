@@ -120,7 +120,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     found_fw = true;
                                     next = sshash_to_graph_index(nb.forward[i].kmer_id);
                                     found_i = i;
-                                    if (nb.forward[i].kmer_orientation)
+                                    if (nb.forward[i].kmer_orientation < 0)
                                         next = graph.reverse_complement(next);
                                 }
                             }
@@ -144,7 +144,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                 } else {
                                     found_bw = true;
                                     prev = sshash_to_graph_index(nb.backward[i].kmer_id);
-                                    if (nb.backward[i].kmer_orientation)
+                                    if (nb.backward[i].kmer_orientation < 0)
                                         prev = graph.reverse_complement(prev);
                                 }
                             }
@@ -296,7 +296,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                         [&](sshash::lookup_result res) {
                             auto node = sshash_to_graph_index(res.kmer_id);
                             assert(!node || in_graph(node));
-                            callback(node, res.kmer_orientation);
+                            callback(node, res.kmer_orientation < 0);
                         },
                         terminate);
             },
@@ -352,8 +352,8 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     if (mode_ != BASIC) {
         map_to_nodes_with_rc<true>(
                 sequence,
-                [&](node_index n, bool orientation) {
-                    callback(n && orientation ? reverse_complement(n) : n);
+                [&](node_index n, bool revcompl) {
+                    callback(n && revcompl ? reverse_complement(n) : n);
                 },
                 terminate);
     } else {
@@ -402,7 +402,7 @@ void DBGSSHash::adjacent_outgoing_nodes_with_rc(
                 for (size_t i = 0; i < nb.forward.size(); i++) {
                     if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.forward[i].kmer_id),
-                                 nb.forward[i].kmer_orientation);
+                                 nb.forward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -444,7 +444,7 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
                 for (size_t i = 0; i < nb.forward.size(); i++) {
                     if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.forward[i].kmer_id),
-                                 kmer_t::uint64_to_char(i), nb.forward[i].kmer_orientation);
+                                 kmer_t::uint64_to_char(i), nb.forward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -485,7 +485,7 @@ void DBGSSHash::adjacent_incoming_nodes_with_rc(
                 for (size_t i = 0; i < nb.backward.size(); i++) {
                     if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.backward[i].kmer_id),
-                                 nb.backward[i].kmer_orientation);
+                                 nb.backward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -528,7 +528,7 @@ void DBGSSHash::call_incoming_kmers_with_rc(
                 for (size_t i = 0; i < nb.backward.size(); i++) {
                     if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.backward[i].kmer_id),
-                                 kmer_t::uint64_to_char(i), nb.backward[i].kmer_orientation);
+                                 kmer_t::uint64_to_char(i), nb.backward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -546,8 +546,8 @@ template void DBGSSHash::call_incoming_kmers_with_rc<false>(
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
     if (mode_ != BASIC) {
-        call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool orientation) {
-            callback(orientation ? reverse_complement(next) : next, c);
+        call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool revcompl) {
+            callback(revcompl ? reverse_complement(next) : next, c);
         });
     } else {
         call_outgoing_kmers_with_rc<false>(node, [&](node_index next, char c, bool) {
@@ -559,8 +559,8 @@ void DBGSSHash::call_outgoing_kmers(node_index node,
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
     if (mode_ != BASIC) {
-        adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool orientation) {
-            callback(orientation ? reverse_complement(next) : next);
+        adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool revcompl) {
+            callback(revcompl ? reverse_complement(next) : next);
         });
     } else {
         adjacent_outgoing_nodes_with_rc<false>(node, [&](node_index next, bool) {
@@ -572,8 +572,8 @@ void DBGSSHash::adjacent_outgoing_nodes(node_index node,
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
     if (mode_ != BASIC) {
-        call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool orientation) {
-            callback(orientation ? reverse_complement(prev) : prev, c);
+        call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool revcompl) {
+            callback(revcompl ? reverse_complement(prev) : prev, c);
         });
     } else {
         call_incoming_kmers_with_rc<false>(node, [&](node_index prev, char c, bool) {
@@ -585,8 +585,8 @@ void DBGSSHash::call_incoming_kmers(node_index node,
 void DBGSSHash::adjacent_incoming_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
     if (mode_ != BASIC) {
-        adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool orientation) {
-            callback(orientation ? reverse_complement(prev) : prev);
+        adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool revcompl) {
+            callback(revcompl ? reverse_complement(prev) : prev);
         });
     } else {
         adjacent_incoming_nodes_with_rc<false>(node, [&](node_index prev, bool) {
@@ -647,7 +647,7 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
             [&](const auto& d) {
                 auto res = d.lookup_advanced(kmer.data(), with_rc);
                 return std::make_pair(sshash_to_graph_index(res.kmer_id),
-                                      res.kmer_orientation);
+                                      res.kmer_orientation < 0);
             },
             dict_);
 }
