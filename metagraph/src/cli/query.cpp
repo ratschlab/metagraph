@@ -1323,6 +1323,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
+            std::mutex callback_mutex;
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 SeqSearchResult search_result
@@ -1332,7 +1333,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                callback(search_result);
+                {
+                    std::lock_guard<std::mutex> lock(callback_mutex);
+                    callback(search_result);
+                }
             }
 
             logger->trace("Query graph constructed for batch of sequences"
