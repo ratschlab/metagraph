@@ -159,6 +159,11 @@ void add_kmer_counts(const std::string &file,
 
     logger->trace("Parsing k-mer counts from '{}'", counts_fname);
 
+    if (!fs::exists(counts_fname)) {
+        logger->trace("K-mer counts file '{}' does not exist, skipping k-mer counts", counts_fname);
+        return;
+    }
+
     read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
         [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
             if (k != graph.get_k()) {
