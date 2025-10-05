@@ -70,13 +70,13 @@ jobs:
 
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install ${{ matrix.compiler }}
+            sudo apt-get install -y ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install libcurl4-openssl-dev
+          sudo apt-get install -y libcurl4-openssl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
