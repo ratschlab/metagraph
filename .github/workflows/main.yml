@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install -y ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev libomp-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           sudo apt-get install -y libcurl4-openssl-dev
