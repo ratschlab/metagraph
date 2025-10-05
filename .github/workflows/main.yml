@@ -115,6 +115,6 @@ jobs:
           echo "Test step failed! Printing memory usage:"
           free -h
           cat /proc/meminfo
-          df -h /
+          df -h
           exit 1  # Fail the workflow
         fi
