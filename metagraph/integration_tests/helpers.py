@@ -50,7 +50,7 @@ class TimeLoggingTestResult(unittest.TextTestResult):
         super().startTest(test)
 
     def addSuccess(self, test):
-        elapsed = time.time() - self._started_at
+        elapsed = time.time() - getattr(self, '_started_at', time.time())
         self.__total_time += elapsed
         self.__num_successes += 1
         name = self.getDescription(test)
@@ -58,7 +58,7 @@ class TimeLoggingTestResult(unittest.TextTestResult):
         super().addSuccess(test)
 
     def addFailure(self, test, err):
-        elapsed = time.time() - self._started_at
+        elapsed = time.time() - getattr(self, '_started_at', time.time())
         self.__total_time += elapsed
         name = self.getDescription(test)
         self.stream.write("\033[0;31;40m[   FAIL   ]\033[0m {}\n".format(name))
@@ -66,7 +66,7 @@ class TimeLoggingTestResult(unittest.TextTestResult):
         self.stream.write("{}\n".format(self.failures[-1][1]))
 
     def addError(self, test, err):
-        elapsed = time.time() - self._started_at
+        elapsed = time.time() - getattr(self, '_started_at', time.time())
         self.__total_time += elapsed
         name = self.getDescription(test)
         self.stream.write("\033[0;31;40m[   ERROR  ]\033[0m {}\n".format(name))
