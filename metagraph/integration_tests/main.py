@@ -23,7 +23,8 @@ def create_test_suite(filter_pattern="*"):
         for suite in unittest.defaultTestLoader.loadTestsFromName(name):
             try:
                 for test in suite:
-                    if fnmatch.fnmatchcase(test.__str__(), filter_pattern):
+                    if (fnmatch.fnmatchcase(test.__str__(), filter_pattern) or
+                        fnmatch.fnmatchcase(getattr(test, '_testMethodName', ''), filter_pattern)):
                         test_suite.addTest(test)
             except:
                 test_suite.addTest(suite)
@@ -49,7 +50,8 @@ def run_test_parallel(test_info, filter_pattern="*"):
     test_suite = unittest.TestSuite()
     try:
         all_tests = [test for suite in unittest.defaultTestLoader.loadTestsFromName(module_name)
-                     for test in suite if fnmatch.fnmatchcase(test.__str__(), filter_pattern)]
+                     for test in suite if (fnmatch.fnmatchcase(test.__str__(), filter_pattern) or
+                                          fnmatch.fnmatchcase(getattr(test, '_testMethodName', ''), filter_pattern))]
         
         # Add tests (slice if chunk, all if file)
         tests_to_run = all_tests[start_idx:end_idx] if is_chunk else all_tests
@@ -117,7 +119,12 @@ def run_tests_parallel(filter_pattern="*", max_workers=4):
         try:
             for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
                 for test in suite:
-                    if fnmatch.fnmatchcase(test.__str__(), filter_pattern):
+                    test_str = test.__str__()
+                    method_name = getattr(test, '_testMethodName', '')
+                    # Match against full test string OR just the method name
+                    matches = (fnmatch.fnmatchcase(test_str, filter_pattern) or
+                              fnmatch.fnmatchcase(method_name, filter_pattern))
+                    if matches:
                         class_name = test.__class__.__name__
                         if class_name not in class_ranges:
                             class_ranges[class_name] = len(all_tests)
