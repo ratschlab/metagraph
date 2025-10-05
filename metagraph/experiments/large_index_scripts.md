@@ -2924,6 +2924,60 @@ sbatch -J "query" \
 ######################## Random (100 studies) ##########################
 
 DIR=~/metagenome/data/cloudcompute/random_100_studies;
+FULGOR=/cluster/customapps/biomed/grlab/users/hmustafa/fulgor/build/fulgor;
+
+sbatch -J "fulgor_random100" \
+     -o $DIR/logs/fulgor.slog \
+     -t 05-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=35G \
+    --wrap="/usr/bin/time -v $FULGOR build \
+            -l $DIR/samples.txt \
+            -o $DIR/fulgor \
+            -k 31 -m 19 \
+            -g 340 -t 34 \
+            -d ~/metagenome/scratch/nobackup;"
+
+sbatch -J "fulgor_random100_color" \
+     -o $DIR/logs/fulgor_color.slog \
+     -t 03-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=49G \
+    --wrap="/usr/bin/time -v $FULGOR color \
+            -i $DIR/fulgor.fur \
+            --meta --diff \
+            -t 34 \
+            -d ~/metagenome/scratch/nobackup;"
+
+sbatch -J "fulgor_random100_color" \
+     -o $DIR/logs/fulgor_color.slog \
+     -t 03-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=49G \
+    --wrap="/usr/bin/time -v $FULGOR color \
+            -i $DIR/fulgor.fur \
+            --meta \
+            -t 34 \
+            -d ~/metagenome/scratch/nobackup;"
+
+DIR=~/metagenome/data/cloudcompute/random_100_studies;
+FULGOR=/cluster/customapps/biomed/grlab/users/hmustafa/fulgor/build/fulgor;
+
+sbatch -J "fulgor_md_random100" \
+     -o $DIR/logs/fulgor_md.slog \
+     -t 05-00 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=35G \
+    --wrap="/usr/bin/time -v $FULGOR build \
+            -l $DIR/samples.txt \
+            -o $DIR/fulgor_md \
+            -k 31 -m 19 \
+            -g 340 -t 34 \
+            --meta --diff \
+            -d ~/metagenome/scratch/nobackup;"
+
+
+DIR=~/metagenome/data/cloudcompute/random_100_studies;
 METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph;
 
 find ~/metagenome/data/cloudcompute/metagraph_1kstudies -name "*.fasta.gz" > $DIR/samples.txt;
@@ -4077,4 +4131,14 @@ sbatch -J "tcga_count_${WINDOW_SIZE}_rd_brwt" \
 ~/time -v ./metagraph_DNA query -v --query-mode matches --align --num-top-labels 10 --min-kmers-fraction-label 0 -i sra/random_100_studies.small.dbg -a /optane/random_100_studies.row_diff_brwt.annodbg -v <(head -n 7400 sra/100_studies.fq) > /dev/null 2> query_align.small &
 ~/time -v ./metagraph_DNA query -v --query-mode matches --align --num-top-labels 10 --min-kmers-fraction-label 0 -i sra/random_100_studies.dbg -a /optane/random_100_studies.row_diff_disk.annodbg -v <(head -n 7400 sra/100_studies.fq) > /dev/null 2> query_align.fast_disk &
 ~/time -v ./metagraph_DNA query -v --query-mode matches --align --num-top-labels 10 --min-kmers-fraction-label 0 -i sra/random_100_studies.small.dbg -a /optane/random_100_studies.row_diff_disk.annodbg -v <(head -n 7400 sra/100_studies.fq) > /dev/null 2> query_align.small_disk &
+```
+
+
+```bash
+cd /scratch/cost
+/usr/bin/time -v ./fulgor/build/fulgor pseudoalign -i ./fulgor_md.mfur -q sra/100_studies.fq -t 1 --threshold 0 -o /dev/null > fulgor.mfur.query 2>&1
+/usr/bin/time -v ./fulgor/build/fulgor pseudoalign -i ./fulgor.fur -q sra/100_studies.fq -t 1 --threshold 0 -o /dev/null > fulgor.fur.query 2>&1
+
+/usr/bin/time -v ./metagraph/metagraph/build/metagraph query -v --query-mode matches --num-top-labels 10 --min-kmers-fraction-label 0 -i sra/random_100_studies.dbg -a sra/random_100_studies.row_diff_flat.annodbg -v sra/100_studies.fq > /dev/null 2> query.fast
+/usr/bin/time -v ./metagraph/metagraph/build/metagraph query -v --query-mode matches --num-top-labels 10 --min-kmers-fraction-label 0 -i ./sra_public_mg_sshash/graph.primary.sshashdbg -a ./sra_public_mg_sshash/graph.primary.flat.annodbg -v sra/100_studies.fq > /dev/null 2> query.sshash
 ```
