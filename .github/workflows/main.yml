@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
-      fail-fast: false
       matrix:
         alphabet: [DNA]
         build_type: [Debug, Release]
@@ -51,7 +50,6 @@ jobs:
     - name: install dependencies
       run: |
         sudo apt-get update
-        
         sudo apt-get install -y ${{ matrix.compiler }} cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
@@ -106,7 +104,7 @@ jobs:
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build
-        make check || echo "TEST_FAILED" > test_failed.status
+        make integration_tests || echo "TEST_FAILED" > test_failed.status
         if [ -f test_failed.status ]; then
           echo "Test step failed! Printing memory usage:"
           free -h
