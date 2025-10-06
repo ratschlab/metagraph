@@ -4,6 +4,8 @@
 #include <vector>
 #include <filesystem>
 
+#include <ips4o.hpp>
+
 #include "common/utils/file_utils.hpp"
 #include "common/elias_fano/elias_fano.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
@@ -74,8 +76,7 @@ class SortedVector {
     template <class Callback>
     void for_each(const Callback &callback) {
         if (tmp_dir_.empty()) {
-            std::sort(buffer_.begin(), buffer_.end(), std::less<>());
-            std::ignore = num_threads_;
+            ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), num_threads_);
             for (const auto &v : buffer_) {
                 callback(v);
             }
@@ -106,8 +107,7 @@ class SortedVector {
     void flush(bool release_buffer = false) {
         if (tmp_dir_.empty() || (buffer_.empty() && num_chunks_))
             return;
-        std::sort(buffer_.begin(), buffer_.end(), std::less<>());
-        std::ignore = num_threads_;
+        ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), num_threads_);
         elias_fano::EliasFanoEncoderBuffered<T>::append_block(buffer_, tmp_file(num_chunks_++));
         if (release_buffer) {
             buffer_ = std::vector<T>();
