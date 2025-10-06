@@ -155,7 +155,7 @@ class TestingBase(unittest.TestCase):
 
         command = f'{METAGRAPH} annotate -v -p {num_threads} --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} {extra_params} \
-                    -o {output} {input}' + MMAP_FLAG
+                    -o {output} {input}'
 
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
