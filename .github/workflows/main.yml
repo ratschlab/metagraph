@@ -138,7 +138,7 @@ jobs:
         retry_on: error
         command: |
           export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-          cd metagraph/build && make check
+          cd metagraph/build && make integration_tests
 
   MacOS:
     strategy:
@@ -231,7 +231,7 @@ jobs:
       run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
-      run: cd metagraph/build && make check
+      run: cd metagraph/build && make integration_tests
 
 
   Metagraph-Workflows:
