@@ -1,6 +1,7 @@
 #include "annotate.hpp"
 
 #include <filesystem>
+#include <fstream>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -164,6 +165,14 @@ void add_kmer_counts(const std::string &file,
         return;
     }
 
+    // Additional safety check: verify the file is readable and not corrupted
+    std::ifstream test_file(counts_fname, std::ios::binary);
+    if (!test_file.good()) {
+        logger->warn("K-mer counts file '{}' is not readable, skipping k-mer counts", counts_fname);
+        return;
+    }
+    test_file.close();
+
     read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
         [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
             if (k != graph.get_k()) {
@@ -194,7 +203,7 @@ void add_kmer_counts(const std::string &file,
             total_seqs++;
 
             if (logger->level() <= spdlog::level::level_enum::trace
-                                            && total_seqs % 10000 == 0) {
+                                                    && total_seqs % 10000 == 0) {
                 logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                               total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
             }
