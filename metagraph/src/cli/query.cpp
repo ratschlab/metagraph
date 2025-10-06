@@ -1272,9 +1272,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(0);
+    ThreadPool thread_pool(config_.parallel_each);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
-    std::mutex callback_mutex;  // Shared across all batches
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
@@ -1330,10 +1329,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);
 
-                {
-                    std::lock_guard<std::mutex> lock(callback_mutex);
-                    callback(search_result);
-                }
+                callback(search_result);
             }
 
             logger->trace("Query graph constructed for batch of sequences"
