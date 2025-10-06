@@ -230,7 +230,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     Timer timer;
 
-    ThreadPool thread_pool(1);
+    ThreadPool thread_pool(0);
 
     // not too small, not too large
     const size_t batch_size = 1'000;
