@@ -53,10 +53,6 @@ jobs:
 
         sudo apt-get install ${{ matrix.compiler }} libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev libomp-dev libgomp1
 
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install libcurl4-openssl-dev
-        fi
-
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
         echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
 
