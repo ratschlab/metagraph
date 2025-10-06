@@ -1,6 +1,5 @@
 #include "sorted_set.hpp"
 
-#include <ips4o.hpp>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
@@ -40,8 +39,9 @@ void SortedSet<T, Container>::clear() {
 
 template <typename T, class Container>
 void SortedSet<T, Container>::sort_and_remove_duplicates() {
-    ips4o::parallel::sort(data_.begin(), data_.end(),
-                          std::less<value_type>(), num_threads_);
+    std::sort(data_.begin(), data_.end(),
+                          std::less<value_type>());
+    std::ignore = num_threads_;
     // remove duplicates
     auto unique_end = std::unique(data_.begin(), data_.end());
     data_.erase(unique_end, data_.end());
