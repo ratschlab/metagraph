@@ -1100,7 +1100,9 @@ int query_graph(Config *config) {
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
-        // Only the best alignment is used in query, so we take the first one
+        assert(config->alignment_num_alternative_paths == 1u
+                && "only the best alignment is used in query");
+
         aligner_config.reset(new align::DBGAlignerConfig(
             initialize_aligner_config(*config, *graph)
         ));
@@ -1159,7 +1161,8 @@ Alignment align_sequence(std::string *seq,
         + revised_config.left_end_bonus + revised_config.right_end_bonus;
     auto alignments = aligner.align(*seq);
 
-    // Take the first (best) alignment if multiple are returned
+    assert(alignments.size() <= 1 && "Only the best alignment is needed");
+
     if (alignments.size()) {
         auto &match = alignments[0];
         // modify sequence for querying with the best alignment
