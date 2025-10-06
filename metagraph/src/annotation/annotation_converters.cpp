@@ -288,14 +288,14 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
 std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase) {
     std::string anchors_file = fbase + kRowDiffAnchorExt;
     if (!std::filesystem::exists(anchors_file)) {
-        logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                      " transform followed by anchor optimization.", anchors_file);
-        std::exit(1);
+        logger->warn("Anchor bitmap {} does not exist. Run the row_diff"
+                     " transform followed by anchor optimization.", anchors_file);
+        return std::make_pair("", "");
     }
     std::string fork_succ_file = fbase + kRowDiffForkSuccExt;
     if (!std::filesystem::exists(fork_succ_file)) {
-        logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-        std::exit(1);
+        logger->warn("Fork successor bitmap {} does not exist", fork_succ_file);
+        return std::make_pair("", "");
     }
     return std::make_pair(anchors_file, fork_succ_file);
 }
@@ -1576,8 +1576,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;
         if (!fs::exists(anchors_fname)) {
-            logger->error("Can't find anchors bitmap at {}", anchors_fname);
-            exit(1);
+            logger->warn("Can't find anchors bitmap at {}, skipping anchor processing", anchors_fname);
+            return;
         }
         if (!utils::with_mmap()) { // only reserve space for anchors with no mmap
             uint64_t anchor_size = fs::file_size(anchors_fname);
