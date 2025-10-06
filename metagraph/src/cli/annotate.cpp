@@ -216,150 +216,74 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     Timer timer;
 
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
-
     // not too small, not too large
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
 
-    if (config.coordinates) {
-        for (const auto &file : files) {
-            BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
-                [&](auto&& data) {
-                    thread_pool.enqueue([&](auto &data) {
+    #pragma omp parallel num_threads(get_num_threads())
+    #pragma omp single
+    {
+        if (config.coordinates) {
+            #pragma omp taskgroup
+            for (const auto &file : files) {
+                BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
+                    [&](auto&& data) {
+                        #pragma omp task firstprivate(data) shared(anno_graph)
                         anno_graph->annotate_kmer_coords(std::move(data));
-                    }, std::move(data));
-                },
-                batch_size, batch_length, batch_size
-            );
+                    },
+                    batch_size, batch_length, batch_size
+                );
 
-            logger->trace("Annotating k-mer coordinates for file {}", file);
+                logger->trace("Annotating k-mer coordinates for file {}", file);
 
-            if (file_format(file) != "FASTA"
-                    && file_format(file) != "FASTQ") {
-                logger->error("Currently only FASTA or FASTQ format is supported"
-                              " for annotating k-mer coordinates");
-                exit(1);
-            }
-
-            uint64_t coord = 0;
-            call_annotations(
-                file,
-                config.refpath,
-                anno_graph->get_graph(),
-                forward_and_reverse,
-                config.min_count,
-                config.max_count,
-                config.filename_anno,
-                config.annotate_sequence_headers,
-                config.fasta_anno_comment_delim,
-                config.fasta_header_delimiter,
-                config.anno_labels,
-                [&](std::string sequence, auto labels) {
-                    if (config.num_kmers_in_seq
-                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
-                        logger->error("All input sequences must have the same"
-                                      " length when flag --const-length is on");
-                        exit(1);
-                    }
-                    if (sequence.size() >= k) {
-                        uint64_t num_kmers = sequence.size() - k + 1;
-                        batcher.push_and_pay(sequence.size(),
-                                             std::move(sequence), std::move(labels), coord);
-                        if (!config.annotate_sequence_headers)
-                            coord += num_kmers;
-                    }
+                if (file_format(file) != "FASTA"
+                        && file_format(file) != "FASTQ") {
+                    logger->error("Currently only FASTA or FASTQ format is supported"
+                                  " for annotating k-mer coordinates");
+                    exit(1);
                 }
-            );
-        }
 
-        thread_pool.join();
-
-        anno_graph->get_annotator().serialize(annotator_filename);
-
-        return;
-    }
-
-    // iterate over input files
-    for (const auto &file : files) {
-        BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
-            [&](auto&& data) {
-                thread_pool.enqueue([&anno_graph](auto &data) {
-                    anno_graph->annotate_sequences(std::move(data));
-                }, std::move(data));
-            },
-            batch_size, batch_length, batch_size
-        );
-        call_annotations(
-            file,
-            config.refpath,
-            anno_graph->get_graph(),
-            forward_and_reverse,
-            config.min_count,
-            config.max_count,
-            config.filename_anno,
-            config.annotate_sequence_headers,
-            config.fasta_anno_comment_delim,
-            config.fasta_header_delimiter,
-            config.anno_labels,
-            [&](std::string sequence, auto labels) {
-                if (sequence.size() >= k) {
-                    batcher.push_and_pay(sequence.size(),
-                                         std::move(sequence), std::move(labels));
-                }
-            }
-        );
-    }
-
-    thread_pool.join();
-
-    if (config.count_kmers) {
-        // add k-mer counts to existing binary annotations
-        for (const auto &file : files) {
-            logger->trace("Annotating k-mer counts for file {}", file);
-
-            BatchAccumulator<std::tuple<std::string,
-                                        std::vector<std::string>,
-                                        std::vector<uint64_t>>> batcher(
-                [&](auto&& data) {
-                    using Batch = std::vector<std::tuple<std::string,
-                                                         std::vector<std::string>,
-                                                         std::vector<uint64_t>>>;
-                    thread_pool.enqueue([&](Batch &data) {
-                        for (auto &[seq, labels, kmer_counts] : data) {
-                            anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
-                        }
-                    }, std::move(data));
-                },
-                batch_size, batch_length, batch_size
-            );
-
-            const std::string &counts_fname
-                    = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
-
-            if (fs::exists(counts_fname)) {
-                add_kmer_counts(
+                uint64_t coord = 0;
+                call_annotations(
                     file,
+                    config.refpath,
                     anno_graph->get_graph(),
                     forward_and_reverse,
+                    config.min_count,
+                    config.max_count,
                     config.filename_anno,
                     config.annotate_sequence_headers,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
                     config.anno_labels,
-                    [&](std::string sequence,
-                                std::vector<std::string> labels,
-                                std::vector<uint64_t> kmer_counts) {
+                    [&](std::string sequence, auto labels) {
+                        if (config.num_kmers_in_seq
+                                && config.num_kmers_in_seq + k - 1 != sequence.size()) {
+                            logger->error("All input sequences must have the same"
+                                          " length when flag --const-length is on");
+                            exit(1);
+                        }
                         if (sequence.size() >= k) {
+                            uint64_t num_kmers = sequence.size() - k + 1;
                             batcher.push_and_pay(sequence.size(),
-                                                 std::move(sequence), std::move(labels),
-                                                 std::move(kmer_counts));
+                                                 std::move(sequence), std::move(labels), coord);
+                            if (!config.annotate_sequence_headers)
+                                coord += num_kmers;
                         }
                     }
                 );
-            } else {
-                logger->warn("No k-mer counts found at '{}'. Every input k-mer"
-                             " will have count 1.", counts_fname);
+            }
+        } else {
+            // iterate over input files
+            #pragma omp taskgroup
+            for (const auto &file : files) {
+                BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
+                    [&](auto&& data) {
+                        #pragma omp task firstprivate(data) shared(anno_graph)
+                        anno_graph->annotate_sequences(std::move(data));
+                    },
+                    batch_size, batch_length, batch_size
+                );
                 call_annotations(
                     file,
                     config.refpath,
@@ -375,15 +299,82 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     [&](std::string sequence, auto labels) {
                         if (sequence.size() >= k) {
                             batcher.push_and_pay(sequence.size(),
-                                                 std::move(sequence), std::move(labels),
-                                                 std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                                                 std::move(sequence), std::move(labels));
                         }
                     }
                 );
             }
-        }
 
-        thread_pool.join();
+            if (config.count_kmers) {
+                // add k-mer counts to existing binary annotations
+                #pragma omp taskgroup
+                for (const auto &file : files) {
+                    logger->trace("Annotating k-mer counts for file {}", file);
+
+                    BatchAccumulator<std::tuple<std::string,
+                                                std::vector<std::string>,
+                                                std::vector<uint64_t>>> batcher(
+                        [&](auto&& data) {
+                            #pragma omp task firstprivate(data) shared(anno_graph)
+                            {
+                                for (auto &[seq, labels, kmer_counts] : data) {
+                                    anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
+                                }
+                            }
+                        },
+                        batch_size, batch_length, batch_size
+                    );
+
+                    const std::string &counts_fname
+                            = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
+
+                    if (fs::exists(counts_fname)) {
+                        add_kmer_counts(
+                            file,
+                            anno_graph->get_graph(),
+                            forward_and_reverse,
+                            config.filename_anno,
+                            config.annotate_sequence_headers,
+                            config.fasta_anno_comment_delim,
+                            config.fasta_header_delimiter,
+                            config.anno_labels,
+                            [&](std::string sequence,
+                                        std::vector<std::string> labels,
+                                        std::vector<uint64_t> kmer_counts) {
+                                if (sequence.size() >= k) {
+                                    batcher.push_and_pay(sequence.size(),
+                                                         std::move(sequence), std::move(labels),
+                                                         std::move(kmer_counts));
+                                }
+                            }
+                        );
+                    } else {
+                        logger->warn("No k-mer counts found at '{}'. Every input k-mer"
+                                     " will have count 1.", counts_fname);
+                        call_annotations(
+                            file,
+                            config.refpath,
+                            anno_graph->get_graph(),
+                            forward_and_reverse,
+                            config.min_count,
+                            config.max_count,
+                            config.filename_anno,
+                            config.annotate_sequence_headers,
+                            config.fasta_anno_comment_delim,
+                            config.fasta_header_delimiter,
+                            config.anno_labels,
+                            [&](std::string sequence, auto labels) {
+                                if (sequence.size() >= k) {
+                                    batcher.push_and_pay(sequence.size(),
+                                                         std::move(sequence), std::move(labels),
+                                                         std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                                }
+                            }
+                        );
+                    }
+                }
+            }
+        }
     }
 
     anno_graph->get_annotator().serialize(annotator_filename);
