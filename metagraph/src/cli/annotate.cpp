@@ -230,7 +230,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     Timer timer;
 
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+    ThreadPool thread_pool(0);
 
     // not too small, not too large
     const size_t batch_size = 1'000;
@@ -298,7 +298,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (const auto &file : files) {
         BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
             [&](auto&& data) {
-                thread_pool.enqueue([&](auto &data) {
+                thread_pool.enqueue([&anno_graph](auto &data) {
                     anno_graph->annotate_sequences(std::move(data));
                 }, std::move(data));
             },
@@ -396,9 +396,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 );
             }
         }
-    }
 
-    thread_pool.join();
+        thread_pool.join();
+    }
 
     anno_graph->get_annotator().serialize(annotator_filename);
 }
