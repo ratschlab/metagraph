@@ -51,12 +51,7 @@ jobs:
       run: |
         sudo apt-get update
 
-        # If clang, use the default version. Otherwise the compiler install with apt-get.
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install ${{ matrix.compiler }}
-        fi
-
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev libomp-dev libgomp1-dev libgomp1
+        sudo apt-get install ${{ matrix.compiler }} libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev libomp-dev libgomp1
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           sudo apt-get install libcurl4-openssl-dev
