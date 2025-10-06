@@ -153,9 +153,10 @@ class TestingBase(unittest.TestCase):
             target_anno = anno_repr
             anno_repr = 'row'
 
-        command = f'{METAGRAPH} annotate -v -p {num_threads} --anno-{anno_type}\
+        command = f'{METAGRAPH} annotate -v --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} {extra_params} \
                     -o {output} {input}'
+        print(command)
 
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
