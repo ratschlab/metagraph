@@ -13,7 +13,7 @@ from metagraph import helpers
 """Metagraph client."""
 
 DEFAULT_TOP_LABELS = 100
-DEFAULT_DISCOVERY_THRESHOLD = 0
+DEFAULT_DISCOVERY_FRACTION = 0
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
 
 JsonDict = Dict[str, Any]
@@ -39,7 +39,7 @@ class GraphClientJson:
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
-               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               discovery_fraction: float = DEFAULT_DISCOVERY_FRACTION,
                with_signature: bool = False,
                abundance_sum: bool = False,
                query_counts: bool = False,
@@ -48,9 +48,9 @@ class GraphClientJson:
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
 
-        if discovery_threshold < 0.0 or discovery_threshold > 1.0:
+        if discovery_fraction < 0.0 or discovery_fraction > 1.0:
             raise ValueError(
-                f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+                f"discovery_fraction should be between 0 and 1 inclusive. Got {discovery_fraction}")
 
         if align:
             # Warn if number of alignments is specified > 1
@@ -74,7 +74,7 @@ class GraphClientJson:
             sequence = aligned_sequences
 
         param_dict = {"count_labels": True,
-                      "discovery_fraction": discovery_threshold,
+                      "discovery_fraction": discovery_fraction,
                       "top_labels": top_labels,
                       "with_signature": with_signature,
                       "abundance_sum": abundance_sum,
@@ -95,7 +95,7 @@ class GraphClientJson:
         return search_results
 
     def align(self, sequence: Union[str, Iterable[str]],
-              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
@@ -173,7 +173,7 @@ class GraphClient:
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
-               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               discovery_fraction: float = DEFAULT_DISCOVERY_FRACTION,
                with_signature: bool = False,
                abundance_sum: bool = False,
                query_counts: bool = False,
@@ -185,8 +185,8 @@ class GraphClient:
         :type       sequence:             Union[str, Iterable[str]]
         :param      top_labels:           The maximum number of matched labels to retrieve [default: 100]
         :type       top_labels:           int
-        :param      discovery_threshold:  The minimum fraction (between 0.0 and 1.0) of k-mers from the query required to match a label (occur in a sample) in order for that label to show up in the result [default: 0.0]
-        :type       discovery_threshold:  float
+        :param      discovery_fraction:   The minimum fraction (between 0.0 and 1.0) of k-mers from the query required to match a label (occur in a sample) in order for that label to show up in the result [default: 0.0]
+        :type       discovery_fraction:   float
         :param      with_signature:       Return the signature of k-mer matches
         :type       with_signature:       bool
         :param      abundance_sum:        Compute the sum of abundances for all k-mers matched
@@ -205,14 +205,14 @@ class GraphClient:
         """
 
         json_obj = self._json_client.search(sequence, top_labels,
-                                            discovery_threshold, with_signature,
+                                            discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
 
     def align(self, sequence: Union[str, Iterable[str]],
-              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
         """
@@ -267,7 +267,7 @@ class MultiGraphClient:
     def search(self, sequence: Union[str, Iterable[str]],
                parallel=True,
                top_labels: int = DEFAULT_TOP_LABELS,
-               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               discovery_fraction: float = DEFAULT_DISCOVERY_FRACTION,
                with_signature: bool = False,
                abundance_sum: bool = False,
                query_counts: bool = False,
@@ -288,7 +288,7 @@ class MultiGraphClient:
             # Do this iteratively and return once done
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.search(sequence, top_labels,
-                                                   discovery_threshold, with_signature,
+                                                   discovery_fraction, with_signature,
                                                    abundance_sum, query_counts, query_coords,
                                                    align, **align_params)
 
@@ -303,7 +303,7 @@ class MultiGraphClient:
         # Populate async results dict with concurrent.futures.Future instances
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.search, sequence,
-                                            top_labels, discovery_threshold, with_signature,
+                                            top_labels, discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
                                             align, **align_params)
 
@@ -315,7 +315,7 @@ class MultiGraphClient:
 
     def align(self, sequence: Union[str, Iterable[str]],
               parallel=True,
-              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, Union[pd.DataFrame, Future]]:

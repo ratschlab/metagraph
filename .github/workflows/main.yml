@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
+      fail-fast: false
       matrix:
         alphabet: [DNA]
         build_type: [Debug, Release]
@@ -50,11 +51,11 @@ jobs:
     - name: install dependencies
       run: |
         sudo apt-get update
-
-        sudo apt-get install ${{ matrix.compiler }} libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+        
+        sudo apt-get install -y ${{ matrix.compiler }} cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install libcurl4-openssl-dev
+          sudo apt-get install -y libcurl4-openssl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
