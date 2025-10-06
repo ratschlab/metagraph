@@ -1272,7 +1272,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(config_.parallel_each);
+    ThreadPool thread_pool(1);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
     while (it != end) {
         uint64_t num_bytes_read = 0;
@@ -1308,7 +1308,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
                 anno_graph_,
-                [&](auto callback) {
+                [&seq_batch](auto callback) {
                     for (const auto &seq : seq_batch) {
                         callback(seq.sequence);
                     }
