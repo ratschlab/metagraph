@@ -554,7 +554,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == ANNOTATE && infbase.empty())
+    if (identity == ANNOTATE && infbase.empty() && !accessions)
         print_usage_and_exit = true;
 
     if ((identity == ANNOTATE || identity == EXTEND) && infbase_annotators.size() > 1) {
@@ -563,8 +563,8 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (identity == ANNOTATE
-            && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
-        std::cerr << "Error: no annotation labels passed (see flags --anno-filename --anno-header --anno-label)" << std::endl;
+            && !filename_anno && !annotate_sequence_headers && !anno_labels.size() && !accessions) {
+        std::cerr << "Error: no annotation labels passed (see flags --anno-filename --anno-header --anno-label --accessions)" << std::endl;
         print_usage_and_exit = true;
     }
 

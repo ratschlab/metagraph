@@ -396,16 +396,16 @@ int annotate_graph(Config *config) {
 
     const auto &files = config->fnames;
 
-    assert(config->infbase_annotators.size() <= 1);
-
-    const auto graph = load_critical_dbg(config->infbase);
-
     if (config->accessions) {
         common::logger->trace("Constructing sequence accession map");
         mtg::graph::RowTuplesToId accessions(files);
         accessions.serialize(config->outfbase);
         return 0;
     }
+
+    assert(config->infbase_annotators.size() <= 1);
+
+    const auto graph = load_critical_dbg(config->infbase);
 
     if (!config->separately) {
         annotate_data(graph, *config, files, config->outfbase);
