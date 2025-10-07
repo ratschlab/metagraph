@@ -12,6 +12,7 @@
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 #include "graph/graph_extensions/row_tuples_to_id.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -80,8 +81,13 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     auto graph = load_critical_dbg(config.infbase);
-    if (config.accessions)
-        graph->add_extension(std::make_shared<RowTuplesToId>(config.fnames));
+    if (config.accessions) {
+        common::logger->trace("Loading sequence accession map");
+        auto accessions = std::make_shared<RowTuplesToId>();
+        auto filename_base = utils::remove_suffix(config.infbase, graph->file_extension());
+        accessions->load(filename_base);
+        graph->add_extension(accessions);
+    }
 
     return initialize_annotated_dbg(graph, config);
 }
