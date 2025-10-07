@@ -10,6 +10,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
+#include "graph/graph_extensions/row_tuples_to_id.hpp"
 
 
 namespace mtg {
@@ -500,6 +501,29 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
     }
 
     auto rows_tuples = tuple_matrix->get_row_tuples(rows);
+
+    const auto *seq_ids = dbg_.get_extension_threadsafe<RowTuplesToId>();
+
+    if (seq_ids) {
+        auto conv_results = seq_ids->rows_tuples_to_label_tuples(rows_tuples);
+        if (num_top_labels < conv_results.size() || min_count > 1) {
+            std::sort(conv_results.begin(), conv_results.end(),
+                      [](const auto &a, const auto &b) {
+                          return std::get<1>(a) > std::get<1>(b);
+                      });
+            if (num_top_labels < conv_results.size())
+                conv_results.resize(num_top_labels);
+
+            if (min_count > 1) {
+                auto it = std::find_if(
+                    conv_results.begin(), conv_results.end(),
+                    [min_count](const auto &a) { return std::get<1>(a) < min_count; }
+                );
+                conv_results.erase(it, conv_results.end());
+            }
+        }
+        return conv_results;
+    }
 
     // FYI: one could use tsl::hopscotch_map for counting but it is slower
     // than std::vector unless the number of columns is ~1M or higher

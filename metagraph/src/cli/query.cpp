@@ -21,6 +21,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "cli/align.hpp"
+#include "graph/graph_extensions/row_tuples_to_id.hpp"
 
 
 namespace mtg {
@@ -597,7 +598,8 @@ std::unique_ptr<AnnotatedDBG::Annotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
-                 size_t num_threads) {
+                 size_t num_threads,
+                 bool reencode = true) {
     if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
         // don't break the topological order for row-diff annotation
         if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
@@ -614,7 +616,9 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         auto slice = mat->get_row_values(row_indexes);
 
-        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
+        auto label_encoder = reencode
+            ? reencode_labels(full_annotation.get_label_encoder(), &slice)
+            : full_annotation.get_label_encoder();
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
@@ -865,6 +869,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
+    const auto *seq_ids = full_dbg.get_extension_threadsafe<RowTuplesToId>();
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
@@ -1074,12 +1079,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
-                                       num_threads);
+                                       num_threads,
+                                       !seq_ids);
 
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
+
+    if (seq_ids) {
+        graph->add_extension(std::shared_ptr<RowTuplesToId>(
+            std::shared_ptr<RowTuplesToId>{},
+            const_cast<RowTuplesToId*>(seq_ids)
+        ));
+    }
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));

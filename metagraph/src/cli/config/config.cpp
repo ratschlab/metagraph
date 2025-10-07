@@ -130,6 +130,8 @@ Config::Config(int argc, char *argv[]) {
             print_counts_hist = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
+        } else if (!strcmp(argv[i], "--accessions")) {
+            accessions = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
             std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
