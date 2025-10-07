@@ -130,7 +130,6 @@ jobs:
 
   MacOS:
     strategy:
-      fail-fast: false
       matrix:
         include:
           # Apple Silicon Release
