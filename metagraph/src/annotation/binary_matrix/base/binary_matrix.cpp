@@ -16,10 +16,41 @@ namespace matrix {
 
 const size_t kRowBatchSize = 10'000;
 
+struct BitmapHash {
+    size_t operator()(const bitmap &v) const {
+        uint64_t hash = 0;
+        v.call_ones([&](uint64_t value) {
+            hash ^= value + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        });
+        return static_cast<std::size_t>(hash);
+    }
+};
 
-std::vector<BinaryMatrix::SetBitPositions>
+void BinaryMatrix::call_rows(const std::vector<Row> &rows,
+                             const std::function<void(size_t, const bitmap&)> &callback) const {
+
+    auto batch = get_rows(rows);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        std::sort(batch[i].begin(), batch[i].end());
+        size_t row_size = batch[i].size();
+        callback(
+            i,
+            bitmap_generator(
+                [row=std::move(batch[i])](const auto &callback) {
+                    for (auto j : row) {
+                        callback(j);
+                    }
+                },
+                num_columns(),
+                row_size
+            )
+        );
+    }
+}
+
+std::vector<bit_vector_smart>
 BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
+    VectorSet<bit_vector_smart, BitmapHash> unique_rows;
 
     std::vector<std::pair<Row, size_t>> row_to_index(rows->size());
     for (size_t i = 0; i < rows->size(); ++i) {
@@ -42,18 +73,20 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
             ids[i - begin] = row_to_index[i].first;
         }
 
-        auto batch = get_rows(ids);
-
-        #pragma omp critical
-        {
-            for (uint64_t i = begin; i < end; ++i) {
-                auto it = unique_rows.emplace(std::move(batch[i - begin])).first;
-                (*rows)[row_to_index[i].second] = it - unique_rows.begin();
+        call_rows(ids, [&](size_t i, const bitmap &row) {
+            #pragma omp critical
+            {
+                auto it = unique_rows.emplace(
+                    [&](const auto &callback) { row.call_ones(callback); },
+                    num_columns(),
+                    row.num_set_bits()
+                ).first;
+                (*rows)[row_to_index[i + begin].second] = it - unique_rows.begin();
             }
-        }
+        });
     }
 
-    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
+    return const_cast<std::vector<bit_vector_smart>&&>(unique_rows.values_container());
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
@@ -118,13 +151,16 @@ RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
 
     std::vector<SetBitPositions> result(rows.size());
     for (size_t i = 0; i < pointers.size(); ++i) {
-        result[i] = distinct_rows[pointers[i]];
+        result[i].reserve(distinct_rows[pointers[i]].num_set_bits());
+        distinct_rows[pointers[i]].call_ones([&](auto j) {
+            result[i].emplace_back(j);
+        });
     }
 
     return result;
 }
 
-std::vector<RainbowMatrix::SetBitPositions>
+std::vector<bit_vector_smart>
 RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 
@@ -154,7 +190,7 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     if (num_threads <= 1)
         return codes_to_rows(codes);
 
-    std::vector<SetBitPositions> unique_rows(codes.size());
+    std::vector<bit_vector_smart> unique_rows(codes.size());
 
     size_t batch_size = std::min(kRowBatchSize,
                                  (codes.size() + num_threads - 1) / num_threads);
@@ -200,9 +236,9 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     // than std::vector unless the number of columns is ~1M or higher
     Vector<size_t> col_counts(num_columns(), 0);
     for (size_t i = 0; i < counts.size(); ++i) {
-        for (size_t j : distinct_rows[i]) {
+        distinct_rows[i].call_ones([&](size_t j) {
             col_counts[j] += counts[i];
-        }
+        });
     }
 
     std::vector<std::pair<Column, size_t>> result;

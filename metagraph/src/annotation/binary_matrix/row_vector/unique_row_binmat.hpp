@@ -14,7 +14,7 @@ class UniqueRowBinmat : public RainbowMatrix {
   public:
     explicit UniqueRowBinmat(uint64_t num_rows = 0);
 
-    UniqueRowBinmat(std::vector<SetBitPositions>&& unique_rows,
+    UniqueRowBinmat(std::vector<bit_vector_smart>&& unique_rows,
                     std::vector<uint32_t>&& row_rank,
                     uint32_t num_columns);
 
@@ -37,8 +37,8 @@ class UniqueRowBinmat : public RainbowMatrix {
 
   private:
     uint64_t get_code(Row row) const { return row_rank_[row]; }
-    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const {
-        std::vector<SetBitPositions> result(rows.size());
+    std::vector<bit_vector_smart> codes_to_rows(const std::vector<uint64_t> &rows) const {
+        std::vector<bit_vector_smart> result(rows.size());
         for (size_t i = 0; i < rows.size(); ++i) {
             result[i] = unique_rows_[rows[i]];
         }
@@ -47,7 +47,7 @@ class UniqueRowBinmat : public RainbowMatrix {
 
     uint32_t num_columns_ = 0;
     uint32_t num_relations_ = 0;
-    std::vector<SetBitPositions> unique_rows_;
+    std::vector<bit_vector_smart> unique_rows_;
     std::vector<uint32_t> row_rank_;
 };
 
