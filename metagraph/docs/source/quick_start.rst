@@ -31,12 +31,40 @@ index and querying it.
 
 The indexing workflow in MetaGraph consists of two major steps: graph construction and annotation construction.
 
+Supported alphabets
+-------------------
+
+MetaGraph supports multiple sequence alphabets, each optimized for different types of biological sequences:
+
+**DNA alphabet (default)**
+    - Standard 4-letter DNA alphabet: A, C, G, T
+    - Default executable: ``metagraph_DNA`` (with ``metagraph`` symlink)
+    - Best for: Genomic DNA, RNA sequences, metagenomic data
+
+**DNA5 alphabet**
+    - DNA alphabet with N for unknown bases: A, C, G, T, N
+    - Executable: ``metagraph_DNA5``
+    - Best for: Sequences with ambiguous bases or low-quality regions
+
+**DNA case-sensitive alphabet**
+    - Case-sensitive DNA alphabet: A, C, G, T, a, c, g, t
+    - Executable: ``metagraph_DNA_CASE_SENSITIVE``
+    - Best for: Sequences where case information is meaningful
+
+**Protein alphabet**
+    - 20-letter protein alphabet: A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y
+    - Executable: ``metagraph_Protein``
+    - Best for: Protein sequences, amino acid analysis
+
+.. note::
+    The alphabet is determined at compile time. For custom alphabets or to use different alphabets, compile MetaGraph from source with the appropriate ``-DCMAKE_DBG_ALPHABET`` flag.
+
 .. _construct graph:
 
 Construct graph
 ---------------
 
-The following workflow can be executed from the `metagraph/metagraph/tests/data` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
+The following workflow can be executed from the ``metagraph/tests/data`` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
 
 Basics
 ^^^^^^
