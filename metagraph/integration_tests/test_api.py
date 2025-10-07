@@ -80,7 +80,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
-                    "num_labels": 'not_a_number',
+                    "top_labels": 'not_a_number',
                     "FASTA": "\n".join([">query",
                                         'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA',
                                         ]),
@@ -94,7 +94,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_missing_params(self):
         payload = json.dumps({
-            "num_labels": 100,
+            "top_labels": 100,
             "discovery_fraction": 1 / 100
         })
 
@@ -109,13 +109,13 @@ class TestAPIRaw(TestAPIBase):
                                 'TCGA',
                                 ]),
             "discovery_fraction": 1.1,
-            "num_labels": 1,
+            "top_labels": 1,
         })
         ret = self.raw_post_request('search', payload)
 
         self.assertEqual(ret.status_code, 400)
 
-    def test_api_raw_missing_num_labels(self):
+    def test_api_raw_missing_top_labels(self):
         payload = json.dumps({
             "FASTA": "\n".join([">query",
                                 'TCGA',
@@ -137,7 +137,7 @@ class TestAPIRaw(TestAPIBase):
                                         'SEQUENCE_NOT_IN_GRAPH',
                                         ]),
                     "discovery_fraction": 1 / 100,
-                    "num_labels": 1,
+                    "top_labels": 1,
                     })
         ret = self.raw_post_request('search', payload)
         json_ret = ret.json()
@@ -222,14 +222,14 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_search_empty_fasta_desc(self):
         fasta_str = ">\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1})
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1})
         ret = self.raw_post_request('search', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
 
     def test_api_raw_search_no_coordinate_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1,
                               'query_coords': True})
 
         ret = self.raw_post_request('search', payload)
@@ -239,7 +239,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_search_no_count_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+        payload = json.dumps({"FASTA": fasta_str, 'top_labels': 5, 'min_exact_match': 0.1,
                               'abundance_sum': True})
 
         ret = self.raw_post_request('search', payload)
@@ -271,14 +271,14 @@ class TestAPIClient(TestAPIBase):
     def test_api_multiple_query_df(self):
         repetitions = 5
         ret = self.graph_client.search([self.sample_query] * repetitions, parallel=False,
-                                       discovery_threshold=0.01)
+                                       discovery_fraction=0.01)
         df = ret[self.graph_name]
         self.assertEqual((self.sample_query_expected_rows * repetitions, 3), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches * repetitions)
 
     def test_api_simple_query_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01)
+                                       discovery_fraction=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
@@ -286,7 +286,7 @@ class TestAPIClient(TestAPIBase):
 
     def test_api_simple_query_with_signature_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, with_signature=True)
+                                       discovery_fraction=0.01, with_signature=True)
         df = ret[self.graph_name]
 
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
@@ -294,7 +294,7 @@ class TestAPIClient(TestAPIBase):
 
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, align=True, min_exact_match=0.01)
+                                       discovery_fraction=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
@@ -304,7 +304,7 @@ class TestAPIClient(TestAPIBase):
         # If aligned sequence does not have result when searched, make sure client doesn't fail
         sample_align_query = self.sample_query[:2] + 'GG' + self.sample_query[4:]
         ret = self.graph_client.search(sample_align_query, parallel=False,
-                                       discovery_threshold=1.0, align=True)
+                                       discovery_fraction=1.0, align=True)
         df = ret[self.graph_name]
         self.assertTrue(df.empty)
 
@@ -349,12 +349,12 @@ class TestAPIClient(TestAPIBase):
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, query_coords=True)
+                                       discovery_fraction=0.01, query_coords=True)
 
     @unittest.expectedFailure
     def test_api_search_no_count_support(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, abundance_sum=True)
+                                       discovery_fraction=0.01, abundance_sum=True)
 
 
 # No canonical mode for Protein alphabets
@@ -385,7 +385,7 @@ class TestAPIJson(TestAPIBase):
 
     # do various queries
     def test_api_simple_query(self):
-        res_list = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
+        res_list = self.graph_client.search(self.sample_query, discovery_fraction=0.01)
         self.assertEqual(len(res_list), 1)
 
         res_obj = res_list[0]['results']
@@ -474,7 +474,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
 
     def test_api_simple_query_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False)
         df = ret[self.graph_name]
 
@@ -482,7 +482,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
 
     def test_api_simple_query_abundance_sum_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, abundance_sum=True)
         df = ret[self.graph_name]
 
@@ -490,7 +490,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         self.assertEqual(df['kmer_count'].sum(), self.expected_abundance_sum)
 
     def test_api_simple_query_counts_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, query_counts=True)
         df = ret[self.graph_name]
 
@@ -499,7 +499,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
 
     def test_api_simple_query_coords_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, query_coords=True)
         df = ret[self.graph_name]
 
@@ -533,7 +533,7 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
 
     def test_api_simple_query_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False)
         df = ret[self.graph_name]
 
@@ -541,7 +541,7 @@ class TestAPIClientWithCounts(TestAPIBase):
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
 
     def test_api_simple_query_abundance_sum_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, abundance_sum=True)
         df = ret[self.graph_name]
 
@@ -549,7 +549,7 @@ class TestAPIClientWithCounts(TestAPIBase):
         self.assertEqual(df['kmer_count'].sum(), self.expected_abundance_sum)
 
     def test_api_simple_query_counts_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, query_counts=True)
         df = ret[self.graph_name]
 
@@ -559,7 +559,7 @@ class TestAPIClientWithCounts(TestAPIBase):
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+        ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, query_coords=True)
 
 
@@ -592,7 +592,7 @@ class TestAPIClientParallel(TestAPIBase):
 
     def test_api_parallel_query_df(self):
         futures = self.graph_client.search(self.sample_query, parallel=True,
-                                           discovery_threshold=0.01)
+                                           discovery_fraction=0.01)
 
         self.assertEqual(len(futures), 2)
 
@@ -632,7 +632,7 @@ class TestAPIClientParallel(TestAPIBase):
 
     def test_api_parallel_query_error(self):
         futures = self.graph_client.search(self.sample_query, parallel=True,
-                                           discovery_threshold=1.2)
+                                           discovery_fraction=1.2)
 
         self.assertEqual(len(futures), 2)
 
