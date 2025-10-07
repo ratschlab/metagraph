@@ -3,33 +3,43 @@
 Quick start
 ===========
 
-MetaGraph constructs indexes composed of two main elements: a k-mer index and an annotation matrix.
+MetaGraph constructs indexes with two main components: a **de Bruijn graph** and an **annotation matrix**.
 
-The k-mer index stores all k-mers from the input sequences and represents a de Bruijn graph.
+**De Bruijn Graph**
+
+The de Bruijn graph serves as a k-mer index and stores all k-mers from the input sequences.
 This index serves as a dictionary mapping k-mers to their unique positive identifiers.
 
-.. It can also be used to map sub-k-mers (or spaced k-mers) to ranges of their identifiers (see TODO).
 
-The second element is a matrix encoding the relation between the k-mers and their attributes.
-These relations may represent, for instance:
+One of the main representations for de Bruijn graphs implemented in MetaGraph is the `BOSS table <https://doi.org/10.1007/978-3-642-33122-0_18>`_. It represents de Bruijn graphs succinctly, using only 2-4 bits per k-mer (for the DNA alphabet) and
 
+* Stores all k-mers from input sequences
+* Enables efficient k-mer lookups and graph traversal
+* Supports sub-k-mer and k-mer range queries for alignment
+
+**Annotation Matrix**
+
+The annotation matrix encodes relations between k-mers and their metadata.
+Even with the simplest binary representation can encode:
+
+* k-mer ``i`` is present in file/sample ``j``
 * k-mer ``i`` is present in sequence/genome ``j``
-* k-mer ``i`` is present in SRA sample ``j``
-* k-mer ``i`` is present in file ``j``
-* k-mer ``i`` is present in a collection of sequences/files marked by ``j``
-* k-mer ``i`` is highly expressed in sample ``j``
+* k-mer ``i`` is present in a *collection* of sequences/files marked by ``j``
+* k-mer ``i`` is *highly* expressed in sample ``j`` (a property)
 
 The annotation matrix can also be supplemented with additional attributes to represent such quantities as:
 
-* k-mer ``i`` occurs :math:`c_i` times in sample ``j`` (k-mer abundance)
-* k-mer ``i`` occurs at positions :math:`p_1,\dots,p_{c_i}` in genome ``j`` (k-mer coordinates)
+* **Counts (abundances):** k-mer ``i`` occurs :math:`c_i` times in sample ``j``
+* **Coordinates (positions):** k-mer ``i`` at positions :math:`p_1,\dots,p_{c_i}` in genome ``j``
 
-.. TODO: Describe counts/coordinate annotation
+
+**Workflow**
+
+A typical workflow in MetaGraph consists of these steps: 1. Construct graph, 2. Construct annotation, 3. Query/host for queries.
+For the full construction workflows on real large-scale datasets, see :ref:`large_scale_workflows`.
 
 In the following, you will find simplified instructions and examples for constructing a MetaGraph
 index and querying it.
-
-The indexing workflow in MetaGraph consists of two major steps: graph construction and annotation construction.
 
 Supported alphabets
 -------------------
@@ -47,12 +57,12 @@ MetaGraph supports multiple sequence alphabets, each optimized for different typ
     - Best for: Sequences with ambiguous bases or low-quality regions
 
 **DNA case-sensitive alphabet**
-    - Case-sensitive DNA alphabet: A, C, G, T, a, c, g, t
+    - Case-sensitive DNA alphabet: A, C, G, T, N, a, c, g, t
     - Executable: ``metagraph_DNA_CASE_SENSITIVE``
     - Best for: Sequences where case information is meaningful
 
 **Protein alphabet**
-    - 20-letter protein alphabet: A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y
+    - Standard amino acids and extra letters: A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X
     - Executable: ``metagraph_Protein``
     - Best for: Protein sequences, amino acid analysis
 
@@ -792,3 +802,28 @@ For instance, consider the following example.
                              --max-value 10 out.column.annodbg
 
 which generates the final column ``rare_kmers.column.annodbg`` with the mask indicating all k-mers occurring in 10 or fewer input columns in the original file ``annotation.column.annodbg``.
+
+Memory mapping
+--------------
+
+When dealing with large graphs and annotations, they can be loaded with memory mapping -- just
+add the ``--mmap`` flag to any ``metagraph`` command, e.g.::
+
+    metagraph stats --mmap graph.dbg
+
+    metagraph transform_anno --mmap \
+                --rename-cols rename_rules.txt \
+                -o renamed \
+                annotation.row_diff_brwt.annodbg
+
+    metagraph query --mmap \
+                -i graph.dbg \
+                -a annotation.column.annodbg \
+                --min-kmers-fraction-label 0.1 \
+                transcripts_1000.fa
+
+Memory mapping is supported for most graph and annotation representations. This reduces the loading time and
+the RAM usage to practically zero.
+
+.. attention:: For the efficient use of memory mapping, the data needs to be stored on a fast SSD or
+    NVME disk. Spinning disks are not recommended (unless ``--mmap`` is used for simple stats checks).
