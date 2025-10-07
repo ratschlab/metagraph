@@ -672,6 +672,8 @@ that is, all leaves (original labels) directly connected to the root of the BRWT
 
 For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
+.. _query_index:
+
 Query index
 -----------
 
