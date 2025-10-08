@@ -25,6 +25,14 @@ using mtg::common::logger;
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config,
                                                        size_t max_chunks_open) {
+    if (config.accessions) {
+        common::logger->trace("Loading sequence accession map");
+        auto accessions = std::make_shared<RowTuplesToId>();
+        auto filename_base = utils::remove_suffix(config.infbase, graph->file_extension());
+        accessions->load(filename_base);
+        graph->add_extension(accessions);
+    }
+
     uint64_t max_index = graph->max_index();
 
     auto base_graph = graph;
@@ -80,16 +88,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 }
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
-    auto graph = load_critical_dbg(config.infbase);
-    if (config.accessions) {
-        common::logger->trace("Loading sequence accession map");
-        auto accessions = std::make_shared<RowTuplesToId>();
-        auto filename_base = utils::remove_suffix(config.infbase, graph->file_extension());
-        accessions->load(filename_base);
-        graph->add_extension(accessions);
-    }
-
-    return initialize_annotated_dbg(graph, config);
+    return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
 
