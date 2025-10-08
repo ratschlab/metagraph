@@ -566,9 +566,7 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 
     auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
-    const auto *seq_ids = dbg_.get_extension_threadsafe<RowTuplesToId>();
-
-    if (seq_ids) {
+    if (const auto *seq_ids = dbg_.get_extension_threadsafe<RowTuplesToId>()) {
         auto conv_results = seq_ids->rows_tuples_to_label_tuples(rows_tuples);
         if (num_top_labels < conv_results.size() || min_count > 1) {
             std::sort(conv_results.begin(), conv_results.end(),
@@ -709,6 +707,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         }
 
         Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+        result.resize(code_counts.size());
 
         col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
