@@ -803,6 +803,8 @@ For instance, consider the following example.
 
 which generates the final column ``rare_kmers.column.annodbg`` with the mask indicating all k-mers occurring in 10 or fewer input columns in the original file ``annotation.column.annodbg``.
 
+.. _memory_mapping:
+
 Memory mapping
 --------------
 

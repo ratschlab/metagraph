@@ -28,6 +28,8 @@ The ``--no-sign-request`` flag indicates public access without AWS credentials.
 
 Once downloaded, the indexes can be queried locally with the command line interface and Python API (see :ref:`query_index`).
 
+For more information about the indexes and deployment manuals, see https://github.com/ratschlab/metagraph-open-data.
+
 .. _metagraph_online:
 
 MetaGraph Online
@@ -52,7 +54,7 @@ The production API endpoint is available at: ``https://metagraph.ethz.ch:8081/se
 For detailed API documentation and examples, see the `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_ page.
 
 .. note:: Python API described in the :ref:`API documentation <api>` is used in the internal implementation of the service
-    and can also be used to query indexes hosted locally. To query indexes hostead publicly, refer to
+    and can also be used to query indexes hosted locally. To query indexes hosted publicly, refer to
     `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_.
 
 **Web Interface Limits:** Maximum 10 sequences per query, 50k bases, results expire after 48 hours (6 months with locked searches).
