@@ -102,8 +102,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::function<Json::Value(const std::string &)> &process) {
     // Retrieve string:
     std::string content = request->content.string();
-    logger->info("[Server] {} request from {}", request->path,
-                 request->remote_endpoint().address().to_string());
 
     try {
         // Return JSON string

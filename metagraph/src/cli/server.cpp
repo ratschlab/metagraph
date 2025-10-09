@@ -272,6 +272,7 @@ bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Respon
 
 int run_server(Config *config) {
     assert(config);
+    std::atomic<size_t> num_requests = 0;
 
     ThreadPool graph_loader(1, 1);
     std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
@@ -339,65 +340,85 @@ int run_server(Config *config) {
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
-        if (config->fnames.size()) {
-            process_request(response, request, [&](const std::string &content) {
-                std::vector<std::string> graphs_to_query;
+        size_t request_id = num_requests++;
+        logger->info("[Server] {} request {} from {}", request->path, request_id,
+                     request->remote_endpoint().address().to_string());
 
-                Json::Value content_json = parse_json_string(content);
-                if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
-                    for (const auto &item : content_json["graphs"]) {
-                        graphs_to_query.push_back(item.asString());
-                    }
-                    if (!indexes.count(graphs_to_query.back()))
-                        throw std::invalid_argument("Trying to query uninitialized graph " + graphs_to_query.back());
-                } else {
-                    for (const auto &[name, _] : indexes) {
-                        graphs_to_query.push_back(name);
-                    }
-                }
+        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+            return;  // the index is not loaded yet, so we can't process the request
 
-                Json::Value merged;
-                ThreadPool graphs_pool(config->parallel_each);
-                std::mutex mu;
-                for (const auto &name : graphs_to_query) {
-                    for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        Config config_copy = *config;
-                        config_copy.infbase = graph_fname;
-                        config_copy.infbase_annotators = { anno_fname };
-                        graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
-                            auto index = initialize_annotated_dbg(config_copy);
-                            auto json = process_search_request(content_json, *index, config_copy);
-                            std::lock_guard<std::mutex> lock(mu);
-                            if (merged.empty()) {
-                                merged = std::move(json);
-                            } else {
-                                assert(json.size() == merged.size());
-                                for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
-                                    for (auto&& value : json[i]["results"]) {
-                                        merged[i]["results"].append(std::move(value));
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-                graphs_pool.join();
-                return merged;
-            });
-            return;
-        }
-        if (check_data_ready(anno_graph, response)) {
-            process_request(response, request, [&](const std::string &content) {
-                Json::Value content_json = parse_json_string(content);
+        process_request(response, request, [&](const std::string &content) {
+            Json::Value content_json = parse_json_string(content);
+            logger->info("Request {}: {}", request_id, content_json.toStyledString());
+
+            // simple case with a single graph pair
+            if (!config->fnames.size()) {
                 if (content_json.isMember("graphs"))
                     throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                 return process_search_request(content_json, *anno_graph.get(), *config);
-            });
-        }
+            }
+
+            // query graphs from list `config->fnames`
+            std::vector<std::string> graphs_to_query;
+
+            if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
+                for (const auto &item : content_json["graphs"]) {
+                    graphs_to_query.push_back(item.asString());
+                    if (!indexes.count(graphs_to_query.back()))
+                        throw std::invalid_argument("Trying to query uninitialized graph "
+                                                                        + graphs_to_query.back());
+                }
+                // deduplicate
+                std::sort(graphs_to_query.begin(), graphs_to_query.end());
+                graphs_to_query.erase(std::unique(graphs_to_query.begin(), graphs_to_query.end()), graphs_to_query.end());
+            } else {
+                if (indexes.size() > 10) {
+                    throw std::invalid_argument(
+                        fmt::format("Request {} was without names (no \"graphs\" field) -- this "
+                                    "is only supported for small indexes (<=10 names)", request_id));
+                }
+                for (const auto &[name, _] : indexes) {
+                    graphs_to_query.push_back(name);
+                }
+            }
+
+            Json::Value merged;
+            ThreadPool graphs_pool(config->parallel_each);
+            std::mutex mu;
+            for (const auto &name : graphs_to_query) {
+                for (const auto &[graph_fname, anno_fname] : indexes[name]) {
+                    Config config_copy = *config;
+                    config_copy.infbase = graph_fname;
+                    config_copy.infbase_annotators = { anno_fname };
+                    graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
+                        auto index = initialize_annotated_dbg(config_copy);
+                        auto json = process_search_request(content_json, *index, config_copy);
+                        std::lock_guard<std::mutex> lock(mu);
+                        if (merged.empty()) {
+                            merged = std::move(json);
+                        } else {
+                            assert(json.size() == merged.size());
+                            for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
+                                for (auto&& value : json[i]["results"]) {
+                                    merged[i]["results"].append(std::move(value));
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            graphs_pool.join();
+            logger->info("Request {} finished", request_id);
+            return merged;
+        });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
+        size_t request_id = num_requests++;
+        logger->info("[Server] {} request {} from {}", request->path, request_id,
+                     request->remote_endpoint().address().to_string());
+
         if (config->fnames.size()) {
             // TODO
             return;
@@ -411,6 +432,10 @@ int run_server(Config *config) {
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
+        size_t request_id = num_requests++;
+        logger->info("[Server] {} request {} from {}", request->path, request_id,
+                     request->remote_endpoint().address().to_string());
+
         if (config->fnames.size()) {
             // TODO
             return;
@@ -424,6 +449,10 @@ int run_server(Config *config) {
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
+        size_t request_id = num_requests++;
+        logger->info("[Server] {} request {} from {}", request->path, request_id,
+                     request->remote_endpoint().address().to_string());
+
         if (config->fnames.size()) {
             // TODO
             return;
