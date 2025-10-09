@@ -108,6 +108,10 @@ To check the statistics for a constructed graph, type::
 
     metagraph stats graph.dbg
 
+or with :ref:`memory mapping <memory_mapping>` for faster loading and lower RAM usage::
+
+    metagraph stats --mmap graph.dbg
+
 Construct with disk swap
 """"""""""""""""""""""""
 

@@ -17,5 +17,6 @@ framework, a software platform for indexing and analysis of very large sequence 
    api.rst
    sequence_search.rst
    sequence_assembly.rst
-   resources.rst
    faq.rst
+   troubleshooting.rst
+   resources.rst

@@ -126,6 +126,12 @@ How to handle large datasets?
    # Joint primary graph from all contigs
    metagraph build -k 31 --mode primary -o joint_primary joint_contigs_primary.fasta.gz
 
+3. **Extremely large graphs:**
+
+Extremely large succinct graphs can be constructed by building their parts separately
+and writing them to disk on the fly with flag ``--inplace``.
+In such cases, don't forget to index suffix ranges afterwards with ``metagraph transform --index-ranges ...``.
+
 Annotation
 ==========
 
@@ -336,11 +342,3 @@ RowDiff transform generates no output
 **Solution:** Remember that for annotations with coordinates and counts, the output
 files have the same name ``*.column.annodbg`` as the input files, hence, should be
 written to a new directory. (See :ref:`transform_count_annotations`.)
-
-Getting Help
-============
-
-1. Check :ref:`troubleshooting` and :ref:`faq`
-2. Search `GitHub issues <https://github.com/ratschlab/metagraph/issues>`_
-3. Don't hesitate to feed this documentation to AI and ask for help
-4. Open an issue on GitHub https://github.com/ratschlab/metagraph
