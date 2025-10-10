@@ -253,8 +253,7 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
-    logger->info("[Server] Maximum connections: {}, threads per connection: {}",
-                 get_num_threads(), config.parallel_each);
+    logger->info("[Server] Maximum connections: {}", get_num_threads());
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
@@ -269,6 +268,38 @@ bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Respon
 
     return true;
 }
+
+std::vector<std::string> filter_graphs_from_list(
+        const tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> &indexes,
+        const Json::Value &content_json,
+        size_t request_id,
+        size_t max_names_without_filtering = 10) {
+    std::vector<std::string> graphs_to_query;
+
+    if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
+        for (const auto &item : content_json["graphs"]) {
+            graphs_to_query.push_back(item.asString());
+            if (!indexes.count(graphs_to_query.back()))
+                throw std::invalid_argument("Request with an uninitialized graph " + graphs_to_query.back());
+        }
+        // deduplicate
+        std::sort(graphs_to_query.begin(), graphs_to_query.end());
+        graphs_to_query.erase(std::unique(graphs_to_query.begin(), graphs_to_query.end()), graphs_to_query.end());
+    } else {
+        if (indexes.size() > max_names_without_filtering) {
+            throw std::invalid_argument(
+                fmt::format("Bad request: requests without names (no \"graphs\" field) are "
+                            "only supported for small indexes (<={} names)",
+                            request_id, max_names_without_filtering));
+        }
+        // query all graphs from list `config->fnames`
+        for (const auto &[name, _] : indexes) {
+            graphs_to_query.push_back(name);
+        }
+    }
+    return graphs_to_query;
+}
+
 
 int run_server(Config *config) {
     assert(config);
@@ -336,6 +367,8 @@ int run_server(Config *config) {
         }
     }
 
+    ThreadPool graphs_pool(get_num_threads());
+
     // the actual server
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
@@ -358,39 +391,18 @@ int run_server(Config *config) {
                 return process_search_request(content_json, *anno_graph.get(), *config);
             }
 
-            // query graphs from list `config->fnames`
-            std::vector<std::string> graphs_to_query;
-
-            if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
-                for (const auto &item : content_json["graphs"]) {
-                    graphs_to_query.push_back(item.asString());
-                    if (!indexes.count(graphs_to_query.back()))
-                        throw std::invalid_argument("Trying to query uninitialized graph "
-                                                                        + graphs_to_query.back());
-                }
-                // deduplicate
-                std::sort(graphs_to_query.begin(), graphs_to_query.end());
-                graphs_to_query.erase(std::unique(graphs_to_query.begin(), graphs_to_query.end()), graphs_to_query.end());
-            } else {
-                if (indexes.size() > 10) {
-                    throw std::invalid_argument(
-                        fmt::format("Request {} was without names (no \"graphs\" field) -- this "
-                                    "is only supported for small indexes (<=10 names)", request_id));
-                }
-                for (const auto &[name, _] : indexes) {
-                    graphs_to_query.push_back(name);
-                }
-            }
+            std::vector<std::string> graphs_to_query
+                    = filter_graphs_from_list(indexes, content_json, request_id);
 
             Json::Value merged;
-            ThreadPool graphs_pool(config->parallel_each);
             std::mutex mu;
+            std::vector<std::shared_future<void>> futures;
             for (const auto &name : graphs_to_query) {
                 for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                     Config config_copy = *config;
                     config_copy.infbase = graph_fname;
                     config_copy.infbase_annotators = { anno_fname };
-                    graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
+                    futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
                         auto index = initialize_annotated_dbg(config_copy);
                         auto json = process_search_request(content_json, *index, config_copy);
                         std::lock_guard<std::mutex> lock(mu);
@@ -404,10 +416,12 @@ int run_server(Config *config) {
                                 }
                             }
                         }
-                    });
+                    }));
                 }
             }
-            graphs_pool.join();
+            for (auto &future : futures) {
+                future.wait();
+            }
             logger->info("Request {} finished", request_id);
             return merged;
         });
