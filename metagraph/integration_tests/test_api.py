@@ -9,7 +9,7 @@ import requests
 
 import pandas as pd
 
-from metagraph.client import GraphClientJson, MultiGraphClient
+from metagraph.client import GraphClientJson, MultiGraphClient, GraphClient
 from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 from itertools import product
@@ -396,7 +396,7 @@ class TestAPIClientMultiple(TestingBase):
         cls._build_graph(fasta_paths[1], graph_paths[1], 6, 'succinct', mode=cls.mode)
         cls._annotate_graph(fasta_paths[1], graph_paths[1], annotation_path_bases[1], anno_repr)
 
-        mult = 1 if cls.threads_each < 2 else 200  # duplicate graphs so that there are more to query
+        cls.mult = 1 if cls.threads_each < 2 else 200  # duplicate graphs so that there are more to query
 
         graphs_file = cls.tempdir.name + '/graphs.txt'
         with open(graphs_file, 'w') as f:
@@ -405,7 +405,7 @@ class TestAPIClientMultiple(TestingBase):
                 f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
                 f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
                 f'G3,{graph_paths[1]},{annotation_path_bases[1]}.{anno_repr}.annodbg',
-            ] * mult))
+            ] * cls.mult))
 
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
@@ -433,18 +433,19 @@ class TestAPIClientMultiple(TestingBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_name = 'G1,G2x2,G3'
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+        cls.client = GraphClient(cls.host, cls.port, cls.graph_name)
 
         cls.sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
         # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
         # they get more matches
-        cls.expected_rows_1 = (98 if cls.mode == 'basic' else 99) * mult
-        cls.expected_matches_1 = (840 if cls.mode == 'basic' else 1381) * mult
+        cls.expected_rows_1 = (98 if cls.mode == 'basic' else 99) * cls.mult
+        cls.expected_matches_1 = (840 if cls.mode == 'basic' else 1381) * cls.mult
 
         cls.expected_rows_2 = cls.expected_rows_1 * 2
         cls.expected_matches_2 = cls.expected_matches_1 * 2
 
-        cls.expected_rows_3 = (100) * mult
-        cls.expected_matches_3 = (2843 if cls.mode == 'basic' else 3496) * mult
+        cls.expected_rows_3 = (100) * cls.mult
+        cls.expected_matches_3 = (2843 if cls.mode == 'basic' else 3496) * cls.mult
 
     @classmethod
     def tearDownClass(cls):
@@ -498,6 +499,30 @@ class TestAPIClientMultiple(TestingBase):
     @unittest.expectedFailure
     def test_api_query_df_multiple_bad(self):
         df = self.graph_client.search(self.sample_query, parallel=False, graphs=['G1', 'X'])
+
+    def test_api_stats_multiple_graphs(self):
+        """Test /stats endpoint with multiple graphs returns aggregated stats"""
+        ret = self.client._json_client.stats()
+
+        # Should have annotation section with aggregated labels
+        self.assertIn("annotation", ret.keys())
+        self.assertIn("labels", ret["annotation"])
+
+        # Total labels should be sum of all graphs
+        self.assertEqual(ret["annotation"]["labels"], 1300 * self.mult)
+
+    def test_api_column_labels_multiple_graphs(self):
+        """Test /column_labels endpoint with multiple graphs returns all labels"""
+        ret = self.graph_client.column_labels()
+
+        self.assertIn(self.graph_name, ret.keys())
+        label_list = ret[self.graph_name]
+        # Should have labels from all graphs combined
+        self.assertEqual(len(label_list), 1300 * self.mult)
+        # All labels should start with 'ENST' (from the test data)
+        self.assertTrue(all(l.startswith('ENST') for l in label_list))
+        # Check that the total number of deduplicated labels equals to 1000
+        self.assertEqual(len(set(label_list)), 1000)
 
 
 # No canonical mode for Protein alphabets

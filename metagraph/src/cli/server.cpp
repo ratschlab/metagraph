@@ -17,6 +17,7 @@
 #include "query.hpp"
 #include "align.hpp"
 #include "server_utils.hpp"
+#include "cli/load/load_annotation.hpp"
 
 
 namespace mtg {
@@ -205,44 +206,6 @@ Json::Value process_align_request(const std::string &received_message,
     return root;
 }
 
-Json::Value process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
-    auto labels = anno_graph.get_annotator().get_label_encoder().get_labels();
-
-    Json::Value root = Json::Value(Json::arrayValue);
-
-    for (const std::string &label : labels) {
-        Json::Value entry = label;
-        root.append(entry);
-    }
-
-    return root;
-}
-
-Json::Value process_stats_request(const graph::AnnotatedDBG &anno_graph,
-                                  const std::string &graph_filename,
-                                  const std::string &annotation_filename) {
-    Json::Value root;
-
-    Json::Value graph_stats;
-    graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
-    graph_stats["k"] = static_cast<uint64_t>(anno_graph.get_graph().get_k());
-    graph_stats["nodes"] = anno_graph.get_graph().num_nodes();
-    graph_stats["is_canonical_mode"] = (anno_graph.get_graph().get_mode()
-                                            == graph::DeBruijnGraph::CANONICAL);
-    root["graph"] = graph_stats;
-
-    Json::Value annotation_stats;
-    const auto &annotation = anno_graph.get_annotator();
-    annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
-    annotation_stats["labels"] = static_cast<uint64_t>(annotation.num_labels());
-    annotation_stats["objects"] = static_cast<uint64_t>(annotation.num_objects());
-    annotation_stats["relations"] = static_cast<uint64_t>(annotation.num_relations());
-
-    root["annotation"] = annotation_stats;
-
-    return root;
-}
-
 std::thread start_server(HttpServer &server_startup, Config &config) {
     server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
 
@@ -300,6 +263,22 @@ std::vector<std::string> filter_graphs_from_list(
     return graphs_to_query;
 }
 
+// read labels from annotation
+std::vector<std::string> read_labels(const std::string &anno_fname) {
+    annot::LabelEncoder<std::string> label_encoder;
+
+    std::ifstream instream(anno_fname, std::ios::binary);
+    // TODO: make this more reliable
+    if (parse_annotation_type(anno_fname) == Config::ColumnCompressed) {
+        // Column compressed dumps the number of rows first
+        // skipping it...
+        load_number(instream);
+    }
+    if (!label_encoder.load(instream))
+        throw std::ios_base::failure("Cannot read label encoder from file " + anno_fname);
+
+    return label_encoder.get_labels();
+}
 
 int run_server(Config *config) {
     assert(config);
@@ -369,6 +348,19 @@ int run_server(Config *config) {
 
     ThreadPool graphs_pool(get_num_threads());
 
+    logger->info("Collecting graph stats...");
+    std::mutex mu;
+    tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
+    for (const auto &[name, graphs] : indexes) {
+        for (const auto &[graph_fname, anno_fname] : graphs) {
+            auto &out = name_labels[name];
+            const auto &labels = read_labels(anno_fname);
+            out.insert(out.end(), labels.begin(), labels.end());
+        }
+    }
+
+    logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
+
     // the actual server
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
@@ -383,47 +375,46 @@ int run_server(Config *config) {
         process_request(response, request, [&](const std::string &content) {
             Json::Value content_json = parse_json_string(content);
             logger->info("Request {}: {}", request_id, content_json.toStyledString());
+            Json::Value result;
 
             // simple case with a single graph pair
             if (!config->fnames.size()) {
                 if (content_json.isMember("graphs"))
                     throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
-                return process_search_request(content_json, *anno_graph.get(), *config);
-            }
-
-            std::vector<std::string> graphs_to_query
-                    = filter_graphs_from_list(indexes, content_json, request_id);
-
-            Json::Value merged;
-            std::mutex mu;
-            std::vector<std::shared_future<void>> futures;
-            for (const auto &name : graphs_to_query) {
-                for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                    Config config_copy = *config;
-                    config_copy.infbase = graph_fname;
-                    config_copy.infbase_annotators = { anno_fname };
-                    futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&merged,&mu]() {
-                        auto index = initialize_annotated_dbg(config_copy);
-                        auto json = process_search_request(content_json, *index, config_copy);
-                        std::lock_guard<std::mutex> lock(mu);
-                        if (merged.empty()) {
-                            merged = std::move(json);
-                        } else {
-                            assert(json.size() == merged.size());
-                            for (Json::ArrayIndex i = 0; i < merged.size(); ++i) {
-                                for (auto&& value : json[i]["results"]) {
-                                    merged[i]["results"].append(std::move(value));
+                result = process_search_request(content_json, *anno_graph.get(), *config);
+            } else {
+                std::vector<std::string> graphs_to_query
+                        = filter_graphs_from_list(indexes, content_json, request_id);
+                std::mutex mu;
+                std::vector<std::shared_future<void>> futures;
+                for (const auto &name : graphs_to_query) {
+                    for (const auto &[graph_fname, anno_fname] : indexes[name]) {
+                        Config config_copy = *config;
+                        config_copy.infbase = graph_fname;
+                        config_copy.infbase_annotators = { anno_fname };
+                        futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&result,&mu]() {
+                            auto index = initialize_annotated_dbg(config_copy);
+                            auto json = process_search_request(content_json, *index, config_copy);
+                            std::lock_guard<std::mutex> lock(mu);
+                            if (result.empty()) {
+                                result = std::move(json);
+                            } else {
+                                assert(json.size() == result.size());
+                                for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                    for (auto&& value : json[i]["results"]) {
+                                        result[i]["results"].append(std::move(value));
+                                    }
                                 }
                             }
-                        }
-                    }));
+                        }));
+                    }
+                }
+                for (auto &future : futures) {
+                    future.wait();
                 }
             }
-            for (auto &future : futures) {
-                future.wait();
-            }
             logger->info("Request {} finished", request_id);
-            return merged;
+            return result;
         });
     };
 
@@ -433,15 +424,16 @@ int run_server(Config *config) {
         logger->info("[Server] {} request {} from {}", request->path, request_id,
                      request->remote_endpoint().address().to_string());
 
-        if (config->fnames.size()) {
-            // TODO
-            return;
-        }
-        if (check_data_ready(anno_graph, response)) {
-            process_request(response, request, [&](const std::string &content) {
+        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+            return;  // the index is not loaded yet, so we can't process the request
+
+        process_request(response, request, [&](const std::string &content) {
+            if (!config->fnames.size())
                 return process_align_request(content, anno_graph.get()->get_graph(), *config);
-            });
-        }
+
+            throw std::invalid_argument("Bad request: alignment requests are not yet supported for "
+                                        "servers with multiple graphs");
+        });
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
@@ -450,15 +442,26 @@ int run_server(Config *config) {
         logger->info("[Server] {} request {} from {}", request->path, request_id,
                      request->remote_endpoint().address().to_string());
 
-        if (config->fnames.size()) {
-            // TODO
-            return;
-        }
-        if (check_data_ready(anno_graph, response)) {
-            process_request(response, request, [&](const std::string &) {
-                return process_column_label_request(*anno_graph.get());
-            });
-        }
+        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+            return;  // the index is not loaded yet, so we can't process the request
+
+        process_request(response, request, [&](const std::string &) {
+            Json::Value root(Json::arrayValue);
+            if (!config->fnames.size()) {
+                auto labels = anno_graph.get()->get_annotator().get_label_encoder().get_labels();
+                for (const std::string &label : labels) {
+                    Json::Value entry = label;
+                    root.append(entry);
+                }
+            } else {
+                for (const auto &[name, labels] : name_labels) {
+                    for (const std::string &label : labels) {
+                        root.append(label);
+                    }
+                }
+            }
+            return root;
+        });
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
@@ -467,16 +470,32 @@ int run_server(Config *config) {
         logger->info("[Server] {} request {} from {}", request->path, request_id,
                      request->remote_endpoint().address().to_string());
 
-        if (config->fnames.size()) {
-            // TODO
-            return;
-        }
-        if (check_data_ready(anno_graph, response)) {
-            process_request(response, request, [&](const std::string &) {
-                return process_stats_request(*anno_graph.get(), config->infbase,
-                                             config->infbase_annotators.front());
-            });
-        }
+        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+            return;  // the index is not loaded yet, so we can't process the request
+
+        process_request(response, request, [&](const std::string &) {
+            Json::Value root;
+            if (config->fnames.size()) {
+                // for scenarios with multiple graphs
+                uint64_t num_labels = 0;
+                for (const auto &[name, labels] : name_labels) {
+                    num_labels += labels.size();
+                }
+                root["annotation"]["labels"] = num_labels;
+            } else {
+                root["graph"]["filename"] = std::filesystem::path(config->infbase).filename().string();
+                root["graph"]["k"] = static_cast<uint64_t>(anno_graph.get()->get_graph().get_k());
+                root["graph"]["nodes"] = anno_graph.get()->get_graph().num_nodes();
+                root["graph"]["is_canonical_mode"] = (anno_graph.get()->get_graph().get_mode()
+                                                        == graph::DeBruijnGraph::CANONICAL);
+                const auto &annotation = anno_graph.get()->get_annotator();
+                root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
+                root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
+                root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
+                root["annotation"]["relations"] = static_cast<uint64_t>(annotation.num_relations());
+            }
+            return root;
+        });
     };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
