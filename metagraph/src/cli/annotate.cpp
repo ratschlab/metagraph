@@ -219,7 +219,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     // not too small, not too large
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
-
+    omp_set_nested(1);
     #pragma omp parallel num_threads(get_num_threads())
     #pragma omp single
     {

@@ -1276,6 +1276,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t num_bp = 0;
 
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+    omp_set_nested(1);
     #pragma omp parallel num_threads(config_.parallel_each)
     #pragma omp single
     while (it != end) {
