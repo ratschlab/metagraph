@@ -2,6 +2,8 @@
 
 #include <filesystem>
 
+#include <omp.h>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/batch_accumulator.hpp"
