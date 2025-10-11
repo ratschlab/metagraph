@@ -253,7 +253,7 @@ std::vector<std::string> filter_graphs_from_list(
             throw std::invalid_argument(
                 fmt::format("Bad request: requests without names (no \"graphs\" field) are "
                             "only supported for small indexes (<={} names)",
-                            request_id, max_names_without_filtering));
+                            max_names_without_filtering));
         }
         // query all graphs from list `config->fnames`
         for (const auto &[name, _] : indexes) {
@@ -349,7 +349,6 @@ int run_server(Config *config) {
     ThreadPool graphs_pool(get_num_threads());
 
     logger->info("Collecting graph stats...");
-    std::mutex mu;
     tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
     for (const auto &[name, graphs] : indexes) {
         for (const auto &[graph_fname, anno_fname] : graphs) {

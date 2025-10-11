@@ -16,6 +16,9 @@ from itertools import product
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
+GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
+
+
 class TestAPIBase(TestingBase):
     @classmethod
     def setUpClass(cls, fasta_path, mode='basic', anno_repr='column'):
@@ -54,14 +57,13 @@ class TestAPIBase(TestingBase):
 
     def _start_server(self, graph, annotation):
         construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
-                                            --port {self.port} --address {self.host} -p {2}'
+                                            --port {self.port} --address {self.host} -p 2'
 
         return subprocess.Popen(shlex.split(construct_command))
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
@@ -250,8 +252,7 @@ class TestAPIRaw(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -364,11 +365,7 @@ class TestAPIClient(TestAPIBase):
 
 # No canonical mode for Protein alphabets
 @parameterized_class(('mode', 'threads_each'),
-    input_values=list(product(
-        ['basic'] + ([] if PROTEIN_MODE else ['canonical', 'primary',]),
-        [1,]
-    )) + [('basic', 4)]
-)
+    input_values=[(mode, 1) for mode in GRAPH_MODES] + [('basic', 4)])
 class TestAPIClientMultiple(TestingBase):
     @classmethod
     def setUpClass(
@@ -414,7 +411,7 @@ class TestAPIClientMultiple(TestingBase):
         while num_retries > 0:
             cls.server_process = subprocess.Popen(shlex.split(
                 f'{METAGRAPH} server_query {graphs_file} \
-                --port {cls.port} --address {cls.host} -p {2} --threads-each {cls.threads_each}'
+                --port {cls.port} --address {cls.host} -p 2 --threads-each {cls.threads_each}'
             ))
             try:
                 cls.server_process.wait(timeout=1)
@@ -526,8 +523,7 @@ class TestAPIClientMultiple(TestingBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -585,8 +581,7 @@ class TestAPIJson(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -617,8 +612,7 @@ class TestAPIClientWithProperties(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIClientWithCoordinates(TestAPIBase):
     """
     Testing whether API works well given coordinate aware annotations
@@ -677,8 +671,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIClientWithCounts(TestAPIBase):
     """
     Testing whether API works well given k-mer count aware annotations
@@ -732,8 +725,7 @@ class TestAPIClientWithCounts(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=GRAPH_MODES)
 class TestAPIClientParallel(TestAPIBase):
     """
     Testing whether or not parallel requests work
