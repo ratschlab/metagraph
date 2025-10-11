@@ -263,22 +263,6 @@ std::vector<std::string> filter_graphs_from_list(
     return graphs_to_query;
 }
 
-// read labels from annotation
-std::vector<std::string> read_labels(const std::string &anno_fname) {
-    annot::LabelEncoder<std::string> label_encoder;
-
-    std::ifstream instream(anno_fname, std::ios::binary);
-    // TODO: make this more reliable
-    if (parse_annotation_type(anno_fname) == Config::ColumnCompressed) {
-        // Column compressed dumps the number of rows first
-        // skipping it...
-        load_number(instream);
-    }
-    if (!label_encoder.load(instream))
-        throw std::ios_base::failure("Cannot read label encoder from file " + anno_fname);
-
-    return label_encoder.get_labels();
-}
 
 int run_server(Config *config) {
     assert(config);
