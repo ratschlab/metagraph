@@ -221,7 +221,7 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
         auto it = unique_rows.emplace(result).first;
         (*rows)[i] = it - unique_rows.begin();
     }
-    DEBUG_LOG("Reconstructed annotations for {} rows", rows.size());
+    DEBUG_LOG("Reconstructed annotations for {} rows", rows->size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
     common::logger->trace("RD: rows reconstructed");
 
