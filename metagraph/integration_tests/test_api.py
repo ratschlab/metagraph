@@ -63,7 +63,7 @@ class TestAPIBase(TestingBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
@@ -252,7 +252,7 @@ class TestAPIRaw(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -523,7 +523,7 @@ class TestAPIClientMultiple(TestingBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -581,7 +581,7 @@ class TestAPIJson(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -612,7 +612,7 @@ class TestAPIClientWithProperties(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithCoordinates(TestAPIBase):
     """
     Testing whether API works well given coordinate aware annotations
@@ -671,7 +671,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithCounts(TestAPIBase):
     """
     Testing whether API works well given k-mer count aware annotations
@@ -725,7 +725,7 @@ class TestAPIClientWithCounts(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',), input_values=GRAPH_MODES)
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientParallel(TestAPIBase):
     """
     Testing whether or not parallel requests work
