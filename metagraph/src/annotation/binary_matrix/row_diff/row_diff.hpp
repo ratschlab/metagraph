@@ -194,10 +194,11 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
+    common::logger->trace("RD: paths traversed");
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-
+    common::logger->trace("RD: rows queried");
     rd_ids = std::vector<Row>();
 
     // reconstruct annotation rows from row-diff
@@ -222,6 +223,7 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     }
     DEBUG_LOG("Reconstructed annotations for {} rows", rows.size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
+    common::logger->trace("RD: rows reconstructed");
 
     return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
 }
