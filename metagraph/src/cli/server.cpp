@@ -384,6 +384,10 @@ int run_server(Config *config) {
                             } else {
                                 assert(json.size() == result.size());
                                 for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                    if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
+                                            != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
+                                        throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                                    }
                                     for (auto&& value : json[i]["results"]) {
                                         result[i]["results"].append(std::move(value));
                                     }
