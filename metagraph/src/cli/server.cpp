@@ -437,8 +437,7 @@ int run_server(Config *config) {
             if (!config->fnames.size()) {
                 auto labels = anno_graph.get()->get_annotator().get_label_encoder().get_labels();
                 for (const std::string &label : labels) {
-                    Json::Value entry = label;
-                    root.append(entry);
+                    root.append(label);
                 }
             } else {
                 for (const auto &[name, labels] : name_labels) {
