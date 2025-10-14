@@ -213,6 +213,8 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
         server_startup.config.address = config.host_address;
     }
     server_startup.config.port = config.port;
+    server_startup.config.timeout_request = 30;    // 30 sec to finish headers
+    server_startup.config.timeout_content = 1800;  // 30 minutes for body/compute (per request) max
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
