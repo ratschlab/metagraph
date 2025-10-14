@@ -3,6 +3,8 @@ import subprocess
 import unittest
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
+import psutil
+import shutil
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -80,8 +82,9 @@ class TestingBase(unittest.TestCase):
             input=input
         ) + MMAP_FLAG
 
-        res = subprocess.run([construct_command], shell=True)
-        assert res.returncode == 0
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            raise AssertionError(f"Build command failed with return code {res.returncode}\nCommand: {construct_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
         if mode == 'primary':
             transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
@@ -94,8 +97,9 @@ class TestingBase(unittest.TestCase):
                 input=output
             ) + MMAP_FLAG
 
-            res = subprocess.run([transform_command], shell=True)
-            assert res.returncode == 0
+            res = subprocess.run([transform_command], shell=True, stdout=PIPE, stderr=PIPE)
+            if res.returncode != 0:
+                raise AssertionError(f"Transform command failed with return code {res.returncode}\nCommand: {transform_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
             construct_command = '{exe} build --mode primary -p {num_threads} {extra_params} \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
@@ -108,8 +112,9 @@ class TestingBase(unittest.TestCase):
                 input='{}.fasta.gz'.format(output)
             ) + MMAP_FLAG
 
-            res = subprocess.run([construct_command], shell=True)
-            assert res.returncode == 0
+            res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+            if res.returncode != 0:
+                raise AssertionError(f"Build primary command failed with return code {res.returncode}\nCommand: {construct_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
     @staticmethod
     def _clean(graph, output, extra_params=''):
@@ -121,8 +126,9 @@ class TestingBase(unittest.TestCase):
             extra_params=extra_params,
             input=graph
         ) + MMAP_FLAG
-        res = subprocess.run([clean_command], shell=True)
-        assert res.returncode == 0
+        res = subprocess.run([clean_command], shell=True, stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            raise AssertionError(f"Clean command failed with return code {res.returncode}\nCommand: {clean_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
@@ -147,9 +153,9 @@ class TestingBase(unittest.TestCase):
             target_anno = anno_repr
             anno_repr = 'row'
 
-        command = f'{METAGRAPH} annotate -p {num_threads} --anno-{anno_type}\
+        command = f'{METAGRAPH} annotate -v -p {num_threads} --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} {extra_params} \
-                    -o {output} {input}' + MMAP_FLAG
+                    -o {output} {input}'
 
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
@@ -158,8 +164,32 @@ class TestingBase(unittest.TestCase):
         if with_counts:
             command += ' --count-kmers'
 
-        res = subprocess.run([command], shell=True)
-        assert(res.returncode == 0)
+        # Monitor RAM and disk usage before command
+        
+        mem_before = psutil.virtual_memory()
+        disk_before = shutil.disk_usage('/')
+        sys_before_gb = mem_before.used / 1024 / 1024 / 1024
+        sys_total_gb = mem_before.total / 1024 / 1024 / 1024
+        sys_before_pct = mem_before.percent
+        disk_before_gb = disk_before.used / 1024 / 1024 / 1024
+        disk_total_gb = disk_before.total / 1024 / 1024 / 1024
+        disk_before_pct = (disk_before.used / disk_before.total) * 100
+        
+        print(f"\n\033[33m[RESOURCE BEFORE]\033[0m Annotation: RAM {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%) | Disk {disk_before_gb:.1f}/{disk_total_gb:.1f}GB ({disk_before_pct:.1f}%)", flush=True)
+
+        res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+        
+        # Monitor RAM and disk usage after command
+        mem_after = psutil.virtual_memory()
+        disk_after = shutil.disk_usage('/')
+        sys_after_gb = mem_after.used / 1024 / 1024 / 1024
+        sys_after_pct = mem_after.percent
+        disk_after_gb = disk_after.used / 1024 / 1024 / 1024
+        disk_after_pct = (disk_after.used / disk_after.total) * 100
+        
+        print(f"\033[33m[RESOURCE AFTER ]\033[0m Annotation: RAM {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%) | Disk {disk_after_gb:.1f}/{disk_total_gb:.1f}GB ({disk_after_pct:.1f}%)", flush=True)
+        if res.returncode != 0:
+            raise AssertionError(f"Annotate command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
         if target_anno == anno_repr:
             return
@@ -182,8 +212,9 @@ class TestingBase(unittest.TestCase):
         if not no_fork_opt:
             if target_anno.startswith('row_diff'):
                 print('-- Building RowDiff without fork optimization...')
-            res = subprocess.run([command + other_args], shell=True)
-            assert(res.returncode == 0)
+            res = subprocess.run([command + other_args], shell=True, stdout=PIPE, stderr=PIPE)
+            if res.returncode != 0:
+                raise AssertionError(f"Transform_anno command failed with return code {res.returncode}\nCommand: {command + other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
         if target_anno == 'row_diff':
             without_input_anno = command.split(' ')
@@ -192,30 +223,36 @@ class TestingBase(unittest.TestCase):
             if not no_anchor_opt:
                 if separate:
                     print('-- Building RowDiff succ/pred...')
-                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True)
-                    assert(res.returncode == 0)
-                res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True)
-                assert(res.returncode == 0)
+                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True, stdout=PIPE, stderr=PIPE)
+                    if res.returncode != 0:
+                        raise AssertionError(f"RowDiff stage 1 (separate) command failed with return code {res.returncode}\nCommand: echo \"\" | {without_input_anno} --row-diff-stage 1\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+                res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True, stdout=PIPE, stderr=PIPE)
+                if res.returncode != 0:
+                    raise AssertionError(f"RowDiff stage 1 command failed with return code {res.returncode}\nCommand: {command} --row-diff-stage 1{other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
                 subprocess.run([f'rm -f {output}.row_count'], shell=True)
             if separate:
                 print('-- Assigning anchors...')
-                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
-                assert(res.returncode == 0)
-            res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True)
-            assert(res.returncode == 0)
+                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True, stdout=PIPE, stderr=PIPE)
+                if res.returncode != 0:
+                    raise AssertionError(f"RowDiff stage 2 (separate) command failed with return code {res.returncode}\nCommand: echo \"\" | {without_input_anno} --row-diff-stage 2\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+            res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True, stdout=PIPE, stderr=PIPE)
+            if res.returncode != 0:
+                raise AssertionError(f"RowDiff stage 2 command failed with return code {res.returncode}\nCommand: {command} --row-diff-stage 2{other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
             subprocess.run([f'rm -f {output}.row_reduction'], shell=True)
 
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg' + MMAP_FLAG
-                res = subprocess.run([command], shell=True)
-                assert (res.returncode == 0)
+                res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+                if res.returncode != 0:
+                    raise AssertionError(f"Transform_anno (final) command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
                 subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
             else:
                 subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
-            res = subprocess.run([command], shell=True)
-            assert (res.returncode == 0)
+            res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+            if res.returncode != 0:
+                raise AssertionError(f"Relax_brwt command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
