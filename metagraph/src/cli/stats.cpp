@@ -187,30 +187,17 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         logger->info("Scanning annotation '{}'", fname);
 
         try {
-            std::ifstream instream(fname, std::ios::binary);
-
-            // TODO: make this more reliable
-            if (parse_annotation_type(fname) == Config::ColumnCompressed) {
-                // Column compressed dumps the number of rows first
-                // skipping it...
-                load_number(instream);
+            auto labels = read_labels(fname);
+            std::cout << "Number of columns: " << labels.size() << '\n';
+            for (const auto &label : labels) {
+                std::cout << label << '\n';
             }
-
-            if (!label_encoder.load(instream))
-                throw std::ios_base::failure("");
-
+            std::cout << std::flush;
+            return;
         } catch (...) {
             logger->error("Cannot read label encoder from file '{}'", fname);
             exit(1);
         }
-
-        std::cout << "Number of columns: " << label_encoder.size() << '\n';
-        for (size_t c = 0; c < label_encoder.size(); ++c) {
-            std::cout << label_encoder.decode(c) << '\n';
-        }
-
-        std::cout << std::flush;
-        return;
     }
 
     logger->info("Statistics for annotation '{}'", fname);
