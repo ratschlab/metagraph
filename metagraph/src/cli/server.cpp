@@ -206,8 +206,8 @@ Json::Value process_align_request(const std::string &received_message,
     return root;
 }
 
-std::thread start_server(HttpServer &server_startup, Config &config) {
-    server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
+std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads) {
+    server_startup.config.thread_pool_size = num_threads;
 
     if (config.host_address != "") {
         server_startup.config.address = config.host_address;
@@ -218,7 +218,7 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
-    logger->info("[Server] Maximum connections: {}", get_num_threads());
+    logger->info("[Server] Maximum connections: {}", num_threads);
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
@@ -333,6 +333,8 @@ int run_server(Config *config) {
     }
 
     ThreadPool graphs_pool(get_num_threads());
+    size_t num_server_threads = std::max(1u, get_num_threads());
+    set_num_threads(0);
 
     logger->info("Collecting graph stats...");
     tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
@@ -504,7 +506,7 @@ int run_server(Config *config) {
         }
     };
 
-    std::thread server_thread = start_server(server, *config);
+    std::thread server_thread = start_server(server, *config, num_server_threads);
     server_thread.join();
 
     return 0;
