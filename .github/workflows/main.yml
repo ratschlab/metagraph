@@ -27,14 +27,6 @@ jobs:
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-11
-            cxx: g++-11
-            cc: gcc-11
-
-          - compiler: g++-12
-            cxx: g++-12
-            cc: gcc-12
-
           - compiler: g++-13
             cxx: g++-13
             cc: gcc-13
