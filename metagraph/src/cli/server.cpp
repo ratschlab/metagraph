@@ -206,8 +206,8 @@ Json::Value process_align_request(const std::string &received_message,
     return root;
 }
 
-std::thread start_server(HttpServer &server_startup, Config &config) {
-    server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
+std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads) {
+    server_startup.config.thread_pool_size = num_threads;
 
     if (config.host_address != "") {
         server_startup.config.address = config.host_address;
@@ -218,7 +218,7 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
-    logger->info("[Server] Maximum connections: {}", get_num_threads());
+    logger->info("[Server] Maximum connections: {}", num_threads);
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
@@ -333,6 +333,8 @@ int run_server(Config *config) {
     }
 
     ThreadPool graphs_pool(get_num_threads());
+    size_t num_server_threads = std::max(1u, get_num_threads());
+    set_num_threads(0);
 
     logger->info("Collecting graph stats...");
     tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
@@ -351,13 +353,10 @@ int run_server(Config *config) {
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        logger->info("[Server] {} request {} from {}", request->path, request_id,
-                     request->remote_endpoint().address().to_string());
+        process_request(response, request, request_id, [&](const std::string &content) {
+            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
-        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-            return;  // the index is not loaded yet, so we can't process the request
-
-        process_request(response, request, [&](const std::string &content) {
             Json::Value content_json = parse_json_string(content);
             logger->info("Request {}: {}", request_id, content_json.toStyledString());
             Json::Value result;
@@ -402,21 +401,16 @@ int run_server(Config *config) {
                     future.wait();
                 }
             }
-            logger->info("Request {} finished", request_id);
             return result;
         });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
-        size_t request_id = num_requests++;
-        logger->info("[Server] {} request {} from {}", request->path, request_id,
-                     request->remote_endpoint().address().to_string());
+        process_request(response, request, num_requests++, [&](const std::string &content) {
+            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
-        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-            return;  // the index is not loaded yet, so we can't process the request
-
-        process_request(response, request, [&](const std::string &content) {
             if (!config->fnames.size())
                 return process_align_request(content, anno_graph.get()->get_graph(), *config);
 
@@ -427,14 +421,10 @@ int run_server(Config *config) {
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        size_t request_id = num_requests++;
-        logger->info("[Server] {} request {} from {}", request->path, request_id,
-                     request->remote_endpoint().address().to_string());
+        process_request(response, request, num_requests++, [&](const std::string &) {
+            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
-        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-            return;  // the index is not loaded yet, so we can't process the request
-
-        process_request(response, request, [&](const std::string &) {
             Json::Value root(Json::arrayValue);
             if (!config->fnames.size()) {
                 auto labels = anno_graph.get()->get_annotator().get_label_encoder().get_labels();
@@ -454,14 +444,10 @@ int run_server(Config *config) {
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        size_t request_id = num_requests++;
-        logger->info("[Server] {} request {} from {}", request->path, request_id,
-                     request->remote_endpoint().address().to_string());
+        process_request(response, request, num_requests++, [&](const std::string &) {
+            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
+                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
-        if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-            return;  // the index is not loaded yet, so we can't process the request
-
-        process_request(response, request, [&](const std::string &) {
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
@@ -504,7 +490,7 @@ int run_server(Config *config) {
         }
     };
 
-    std::thread server_thread = start_server(server, *config);
+    std::thread server_thread = start_server(server, *config, num_server_threads);
     server_thread.join();
 
     return 0;
