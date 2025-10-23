@@ -24,7 +24,7 @@ jobs:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
         compiler: [g++-11, g++-12, g++-13]
-        build_static: [ON]
+        build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
           - compiler: g++-11
@@ -55,6 +55,8 @@ jobs:
           - build_type: Debug
             compiler: g++-12
           - with_avx: OFF
+            build_static: OFF
+          - with_avx: ON
             build_static: OFF
 
     name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
