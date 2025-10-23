@@ -89,6 +89,7 @@ if(Jemalloc_FOUND)
     unset(Jemalloc_FOUND)
   endif()
 endif()
+set(Jemalloc_FOUND ${Jemalloc_FOUND} PARENT_SCOPE)
 
 message(STATUS "Configuring Folly")
 include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
