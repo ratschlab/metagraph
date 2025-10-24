@@ -331,16 +331,17 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 
 findFolly()
 if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
+  add_definitions(-D_USE_FOLLY)
+  if(Jemalloc_FOUND)
+    add_definitions(-DUSE_JEMALLOC)
+  else()
+    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
+  endif()
   include_directories(SYSTEM
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
   )
   set(METALIBS ${METALIBS} fbvector)
-else()
-  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install jemalloc to compile with folly and enable various"
-  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
 # makes ASIO not depend on boost
