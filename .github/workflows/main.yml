@@ -24,20 +24,20 @@ jobs:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
         compiler: [g++-11, g++-12, g++-13]
-        build_static: [ON]
+        build_static: [OFF, ON]
         with_avx: [OFF, ON]
-        # include:
-          # - compiler: g++-11
-          #   cxx: g++-11
-          #   cc: gcc-11
+        include:
+          - compiler: g++-11
+            cxx: g++-11
+            cc: gcc-11
 
-          # - compiler: g++-12
-          #   cxx: g++-12
-          #   cc: gcc-12
+          - compiler: g++-12
+            cxx: g++-12
+            cc: gcc-12
 
-          # - compiler: g++-13
-          #   cxx: g++-13
-          #   cc: gcc-13
+          - compiler: g++-13
+            cxx: g++-13
+            cc: gcc-13
 
         exclude:
           - alphabet: Protein
@@ -221,17 +221,17 @@ jobs:
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
-    # - name: build unit tests
-    #   run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
+    - name: build unit tests
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
 
-    # - name: build other
-    #   run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+    - name: build other
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
-    # - name: run unit tests
-    #   run: cd metagraph/build && ./unit_tests
+    - name: run unit tests
+      run: cd metagraph/build && ./unit_tests
 
-    # - name: run integration tests
-    #   run: cd metagraph/build && make integration_tests
+    - name: run integration tests
+      run: cd metagraph/build && make integration_tests
 
     - name: check metagraph workflows
       run: |
