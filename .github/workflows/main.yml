@@ -227,25 +227,12 @@ jobs:
     - name: build other
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
-    # - name: run unit tests
-    #   run: cd metagraph/build && ./unit_tests
+    - name: run unit tests
+      run: cd metagraph/build && ./unit_tests
 
-    # - name: run integration tests
-    #   run: cd metagraph/build && make integration_tests
+    - name: run integration tests
+      run: cd metagraph/build && make integration_tests
 
-    - name: check metagraph workflows
-      run: |
-        sudo ln -s $(pwd)/metagraph/build/metagraph_DNA /bin/metagraph
-        sudo chmod +rx /bin/metagraph
-        /bin/metagraph --help
-        metagraph --help
-        # Install python dependencies
-        python -m pip install --upgrade pip
-        pip install pytest
-        pip install -r metagraph/workflows/requirements.txt
-        # Test metagraph-workflows pytest
-        cd metagraph/workflows
-        pytest
 
   Metagraph-Workflows:
     name: Test metagraph workflows
