@@ -235,9 +235,9 @@ jobs:
 
     - name: check metagraph workflows
       run: |
-        sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
-        sudo chmod +rx /usr/local/bin/metagraph
-        /usr/local/bin/metagraph --help
+        sudo ln -s $(pwd)/metagraph/build/metagraph_DNA /bin/metagraph
+        sudo chmod +rx /bin/metagraph
+        /bin/metagraph --help
         metagraph --help
         # Install python dependencies
         python -m pip install --upgrade pip
