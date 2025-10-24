@@ -233,6 +233,17 @@ jobs:
     - name: run integration tests
       run: cd metagraph/build && make integration_tests
 
+    - name: check metagraph workflows
+      run: |
+        export PATH="$(pwd)/metagraph/build/:$PATH"
+        metagraph --help
+        # Install python dependencies
+        python -m pip install --upgrade pip
+        pip install pytest
+        pip install -r metagraph/workflows/requirements.txt
+        # Test metagraph-workflows pytest
+        cd metagraph/workflows
+        pytest
 
   Metagraph-Workflows:
     name: Test metagraph workflows

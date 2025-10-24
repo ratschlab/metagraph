@@ -35,11 +35,6 @@ using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
 using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
 
-#if _OpenMP_5
-#define _OMP_NONRCTGLR_LOOP collapse(2)
-#else
-#define _OMP_NONRCTGLR_LOOP schedule(dynamic)
-#endif
 
 std::vector<annot::ColumnCompressed<>>
 load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
@@ -106,6 +101,17 @@ void load_coordinates(const std::vector<std::string> &source_files,
     }
 }
 
+std::vector<std::pair<size_t, size_t>>
+get_all_column_indexes(const std::vector<annot::ColumnCompressed<>> &sources) {
+    std::vector<std::pair<size_t, size_t>> col_indexes;
+    for (size_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
+        for (size_t j = 0; j < sources[l_idx].num_labels(); ++j) {
+            col_indexes.emplace_back(l_idx, j);
+        }
+    }
+    return col_indexes;
+}
+
 void count_labels_per_row(const std::vector<std::string> &source_files,
                           const std::string &row_count_fname,
                           bool with_coordinates) {
@@ -155,6 +161,9 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     ProgressBar progress_bar(num_rows, "Count row labels", std::cerr, !common::get_verbose());
     uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
 
+    // get a full array of all columns for the omp parallelization below
+    const auto col_indexes = get_all_column_indexes(sources);
+
     for (uint64_t block_begin = 0; block_begin < num_rows; block_begin += BLOCK_SIZE) {
         uint64_t block_size = next_block_size;
         next_block_size = std::min(BLOCK_SIZE, num_rows - (block_begin + block_size));
@@ -162,24 +171,22 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
         row_count_block.assign(block_size, 0);
 
         // process the current block
-        #pragma omp parallel for num_threads(get_num_threads()) _OMP_NONRCTGLR_LOOP
-        for (size_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
-            for (size_t j = 0; j < sources[l_idx].num_labels(); ++j) {
-                const bit_vector &source_col
-                        = *sources[l_idx].get_matrix().data()[j];
-                source_col.call_ones_in_range(block_begin, block_begin + block_size,
-                    [&](uint64_t i) {
-                        if (with_coordinates) {
-                            uint64_t rk = source_col.rank1(i);
-                            uint32_t num_coords = delims[l_idx][j].select1(rk + 1)
-                                                    - delims[l_idx][j].select1(rk);
-                            __atomic_add_fetch(&row_count_block[i - block_begin], num_coords, __ATOMIC_RELAXED);
-                        } else {
-                            __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
-                        }
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (auto [l_idx, j] : col_indexes) {
+            const bit_vector &source_col
+                    = *sources[l_idx].get_matrix().data()[j];
+            source_col.call_ones_in_range(block_begin, block_begin + block_size,
+                [&,l_idx=l_idx,j=j](uint64_t i) {
+                    if (with_coordinates) {
+                        uint64_t rk = source_col.rank1(i);
+                        uint32_t num_coords = delims[l_idx][j].select1(rk + 1)
+                                                - delims[l_idx][j].select1(rk);
+                        __atomic_add_fetch(&row_count_block[i - block_begin], num_coords, __ATOMIC_RELAXED);
+                    } else {
+                        __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
                     }
-                );
-            }
+                }
+            );
         }
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
@@ -745,6 +752,9 @@ void traverse_anno_chunked(
                          &pred_it, &pred_boundary_it,
                          next_block_size, &context_other);
 
+    // get a full array of all columns for the omp parallelization below
+    const auto col_indexes = get_all_column_indexes(col_annotations);
+
     ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
 
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
@@ -770,25 +780,23 @@ void traverse_anno_chunked(
         assert(succ_chunk.size() == succ_chunk_idx.back());
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
-        #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
-        for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
-            for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
-                const bit_vector &source_col
-                        = *col_annotations[l_idx].get_matrix().data()[j];
-                source_col.call_ones_in_range(chunk, chunk + block_size,
-                    [&](uint64_t i) {
-                        assert(succ_chunk_idx[i - chunk + 1] >= succ_chunk_idx[i - chunk]);
-                        assert(succ_chunk_idx[i - chunk + 1] <= succ_chunk_idx[i - chunk] + 1);
-                        const uint64_t *succ = succ_chunk_idx[i - chunk + 1]
-                                                > succ_chunk_idx[i - chunk]
-                                                ? succ_chunk.data() + succ_chunk_idx[i - chunk]
-                                                : NULL;
-                        call_ones(source_col, i, i - chunk, l_idx, j, succ,
-                                  pred_chunk.data() + pred_chunk_idx[i - chunk],
-                                  pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
-                    }
-                );
-            }
+        #pragma omp parallel for num_threads(num_threads)
+        for (auto [l_idx, j] : col_indexes) {
+            const bit_vector &source_col
+                    = *col_annotations[l_idx].get_matrix().data()[j];
+            source_col.call_ones_in_range(chunk, chunk + block_size,
+                [&,l_idx=l_idx,j=j](uint64_t i) {
+                    assert(succ_chunk_idx[i - chunk + 1] >= succ_chunk_idx[i - chunk]);
+                    assert(succ_chunk_idx[i - chunk + 1] <= succ_chunk_idx[i - chunk] + 1);
+                    const uint64_t *succ = succ_chunk_idx[i - chunk + 1]
+                                            > succ_chunk_idx[i - chunk]
+                                            ? succ_chunk.data() + succ_chunk_idx[i - chunk]
+                                            : NULL;
+                    call_ones(source_col, i, i - chunk, l_idx, j, succ,
+                              pred_chunk.data() + pred_chunk_idx[i - chunk],
+                              pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
+                }
+            );
         }
 
         after_chunk(chunk);
@@ -1094,17 +1102,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 });
             });
 
-    #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
-    for (size_t s = 0; s < sources.size(); ++s) {
-        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            // flush and release the buffer
-            set_rows[s][j].flush(true);
-            logger->trace("Number of relations for column {} reduced from {}"
-                          " to {}, of them stored in anchors: {}",
-                          sources[s].get_label_encoder().decode(j),
-                          sources[s].get_matrix().data()[j]->num_set_bits(),
-                          set_rows[s][j].size(), num_relations_anchored[s][j]);
-        }
+    // get a full array of all columns for the omp parallelization below
+    const auto col_indexes = get_all_column_indexes(sources);
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (auto [s, j] : col_indexes) {
+        // flush and release the buffer
+        set_rows[s][j].flush(true);
+        logger->trace("Number of relations for column {} reduced from {}"
+                      " to {}, of them stored in anchors: {}",
+                      sources[s].get_label_encoder().decode(j),
+                      sources[s].get_matrix().data()[j]->num_set_bits(),
+                      set_rows[s][j].size(), num_relations_anchored[s][j]);
     }
 
     async_writer.join();
@@ -1195,15 +1204,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
-        for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
-            for (const auto &col_ptr : diff_columns[l_idx]) {
-                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
-                    [&](uint64_t i) {
-                        __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
-                    }
-                );
-            }
+        #pragma omp parallel for num_threads(num_threads)
+        for (auto [l_idx, j] : col_indexes) {
+            diff_columns[l_idx][j]->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
+                [&](uint64_t i) {
+                    __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
+                }
+            );
         }
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
@@ -1491,16 +1498,17 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             [&](uint64_t) {}
     );
 
-    #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
-    for (size_t s = 0; s < sources.size(); ++s) {
-        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            // flush and release the buffer
-            set_rows[s][j].flush(true);
-            logger->trace("Number of coordinates for column {} reduced from {}"
-                          " to {}, number of coordinates stored in anchors: {}",
-                          sources[s].get_label_encoder().decode(j), coords[s][j].size(),
-                          row_diff_coords[s][j], num_coords_anchored[s][j]);
-        }
+    // get a full array of all columns for the omp parallelization below
+    const auto col_indexes = get_all_column_indexes(sources);
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (auto [s, j] : col_indexes) {
+        // flush and release the buffer
+        set_rows[s][j].flush(true);
+        logger->trace("Number of coordinates for column {} reduced from {}"
+                      " to {}, number of coordinates stored in anchors: {}",
+                      sources[s].get_label_encoder().decode(j), coords[s][j].size(),
+                      row_diff_coords[s][j], num_coords_anchored[s][j]);
     }
 
     anchor = anchor_bv_type();
