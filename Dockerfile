@@ -41,7 +41,7 @@ RUN make build-sdsl-lite \
     && make build-metagraph alphabet=DNA5 \
     && make build-metagraph alphabet=Protein
 
-FROM ubuntu:25.04
+FROM ubuntu:24.04
 ARG CODE_BASE
 
 # the image used in production. It contains a basic runtime environment for metagraph without build tools along with
