@@ -42,7 +42,8 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
 
-    slice_rows(row_ids, &slice);
+    ThreadPool thread_pool(4);
+    slice_rows(row_ids, &slice, &thread_pool);
 
     assert(slice.size() >= row_ids.size());
 
@@ -131,7 +132,8 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
 //      return positions of set bits with their column ranks.
 // Appends to `slice`
 template <typename T>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
+void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
+                      ThreadPool *thread_pool) const {
     T delim;
     if constexpr(utils::is_pair_v<T>) {
         delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
@@ -228,18 +230,47 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
     std::vector<size_t> pos(child_nodes_.size());
 
-    for (size_t j = 0; j < child_nodes_.size(); ++j) {
-        pos[j] = slice->size();
-        child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
+    if (thread_pool) {
+        std::vector<std::shared_future<Vector<T>>> futures;
+        for (size_t j = 0; j < child_nodes_.size(); ++j) {
+            futures.emplace_back(thread_pool->enqueue([&,j]() {
+                Vector<T> slice_part;
+                slice_part.reserve(child_row_ids.size());
+                child_nodes_[j]->slice_rows<T>(child_row_ids, &slice_part);
 
-        assert(slice->size() >= pos[j] + child_row_ids.size());
+                assert(slice_part.size() >= child_row_ids.size());
 
-        // transform column indexes
-        for (size_t i = pos[j]; i < slice->size(); ++i) {
-            auto &v = (*slice)[i];
-            if (v != delim) {
-                auto &col = utils::get_first(v);
-                col = assignments_.get(j, col);
+                // transform column indexes
+                for (size_t i = 0; i < slice_part.size(); ++i) {
+                    auto &v = slice_part[i];
+                    if (v != delim) {
+                        auto &col = utils::get_first(v);
+                        col = assignments_.get(j, col);
+                    }
+                }
+                return slice_part;
+            }));
+            std::cout << "added" << std::endl;
+        }
+        for (size_t j = 0; j < child_nodes_.size(); ++j) {
+            pos[j] = slice->size();
+            slice->insert(slice->end(), futures[j].get().begin(), futures[j].get().end());
+            assert(slice->size() >= pos[j] + child_row_ids.size());
+        }
+    } else {
+        for (size_t j = 0; j < child_nodes_.size(); ++j) {
+            pos[j] = slice->size();
+            child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
+
+            assert(slice->size() >= pos[j] + child_row_ids.size());
+
+            // transform column indexes
+            for (size_t i = pos[j]; i < slice->size(); ++i) {
+                auto &v = (*slice)[i];
+                if (v != delim) {
+                    auto &col = utils::get_first(v);
+                    col = assignments_.get(j, col);
+                }
             }
         }
     }
