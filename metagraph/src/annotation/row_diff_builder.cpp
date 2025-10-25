@@ -172,7 +172,8 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
         // process the current block
         #pragma omp parallel for num_threads(get_num_threads())
-        for (auto [l_idx, j] : col_indexes) {
+        for (size_t c = 0; c < col_indexes.size(); ++c) {
+            auto [l_idx, j] = col_indexes[c];
             const bit_vector &source_col
                     = *sources[l_idx].get_matrix().data()[j];
             source_col.call_ones_in_range(block_begin, block_begin + block_size,
@@ -781,7 +782,8 @@ void traverse_anno_chunked(
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
         #pragma omp parallel for num_threads(num_threads)
-        for (auto [l_idx, j] : col_indexes) {
+        for (size_t c = 0; c < col_indexes.size(); ++c) {
+            auto [l_idx, j] = col_indexes[c];
             const bit_vector &source_col
                     = *col_annotations[l_idx].get_matrix().data()[j];
             source_col.call_ones_in_range(chunk, chunk + block_size,
@@ -1106,7 +1108,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     const auto col_indexes = get_all_column_indexes(sources);
 
     #pragma omp parallel for num_threads(num_threads)
-    for (auto [s, j] : col_indexes) {
+    for (size_t c = 0; c < col_indexes.size(); ++c) {
+        auto [s, j] = col_indexes[c];
         // flush and release the buffer
         set_rows[s][j].flush(true);
         logger->trace("Number of relations for column {} reduced from {}"
@@ -1205,7 +1208,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads)
-        for (auto [l_idx, j] : col_indexes) {
+        for (size_t c = 0; c < col_indexes.size(); ++c) {
+            auto [l_idx, j] = col_indexes[c];
             diff_columns[l_idx][j]->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                 [&](uint64_t i) {
                     __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
@@ -1502,7 +1506,8 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     const auto col_indexes = get_all_column_indexes(sources);
 
     #pragma omp parallel for num_threads(num_threads)
-    for (auto [s, j] : col_indexes) {
+    for (size_t c = 0; c < col_indexes.size(); ++c) {
+        auto [s, j] = col_indexes[c];
         // flush and release the buffer
         set_rows[s][j].flush(true);
         logger->trace("Number of coordinates for column {} reduced from {}"
