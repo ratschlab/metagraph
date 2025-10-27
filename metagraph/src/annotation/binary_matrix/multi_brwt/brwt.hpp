@@ -57,8 +57,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // helper function for querying rows in batches
     // appends to `slice`
     template <typename T>
+    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
+    template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice,
-                    ThreadPool *thread_pool = nullptr) const;
+                    size_t depth, size_t cutoff_depth, size_t max_columns_cutoff) const;
 
     void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
 

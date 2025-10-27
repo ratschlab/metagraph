@@ -42,8 +42,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
 
-    ThreadPool thread_pool(4);
-    slice_rows(row_ids, &slice, &thread_pool);
+    slice_rows(row_ids, &slice);
 
     assert(slice.size() >= row_ids.size());
 
@@ -132,8 +131,19 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
 //      return positions of set bits with their column ranks.
 // Appends to `slice`
 template <typename T>
+void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
+    #pragma omp parallel num_threads(2)
+    {
+        #pragma omp single
+        {
+            slice_rows(row_ids, slice, 0, 10, std::max(10, (int)num_columns() / 100));
+        }
+    }
+}
+
+template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
-                      ThreadPool *thread_pool) const {
+                      size_t depth, size_t cutoff_depth, size_t max_columns_cutoff) const {
     T delim;
     if constexpr(utils::is_pair_v<T>) {
         delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
@@ -230,14 +240,15 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
 
     std::vector<size_t> pos(child_nodes_.size());
 
-    if (thread_pool) {
-        std::vector<std::shared_future<Vector<T>>> futures;
+    if (depth < cutoff_depth && num_columns() > max_columns_cutoff) {
+        std::vector<Vector<T>> slices(child_nodes_.size());
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
-            futures.emplace_back(thread_pool->enqueue([&,j]() {
-                Vector<T> slice_part;
+            #pragma omp task default(shared) firstprivate(j)
+            {
+                auto &slice_part = slices[j];
                 slice_part.reserve(child_row_ids.size());
-                child_nodes_[j]->slice_rows<T>(child_row_ids, &slice_part);
-
+                child_nodes_[j]->slice_rows<T>(child_row_ids, &slice_part, depth + 1,
+                                               cutoff_depth, max_columns_cutoff);
                 assert(slice_part.size() >= child_row_ids.size());
 
                 // transform column indexes
@@ -248,20 +259,19 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
                         col = assignments_.get(j, col);
                     }
                 }
-                return slice_part;
-            }));
-            std::cout << "added" << std::endl;
+            }
         }
+        #pragma omp taskwait
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
             pos[j] = slice->size();
-            slice->insert(slice->end(), futures[j].get().begin(), futures[j].get().end());
+            slice->insert(slice->end(), slices[j].begin(), slices[j].end());
             assert(slice->size() >= pos[j] + child_row_ids.size());
         }
     } else {
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
             pos[j] = slice->size();
-            child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
-
+            child_nodes_[j]->slice_rows<T>(child_row_ids, slice, depth + 1,
+                                           cutoff_depth, max_columns_cutoff);
             assert(slice->size() >= pos[j] + child_row_ids.size());
 
             // transform column indexes
