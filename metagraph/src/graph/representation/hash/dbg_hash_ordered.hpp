@@ -31,6 +31,11 @@ class DBGHashOrdered : public DeBruijnGraph {
                       const std::function<void(node_index)> &on_insertion = [](node_index) {}) {
         hash_dbg_->add_sequence(sequence, skip, on_insertion);
     }
+    void add_sequence(std::string_view sequence,
+                      const std::function<bool()> &skip,
+                      const std::function<void(size_t, node_index)> &on_insertion = [](size_t, node_index) {}) {
+        hash_dbg_->add_sequence(sequence, skip, on_insertion);
+    }
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -118,6 +123,9 @@ class DBGHashOrdered : public DeBruijnGraph {
         virtual void add_sequence(std::string_view sequence,
                                   const std::function<bool()> &skip,
                                   const std::function<void(node_index)> &on_insertion) = 0;
+        virtual void add_sequence(std::string_view sequence,
+                                  const std::function<bool()> &skip,
+                                  const std::function<void(size_t, node_index)> &on_insertion) = 0;
         virtual void serialize(std::ostream &out) const = 0;
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;
