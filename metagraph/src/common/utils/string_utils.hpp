@@ -12,6 +12,8 @@ bool starts_with(const std::string &str, const std::string &prefix);
 
 bool ends_with(const std::string &str, const std::string &suffix);
 
+double parse_abundance(const std::string &comment);
+
 std::string remove_suffix(const std::string &str, const std::string &suffix);
 
 template <typename... String>
