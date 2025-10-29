@@ -727,7 +727,7 @@ class TestHeaderCounts(TestingBase):
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
 
-        cls.fasta_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '../build/logan_30.fa'))
+        cls.fasta_file = TEST_DATA_DIR + '/logan_30.fa'
 
         cls.header_counts = []
         with open(cls.fasta_file) as f:
