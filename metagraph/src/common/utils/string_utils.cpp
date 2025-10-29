@@ -25,13 +25,13 @@ bool ends_with(const std::string &str, const std::string &suffix) {
 
 // Try to parse ka:f:[abundance] or km:f:[abundance] from header
 // https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
-double parse_abundance(const std::string &comment) {
+std::optional<uint64_t> parse_abundance(const std::string &comment) {
     std::smatch match;
     std::regex abundance_regex(R"((ka|km):f:([0-9.eE+-]+))");
     if (std::regex_search(comment, match, abundance_regex) && match.size() > 2) {
-        return std::stod(match[2].str());
+        return std::max<uint64_t>(1, std::llround(std::stod(match[2].str())));
     } else {
-        return 1.0;
+        return std::nullopt;
     }
 }
 

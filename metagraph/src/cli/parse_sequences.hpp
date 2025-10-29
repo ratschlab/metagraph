@@ -171,14 +171,22 @@ void parse_sequences(const std::string &file,
         } else {
             if (config.count_kmers) {
                 mtg::common::logger->warn("k-mer counts file not found for '{}', "
-                                          "will try to deduce counts from headers",
+                                          "will try reading counts from headers",
                                           file);
             }
+            bool parse_from_headers = config.count_kmers;
             read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                 uint64_t abundance = 1;
                 
-                if (config.count_kmers) {
-                    abundance = utils::parse_abundance(read_stream->comment.s);
+                if (parse_from_headers) {
+                    if (auto count = utils::parse_abundance(read_stream->comment.s)) {
+                        abundance = *count;
+                    } else {
+                        parse_from_headers = false;
+                        mtg::common::logger->warn("No k-mer count found in header '{}', "
+                                                  "will treat all sequences as having k-mer count 1",
+                                                  read_stream->name.s);
+                    }
                 }
 
                 call_sequence(std::string_view(read_stream->seq.s, read_stream->seq.l), abundance);
