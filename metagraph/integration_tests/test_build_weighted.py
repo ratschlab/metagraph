@@ -362,6 +362,26 @@ class TestBuildWeighted(TestingBase):
         self.assertEqual(stats_graph['nnz weights'], '2')
         self.assertEqual(stats_graph['avg weight'], str(avg_count_expected))
 
+    @parameterized.expand(BUILDS)
+    def test_header_abundance_counts(self, build):
+        """Test --count-kmers with k-mer abundances from FASTA headers (Logan format) for all graph types"""
+        representation, tmp_dir = build_params[build]
+        fasta_path = os.path.join(TEST_DATA_DIR, 'logan_30.fa')
+        outbase = os.path.join(self.tempdir.name, f'logan_graph_{representation}')
+        cmd = f'{METAGRAPH} build --graph {representation} --count-kmers -k 31 -o {outbase} {fasta_path}'
+        res = subprocess.run(cmd, shell=True)
+        self.assertEqual(res.returncode, 0)
+        weights_file = outbase + graph_file_extension[representation] + '.weights'
+        self.assertTrue(os.path.exists(weights_file))
+        stats_graph = self._get_stats(outbase + graph_file_extension[representation])
+        print(f"Stats for {representation}: {stats_graph}")
+        self.assertEqual(stats_graph['returncode'], 0)
+        self.assertEqual(stats_graph['k'], '31')
+        self.assertEqual(stats_graph['nnz weights'], '728')
+        self.assertEqual(stats_graph['avg weight'], '7.74863')
+        self.assertEqual(stats_graph['mode'], 'basic')
+        self.assertIn(stats_graph['nodes (k)'], ['728', '1079'])
+        self.assertIn(stats_graph['max index (k)'], ['728', '1079', '2904'])
 
 if __name__ == '__main__':
     unittest.main()
