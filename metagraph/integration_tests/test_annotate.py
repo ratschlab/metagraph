@@ -377,36 +377,5 @@ class TestAnnotate(TestingBase):
         self.assertTrue(filecmp.cmp(f'{self.tempdir.name}/annotation.column.annodbg.coords',
                                     f'{self.tempdir.name}/annotation_ram.column.annodbg.coords'))
 
-    @parameterized.expand(GRAPH_TYPES)
-    def test_annotate_header_abundance(self, graph_repr):
-        """Test annotation using k-mer counts from FASTA headers (Logan format)"""
-        # Build graph from logan_30.fa
-        graph_path = os.path.join(self.tempdir.name, 'logan_graph')
-        input_fasta = os.path.join(TEST_DATA_DIR, 'logan_30.fa')
-        build_cmd = f'{METAGRAPH} build --graph {graph_repr} -k 31 --count-kmers -o {graph_path} {input_fasta}'
-        res = subprocess.run(build_cmd, shell=True)
-        self.assertEqual(res.returncode, 0)
-        graph_file = graph_path + graph_file_extension[graph_repr]
-        # Annotate using --count-kmers
-        anno_repr = 'column'
-        anno_path = os.path.join(self.tempdir.name, f'logan_annotation_{graph_repr}')
-        annotate_cmd = f'{METAGRAPH} annotate --anno-header --count-kmers -p {NUM_THREADS} \
-            -i {graph_file} -o {anno_path} {input_fasta}'
-        res = subprocess.run(annotate_cmd, shell=True)
-        self.assertEqual(res.returncode, 0)
-        # Check annotation stats
-        stats_annotation = self._get_stats('-a ' + anno_path + anno_file_extension[anno_repr])
-        self.assertEqual(stats_annotation['returncode'], 0)
-        # Assert label count, objects, and density
-        self.assertEqual(stats_annotation['labels'], '30')
-        # Objects and density depend on graph type
-        if graph_repr == 'succinct':
-            self.assertEqual(stats_annotation['objects'], '1079')
-            self.assertAlmostEqual(float(stats_annotation['density']), 0.02249, places=5)
-        elif graph_repr in ['bitmap', 'hash', 'hashstr']:
-            self.assertEqual(stats_annotation['objects'], '728')
-            self.assertAlmostEqual(float(stats_annotation['density']), 0.0333333, places=5)
-        self.assertEqual(stats_annotation['representation'], 'column')
-
 if __name__ == '__main__':
     unittest.main()

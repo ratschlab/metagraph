@@ -372,7 +372,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                 );
             } else {
-
                 logger->warn("No k-mer counts found at '{}', "
                              "will try reading counts from headers",
                              counts_fname);
