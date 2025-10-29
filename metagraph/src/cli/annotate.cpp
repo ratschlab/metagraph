@@ -35,6 +35,7 @@ void call_annotations(const std::string &file,
                       size_t max_count,
                       bool filename_anno,
                       bool annotate_sequence_headers,
+                      bool parse_counts_from_headers,
                       const std::string &fasta_anno_comment_delim,
                       const std::string &fasta_header_delimiter,
                       const std::vector<std::string> &anno_labels,
@@ -93,7 +94,6 @@ void call_annotations(const std::string &file,
         );
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
-        bool parse_from_headers = true;
         read_fasta_file_critical(
             file,
             [&](kseq_t *read_stream) {
@@ -112,11 +112,11 @@ void call_annotations(const std::string &file,
                 }
 
                 uint64_t abundance = 1;
-                if (parse_from_headers) {
+                if (parse_counts_from_headers) {
                     if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
                     } else {
-                        parse_from_headers = false;
+                        parse_counts_from_headers = false;
                         logger->warn("No k-mer count found in header '{}', "
                                      "will treat all sequences as having k-mer count 1",
                                      read_stream->name.s);
@@ -264,6 +264,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.max_count,
                 config.filename_anno,
                 config.annotate_sequence_headers,
+                /*parse_counts_from_headers*/false,
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
                 config.anno_labels,
@@ -311,6 +312,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.max_count,
             config.filename_anno,
             config.annotate_sequence_headers,
+            /*parse_counts_from_headers*/false,
             config.fasta_anno_comment_delim,
             config.fasta_header_delimiter,
             config.anno_labels,
@@ -383,6 +385,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.max_count,
                     config.filename_anno,
                     config.annotate_sequence_headers,
+                    /*parse_counts_from_headers*/true,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
                     config.anno_labels,
