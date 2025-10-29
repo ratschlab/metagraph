@@ -377,5 +377,6 @@ class TestAnnotate(TestingBase):
         self.assertTrue(filecmp.cmp(f'{self.tempdir.name}/annotation.column.annodbg.coords',
                                     f'{self.tempdir.name}/annotation_ram.column.annodbg.coords'))
 
+
 if __name__ == '__main__':
     unittest.main()
