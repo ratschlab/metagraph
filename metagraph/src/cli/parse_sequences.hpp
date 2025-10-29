@@ -179,7 +179,7 @@ void parse_sequences(const std::string &file,
                 uint64_t abundance = 1;
                 
                 if (parse_from_headers) {
-                    if (auto count = utils::parse_abundance(read_stream->comment.s)) {
+                    if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
                     } else {
                         parse_from_headers = false;
