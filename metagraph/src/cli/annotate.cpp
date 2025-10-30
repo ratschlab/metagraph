@@ -94,6 +94,7 @@ void call_annotations(const std::string &file,
         );
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
+        bool parsed_first_header = false;
         read_fasta_file_critical(
             file,
             [&](kseq_t *read_stream) {
@@ -112,16 +113,22 @@ void call_annotations(const std::string &file,
                 }
 
                 uint64_t abundance = 1;
+
                 if (parse_counts_from_headers) {
                     if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
+                        parsed_first_header = true;
+                    } else if (parsed_first_header) {
+                        mtg::common::logger->error("Inconsistent k-mer count headers in file '{}'", file);
+                        exit(1);
                     } else {
                         parse_counts_from_headers = false;
-                        logger->warn("No k-mer count found in header '{}', "
-                                     "will treat all sequences as having k-mer count 1",
-                                     read_stream->name.s);
+                        mtg::common::logger->warn("No k-mer count found in header '{}', "
+                                                  "will treat all sequences as having k-mer count 1",
+                                                  read_stream->name.s);
                     }
                 }
+
                 callback(read_stream->seq.s, labels, abundance);
 
                 total_seqs += 1;
