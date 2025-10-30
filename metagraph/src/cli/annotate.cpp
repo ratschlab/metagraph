@@ -116,8 +116,10 @@ void call_annotations(const std::string &file,
                     if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
                         abundance = *count;
                     } else {
-                        logger->error("No k-mer count found in header '{}'", read_stream->name.s);
-                        exit(1);
+                        parse_counts_from_headers = false;
+                        logger->warn("No k-mer count found in header '{}', "
+                                     "will treat all sequences as having k-mer count 1",
+                                     read_stream->name.s);
                     }
                 }
                 callback(read_stream->seq.s, labels, abundance);
