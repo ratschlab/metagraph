@@ -79,15 +79,24 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
         slice.resize(0);
         slice_rows(begin, end, &slice);
 
+        for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
+            // every row in `slice` ends with `-1`
+            auto row_end = std::find(row_begin, slice.end(),
+                                     std::numeric_limits<Column>::max());
+            std::sort(row_begin, row_end);
+            row_begin = row_end + 1;
+        }
+
+        SetBitPositions row;
+        row.reserve(num_columns());
+
         #pragma omp ordered
         {
-            SetBitPositions row;
             for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
                 // every row in `slice` ends with `-1`
                 auto row_end = std::find(row_begin, slice.end(),
                                          std::numeric_limits<Column>::max());
                 row.assign(row_begin, row_end);
-                std::sort(row.begin(), row.end());
                 callback(row);
                 ++progress_bar;
                 row_begin = row_end + 1;
