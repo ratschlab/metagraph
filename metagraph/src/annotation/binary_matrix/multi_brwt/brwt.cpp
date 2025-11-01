@@ -4,10 +4,12 @@
 #include <numeric>
 
 #include <progress_bar.hpp>
+#include <omp.h>
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
@@ -141,12 +143,10 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
 // Appends to `slice`
 template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
-    #pragma omp parallel num_threads(2)
+    #pragma omp parallel num_threads(4)
+    #pragma omp single nowait
     {
-        #pragma omp single
-        {
-            slice_rows(row_ids, slice, 0, 10, std::max(10, (int)num_columns() / 100));
-        }
+        slice_rows(row_ids, slice, 0, 10, std::max(10, (int)num_columns() / 100));
     }
 }
 
@@ -251,9 +251,23 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
 
     if (depth < cutoff_depth && num_columns() > max_columns_cutoff) {
         std::vector<Vector<T>> slices(child_nodes_.size());
+        size_t biggest = 0;
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
-            #pragma omp task default(shared) firstprivate(j)
+            const auto &c = child_nodes_[j];
+            if (c->num_columns() > child_nodes_[biggest]->num_columns())
+                biggest = j;
+        }
+        std::vector<size_t> indices;
+        for (size_t j = 0; j < child_nodes_.size(); ++j) {
+            if (j != biggest)
+                indices.push_back(j);
+        }
+        indices.push_back(biggest);
+        for (size_t j : indices) {
+            #pragma omp task default(shared) firstprivate(j) if(biggest != j)
             {
+               //common::logger->trace("{}   querying node {}/{}, level: {}->, num_columns: {}, num_rows: {}",
+               //              omp_get_thread_num(), j, child_nodes_.size(), depth, child_nodes_[j]->num_columns(), child_row_ids.size());
                 auto &slice_part = slices[j];
                 slice_part.reserve(child_row_ids.size());
                 child_nodes_[j]->slice_rows<T>(child_row_ids, &slice_part, depth + 1,
