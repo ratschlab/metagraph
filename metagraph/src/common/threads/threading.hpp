@@ -52,12 +52,14 @@ class ThreadPool {
     void initialize(size_t num_threads);
 
     std::vector<std::thread> workers;
+    size_t num_waiting_;
     std::deque<std::function<void()>> tasks;
     size_t max_num_tasks_;
 
     std::mutex queue_mutex;
     std::condition_variable empty_condition;
     std::condition_variable full_condition;
+    std::condition_variable all_waiting;
 
     bool joining_;
     bool stop_;

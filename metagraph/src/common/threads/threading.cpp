@@ -30,8 +30,9 @@ void ThreadPool::join() {
     if (!num_workers) {
         return;
     } else {
-        std::lock_guard<std::mutex> lock(queue_mutex);
+        std::unique_lock<std::mutex> lock(this->queue_mutex);
         assert(!joining_);
+        all_waiting.wait(lock, [this]() { return num_waiting_ == workers.size(); });
         joining_ = true;
     }
     empty_condition.notify_all();
@@ -59,15 +60,20 @@ void ThreadPool::initialize(size_t num_workers) {
     if (!num_workers)
         return;
 
+    num_waiting_ = 0;
+
     for (size_t i = 0; i < num_workers; ++i) {
         workers.emplace_back([this]() {
             while (true) {
                 std::function<void()> task;
                 {
                     std::unique_lock<std::mutex> lock(this->queue_mutex);
+                    num_waiting_++;
+                    all_waiting.notify_one();
                     this->empty_condition.wait(lock, [this]() {
                         return this->joining_ || !this->tasks.empty();
                     });
+                    num_waiting_--;
                     if (this->tasks.empty())
                         return;
 
