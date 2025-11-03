@@ -247,6 +247,7 @@ void BRWT::slice_rows_basic(const std::vector<Row> &row_ids, Vector<T> *slice) c
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
         pos[j] = slice->size();
         child_nodes_[j]->slice_rows_basic<T>(child_row_ids, slice);
+
         assert(slice->size() >= pos[j] + child_row_ids.size());
 
         // transform column indexes
