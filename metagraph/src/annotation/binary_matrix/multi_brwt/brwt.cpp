@@ -206,7 +206,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     ThreadPool thread_pool(4);
     std::mutex mu;
     thread_pool.enqueue([&,this]() {
-        slice_rows(row_ids, {}, 20, std::max(10, (int)num_columns() / 100), mu, thread_pool, &slices);
+        slice_rows(row_ids, {}, 20, std::max(10, (int)num_columns() / 20), mu, thread_pool, &slices);
     });
     thread_pool.join();
 
