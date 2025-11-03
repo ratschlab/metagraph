@@ -2,7 +2,7 @@
 #define __THREADING_HPP__
 
 #include <vector>
-#include <queue>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -29,12 +29,17 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        return emplace(false, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false, false, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class F, typename... Args>
     auto force_enqueue(F&& f, Args&&... args) {
-        return emplace(true, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false, true, std::forward<F>(f), std::forward<Args>(args)...);
+    }
+
+    template <class F, typename... Args>
+    auto force_enqueue_front(F&& f, Args&&... args) {
+        return emplace(true, true, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     void join();
@@ -47,7 +52,7 @@ class ThreadPool {
     void initialize(size_t num_threads);
 
     std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
+    std::deque<std::function<void()>> tasks;
     size_t max_num_tasks_;
 
     std::mutex queue_mutex;
@@ -58,7 +63,7 @@ class ThreadPool {
     bool stop_;
 
     template <class F, typename... Args>
-    auto emplace(bool force, F&& f, Args&&... args) {
+    auto emplace(bool front, bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
@@ -79,7 +84,11 @@ class ThreadPool {
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace(std::move(wrapped_task));
+            if (front) {
+                tasks.emplace_front(std::move(wrapped_task));
+            } else {
+                tasks.emplace_back(std::move(wrapped_task));
+            }
         }
 
         empty_condition.notify_one();
