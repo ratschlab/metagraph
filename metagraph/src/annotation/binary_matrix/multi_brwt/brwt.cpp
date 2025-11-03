@@ -211,7 +211,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     thread_pool.join();
 
     std::vector<size_t> pos(slices.size(), 0);
-    for (auto _ : row_ids) {
+    for (size_t r = 0; r < row_ids.size(); ++r) {
         // merge rows from submatrices
         for (size_t i = 0; i < slices.size(); ++i) {
             while (slices[i][pos[i]++] != delim) {
