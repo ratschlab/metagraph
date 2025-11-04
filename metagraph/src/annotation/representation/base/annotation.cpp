@@ -44,6 +44,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
             if (!load_string_vector(instream, &decode_label_))
                 return false;
 
+            encode_label_.reserve(decode_label_.size());
             for (size_t i = 0; i < decode_label_.size(); ++i) {
                 encode_label_.emplace(decode_label_[i], i);
             }
