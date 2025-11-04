@@ -21,7 +21,7 @@ size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    outstream.write("v2.0", 4);
+    outstream.write("LE-v2.0", 7);
     serialize_string_vector(outstream, decode_label_);
 }
 
@@ -39,8 +39,8 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 
     try {
         auto pos = instream.tellg();
-        std::string version(4, '\0');
-        if (instream.read(version.data(), 4) && version == "v2.0") {
+        std::string version(7, '\0');
+        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
             if (!load_string_vector(instream, &decode_label_))
                 return false;
 
