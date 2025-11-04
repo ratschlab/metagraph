@@ -354,7 +354,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                     std::cout << "\t";
                     if (count_hist_v.size())
                         std::cout << fmt::format("{}:{}", count_hist_v[0].first, count_hist_v[0].second);
-                    for (size_t i = 2; i < count_hist_v.size(); i++) {
+                    for (size_t i = 1; i < count_hist_v.size(); i++) {
                         std::cout << fmt::format(",{}:{}", count_hist_v[i].first, count_hist_v[i].second);
                     }
                 }
