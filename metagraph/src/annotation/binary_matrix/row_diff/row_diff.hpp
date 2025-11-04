@@ -7,6 +7,7 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
@@ -185,7 +186,7 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    if (num_threads > 1)
+    if (num_threads > 1 && !std::is_same_v<BaseMatrix, BRWT>)
         return BinaryMatrix::get_rows_dict(rows, num_threads);
 
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;

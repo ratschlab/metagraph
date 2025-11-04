@@ -79,6 +79,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 2048) private(node_to_rd)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
@@ -89,7 +90,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
             auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.value());
+            rd_paths_trunc[i].push_back(it.key());
 
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
@@ -102,6 +103,17 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
                 break;
 
             node = row_diff_successor(*graph_, node, fork_succ_);
+        }
+    }
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
+            auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
+            rd_paths_trunc[i][j] = it.value();
+            if (!is_new) {
+                rd_paths_trunc[i].resize(j + 1);
+                break;
+            }
         }
     }
 
