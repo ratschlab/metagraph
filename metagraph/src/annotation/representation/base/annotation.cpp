@@ -9,6 +9,46 @@ namespace annot {
 
 using mtg::common::logger;
 
+class Serializer {
+  public:
+    Serializer(std::ostream &outstream) : outstream_(outstream) {}
+
+    void operator()(const std::string &str) {
+        serialize_string(outstream_, str);
+    }
+
+    template<class T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+    void operator()(T value) {
+        outstream_.write(reinterpret_cast<const char*>(&value), sizeof(T));
+    }
+
+  private:
+    std::ostream &outstream_;
+};
+
+class Deserializer {
+  public:
+    Deserializer(std::istream &instream) : instream_(instream) {}
+
+    template <typename T>
+    T operator()() {
+        T value;
+        deserialize(&value);
+        return value;
+    }
+
+  private:
+    void deserialize(std::string *str) {
+        load_string(instream_, str);
+    }
+
+    template<class T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+    void deserialize(T *value) {
+        instream_.read(reinterpret_cast<char*>(value), sizeof(T));
+    }
+
+    std::istream &instream_;
+};
 
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
@@ -17,8 +57,10 @@ size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    outstream.write("LE-v2.0", 7);
-    serialize_string_vector(outstream, get_labels());
+    outstream.write("LE-v3.0", 7);
+
+    Serializer serializer(outstream);
+    encode_label_.serialize(serializer);
 }
 
 template<typename Label>
@@ -36,6 +78,12 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     try {
         auto pos = instream.tellg();
         std::string version(7, '\0');
+        if (instream.read(version.data(), 7) && version == "LE-v3.0") {
+            Deserializer deserializer(instream);
+            encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
+            return instream.good();
+        }
+        instream.seekg(pos);
         if (instream.read(version.data(), 7) && version == "LE-v2.0") {
             std::vector<std::string> decode_label;
             if (!load_string_vector(instream, &decode_label))
