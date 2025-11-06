@@ -466,7 +466,6 @@ int run_server(Config *config) {
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
                 root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
-                root["annotation"]["relations"] = static_cast<uint64_t>(annotation.num_relations());
             }
             return root;
         });
