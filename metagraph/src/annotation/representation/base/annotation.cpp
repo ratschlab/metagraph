@@ -12,17 +12,13 @@ using mtg::common::logger;
 
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
-    auto [it, inserted] = encode_label_.emplace(label, decode_label_.size());
-    if (inserted)
-        decode_label_.push_back(label);
-
-    return it->second;
+    return encode_label_.emplace(label).first - encode_label_.begin();
 }
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
     outstream.write("LE-v2.0", 7);
-    serialize_string_vector(outstream, decode_label_);
+    serialize_string_vector(outstream, get_labels());
 }
 
 template<typename Label>
@@ -41,23 +37,30 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         auto pos = instream.tellg();
         std::string version(7, '\0');
         if (instream.read(version.data(), 7) && version == "LE-v2.0") {
-            if (!load_string_vector(instream, &decode_label_))
+            std::vector<std::string> decode_label;
+            if (!load_string_vector(instream, &decode_label))
                 return false;
 
-            encode_label_.reserve(decode_label_.size());
-            for (size_t i = 0; i < decode_label_.size(); ++i) {
-                encode_label_.emplace(decode_label_[i], i);
+            encode_label_.clear();
+            encode_label_.reserve(decode_label.size());
+            for (size_t i = 0; i < decode_label.size(); ++i) {
+                encode_label_.emplace(decode_label[i]);
             }
             return instream.good();
         }
         // backward compatibility
         instream.seekg(pos);
-        if (!load_string_number_map(instream, &encode_label_))
+        tsl::hopscotch_map<std::string, uint64_t> encode_label;
+        if (!load_string_number_map(instream, &encode_label))
             return false;
 
-        if (!load_string_vector(instream, &decode_label_))
+        std::vector<std::string> decode_label;
+        if (!load_string_vector(instream, &decode_label))
             return false;
 
+        for (size_t i = 0; i < decode_label.size(); ++i) {
+            encode_label_.emplace(decode_label[i]);
+        }
         return instream.good();
     } catch (...) {
         return false;

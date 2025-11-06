@@ -11,6 +11,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "common/vector.hpp"
+#include "common/vector_set.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
@@ -99,7 +100,12 @@ class LabelEncoder {
      * Return the code of the label passed.
      * Throw exception if it does not exist.
      */
-    size_t encode(const Label &label) const { return encode_label_.at(label); }
+    size_t encode(const Label &label) const {
+        auto it = encode_label_.find(label);
+        if (it == encode_label_.end())
+            throw std::out_of_range("Label not found");
+        return it - encode_label_.begin();
+    }
 
     /**
      * Check if the label has been added to encoder.
@@ -109,22 +115,21 @@ class LabelEncoder {
     /**
      * Throws an exception if a bad code is passed.
      */
-    const Label& decode(size_t code) const { return decode_label_.at(code); }
+    const Label& decode(size_t code) const { return *encode_label_.nth(code); }
 
-    const std::vector<Label>& get_labels() const { return decode_label_; }
+    const std::vector<Label>& get_labels() const { return encode_label_.values_container(); }
 
     void merge(const LabelEncoder<Label> &other);
 
-    size_t size() const { return decode_label_.size(); }
+    size_t size() const { return encode_label_.size(); }
 
-    void clear() { encode_label_.clear(); decode_label_.clear(); }
+    void clear() { encode_label_.clear(); }
 
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
 
   private:
-    tsl::hopscotch_map<Label, uint64_t> encode_label_;
-    std::vector<Label> decode_label_;
+    VectorSet<Label> encode_label_;
 };
 
 } // namespace annot
