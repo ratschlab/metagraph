@@ -346,6 +346,23 @@ int run_server(Config *config) {
         }
     }
 
+    logger->info("Loading graphs...");
+    std::mutex mu_graphs;
+    std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
+    for (const auto &[name, graphs] : indexes) {
+        for (const auto &[graph_fname, anno_fname] : graphs) {
+            Config config_copy = *config;
+            config_copy.infbase = graph_fname;
+            config_copy.infbase_annotators = { anno_fname };
+            graphs_pool.enqueue([config_copy{std::move(config_copy)},&graphs_cache,&mu_graphs]() {
+                auto index = initialize_annotated_dbg(config_copy);
+                std::lock_guard<std::mutex> lock(mu_graphs);
+                graphs_cache[{ config_copy.infbase, config_copy.infbase_annotators[0] }] = std::move(index);
+            });
+        }
+    }
+    graphs_pool.join();
+
     logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
 
     // the actual server
@@ -373,12 +390,8 @@ int run_server(Config *config) {
                 std::vector<std::shared_future<void>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        Config config_copy = *config;
-                        config_copy.infbase = graph_fname;
-                        config_copy.infbase_annotators = { anno_fname };
-                        futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&result,&mu]() {
-                            auto index = initialize_annotated_dbg(config_copy);
-                            auto json = process_search_request(content_json, *index, config_copy);
+                        futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
+                            auto json = process_search_request(content_json, *index, *config);
                             std::lock_guard<std::mutex> lock(mu);
                             if (result.empty()) {
                                 result = std::move(json);
