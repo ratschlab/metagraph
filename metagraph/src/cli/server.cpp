@@ -214,7 +214,7 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     }
     server_startup.config.port = config.port;
     server_startup.config.timeout_request = 30;    // 30 sec to finish headers
-    server_startup.config.timeout_content = 1800;  // 30 minutes for body/compute (per request) max
+    server_startup.config.timeout_content = 900;   // 15 minutes for body/compute (per request) max
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
@@ -346,6 +346,39 @@ int run_server(Config *config) {
         }
     }
 
+    logger->info("Loading graphs...");
+    std::mutex mu_graphs;
+    std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
+    for (const auto &[name, graphs] : indexes) {
+        for (const auto &[graph_fname, anno_fname] : graphs) {
+            Config config_copy = *config;
+            config_copy.infbase = graph_fname;
+            config_copy.infbase_annotators = { anno_fname };
+            graphs_pool.enqueue([config_copy{std::move(config_copy)},&graphs_cache,&mu_graphs]() {
+                auto index = initialize_annotated_dbg(config_copy);
+                std::lock_guard<std::mutex> lock(mu_graphs);
+                graphs_cache[{ config_copy.infbase, config_copy.infbase_annotators[0] }] = std::move(index);
+            });
+        }
+    }
+    graphs_pool.join();
+
+    std::optional<size_t> k;
+    std::optional<bool> is_canonical;
+    if (config->fnames.size()) {
+        k = graphs_cache.begin()->second->get_graph().get_k();
+        is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
+    }
+    for (const auto &[name, graphs] : indexes) {
+        for (const auto &[graph_fname, anno_fname] : graphs) {
+            auto &graph = graphs_cache[{ graph_fname, anno_fname }]->get_graph();
+            if (k && *k != graph.get_k())
+                k.reset();
+            if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                is_canonical.reset();
+        }
+    }
+
     logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
 
     // the actual server
@@ -373,12 +406,8 @@ int run_server(Config *config) {
                 std::vector<std::shared_future<void>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        Config config_copy = *config;
-                        config_copy.infbase = graph_fname;
-                        config_copy.infbase_annotators = { anno_fname };
-                        futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&result,&mu]() {
-                            auto index = initialize_annotated_dbg(config_copy);
-                            auto json = process_search_request(content_json, *index, config_copy);
+                        futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
+                            auto json = process_search_request(content_json, *index, *config);
                             std::lock_guard<std::mutex> lock(mu);
                             if (result.empty()) {
                                 result = std::move(json);
@@ -456,6 +485,10 @@ int run_server(Config *config) {
                     num_labels += labels.size();
                 }
                 root["annotation"]["labels"] = num_labels;
+                if (k)
+                    root["graph"]["k"] = static_cast<uint64_t>(*k);
+                if (is_canonical)
+                    root["graph"]["is_canonical_mode"] = *is_canonical;
             } else {
                 root["graph"]["filename"] = std::filesystem::path(config->infbase).filename().string();
                 root["graph"]["k"] = static_cast<uint64_t>(anno_graph.get()->get_graph().get_k());
@@ -466,7 +499,6 @@ int run_server(Config *config) {
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
                 root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
-                root["annotation"]["relations"] = static_cast<uint64_t>(annotation.num_relations());
             }
             return root;
         });
