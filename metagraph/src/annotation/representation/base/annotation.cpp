@@ -9,56 +9,23 @@ namespace annot {
 
 using mtg::common::logger;
 
-class Serializer {
-  public:
-    Serializer(std::ostream &outstream) : outstream_(outstream) {}
-
-    void operator()(const std::string &str) {
-        serialize_string(outstream_, str);
-    }
-
-    template<class T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
-    void operator()(T value) {
-        outstream_.write(reinterpret_cast<const char*>(&value), sizeof(T));
-    }
-
-  private:
-    std::ostream &outstream_;
-};
-
-class Deserializer {
-  public:
-    Deserializer(std::istream &instream) : instream_(instream) {}
-
-    template <typename T>
-    T operator()() {
-        T value;
-        deserialize(&value);
-        return value;
-    }
-
-  private:
-    void deserialize(std::string *str) {
-        load_string(instream_, str);
-    }
-
-    template<class T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
-    void deserialize(T *value) {
-        instream_.read(reinterpret_cast<char*>(value), sizeof(T));
-    }
-
-    std::istream &instream_;
-};
-
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
-    return encode_label_.emplace(label).first - encode_label_.begin();
+    auto it = encode_label_.emplace(label).first;
+    return it - encode_label_.begin();
+}
+
+template <typename Label>
+size_t LabelEncoder<Label>::encode(const Label &label) const {
+    auto it = encode_label_.find(label);
+    if (it == encode_label_.end())
+        throw std::out_of_range("Label not found");
+    return it - encode_label_.begin();
 }
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    outstream.write("LE-v3.0", 7);
-
+    outstream.write("LE-v2.0", 7);
     Serializer serializer(outstream);
     encode_label_.serialize(serializer);
 }
@@ -78,34 +45,22 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     try {
         auto pos = instream.tellg();
         std::string version(7, '\0');
-        if (instream.read(version.data(), 7) && version == "LE-v3.0") {
+        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
             Deserializer deserializer(instream);
             encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
             return instream.good();
         }
-        instream.seekg(pos);
-        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
-            std::vector<std::string> decode_label;
-            if (!load_string_vector(instream, &decode_label))
-                return false;
-
-            encode_label_.clear();
-            encode_label_.reserve(decode_label.size());
-            for (size_t i = 0; i < decode_label.size(); ++i) {
-                encode_label_.emplace(decode_label[i]);
-            }
-            return instream.good();
-        }
         // backward compatibility
         instream.seekg(pos);
-        tsl::hopscotch_map<std::string, uint64_t> encode_label;
-        if (!load_string_number_map(instream, &encode_label))
-            return false;
 
         std::vector<std::string> decode_label;
-        if (!load_string_vector(instream, &decode_label))
+        std::vector<uint64_t> values;
+        if (!load_string_vector(instream, &decode_label)
+                || !load_number_vector(instream, &values)
+                || !load_string_vector(instream, &decode_label))
             return false;
 
+        encode_label_.clear();
         for (size_t i = 0; i < decode_label.size(); ++i) {
             encode_label_.emplace(decode_label[i]);
         }

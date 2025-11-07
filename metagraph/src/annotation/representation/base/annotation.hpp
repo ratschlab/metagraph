@@ -100,12 +100,7 @@ class LabelEncoder {
      * Return the code of the label passed.
      * Throw exception if it does not exist.
      */
-    size_t encode(const Label &label) const {
-        auto it = encode_label_.find(label);
-        if (it == encode_label_.end())
-            throw std::out_of_range("Label not found");
-        return it - encode_label_.begin();
-    }
+    size_t encode(const Label &label) const;
 
     /**
      * Check if the label has been added to encoder.
