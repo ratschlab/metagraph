@@ -363,6 +363,22 @@ int run_server(Config *config) {
     }
     graphs_pool.join();
 
+    std::optional<size_t> k;
+    std::optional<bool> is_canonical;
+    if (config->fnames.size()) {
+        k = graphs_cache.begin()->second->get_graph().get_k();
+        is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
+    }
+    for (const auto &[name, graphs] : indexes) {
+        for (const auto &[graph_fname, anno_fname] : graphs) {
+            auto &graph = graphs_cache[{ graph_fname, anno_fname }]->get_graph();
+            if (k.has_value() && *k != graph.get_k())
+                k.reset();
+            if (is_canonical.has_value() && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                is_canonical.reset();
+        }
+    }
+
     logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
 
     // the actual server
@@ -469,6 +485,10 @@ int run_server(Config *config) {
                     num_labels += labels.size();
                 }
                 root["annotation"]["labels"] = num_labels;
+                if (k)
+                    root["graph"]["k"] = static_cast<uint64_t>(*k);
+                if (is_canonical)
+                    root["graph"]["is_canonical_mode"] = *is_canonical;
             } else {
                 root["graph"]["filename"] = std::filesystem::path(config->infbase).filename().string();
                 root["graph"]["k"] = static_cast<uint64_t>(anno_graph.get()->get_graph().get_k());
