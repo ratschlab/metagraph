@@ -63,6 +63,11 @@ class Serializer {
   public:
     explicit Serializer(std::ostream &os) : os_(os) {}
 
+    void operator()(const std::string &str) {
+        serialize_number(os_, str.size());
+        os_.write(str.data(), str.size());
+    }
+
     template <class T>
     void operator()(const T &value) {
         os_.write(reinterpret_cast<const char *>(&value), sizeof(T));
@@ -79,11 +84,22 @@ class Deserializer {
     template <class T>
     T operator()() {
         T value;
-        is_.read(reinterpret_cast<char *>(&value), sizeof(T));
+        deserialize(&value);
         return value;
     }
 
   private:
+    void deserialize(std::string *str) {
+        uint64_t size = load_number(is_);
+        str->resize(size);
+        is_.read(str->data(), size);
+    }
+
+    template <class T>
+    void deserialize(T *value) {
+        is_.read(reinterpret_cast<char *>(value), sizeof(T));
+    }
+
     std::istream &is_;
 };
 

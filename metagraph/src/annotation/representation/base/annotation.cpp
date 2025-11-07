@@ -9,20 +9,25 @@ namespace annot {
 
 using mtg::common::logger;
 
-
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
-    auto [it, inserted] = encode_label_.emplace(label, decode_label_.size());
-    if (inserted)
-        decode_label_.push_back(label);
+    auto it = encode_label_.emplace(label).first;
+    return it - encode_label_.begin();
+}
 
-    return it->second;
+template <typename Label>
+size_t LabelEncoder<Label>::encode(const Label &label) const {
+    auto it = encode_label_.find(label);
+    if (it == encode_label_.end())
+        throw std::out_of_range("Label not found");
+    return it - encode_label_.begin();
 }
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    serialize_string_number_map(outstream, encode_label_);
-    serialize_string_vector(outstream, decode_label_);
+    outstream.write("LE-v2.0", 7);
+    Serializer serializer(outstream);
+    encode_label_.serialize(serializer);
 }
 
 template<typename Label>
@@ -38,12 +43,24 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         return false;
 
     try {
-        if (!load_string_number_map(instream, &encode_label_))
+        auto pos = instream.tellg();
+        std::string version(7, '\0');
+        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
+            Deserializer deserializer(instream);
+            encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
+            return instream.good();
+        }
+        // backward compatibility
+        instream.seekg(pos);
+
+        std::vector<std::string> labels;
+        std::vector<uint64_t> values;
+        if (!load_string_vector(instream, &labels)
+                || !load_number_vector(instream, &values)
+                || !load_string_vector(instream, &labels))
             return false;
 
-        if (!load_string_vector(instream, &decode_label_))
-            return false;
-
+        encode_label_ = VectorSet<std::string>(labels.begin(), labels.end());
         return instream.good();
     } catch (...) {
         return false;
