@@ -372,9 +372,9 @@ int run_server(Config *config) {
     for (const auto &[name, graphs] : indexes) {
         for (const auto &[graph_fname, anno_fname] : graphs) {
             auto &graph = graphs_cache[{ graph_fname, anno_fname }]->get_graph();
-            if (k.has_value() && *k != graph.get_k())
+            if (k && *k != graph.get_k())
                 k.reset();
-            if (is_canonical.has_value() && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+            if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
                 is_canonical.reset();
         }
     }
