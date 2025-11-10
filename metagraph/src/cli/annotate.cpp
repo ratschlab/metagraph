@@ -415,7 +415,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                             }
                         }
                         if (sequence.size() >= k) {
-                            logger->info("{}: {}, {}", fmt::join(labels, ", "), kmer_count, sequence.size() - k + 1);
+                            //logger->info("{}: {}, {}", fmt::join(labels, ", "), kmer_count, sequence.size() - k + 1);
                             batcher.push_and_pay(sequence.size(),
                                                  std::move(sequence), std::move(labels),
                                                  std::vector<uint64_t>(sequence.size() - k + 1, kmer_count));
