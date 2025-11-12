@@ -45,6 +45,11 @@ void ThreadPool::join() {
         initialize(num_workers);
 }
 
+size_t ThreadPool::num_waiting_tasks() const {
+    std::unique_lock<std::mutex> lock(const_cast<std::mutex&>(this->queue_mutex));
+    return this->tasks.size();
+}
+
 void ThreadPool::remove_waiting_tasks() {
     std::unique_lock<std::mutex> lock(this->queue_mutex);
     this->tasks = std::queue<std::function<void()>>();
