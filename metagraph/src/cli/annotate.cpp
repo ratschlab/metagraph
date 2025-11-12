@@ -7,6 +7,7 @@
 #include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "graph/graph_extensions/row_tuples_to_id.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "seq_io/kmc_parser.hpp"
@@ -417,6 +418,13 @@ int annotate_graph(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
+
+    if (config->accessions) {
+        common::logger->trace("Constructing sequence accession map");
+        mtg::graph::RowTuplesToId accessions(files);
+        accessions.serialize(config->outfbase);
+        return 0;
+    }
 
     assert(config->infbase_annotators.size() <= 1);
 
