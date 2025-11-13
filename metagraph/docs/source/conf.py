@@ -76,26 +76,27 @@ pygments_style = 'sphinx'
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-import sphinx_bootstrap_theme
-html_theme = 'bootstrap'
-html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
+# import sphinx_bootstrap_theme
+html_theme = 'furo'
+# html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_logo = 'images/mtg_icon.png'
 templates_path = ['_templates']
+html_title = 'MetaGraph Docs'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-html_theme_options = {
-    'navbar_title': "MetaGraph Docs",
-    'navbar_site_name': "Docs",
-    # 'navbar_links': [
-    #     ("Home", "https://metagraph.ethz.ch/", True),
-    # ],
-    'navbar_sidebarrel': True,
-    'navbar_fixed_top': True,
-    'source_link_position': "footer",
-}
+# html_theme_options = {
+#     'navbar_title': "MetaGraph Docs",
+#     'navbar_site_name': "Docs",
+#     # 'navbar_links': [
+#     #     ("Home", "https://metagraph.ethz.ch/", True),
+#     # ],
+#     'navbar_sidebarrel': True,
+#     'navbar_fixed_top': True,
+#     'source_link_position': "footer",
+# }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

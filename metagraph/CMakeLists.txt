@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.16...3.30)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
 
 # Read version from JSON
@@ -112,12 +114,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-exit-time-destructors
     -Wno-deprecated-declarations
     -Wno-vla-extension
+    -Wno-deprecated-copy
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
     add_compile_options(
      -Wno-suggest-destructor-override
-     -Wno-deprecated-copy
      -Wno-deprecated-declarations
     )
   endif()
@@ -131,11 +133,6 @@ if(APPLE)
   if(EXISTS /opt/homebrew/lib)
     link_directories(/opt/homebrew/lib)
   endif()
-  if(EXISTS /opt/homebrew/opt/icu4c/lib)
-    link_directories(/opt/homebrew/opt/icu4c/lib)
-  else()
-    message(FATAL_ERROR "ICU libs not found")
-  endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
@@ -144,10 +141,14 @@ if(APPLE)
 endif()
 
 findOpenMP()
-if("${OpenMP_CXX_VERSION}" VERSION_GREATER_EQUAL 5.0)
-  add_definitions(-D_OpenMP_5)
-else()
-  message(WARNING "Could only find OpenMP ${OpenMP_CXX_VERSION} < 5.0, non-rectangular nested loops will not be parallelized")
+
+if(APPLE)
+  if(CMAKE_OSX_ARCHITECTURES MATCHES "")
+    set(CMAKE_OSX_ARCHITECTURES ${CMAKE_SYSTEM_PROCESSOR})
+  elseif(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
+    set(CMAKE_SYSTEM_PROCESSOR arm64)
+    set(CMAKE_HOST_SYSTEM_PROCESSOR arm64)
+  endif()
 endif()
 
 # Check if 128 bit integers are supported
@@ -164,7 +165,7 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT ${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
   execute_process(COMMAND sysctl -n machdep.cpu.features
                   OUTPUT_VARIABLE _cpuinfo OUTPUT_STRIP_TRAILING_WHITESPACE)
   execute_process(COMMAND sysctl -n machdep.cpu.leaf7_features
@@ -259,6 +260,7 @@ set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
+  ${CMAKE_BINARY_DIR}/external-libraries/htslib/lib
   ${CMAKE_BINARY_DIR}/KMC
   external-libraries/sdsl-lite/lib
 )
@@ -273,6 +275,7 @@ include_directories(
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
+  ${CMAKE_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
@@ -283,10 +286,6 @@ include_directories(
   PUBLIC SYSTEM
   external-libraries/asio/asio/include
   external-libraries/simde-no-tests
-  external-libraries/sshash
-  external-libraries/sshash/include
-  external-libraries/sshash/external/pthash
-  external-libraries/sshash/external/pthash/external/essentials/include
 )
 
 add_library(ips4o INTERFACE)
@@ -301,14 +300,23 @@ target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 
-if(NO_ZSTD)
-  set(ZSTD_FOUND FALSE)
-else()
-  find_package(zstd)
-endif()
-
+find_package(zstd)
 if(ZSTD_FOUND)
   add_definitions(-D_SUPPORT_ZSTD)
+  if(APPLE)
+    if(EXISTS /opt/homebrew/opt/icu4c)
+      set(ICU_ROOT "/opt/homebrew/opt/icu4c")
+    elseif(EXISTS /usr/local/opt/icu4c)
+      set(ICU_ROOT "/usr/local/opt/icu4c")
+    else()
+      execute_process(COMMAND conda info --base
+                      OUTPUT_VARIABLE ICU_ROOT
+                      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+    find_package(ICU COMPONENTS data REQUIRED)
+    get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
+    link_directories(${ICU_DATA_LIBRARY_PATH})
+  endif()
 else()
   message(WARNING "Disabling zstd support.")
 endif()
@@ -318,16 +326,17 @@ find_package(Boost REQUIRED COMPONENTS iostreams)
 
 findFolly()
 if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
+  add_definitions(-D_USE_FOLLY)
+  if(Jemalloc_FOUND)
+    add_definitions(-DUSE_JEMALLOC)
+  else()
+    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
+  endif()
   include_directories(SYSTEM
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
   )
   set(METALIBS ${METALIBS} fbvector)
-else()
-  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install jemalloc to compile with folly and enable various"
-  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
 # makes ASIO not depend on boost
@@ -358,6 +367,11 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
+add_library(folly STATIC
+  external-libraries/folly/folly/lang/SafeAssert.cpp
+  external-libraries/folly/folly/lang/ToAscii.cpp
+)
+
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
 )
@@ -372,13 +386,43 @@ add_library(sdust STATIC
 
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
+# (macOS) make arch flags string like "-arch arm64" or "-arch arm64 -arch x86_64"
+function(make_osx_arch_flags outvar)
+  if(APPLE)
+    message(STATUS "Compiling for architecture: ${CMAKE_OSX_ARCHITECTURES}")
+    set(f "")
+    foreach(a ${CMAKE_OSX_ARCHITECTURES})
+      list(APPEND f -arch ${a})
+    endforeach()
+    string(REPLACE ";" " " f "${f}")
+    set(${outvar} "${f}" PARENT_SCOPE)
+  else()
+    set(${outvar} "" PARENT_SCOPE)
+  endif()
+endfunction()
+make_osx_arch_flags(OSX_ARCH_FLAGS)
+
 include(ExternalProject)
+set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+  PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
+  CONFIGURE_COMMAND
+    ${CMAKE_COMMAND} -E env
+      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
+    /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
+  BUILD_COMMAND $(MAKE) -j${N} lib-static
+  #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
+  # Install only static lib to avoid the dependency
+  INSTALL_COMMAND
+    ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
+    && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
+    && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
+    && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
+  DEPENDS zlib
 )
-link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
-include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
@@ -445,6 +489,7 @@ set(METALIBS ${METALIBS}
   ips4o
   caches
   eigen
+  folly
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
@@ -608,18 +653,18 @@ add_custom_target(install_test_environment
 )
 
 # --- integration tests ---
-add_custom_target(check
+add_custom_target(integration_tests
   COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
   DEPENDS metagraph
   DEPENDS install_test_environment
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
-  COMMAND make check
+  COMMAND make integration_tests
   COMMAND unit_tests
-  DEPENDS check unit_tests
+  DEPENDS integration_tests unit_tests
 )
-add_test(NAME integration_tests COMMAND make check)
+add_test(NAME integration_tests COMMAND make integration_tests)
 add_test(NAME unit_tests COMMAND unit_tests)
 
 # --- integration tests runner ---

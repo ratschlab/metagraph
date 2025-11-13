@@ -718,6 +718,61 @@ class TestQuery1Column(TestingBase):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
         [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
+        [anno_type for anno_type in ANNO_TYPES if 'int_' in anno_type]
+    ),
+    class_name_func=get_test_class_name
+)
+class TestHeaderCounts(TestingBase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+
+        cls.fasta_file = TEST_DATA_DIR + '/logan_30.fa'
+
+        cls.header_counts = []
+        with open(cls.fasta_file) as f:
+            for line in f:
+                if line.startswith('>'):
+                    label = line.split()[0][1:]
+                    for part in line.split():
+                        if part.startswith('ka:f:'):
+                            count = int(float(part.split(':')[2]) + 0.5)
+                            cls.header_counts.append((label, count))
+
+        cls.k = 31
+
+        cls._build_graph(cls.fasta_file, cls.tempdir.name + '/graph', cls.k, cls.graph_repr, 'basic')
+
+        cls._annotate_graph(
+            cls.fasta_file,
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr,
+            anno_type='header'
+        )
+
+    def test_header_counts_query(self):
+        query_cmd = f'{METAGRAPH} query --query-mode counts -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} {self.fasta_file}'
+        res = subprocess.run(query_cmd.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        output = res.stdout.decode().strip().split('\n')
+        expected_counts = {label: count for label, count in self.header_counts}
+        actual_counts = {}
+        for line in output:
+            parts = line.split('\t')
+            label = parts[1]
+            self.assertFalse(label in actual_counts, f"Duplicate label {label} in output")
+            actual_counts[label] = int(parts[2].split('=')[-1])
+        self.assertEqual(expected_counts, actual_counts)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tempdir.cleanup()
+
+
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(
+        [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
         [anno_type for anno_type in ANNO_TYPES if '_int_' in anno_type or anno_type.endswith('_coord')]
     ),
     class_name_func=get_test_class_name

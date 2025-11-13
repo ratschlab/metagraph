@@ -2,8 +2,14 @@
 
 #include <type_traits>
 
-#include <query/streaming_query_canonical_parsing.hpp>
+#include <streaming_query.hpp>
 #include <progress_bar.hpp>
+
+// sshash template implementations
+#include <src/dictionary.cpp>
+#include <src/build.cpp>
+#include <src/query.cpp>
+#include <src/info.cpp>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
@@ -107,7 +113,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     found_fw = true;
                                     next = DBGSSHash::sshash_to_graph_index(nb.forward[i].kmer_id);
                                     found_i = i;
-                                    if (nb.forward[i].kmer_orientation)
+                                    if (nb.forward[i].kmer_orientation < 0)
                                         next = graph.reverse_complement(next);
                                 }
                             }
@@ -118,7 +124,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
                             kmer.drop_char();
-                            kmer.kth_char_or(graph.get_k() - 1, found_i);
+                            kmer.set(graph.get_k() - 1, found_i);
                         }
 
                         bool found_bw = false;
@@ -131,7 +137,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                 } else {
                                     found_bw = true;
                                     prev = DBGSSHash::sshash_to_graph_index(nb.backward[i].kmer_id);
-                                    if (nb.backward[i].kmer_orientation)
+                                    if (nb.backward[i].kmer_orientation < 0)
                                         prev = graph.reverse_complement(prev);
                                 }
                             }
@@ -189,8 +195,8 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
-    build_config.canonical_parsing = mode != BASIC;
     build_config.tmp_dirname = swap_dir;
+    build_config.canonical = mode != BASIC;
 
     // silence sshash construction messages when not verbose
     std::ios orig_state(nullptr);
@@ -249,7 +255,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
     using kmer_t = get_kmer_t<Dict>;
 
     if (with_rc) {
-        auto parser = sshash::streaming_query_canonical_parsing<kmer_t>(&dict);
+        auto parser = sshash::streaming_query<kmer_t, true>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup_advanced(sequence.data() + i);
             assert(sshash::equal_lookup_result(ret_val,
@@ -275,7 +281,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
                 uint_kmer = sshash::util::string_to_uint_kmer<kmer_t>(sequence.data() + i, k);
             } else {
                 uint_kmer.drop_char();
-                uint_kmer.kth_char_or(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
+                uint_kmer.set(k - 1, kmer_t::char_to_uint(sequence[i + k - 1]));
             }
             ret_val = dict.lookup_advanced_uint(uint_kmer, with_rc);
 
@@ -297,7 +303,7 @@ void DBGSSHash::map_to_nodes_with_rc(std::string_view sequence,
                         [&](sshash::lookup_result res) {
                             auto node = sshash_to_graph_index(res.kmer_id);
                             assert(!node || in_graph(node));
-                            callback(node, res.kmer_orientation);
+                            callback(node, res.kmer_orientation < 0);
                         },
                         terminate);
             },
@@ -366,8 +372,8 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     if (mode_ != BASIC) {
         map_to_nodes_with_rc<true>(
                 sequence,
-                [&](node_index n, bool orientation) {
-                    callback(n && orientation ? reverse_complement(n) : n);
+                [&](node_index n, bool revcompl) {
+                    callback(n && revcompl ? reverse_complement(n) : n);
                 },
                 terminate);
     } else {
@@ -416,7 +422,7 @@ void DBGSSHash::adjacent_outgoing_nodes_with_rc(
                 for (size_t i = 0; i < nb.forward.size(); i++) {
                     if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.forward[i].kmer_id),
-                                 nb.forward[i].kmer_orientation);
+                                 nb.forward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -458,7 +464,7 @@ void DBGSSHash::call_outgoing_kmers_with_rc(
                 for (size_t i = 0; i < nb.forward.size(); i++) {
                     if (nb.forward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.forward[i].kmer_id),
-                                 kmer_t::uint64_to_char(i), nb.forward[i].kmer_orientation);
+                                 kmer_t::uint64_to_char(i), nb.forward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -499,7 +505,7 @@ void DBGSSHash::adjacent_incoming_nodes_with_rc(
                 for (size_t i = 0; i < nb.backward.size(); i++) {
                     if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.backward[i].kmer_id),
-                                 nb.backward[i].kmer_orientation);
+                                 nb.backward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -542,7 +548,7 @@ void DBGSSHash::call_incoming_kmers_with_rc(
                 for (size_t i = 0; i < nb.backward.size(); i++) {
                     if (nb.backward[i].kmer_id != sshash::constants::invalid_uint64) {
                         callback(sshash_to_graph_index(nb.backward[i].kmer_id),
-                                 kmer_t::uint64_to_char(i), nb.backward[i].kmer_orientation);
+                                 kmer_t::uint64_to_char(i), nb.backward[i].kmer_orientation < 0);
                     }
                 }
             },
@@ -560,8 +566,8 @@ template void DBGSSHash::call_incoming_kmers_with_rc<false>(
 void DBGSSHash::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback& callback) const {
     if (mode_ != BASIC) {
-        call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool orientation) {
-            callback(orientation ? reverse_complement(next) : next, c);
+        call_outgoing_kmers_with_rc<true>(node, [&](node_index next, char c, bool revcompl) {
+            callback(revcompl ? reverse_complement(next) : next, c);
         });
     } else {
         call_outgoing_kmers_with_rc<false>(node, [&](node_index next, char c, bool) {
@@ -573,8 +579,8 @@ void DBGSSHash::call_outgoing_kmers(node_index node,
 void DBGSSHash::adjacent_outgoing_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
     if (mode_ != BASIC) {
-        adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool orientation) {
-            callback(orientation ? reverse_complement(next) : next);
+        adjacent_outgoing_nodes_with_rc<true>(node, [&](node_index next, bool revcompl) {
+            callback(revcompl ? reverse_complement(next) : next);
         });
     } else {
         adjacent_outgoing_nodes_with_rc<false>(node, [&](node_index next, bool) {
@@ -586,8 +592,8 @@ void DBGSSHash::adjacent_outgoing_nodes(node_index node,
 void DBGSSHash::call_incoming_kmers(node_index node,
                                     const IncomingEdgeCallback& callback) const {
     if (mode_ != BASIC) {
-        call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool orientation) {
-            callback(orientation ? reverse_complement(prev) : prev, c);
+        call_incoming_kmers_with_rc<true>(node, [&](node_index prev, char c, bool revcompl) {
+            callback(revcompl ? reverse_complement(prev) : prev, c);
         });
     } else {
         call_incoming_kmers_with_rc<false>(node, [&](node_index prev, char c, bool) {
@@ -599,8 +605,8 @@ void DBGSSHash::call_incoming_kmers(node_index node,
 void DBGSSHash::adjacent_incoming_nodes(node_index node,
                                         const std::function<void(node_index)>& callback) const {
     if (mode_ != BASIC) {
-        adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool orientation) {
-            callback(orientation ? reverse_complement(prev) : prev);
+        adjacent_incoming_nodes_with_rc<true>(node, [&](node_index prev, bool revcompl) {
+            callback(revcompl ? reverse_complement(prev) : prev);
         });
     } else {
         adjacent_incoming_nodes_with_rc<false>(node, [&](node_index prev, bool) {
@@ -661,7 +667,7 @@ DBGSSHash::kmer_to_node_with_rc(std::string_view kmer) const {
             [&](const auto& d) {
                 auto res = d.lookup_advanced(kmer.data(), with_rc);
                 return std::make_pair(sshash_to_graph_index(res.kmer_id),
-                                      res.kmer_orientation);
+                                      res.kmer_orientation < 0);
             },
             dict_);
 }
@@ -688,10 +694,10 @@ char DBGSSHash::get_last_char(node_index node) const {
                 using kmer_t = get_kmer_t<decltype(d)>;
                 const auto& buckets = d.data();
                 uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
-                sshash::bit_vector_iterator<kmer_t> bv_it(
-                        d.strings(), kmer_t::bits_per_char * (offset + get_k() - 1));
-                return kmer_t::uint64_to_char(
-                        static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+                sshash::kmer_iterator<kmer_t> kmer_it(
+                        d.strings(), get_k(),
+                        kmer_t::bits_per_char * (offset + get_k() - 1));
+                return kmer_t::uint64_to_char(kmer_it.get_next_char());
             },
             dict_);
 }
@@ -705,10 +711,9 @@ char DBGSSHash::get_first_char(node_index node) const {
                 using kmer_t = get_kmer_t<decltype(d)>;
                 const auto& buckets = d.data();
                 uint64_t offset = buckets.id_to_offset(ssh_idx, get_k());
-                sshash::bit_vector_iterator<kmer_t> bv_it(d.strings(),
-                                                          kmer_t::bits_per_char * offset);
-                return kmer_t::uint64_to_char(
-                        static_cast<uint64_t>(bv_it.read(kmer_t::bits_per_char)));
+                sshash::kmer_iterator<kmer_t> kmer_it(d.strings(), get_k(),
+                                                       kmer_t::bits_per_char * offset);
+                return kmer_t::uint64_to_char(kmer_it.get_next_char());
             },
             dict_);
 }

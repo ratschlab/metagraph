@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     strategy:
+      fail-fast: false
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
@@ -70,13 +71,13 @@ jobs:
 
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install ${{ matrix.compiler }}
+            sudo apt-get install -y ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install libcurl4-openssl-dev
+          sudo apt-get install -y libcurl4-openssl-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
@@ -102,15 +103,15 @@ jobs:
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
-      run: cd metagraph/build && make -j 2 unit_tests
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
 
     - name: build other
       if: matrix.build_static == 'OFF'
-      run: cd metagraph/build && make -j 2
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     # for potential release
     - name: rename binary
@@ -137,16 +138,39 @@ jobs:
         retry_on: error
         command: |
           export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-          cd metagraph/build && make check
+          cd metagraph/build && make integration_tests
 
   MacOS:
-    runs-on: macos-latest
-
     strategy:
+      fail-fast: false
       matrix:
-        alphabet: [DNA]
-        build_type: [Debug, Release]
-        platform: [x64, arm64]
+        include:
+          # Apple Silicon Release
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-latest
+            target_arch: arm64
+          # Intel Release
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-15-intel
+            target_arch: x86_64
+          # Apple Silicon runner + Rosetta for x86_64
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-latest
+            target_arch: x86_64
+          # Debug run on Apple Silicon
+          - alphabet: DNA
+            build_type: Debug
+            platform: macos-latest
+            target_arch: arm64
+
+    runs-on: ${{ matrix.platform }}
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
     - uses: actions/checkout@v1
@@ -154,8 +178,28 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
+    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
+      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
+      run: |
+        # Install Intel Homebrew into /usr/local if missing
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c zstd
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
@@ -172,23 +216,34 @@ jobs:
 
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+              ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
     - name: build unit tests
-      run: cd metagraph/build && make -j 2 unit_tests
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
 
     - name: build other
-      run: cd metagraph/build && make -j 2
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: run unit tests
       run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
-      run: cd metagraph/build && make check
+      run: cd metagraph/build && make integration_tests
 
+    - name: check metagraph workflows
+      run: |
+        export PATH="$(pwd)/metagraph/build/:$PATH"
+        metagraph --help
+        # Install python dependencies
+        python -m pip install --upgrade pip
+        pip install pytest
+        pip install -r metagraph/workflows/requirements.txt
+        # Test metagraph-workflows pytest
+        cd metagraph/workflows
+        pytest
 
   Metagraph-Workflows:
     name: Test metagraph workflows
@@ -198,10 +253,10 @@ jobs:
     steps:
         - uses: actions/checkout@v2
 
-        - name: Set up Python 3.10.18
-          uses: actions/setup-python@v1
+        - name: Set up Python
+          uses: actions/setup-python@v6
           with:
-              python-version: 3.10.18
+              python-version: 3.13
 
         - name: fetch static binary
           uses: actions/download-artifact@v4

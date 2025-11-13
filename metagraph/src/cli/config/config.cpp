@@ -61,6 +61,7 @@ Config::Config(int argc, char *argv[]) {
         identity = QUERY;
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
+        num_top_labels = 10'000;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -549,7 +550,7 @@ Config::Config(int argc, char *argv[]) {
     if (count_kmers || query_presence)
         map_sequences = true;
 
-    if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
+    if (identity == QUERY && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
@@ -581,8 +582,14 @@ Config::Config(int argc, char *argv[]) {
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == QUERY || identity == SERVER_QUERY) && infbase_annotators.size() != 1)
+    if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
+
+    if (identity == SERVER_QUERY
+            && (fnames.size() > 1
+                || (fnames.size() && (infbase.size() || infbase_annotators.size()))
+                || (fnames.empty() && (infbase.empty() || infbase_annotators.size() != 1))))
+        print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
 
     if ((identity == TRANSFORM
             || identity == CLEAN
@@ -1386,7 +1393,10 @@ if (advanced) {
 }
         } break;
         case SERVER_QUERY: {
-            fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s server_query (-i <GRAPH> -a <ANNOTATION> | <GRAPHS.csv>) [options]\n\n"
+                            "\tThe index must be passed with flags -i -a or with a file GRAPHS.csv listing one\n"
+                            "\tor more indexes, a file with rows: '<name>,<graph_path>,<annotation_path>\\n'.\n"
+                            "\t(If multiple rows have the same name, all those graphs will be queried for that name.)\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
@@ -1396,6 +1406,7 @@ if (advanced) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+            fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
         } break;
     }
 
