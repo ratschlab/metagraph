@@ -441,8 +441,10 @@ target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
 # Propagate OpenMP flags to consumers (compile and link)
 # GCC needs -fopenmp during both compilation and linking to auto-link -lgomp
 if(OpenMP_CXX_FLAGS)
-  target_compile_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS})
-  target_link_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS})
+  # Convert space-separated string to list for proper handling by target_*_options
+  separate_arguments(OpenMP_CXX_FLAGS_LIST UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
+  target_compile_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS_LIST})
+  target_link_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS_LIST})
 endif()
 
 target_link_directories(metagraph-core INTERFACE
