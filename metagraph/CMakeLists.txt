@@ -4,7 +4,8 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
 
 # Read version from JSON
-file(READ ${CMAKE_SOURCE_DIR}/../package.json MY_JSON_STRING)
+# Use CMAKE_CURRENT_SOURCE_DIR to work correctly when used as a submodule
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/../package.json MY_JSON_STRING)
 string(JSON VERSION GET ${MY_JSON_STRING} version)
 message(STATUS "Current MetaGraph version: ${VERSION}")
 
