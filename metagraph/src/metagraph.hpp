@@ -5,7 +5,7 @@
 #include "graph/annotated_dbg.hpp"
 
 // Configuration management
-#include "config/config.hpp"
+#include "cli/config/config.hpp"
 
 // Loading functionality
 #include "cli/load/load_graph.hpp"
