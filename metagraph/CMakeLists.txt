@@ -66,6 +66,14 @@ endfunction()
 
 enableCCache()
 
+# Option to build the metagraph executable and tests
+# Default is ON when MetaGraph is the top-level project, OFF otherwise
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  option(METAGRAPH_BUILD_EXECUTABLE "Build the metagraph CLI executable" ON)
+else()
+  option(METAGRAPH_BUILD_EXECUTABLE "Build the metagraph CLI executable" OFF)
+endif()
+
 if(BUILD_STATIC)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
   set(BUILD_SHARED_LIBS OFF)
@@ -495,8 +503,6 @@ add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
 add_dependencies(metagraph-core SDSL)
 
-add_executable(metagraph "src/main.cpp")
-set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
@@ -581,19 +587,24 @@ if(NOT CPPNOFS)
   endif()
 endif()
 
-target_link_libraries(metagraph-core ${METALIBS})
+target_link_libraries(metagraph-core PUBLIC ${METALIBS})
 add_subdirectory(external-libraries/Simple-Web-Server)
 target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
-target_link_libraries(metagraph metagraph-core metagraph-cli)
 
-add_custom_target(link_target ALL
-  COMMAND ${CMAKE_COMMAND} -E
-  create_symlink
-    "metagraph_${CMAKE_DBG_ALPHABET}"
-    "metagraph"
-)
+if(METAGRAPH_BUILD_EXECUTABLE)
+  add_executable(metagraph "src/main.cpp")
+  set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
+  target_link_libraries(metagraph metagraph-core metagraph-cli)
 
-add_dependencies(metagraph link_target)
+  add_custom_target(link_target ALL
+    COMMAND ${CMAKE_COMMAND} -E
+    create_symlink
+      "metagraph_${CMAKE_DBG_ALPHABET}"
+      "metagraph"
+  )
+
+  add_dependencies(metagraph link_target)
+endif()
 
 
 #-------------------
@@ -608,94 +619,97 @@ file(GLOB header_files
 
 install(TARGETS metagraph-core DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
-install(TARGETS metagraph DESTINATION bin)
+if(METAGRAPH_BUILD_EXECUTABLE)
+  install(TARGETS metagraph DESTINATION bin)
 
-#-------------------
-# Unit Tests
-#-------------------
+  #-------------------
+  # Unit Tests
+  #-------------------
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
-target_compile_options(gtest_main PRIVATE -w)
-target_compile_options(gtest PRIVATE -w)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
+  target_compile_options(gtest_main PRIVATE -w)
+  target_compile_options(gtest PRIVATE -w)
 
-set(DEATH_TEST_FLAG "")
-if(NO_DEATH_TESTS)
-  message(STATUS "Disabling death tests in gtest")
-  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
-endif()
+  set(DEATH_TEST_FLAG "")
+  if(NO_DEATH_TESTS)
+    message(STATUS "Disabling death tests in gtest")
+    set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+  endif()
 
-file(GLOB unit_tests_files
-  "tests/*.cpp"
-  "tests/*/*.cpp"
-  "tests/*/*/*.cpp"
-  "tests/*/*/*/*.cpp"
-)
-list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
+  file(GLOB unit_tests_files
+    "tests/*.cpp"
+    "tests/*/*.cpp"
+    "tests/*/*/*.cpp"
+    "tests/*/*/*/*.cpp"
+  )
+  list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
-add_executable(unit_tests ${unit_tests_files})
-target_link_directories(unit_tests PRIVATE ${PROJECT_BINARY_DIR})
-target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
-target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
+  add_executable(unit_tests ${unit_tests_files})
+  target_link_directories(unit_tests PRIVATE ${PROJECT_BINARY_DIR})
+  target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+  target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+  target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
 
-target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
+  target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
-#-------------------
-# Benchmarks
-#-------------------
-add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
+  #-------------------
+  # Benchmarks
+  #-------------------
+  add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
 
-file(GLOB benchmark_files
-  "benchmarks/*.cpp"
-  "benchmarks/*/*.cpp"
-)
-list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
+  file(GLOB benchmark_files
+    "benchmarks/*.cpp"
+    "benchmarks/*/*.cpp"
+  )
+  list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 
-add_executable(benchmarks ${benchmark_files})
-target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
+  add_executable(benchmarks ${benchmark_files})
+  target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
 
-target_compile_options(benchmarks PRIVATE)
+  target_compile_options(benchmarks PRIVATE)
 
-#-------------------
-# Tests
-#-------------------
-find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
+  #-------------------
+  # Tests
+  #-------------------
+  find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 
-add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/test_venv/DONE
-  COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv
-)
-execute_process(COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv)
+  add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/test_venv/DONE
+    COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv
+  )
+  execute_process(COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv)
 
-# creating a make target, s.t. the environment can be set up explicitly
-add_custom_target(install_test_environment
-  DEPENDS ${PROJECT_BINARY_DIR}/test_venv/DONE
-)
+  # creating a make target, s.t. the environment can be set up explicitly
+  add_custom_target(install_test_environment
+    DEPENDS ${PROJECT_BINARY_DIR}/test_venv/DONE
+  )
 
-# --- integration tests ---
-add_custom_target(integration_tests
-  COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
-  DEPENDS metagraph
-  DEPENDS install_test_environment
-)
-# --- integration tests + unit tests ---
-add_custom_target(check_all
-  COMMAND make integration_tests
-  COMMAND unit_tests
-  DEPENDS integration_tests unit_tests
-)
-add_test(NAME integration_tests COMMAND make integration_tests)
-add_test(NAME unit_tests COMMAND unit_tests)
+  # --- integration tests ---
+  add_custom_target(integration_tests
+    COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
+    DEPENDS metagraph
+    DEPENDS install_test_environment
+  )
+  # --- integration tests + unit tests ---
+  add_custom_target(check_all
+    COMMAND make integration_tests
+    COMMAND unit_tests
+    DEPENDS integration_tests unit_tests
+  )
+  add_test(NAME integration_tests COMMAND make integration_tests)
+  add_test(NAME unit_tests COMMAND unit_tests)
 
-# --- integration tests runner ---
-get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
-file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
-file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
-)
-file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  DESTINATION "${PROJECT_BINARY_DIR}"
-  FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                   GROUP_READ GROUP_EXECUTE
-                   WORLD_READ WORLD_EXECUTE
-)
+  # --- integration tests runner ---
+  get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
+  file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+    "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+  )
+  file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+    DESTINATION "${PROJECT_BINARY_DIR}"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                     GROUP_READ GROUP_EXECUTE
+                     WORLD_READ WORLD_EXECUTE
+  )
+
+endif() # CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME
