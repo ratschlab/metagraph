@@ -44,7 +44,7 @@ jobs:
       run: |
         mkdir build && cd build
         cmake ..
-        make -j
+        make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: run basic_query example
       run: |
