@@ -8,8 +8,13 @@ on:
 
 jobs:
   test-examples-repo:
-    runs-on: ubuntu-22.04
-    name: Build and test metagraph-examples
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    name: Build and test metagraph-examples (${{ matrix.os }})
 
     steps:
     - name: checkout metagraph-examples
@@ -25,16 +30,21 @@ jobs:
         git checkout ${{ github.sha }}
         git submodule update --init --recursive
 
-    - name: install dependencies
+    - name: install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
         sudo apt-get install -y g++-13 cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+
+    - name: install dependencies (MacOS)
+      if: matrix.os == 'macos-latest'
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
 
     - name: build examples
       run: |
         mkdir build && cd build
         cmake ..
-        make -j$(nproc)
+        make -j
 
     - name: run basic_query example
       run: |
