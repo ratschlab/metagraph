@@ -1,0 +1,37 @@
+name: Test MetaGraph Examples
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  test-examples-repo:
+    runs-on: ubuntu-22.04
+    name: Build and test metagraph-examples
+
+    steps:
+    - name: checkout metagraph-examples
+      uses: actions/checkout@v3
+      with:
+        repository: ratschlab/metagraph-examples
+        submodules: recursive
+
+    - name: install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-13 cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+
+    - name: build examples
+      run: |
+        mkdir build && cd build
+        cmake ..
+        make -j$(nproc)
+
+    - name: run basic_query example
+      run: |
+        ./build/basic_query \
+          data/graphs/test_graph.dbg \
+          data/graphs/test_graph.column.annodbg \
+          data/test_query.fa
