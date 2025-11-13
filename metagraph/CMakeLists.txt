@@ -438,9 +438,11 @@ target_include_directories(metagraph-core PUBLIC
 # Propagate public compile definitions to dependents
 target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
 
-# Propagate OpenMP compile flags to consumers (enables -fopenmp which auto-links -lgomp on GCC)
+# Propagate OpenMP flags to consumers (compile and link)
+# GCC needs -fopenmp during both compilation and linking to auto-link -lgomp
 if(OpenMP_CXX_FLAGS)
   target_compile_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS})
+  target_link_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS})
 endif()
 
 target_link_directories(metagraph-core INTERFACE
