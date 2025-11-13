@@ -25,7 +25,7 @@ jobs:
 
     - name: update metagraph submodule to current commit
       run: |
-        cd metagraph
+        cd metagraph/metagraph
         git fetch https://github.com/${{ github.repository }} ${{ github.sha }}
         git checkout ${{ github.sha }}
         git submodule update --init --recursive
