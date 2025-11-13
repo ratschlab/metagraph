@@ -1,4 +1,4 @@
-name: Test MetaGraph Examples
+name: MetaGraph CI External
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
-    name: Build and test metagraph-examples (${{ matrix.os }})
+    name: ${{ matrix.os }}
 
     steps:
     - name: checkout metagraph-examples
