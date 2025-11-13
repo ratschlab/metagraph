@@ -128,8 +128,6 @@ endif()
 
 if(APPLE)
   # add path to system libraries but avoid cross-compilation errors
-  include_directories(SYSTEM /usr/local/include)
-  include_directories(SYSTEM /opt/homebrew/include)
   link_directories(/usr/local/lib)
   if(EXISTS /opt/homebrew/lib)
     link_directories(/opt/homebrew/lib)
@@ -276,13 +274,6 @@ link_directories(
   ${SDSL_INSTALL}/lib
 )
 
-# TODO: move ASIO out of here once it replaces sprintf with snprintf
-include_directories(
-  PUBLIC SYSTEM
-  external-libraries/asio/asio/include
-  external-libraries/simde-no-tests
-)
-
 add_library(ips4o INTERFACE)
 target_include_directories(ips4o INTERFACE external-libraries/ips4o)
 
@@ -319,21 +310,6 @@ endif()
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 
-findFolly()
-if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY)
-  if(Jemalloc_FOUND)
-    add_definitions(-DUSE_JEMALLOC)
-  else()
-    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
-  endif()
-  include_directories(SYSTEM
-    external-libraries/folly
-    ${PROJECT_BINARY_DIR}/external-libraries/folly/include
-  )
-  set(METALIBS ${METALIBS} fbvector)
-endif()
-
 # makes ASIO not depend on boost
 add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 set(USE_STANDALONE_ASIO ON)
@@ -365,6 +341,10 @@ target_compile_options(zlib
 add_library(folly STATIC
   external-libraries/folly/folly/lang/SafeAssert.cpp
   external-libraries/folly/folly/lang/ToAscii.cpp
+)
+target_include_directories(folly PRIVATE
+  external-libraries/folly
+  ${PROJECT_BINARY_DIR}/external-libraries/folly/include
 )
 
 add_library(progress_bar STATIC
@@ -439,27 +419,60 @@ message(STATUS "Compile flags used:"
   " ${OTHER_COMPILER_FLAGS}"
 )
 
-file(GLOB metagraph_core_files
-  "src/*.cpp"
-  "src/*/*.cpp"
-  "src/*/*/*.cpp"
-  "src/*/*/*/*.cpp"
-)
-
-# for compiling faster
-list(REVERSE metagraph_core_files)
-
+# Create metagraph-core target early so we can use target_include_directories
+file(GLOB_RECURSE metagraph_core_files "src/*.cpp")
+list(REVERSE metagraph_core_files)  # for compiling faster
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
-
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
-file(GLOB metagraph_cli_files
-  "src/cli/*.cpp"
-  "src/cli/*/*.cpp"
-  "src/cli/*/*/*.cpp"
+# Set up include directories for metagraph-core
+target_include_directories(metagraph-core PUBLIC
+  ${PROJECT_SOURCE_DIR}/src
+  external-libraries/KMC/kmc_api
+  ${SDSL_INSTALL}/include
+  external-libraries/hopscotch-map/include
+  external-libraries/ordered-map/include
+  external-libraries/cpp_progress_bar
+  external-libraries/Priority-Deque
+  external-libraries/rollinghashcpp
+  external-libraries/spdlog/include
+  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
+  external-libraries/zlib
+  external-libraries/sdust
 )
+
+if(APPLE)
+  target_include_directories(metagraph-core SYSTEM PUBLIC
+    /usr/local/include
+    /opt/homebrew/include
+  )
+endif()
+
+# TODO: move ASIO out of here once it replaces sprintf with snprintf
+target_include_directories(metagraph-core SYSTEM PUBLIC
+  external-libraries/asio/asio/include
+  external-libraries/simde-no-tests
+)
+
+# Configure Folly if available
+findFolly()
+if(FOLLY_FOUND)
+  add_definitions(-D_USE_FOLLY)
+  if(Jemalloc_FOUND)
+    add_definitions(-DUSE_JEMALLOC)
+  else()
+    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
+  endif()
+  set(METALIBS ${METALIBS} fbvector)
+  target_include_directories(metagraph-core SYSTEM PUBLIC
+    external-libraries/folly
+    ${PROJECT_BINARY_DIR}/external-libraries/folly/include
+  )
+endif()
+
+file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
 add_dependencies(metagraph-core SDSL)
@@ -551,20 +564,6 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(metagraph-core ${METALIBS})
-target_include_directories(metagraph-core PUBLIC 
-  ${PROJECT_SOURCE_DIR}/src
-  external-libraries/KMC/kmc_api
-  ${SDSL_INSTALL}/include
-  external-libraries/hopscotch-map/include
-  external-libraries/ordered-map/include
-  external-libraries/cpp_progress_bar
-  external-libraries/Priority-Deque
-  external-libraries/rollinghashcpp
-  external-libraries/spdlog/include
-  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
-  external-libraries/zlib
-  external-libraries/sdust
-)
 add_subdirectory(external-libraries/Simple-Web-Server)
 target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
 target_link_libraries(metagraph metagraph-core metagraph-cli)
