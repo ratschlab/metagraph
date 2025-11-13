@@ -8,6 +8,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment_redone/aln_seeder.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -96,6 +97,9 @@ Json::Value process_search_request(const Json::Value &json,
         ));
     }
 
+    config.alignment_extend_chains = json.get("extend_chains", true).asBool();
+    config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
+
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
     std::mutex result_mutex;
@@ -173,8 +177,12 @@ Json::Value process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    align::DBGAligner aligner(graph, initialize_align_config(config, graph));
-    const align::DBGAlignerConfig &aligner_config = aligner.get_config();
+    config.alignment_extend_chains = json.get("extend_chains", true).asBool();
+    config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
+
+    // align::DBGAligner aligner(graph, initialize_align_config(config, graph));
+    // const align::DBGAlignerConfig &aligner_config = aligner.get_config();
+    auto aligner_config = initialize_aligner_config(config, graph);
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),
@@ -185,18 +193,35 @@ Json::Value process_align_request(const std::string &received_message,
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
 
-        for (const auto &path : aligner.align(read_stream->seq.s)) {
+        align_redone::Query aln_query(graph, read_stream->seq.s);
+
+        auto aln_callback = [&](const auto &path) {
             Json::Value a;
-            a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
+            a[SeqSearchResult::SCORE_JSON_FIELD] = aligner_config.score_cigar(path.get_spelling(),
+                                                                              aln_query.get_query(path.get_orientation()),
+                                                                              path.get_cigar());
             a[SeqSearchResult::MAX_SCORE_JSON_FIELD] = aligner_config.match_score(read_stream->seq.s)
                 + aligner_config.left_end_bonus + aligner_config.right_end_bonus;
-            aligner.get_config().match_score(read_stream->seq.s);
-            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = std::string(path.get_sequence());
+            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = std::string(path.get_spelling());
             a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
             a[SeqSearchResult::ORIENTATION_JSON_FIELD] = path.get_orientation();
 
             alignments.append(a);
+        };
+
+        align_redone::ExactSeeder seeder(aln_query, aligner_config);
+
+        if (config.alignment_extend_chains) {
+            align_redone::Extender extender(aln_query, aligner_config);
+            align_query(aln_query, seeder, extender, aln_callback,
+                        config.alignment_connect_anchors);
+        } else {
+            align_query(aln_query, seeder, aln_callback,
+                        config.alignment_connect_anchors);
         }
+        // for (const auto &path : aligner.align(read_stream->seq.s)) {
+
+        // }
 
         align_entry[SeqSearchResult::ALIGNMENT_JSON_FIELD] = alignments;
 

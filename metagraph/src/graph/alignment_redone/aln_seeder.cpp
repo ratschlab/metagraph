@@ -616,7 +616,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             flush_mmer = false;
                         } else {
                             mmer.drop_char();
-                            mmer.kth_char_or(m - 1, kmer_t::char_to_uint(this_query[i + m - 1]));
+                            mmer.set(m - 1, kmer_t::char_to_uint(this_query[i + m - 1]));
+                            // mmer.kth_char_or(m - 1, kmer_t::char_to_uint(this_query[i + m - 1]));
                         }
                         mmers[i] = mmer;
                     }
@@ -637,7 +638,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 flush_mmer = false;
                             } else {
                                 mmer_rc.drop_char();
-                                mmer_rc.kth_char_or(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
+                                mmer_rc.set(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
+                                // mmer_rc.kth_char_or(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
                             }
 
                             size_t j = rc_query.size() - m - i;
@@ -664,7 +666,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             // std::cerr << "\t" << super_kmer_id << "\n";
                             uint64_t offset = offsets.access(super_kmer_id);
 
-                            auto [res, contig_end] = buckets.offset_to_id(offset, k);
+                            // auto [res, contig_end] = buckets.offset_to_id(offset, k);
+                            auto res = buckets.offset_to_id(offset, k);
+                            uint64_t contig_end = res.contig_end(k);
                             assert(res.contig_size);
                             assert(res.kmer_id_in_contig < res.contig_size);
                             assert(contig_end > offset);
@@ -676,7 +680,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             std::ignore = contig_length;
                             assert(contig_length == res.contig_size + k - 1);
 
-                            sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
+                            sshash::kmer_iterator<kmer_t> start_bv_it(dict.strings(), m, offset);
+                            // sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                             assert(offset + m <= contig_end);
                             uint64_t window_size = std::min<uint64_t>({
                                 k,
@@ -684,13 +689,18 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             });
                             assert(offset + window_size + m <= contig_end);
                             for (uint64_t j = 0; j < window_size; ++j) {
-                                kmer_t start_read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                // kmer_t start_read_kmer = start_bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                kmer_t start_read_kmer = start_bv_it.get();
+                                start_bv_it.next();
                                 if (start_read_kmer != mmer)
                                     continue;
 
-                                sshash::bit_vector_iterator<kmer_t> bv_it(dict.strings(), kmer_t::bits_per_char * offset);
+                                sshash::kmer_iterator<kmer_t> bv_it(dict.strings(), m, offset);
+                                // sshash::bit_vector_iterator<kmer_t> bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                                 for (size_t w = 0; w < window_size; ++w) {
-                                    kmer_t read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                    // kmer_t read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
+                                    kmer_t read_kmer = bv_it.get();
+                                    bv_it.next();
                                     assert(w != j || read_kmer == start_read_kmer);
                                     if (i + w < j)
                                         continue;

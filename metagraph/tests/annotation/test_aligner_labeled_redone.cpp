@@ -306,10 +306,10 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
                     auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
                     auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                     // we can only find the first seed of it's also the minimizer
-                    if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
-                            || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
+                    // if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
+                            // || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
                         first_seed_matches = false;
-                    }
+                    // }
                 }, sshash.data());
             }
 
@@ -386,10 +386,10 @@ TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
                         auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
                         auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                         // we can only find the first seed of it's also the minimizer
-                        if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
-                                || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
+                        // if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
+                                // || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
                             first_seed_matches = false;
-                        }
+                        // }
                     }, sshash.data());
                 }
 

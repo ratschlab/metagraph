@@ -100,7 +100,9 @@ class GraphClientJson:
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              connect_anchors: bool = True,
+              extend_chains: bool = True) -> Tuple[JsonDict, str]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
                 f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
@@ -110,7 +112,9 @@ class GraphClientJson:
 
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
-                  'min_exact_match': min_exact_match}
+                  'min_exact_match': min_exact_match,
+                  'connect_anchors': connect_anchors,
+                  'extend_chains': extend_chains}
 
         return self._json_seq_query(sequence, params, "align")
 
@@ -220,7 +224,9 @@ class GraphClient:
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              connect_anchors: bool = True,
+              extend_chains: bool = True) -> pd.DataFrame:
         """
         Align sequence(s) to the joint graph
 
@@ -232,13 +238,18 @@ class GraphClient:
         :type       max_alternative_alignments:  int
         :param      max_num_nodes_per_seq_char:  The maximum number of nodes to consider per sequence character during extension [default: 10.0]
         :type       max_num_nodes_per_seq_char:  float
+        :param      connect_anchors:             If True, traverse the graph to align the query regions that fall between anchors
+        :type       connect_anchors:             bool
+        :param      extend_chains:               If True, perform ends-free extension from the first and last anchors in a chain
+        :type       extend_chains:               bool
 
         :returns:   A data frame with alignments
         :rtype:     pandas.DataFrame
         """
         json_obj = self._json_client.align(sequence, min_exact_match,
                                            max_alternative_alignments,
-                                           max_num_nodes_per_seq_char)
+                                           max_num_nodes_per_seq_char,
+                                           connect_anchors, extend_chains)
 
         return helpers.df_from_align_result(json_obj)
 
@@ -324,7 +335,9 @@ class MultiGraphClient:
               parallel=True,
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              connect_anchors: bool = True,
+              extend_chains: bool = True) -> Dict[
         str, Union[pd.DataFrame, Future]]:
         """
         Make align requests with each graph client.
@@ -340,7 +353,8 @@ class MultiGraphClient:
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.align(sequence, min_exact_match,
                                                   max_alternative_alignments,
-                                                  max_num_nodes_per_seq_char)
+                                                  max_num_nodes_per_seq_char,
+                                                  connect_anchors, extend_chains)
 
             return result
 
@@ -354,7 +368,8 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.align, sequence, min_exact_match,
                                             max_alternative_alignments,
-                                            max_num_nodes_per_seq_char)
+                                            max_num_nodes_per_seq_char,
+                                            connect_anchors, extend_chains)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 

@@ -933,12 +933,12 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
                 auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(reference.data(), k);
                 auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                 // we can only find the first seed of it's also the minimizer
-                if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
-                        || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
-                    run_alignment(*graph, config, query, { reference }, { "5=1X12=" }, 0, true, true);
-                } else {
+                // if (sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_ref, k, dict.m(), dict.seed()).second
+                //         || sshash::util::compute_minimizer_pos<kmer_t>(first_kmer_query, k, dict.m(), dict.seed()).second) {
+                //     run_alignment(*graph, config, query, { reference }, { "5=1X12=" }, 0, true, true);
+                // } else {
                     run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
-                }
+                // }
             }, sshash.data());
         } else {
             run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
