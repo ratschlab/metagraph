@@ -91,13 +91,13 @@ if(NOT CMAKE_DBG_ALPHABET)
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
-  add_definitions(-D_DNA_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
-  add_definitions(-D_DNA5_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA5_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
-  add_definitions(-D_DNA_CASE_SENSITIVE_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA_CASE_SENSITIVE_GRAPH)
 else()
-  add_definitions(-D_PROTEIN_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _PROTEIN_GRAPH)
 endif()
 message(STATUS "Compile for ${BoldCyan}${CMAKE_DBG_ALPHABET}${ColourReset} alphabet")
 
@@ -442,6 +442,9 @@ target_include_directories(metagraph-core PUBLIC
   external-libraries/zlib
   external-libraries/sdust
 )
+
+# Propagate alphabet selection to dependents
+target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_ALPHABET_DEF})
 
 if(APPLE)
   target_include_directories(metagraph-core SYSTEM PUBLIC
