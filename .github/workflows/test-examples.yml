@@ -18,6 +18,13 @@ jobs:
         repository: ratschlab/metagraph-examples
         submodules: recursive
 
+    - name: update metagraph submodule to current commit
+      run: |
+        cd metagraph
+        git fetch https://github.com/${{ github.repository }} ${{ github.sha }}
+        git checkout ${{ github.sha }}
+        git submodule update --init --recursive
+
     - name: install dependencies
       run: |
         sudo apt-get update
