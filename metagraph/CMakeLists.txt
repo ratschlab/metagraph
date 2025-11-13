@@ -260,16 +260,26 @@ set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
+# Build sdsl-lite out-of-tree and install locally to avoid target clashes
+include(ExternalProject)
+set(SDSL_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/sdsl)
+ExternalProject_Add(SDSL
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/sdsl-lite
+  CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
+  INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
+          COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
+)
+
 link_directories(
   ${CMAKE_BINARY_DIR}/external-libraries/htslib/lib
   ${CMAKE_BINARY_DIR}/KMC
-  external-libraries/sdsl-lite/lib
+  ${SDSL_INSTALL}/lib
 )
 
 include_directories(
  PUBLIC
   external-libraries/KMC/kmc_api
-  external-libraries/sdsl-lite/include
+  ${SDSL_INSTALL}/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/cpp_progress_bar
@@ -403,7 +413,6 @@ function(make_osx_arch_flags outvar)
 endfunction()
 make_osx_arch_flags(OSX_ARCH_FLAGS)
 
-include(ExternalProject)
 set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
@@ -469,6 +478,7 @@ file(GLOB metagraph_cli_files
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
+add_dependencies(metagraph-core SDSL)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
@@ -588,9 +598,6 @@ install(TARGETS metagraph DESTINATION bin)
 #-------------------
 # Unit Tests
 #-------------------
-# There is an old gtest library shipped with sdsl.
-# Remove it as we are going to use a more recent one.
-execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
 target_compile_options(gtest_main PRIVATE -w)
