@@ -196,7 +196,7 @@ endif()
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
   RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+  WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
 )
 if(result)
   message(FATAL_ERROR "CMake step for KMC failed: ${result}")
@@ -208,7 +208,7 @@ if(N EQUAL 0)
 endif()
 execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j${N}
   RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+  WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
 )
 if(result)
   message(FATAL_ERROR "Build step for KMC failed: ${result}")
@@ -262,7 +262,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 # Build sdsl-lite out-of-tree and install locally to avoid target clashes
 include(ExternalProject)
-set(SDSL_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/sdsl)
+set(SDSL_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/sdsl)
 ExternalProject_Add(SDSL
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/sdsl-lite
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
@@ -271,8 +271,8 @@ ExternalProject_Add(SDSL
 )
 
 link_directories(
-  ${CMAKE_BINARY_DIR}/external-libraries/htslib/lib
-  ${CMAKE_BINARY_DIR}/KMC
+  ${PROJECT_BINARY_DIR}/external-libraries/htslib/lib
+  ${PROJECT_BINARY_DIR}/KMC
   ${SDSL_INSTALL}/lib
 )
 
@@ -286,7 +286,7 @@ include_directories(
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
-  ${CMAKE_BINARY_DIR}/external-libraries/htslib/include
+  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
@@ -345,7 +345,7 @@ if(FOLLY_FOUND)
   endif()
   include_directories(SYSTEM
     external-libraries/folly
-    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
+    ${PROJECT_BINARY_DIR}/external-libraries/folly/include
   )
   set(METALIBS ${METALIBS} fbvector)
 endif()
@@ -413,15 +413,15 @@ function(make_osx_arch_flags outvar)
 endfunction()
 make_osx_arch_flags(OSX_ARCH_FLAGS)
 
-set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
+set(HTSLIB_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
+  PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
       "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
       "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
-      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
+      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
   BUILD_COMMAND $(MAKE) -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
@@ -429,7 +429,7 @@ ExternalProject_Add(HTSLIB
   INSTALL_COMMAND
     ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
     && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
-    && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
+    && ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
     && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
   DEPENDS zlib
 )
@@ -618,7 +618,7 @@ file(GLOB unit_tests_files
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
 link_directories(
-  ${CMAKE_BINARY_DIR}
+  ${PROJECT_BINARY_DIR}
 )
 
 add_executable(unit_tests ${unit_tests_files})
