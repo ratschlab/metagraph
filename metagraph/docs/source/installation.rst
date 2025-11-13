@@ -161,15 +161,6 @@ To compile MetaGraph, please follow these steps.
 
     git submodule update --init --recursive
 
-#. Install *sdsl-lite* in ``metagraph/external-libraries/sdsl-lite`` with the following script::
-
-    git submodule sync
-    git submodule update --init --recursive
-
-    pushd metagraph/external-libraries/sdsl-lite
-    ./install.sh $PWD
-    popd
-
 #. Set up the ``build`` directory and change into it::
 
     mkdir metagraph/build

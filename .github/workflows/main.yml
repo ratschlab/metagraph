@@ -88,11 +88,6 @@ jobs:
         pip3 install parameterized
         sudo apt-get install python3-venv
 
-    - name: install sdsl-lite
-      run: |
-        cd metagraph/external-libraries/sdsl-lite
-        ./install.sh $(pwd)
-
     - name: configure
       run: |
         mkdir metagraph/build
@@ -203,11 +198,6 @@ jobs:
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized --break-system-packages --user
-
-    - name: install sdsl-lite
-      run: |
-        cd metagraph/external-libraries/sdsl-lite
-        ./install.sh $(pwd)
 
     - name: configure
       run: |
