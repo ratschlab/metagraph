@@ -276,22 +276,6 @@ link_directories(
   ${SDSL_INSTALL}/lib
 )
 
-include_directories(
- PUBLIC
-  external-libraries/KMC/kmc_api
-  ${SDSL_INSTALL}/include
-  external-libraries/hopscotch-map/include
-  external-libraries/ordered-map/include
-  external-libraries/cpp_progress_bar
-  external-libraries/Priority-Deque
-  external-libraries/rollinghashcpp
-  external-libraries/spdlog/include
-  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
-  external-libraries/zlib
-  external-libraries/sdust
-  ${PROJECT_SOURCE_DIR}/src
-)
-
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
 include_directories(
   PUBLIC SYSTEM
@@ -567,6 +551,20 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(metagraph-core ${METALIBS})
+target_include_directories(metagraph-core PUBLIC 
+  ${PROJECT_SOURCE_DIR}/src
+  external-libraries/KMC/kmc_api
+  ${SDSL_INSTALL}/include
+  external-libraries/hopscotch-map/include
+  external-libraries/ordered-map/include
+  external-libraries/cpp_progress_bar
+  external-libraries/Priority-Deque
+  external-libraries/rollinghashcpp
+  external-libraries/spdlog/include
+  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
+  external-libraries/zlib
+  external-libraries/sdust
+)
 add_subdirectory(external-libraries/Simple-Web-Server)
 target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
 target_link_libraries(metagraph metagraph-core metagraph-cli)
