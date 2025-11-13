@@ -14,7 +14,8 @@ project(MetaGraph
   DESCRIPTION "A tool for scalable construction of annotated genome graphs and sequence-to-graph alignment"
 )
 
-add_definitions(-DVERSION="${VERSION}")
+set(METAGRAPH_PUBLIC_DEFS)
+list(APPEND METAGRAPH_PUBLIC_DEFS VERSION="${VERSION}")
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
@@ -100,6 +101,7 @@ else()
   set(METAGRAPH_ALPHABET_DEF _PROTEIN_GRAPH)
 endif()
 message(STATUS "Compile for ${BoldCyan}${CMAKE_DBG_ALPHABET}${ColourReset} alphabet")
+list(APPEND METAGRAPH_PUBLIC_DEFS ${METAGRAPH_ALPHABET_DEF})
 
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(external-libraries/jsoncpp)
@@ -128,10 +130,6 @@ endif()
 
 if(APPLE)
   # add path to system libraries but avoid cross-compilation errors
-  link_directories(/usr/local/lib)
-  if(EXISTS /opt/homebrew/lib)
-    link_directories(/opt/homebrew/lib)
-  endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
@@ -156,7 +154,7 @@ try_compile(MODE_TI
   "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
 )
 if(MODE_TI)
-  add_definitions(-DMODE_TI)
+  list(APPEND METAGRAPH_PUBLIC_DEFS MODE_TI)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
   endif()
@@ -268,11 +266,6 @@ ExternalProject_Add(SDSL
           COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
 )
 
-link_directories(
-  ${PROJECT_BINARY_DIR}/external-libraries/htslib/lib
-  ${PROJECT_BINARY_DIR}/KMC
-  ${SDSL_INSTALL}/lib
-)
 
 add_library(ips4o INTERFACE)
 target_include_directories(ips4o INTERFACE external-libraries/ips4o)
@@ -288,7 +281,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 
 find_package(zstd)
 if(ZSTD_FOUND)
-  add_definitions(-D_SUPPORT_ZSTD)
+  list(APPEND METAGRAPH_PUBLIC_DEFS _SUPPORT_ZSTD)
   if(APPLE)
     if(EXISTS /opt/homebrew/opt/icu4c)
       set(ICU_ROOT "/opt/homebrew/opt/icu4c")
@@ -301,7 +294,6 @@ if(ZSTD_FOUND)
     endif()
     find_package(ICU COMPONENTS data REQUIRED)
     get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
-    link_directories(${ICU_DATA_LIBRARY_PATH})
   endif()
 else()
   message(WARNING "Disabling zstd support.")
@@ -311,7 +303,7 @@ set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 
 # makes ASIO not depend on boost
-add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
+list(APPEND METAGRAPH_PUBLIC_DEFS ASIO_STANDALONE USE_STANDALONE_ASIO)
 set(USE_STANDALONE_ASIO ON)
 set(ASIO_PATH external-libraries/asio/asio)
 
@@ -443,14 +435,28 @@ target_include_directories(metagraph-core PUBLIC
   external-libraries/sdust
 )
 
-# Propagate alphabet selection to dependents
-target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_ALPHABET_DEF})
+# Propagate public compile definitions to dependents
+target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
+
+target_link_directories(metagraph-core INTERFACE
+  ${PROJECT_BINARY_DIR}/KMC
+  ${HTSLIB_INSTALL}/lib
+  ${SDSL_INSTALL}/lib
+)
 
 if(APPLE)
+  target_link_directories(metagraph-core INTERFACE /usr/local/lib)
+  if(EXISTS /opt/homebrew/lib)
+    target_link_directories(metagraph-core INTERFACE /opt/homebrew/lib)
+  endif()
   target_include_directories(metagraph-core SYSTEM PUBLIC
     /usr/local/include
     /opt/homebrew/include
   )
+endif()
+
+if(ICU_DATA_LIBRARY_PATH)
+  target_link_directories(metagraph-core INTERFACE ${ICU_DATA_LIBRARY_PATH})
 endif()
 
 # TODO: move ASIO out of here once it replaces sprintf with snprintf
@@ -462,9 +468,9 @@ target_include_directories(metagraph-core SYSTEM PUBLIC
 # Configure Folly if available
 findFolly()
 if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY)
+  target_compile_definitions(metagraph-core PUBLIC _USE_FOLLY)
   if(Jemalloc_FOUND)
-    add_definitions(-DUSE_JEMALLOC)
+    target_compile_definitions(metagraph-core PUBLIC USE_JEMALLOC)
   else()
     message(WARNING "Jemalloc not found, some optimizations will be disabled.")
   endif()
@@ -617,11 +623,8 @@ file(GLOB unit_tests_files
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
-link_directories(
-  ${PROJECT_BINARY_DIR}
-)
-
 add_executable(unit_tests ${unit_tests_files})
+target_link_directories(unit_tests PRIVATE ${PROJECT_BINARY_DIR})
 target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
