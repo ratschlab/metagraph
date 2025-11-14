@@ -619,16 +619,34 @@ endif()
 # install library
 #-------------------
 
-file(GLOB header_files
-  "src/*.hpp"
-  "src/*/*.hpp"
-  "src/*/*/*.hpp"
-)
+get_property(INCLUDE_DIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+
+get_property(SUBDIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY SUBDIRECTORIES)
+foreach(subdir ${SUBDIRS})
+    get_property(SUBDIR_INCLUDE_DIRS DIRECTORY ${subdir} PROPERTY INCLUDE_DIRECTORIES)
+    list(APPEND INCLUDE_DIRS ${SUBDIR_INCLUDE_DIRS})
+endforeach()
+
+foreach(dir ${INCLUDE_DIRS})
+  if("${dir}" STREQUAL ${PROJECT_SOURCE_DIR})
+    continue()
+  endif()
+  file(GLOB_RECURSE subdirs LIST_DIRECTORIES true "${dir}/*")
+  list(APPEND subdirs ${dir})
+  foreach(subdir ${subdirs})
+        file(GLOB headers "${subdir}/*.h" "${subdir}/*.hpp")
+        if(headers)
+            file(RELATIVE_PATH rel_path ${dir} ${subdir})
+            install(FILES ${headers}
+                    DESTINATION include/${rel_path})
+        endif()
+  endforeach()
+endforeach()
 
 install(TARGETS metagraph-core DESTINATION lib)
-install(FILES ${header_files} DESTINATION include/metagraph)
 if(METAGRAPH_BUILD_EXECUTABLE)
   install(TARGETS metagraph DESTINATION bin)
+endif()
 
   #-------------------
   # Unit Tests
