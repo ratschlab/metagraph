@@ -621,24 +621,39 @@ endif()
 # install library
 #-------------------
 
-
 get_target_property(INCLUDE_DIRS metagraph-core INCLUDE_DIRECTORIES)
 
-foreach(dir ${INCLUDE_DIRS})
-  if("${dir}" STREQUAL ${PROJECT_SOURCE_DIR})
-    continue()
-  endif()
-  file(GLOB_RECURSE subdirs LIST_DIRECTORIES true "${dir}/*")
-  list(APPEND subdirs ${dir})
-  foreach(subdir ${subdirs})
-        file(GLOB headers "${subdir}/*.h" "${subdir}/*.hpp")
-        if(headers)
-            file(RELATIVE_PATH rel_path ${dir} ${subdir})
-            install(FILES ${headers}
-                    DESTINATION include/${rel_path})
-        endif()
+# Run the header installation at install time (after ExternalProjects are built)
+install(CODE "
+  set(INCLUDE_DIRS \"${INCLUDE_DIRS}\")
+  set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
+  
+  foreach(dir \${INCLUDE_DIRS})
+    if(\"\${dir}\" STREQUAL \"\${PROJECT_SOURCE_DIR}\")
+      continue()
+    endif()
+    
+    if(NOT EXISTS \"\${dir}\")
+      continue()
+    endif()
+    
+    file(GLOB_RECURSE subdirs LIST_DIRECTORIES true \"\${dir}/*\")
+    list(APPEND subdirs \${dir})
+    
+    foreach(subdir \${subdirs})
+      if(NOT IS_DIRECTORY \"\${subdir}\")
+        continue()
+      endif()
+      
+      file(GLOB headers \"\${subdir}/*.h\" \"\${subdir}/*.hpp\")
+      if(headers)
+        file(RELATIVE_PATH rel_path \"\${dir}\" \"\${subdir}\")
+        file(INSTALL \${headers}
+             DESTINATION \"\${CMAKE_INSTALL_PREFIX}/include/\${rel_path}\")
+      endif()
+    endforeach()
   endforeach()
-endforeach()
+")
 
 install(TARGETS metagraph-core DESTINATION lib)
 if(METAGRAPH_BUILD_EXECUTABLE)
