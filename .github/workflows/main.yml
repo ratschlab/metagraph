@@ -65,6 +65,13 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
+    - name: checkout metagraph-examples
+      run: |
+        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+        cd metagraph-examples
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
+
     - name: install dependencies
       run: |
         sudo apt-get update
@@ -97,8 +104,20 @@ jobs:
               -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
+    - name: configure examples
+      run: |
+        cd metagraph-examples
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+    - name: build examples
+      run: cd metagraph-examples/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -118,7 +137,15 @@ jobs:
       with:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-        
+
+    - name: run example
+      run: |
+        cd metagraph-examples
+        ./build/basic_query \
+          data/graphs/test_graph.dbg \
+          data/graphs/test_graph.column.annodbg \
+          data/test_query.fa
+
     - name: run unit tests
       if: matrix.build_static == 'OFF'
       run: |
@@ -135,28 +162,6 @@ jobs:
           export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
           cd metagraph/build && make integration_tests
 
-    - name: checkout metagraph-examples
-      run: |
-        rm -rf metagraph-examples
-        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-        cd metagraph-examples
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
-
-    - name: build metagraph examples
-      run: |
-        cd metagraph-examples
-        mkdir build && cd build
-        cmake ..
-        make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: run metagraph example (basic_query)
-      run: |
-        cd metagraph-examples
-        ./build/basic_query \
-          data/graphs/test_graph.dbg \
-          data/graphs/test_graph.column.annodbg \
-          data/test_query.fa
 
   MacOS:
     strategy:
@@ -196,6 +201,13 @@ jobs:
     - name: checkout submodules
       run: git submodule update --init --recursive
 
+    - name: checkout metagraph-examples
+      run: |
+        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+        cd metagraph-examples
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
+
     - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
       if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
       run: |
@@ -231,8 +243,18 @@ jobs:
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               ..
 
+    - name: configure examples
+      run: |
+        cd metagraph-examples
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+    - name: build examples
+      run: cd metagraph-examples/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
@@ -258,22 +280,8 @@ jobs:
         cd metagraph/workflows
         pytest
 
-    - name: checkout metagraph-examples
-      run: |
-        rm -rf metagraph-examples
-        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-        cd metagraph-examples
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
 
-    - name: build metagraph examples
-      run: |
-        cd metagraph-examples
-        mkdir build && cd build
-        cmake ..
-        make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: run metagraph example (basic_query)
+    - name: run example
       run: |
         cd metagraph-examples
         ./build/basic_query \
