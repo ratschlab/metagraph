@@ -619,13 +619,8 @@ endif()
 # install library
 #-------------------
 
-get_property(INCLUDE_DIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
 
-get_property(SUBDIRS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY SUBDIRECTORIES)
-foreach(subdir ${SUBDIRS})
-    get_property(SUBDIR_INCLUDE_DIRS DIRECTORY ${subdir} PROPERTY INCLUDE_DIRECTORIES)
-    list(APPEND INCLUDE_DIRS ${SUBDIR_INCLUDE_DIRS})
-endforeach()
+get_target_property(INCLUDE_DIRS metagraph-core INCLUDE_DIRECTORIES)
 
 foreach(dir ${INCLUDE_DIRS})
   if("${dir}" STREQUAL ${PROJECT_SOURCE_DIR})
