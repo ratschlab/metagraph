@@ -449,6 +449,8 @@ target_include_directories(metagraph-core PUBLIC
   ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
   external-libraries/zlib
   external-libraries/sdust
+  external-libraries/jsoncpp/include
+  external-libraries/DYNAMIC/include
 )
 
 # Propagate public compile definitions to dependents
