@@ -453,9 +453,6 @@ target_include_directories(metagraph-core PUBLIC
   external-libraries/DYNAMIC/include
 )
 
-# Propagate public compile definitions to dependents
-target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
-
 # Propagate OpenMP flags to consumers (compile and link)
 # GCC needs -fopenmp during both compilation and linking to auto-link -lgomp
 if(OpenMP_CXX_FLAGS)
@@ -495,9 +492,9 @@ target_include_directories(metagraph-core SYSTEM PUBLIC
 # Configure Folly if available
 findFolly()
 if(FOLLY_FOUND)
-  target_compile_definitions(metagraph-core PUBLIC _USE_FOLLY)
+  list(APPEND METAGRAPH_PUBLIC_DEFS _USE_FOLLY)
   if(Jemalloc_FOUND)
-    target_compile_definitions(metagraph-core PUBLIC USE_JEMALLOC)
+    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC)
   else()
     message(WARNING "Jemalloc not found, some optimizations will be disabled.")
   endif()
@@ -507,6 +504,9 @@ if(FOLLY_FOUND)
     ${PROJECT_BINARY_DIR}/external-libraries/folly/include
   )
 endif()
+
+# Propagate public compile definitions to dependents
+target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
@@ -655,7 +655,21 @@ install(CODE "
   endforeach()
 ")
 
-install(TARGETS metagraph-core DESTINATION lib)
+install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
+
+# Generate the definitions file for ExternalProject_Add use cases
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/MetaGraphDefinitions.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/MetaGraphDefinitions.cmake
+    @ONLY
+)
+
+# Install the definitions file
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/MetaGraphDefinitions.cmake
+    DESTINATION lib/cmake/MetaGraph
+)
+
 if(METAGRAPH_BUILD_EXECUTABLE)
   install(TARGETS metagraph DESTINATION bin)
 

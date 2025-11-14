@@ -1,0 +1,4 @@
+# MetaGraph Compile Definitions
+# This file contains all the compile definitions needed to use MetaGraph headers
+
+set(METAGRAPH_COMPILE_DEFINITIONS @METAGRAPH_PUBLIC_DEFS@)
