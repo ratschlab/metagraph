@@ -646,7 +646,6 @@ endforeach()
 install(TARGETS metagraph-core DESTINATION lib)
 if(METAGRAPH_BUILD_EXECUTABLE)
   install(TARGETS metagraph DESTINATION bin)
-endif()
 
   #-------------------
   # Unit Tests
