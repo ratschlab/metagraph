@@ -285,26 +285,34 @@ add_library(eigen INTERFACE)
 target_include_directories(eigen INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+# Allow MetaGraph's custom Find*.cmake modules to be picked up even when the
+# project is included as a subdirectory.
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(zstd)
 if(ZSTD_FOUND)
   list(APPEND METAGRAPH_PUBLIC_DEFS _SUPPORT_ZSTD)
-  if(APPLE)
+else()
+  message(WARNING "Disabling zstd support.")
+endif()
+
+if(APPLE)
+  if(NOT DEFINED ICU_ROOT)
     if(EXISTS /opt/homebrew/opt/icu4c)
       set(ICU_ROOT "/opt/homebrew/opt/icu4c")
     elseif(EXISTS /usr/local/opt/icu4c)
       set(ICU_ROOT "/usr/local/opt/icu4c")
     else()
-      execute_process(COMMAND conda info --base
-                      OUTPUT_VARIABLE ICU_ROOT
-                      OUTPUT_STRIP_TRAILING_WHITESPACE)
+      find_program(CONDA_EXECUTABLE conda)
+      if(CONDA_EXECUTABLE)
+        execute_process(COMMAND ${CONDA_EXECUTABLE} info --base
+                        OUTPUT_VARIABLE ICU_ROOT
+                        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      endif()
     endif()
-    find_package(ICU COMPONENTS data REQUIRED)
-    get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
   endif()
-else()
-  message(WARNING "Disabling zstd support.")
+  find_package(ICU COMPONENTS data REQUIRED)
+  get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
 set(Boost_USE_STATIC_LIBS ON)

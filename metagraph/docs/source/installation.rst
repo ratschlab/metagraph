@@ -81,7 +81,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-            brew install libomp cmake make bzip2 boost jemalloc automake autoconf libdeflate
+            brew install libomp cmake make bzip2 boost jemalloc automake autoconf libdeflate icu4c zstd
 
 
     .. group-tab:: Ubuntu / Debian
@@ -102,7 +102,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
 
-            brew install gcc autoconf automake libtool cmake make libdeflate
+            brew install gcc autoconf automake libtool cmake make libdeflate icu4c zstd
             [[ "$OSTYPE" == "darwin"* ]] \
                 && brew remove -f boost \
                 && brew install --cc=gcc-7 boost \
@@ -124,7 +124,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
 
-            brew install llvm libomp autoconf automake libtool cmake make boost libdeflate
+            brew install llvm libomp autoconf automake libtool cmake make boost libdeflate icu4c zstd
 
         Then, the following environment variables have to be set::
 
