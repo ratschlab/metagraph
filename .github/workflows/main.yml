@@ -218,7 +218,26 @@ jobs:
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: run unit tests
-      run: cd metagraph/build && ./unit_tests
+      run: |
+        set -o pipefail
+        cd metagraph/build
+        if ./unit_tests; then
+          exit 0
+        fi
+        echo "unit_tests failed; collecting additional diagnostics..."
+        dsymutil ./unit_tests >/dev/null 2>&1 || true
+        if command -v lldb >/dev/null 2>&1; then
+          echo "Running failing RowDiff tests under lldb for stack traces"
+          lldb -Q \
+               -o "target create ./unit_tests" \
+               -o "settings set target.run-args -- --gtest_filter=RowDiff.*" \
+               -o run \
+               -o "thread backtrace all" \
+               -o quit || true
+        else
+          echo "lldb not available on this runner."
+        fi
+        exit 1
 
     - name: run integration tests
       run: cd metagraph/build && make integration_tests
