@@ -81,7 +81,7 @@ endfunction()
 
 function (findFolly)
 unset(FOLLY_FOUND PARENT_SCOPE)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Jemalloc)
 
 if(Jemalloc_FOUND)
