@@ -70,7 +70,7 @@ jobs:
         git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
         cd metagraph-examples
         rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
 
     - name: install dependencies
       run: |
@@ -206,7 +206,7 @@ jobs:
         git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
         cd metagraph-examples
         rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}/metagraph" metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
 
     - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
       if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
