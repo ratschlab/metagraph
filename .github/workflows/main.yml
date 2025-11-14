@@ -60,7 +60,7 @@ jobs:
     name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
 
     - name: checkout submodules
       run: git submodule update --init --recursive
@@ -218,26 +218,7 @@ jobs:
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: run unit tests
-      run: |
-        set -o pipefail
-        cd metagraph/build
-        if ./unit_tests; then
-          exit 0
-        fi
-        echo "unit_tests failed; collecting additional diagnostics..."
-        dsymutil ./unit_tests >/dev/null 2>&1 || true
-        if command -v lldb >/dev/null 2>&1; then
-          echo "Running failing RowDiff tests under lldb for stack traces"
-          lldb -Q \
-               -o "target create ./unit_tests" \
-               -o "settings set target.run-args -- --gtest_filter=RowDiff.*" \
-               -o run \
-               -o "thread backtrace all" \
-               -o quit || true
-        else
-          echo "lldb not available on this runner."
-        fi
-        exit 1
+      run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
       run: cd metagraph/build && make integration_tests
@@ -253,6 +234,12 @@ jobs:
         # Test metagraph-workflows pytest
         cd metagraph/workflows
         pytest
+
+    - name: Setup tmate session
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
+      with:
+        limit-access-to-actor: true
 
   Metagraph-Workflows:
     name: Test metagraph workflows
