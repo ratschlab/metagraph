@@ -34,7 +34,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y g++-13 cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev libzstd-dev
+        sudo apt-get install -y g++-13 cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
 
     - name: install dependencies (MacOS)
       if: matrix.os == 'macos-latest'

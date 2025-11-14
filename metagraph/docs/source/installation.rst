@@ -88,7 +88,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev
+            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
 
 
     .. group-tab:: CentOS

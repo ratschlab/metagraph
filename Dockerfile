@@ -17,6 +17,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libbz2-dev \
     libdeflate-dev \
     libjemalloc-dev \
+    liblzma-dev \
     libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
