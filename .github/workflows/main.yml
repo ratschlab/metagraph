@@ -142,9 +142,9 @@ jobs:
       run: |
         cd metagraph-examples
         ./build/basic_query \
-          data/graphs/test_graph.dbg \
-          data/graphs/test_graph.column.annodbg \
-          data/test_query.fa
+          data/graphs/test_${{ matrix.alphabet }}_graph.dbg \
+          data/graphs/test_${{ matrix.alphabet }}_graph.column.annodbg \
+          data/test_${{ matrix.alphabet }}_query.fa
 
     - name: run unit tests
       if: matrix.build_static == 'OFF'
@@ -285,9 +285,9 @@ jobs:
       run: |
         cd metagraph-examples
         ./build/basic_query \
-          data/graphs/test_graph.dbg \
-          data/graphs/test_graph.column.annodbg \
-          data/test_query.fa
+          data/graphs/test_${{ matrix.alphabet }}_graph.dbg \
+          data/graphs/test_${{ matrix.alphabet }}_graph.column.annodbg \
+          data/test_${{ matrix.alphabet }}_query.fa
 
   Metagraph-Workflows:
     name: Test metagraph workflows
