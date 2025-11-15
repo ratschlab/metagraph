@@ -10,9 +10,8 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: install build dependencies
-      shell: bash
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
+    - name: install dependencies
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
 
     - name: install dependencies for integration tests
       if: inputs.install_test_deps == 'true'
