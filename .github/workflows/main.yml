@@ -64,18 +64,12 @@ jobs:
           EOF
           
           # Create Linux examples matrix by adding example_type to base Linux matrix
-          jq '. + {"example_type": ["subdirectory", "ExternalProject"]} | 
-              .include += [
-                {"example_type": "subdirectory", "example_name": "Subdirectory"},
-                {"example_type": "ExternalProject", "example_name": "ExternalProject"}
-              ]' linux-matrix.json > linux-examples-matrix.json
+          jq '. + {"example_type": ["subdirectory", "ExternalProject"]}' linux-matrix.json > linux-examples-matrix.json
           
-          # Create macOS examples matrix by adding example_type to base macOS matrix
-          jq '. + {"example_type": ["subdirectory", "ExternalProject"]} | 
-              .include += [
-                {"example_type": "subdirectory", "example_name": "Subdirectory"},
-                {"example_type": "ExternalProject", "example_name": "ExternalProject"}
-              ]' macos-matrix.json > macos-examples-matrix.json
+          # Create macOS examples matrix by expanding each base config with both example types
+          jq '{include: ([.include[] as $base | 
+                ("subdirectory", "ExternalProject") as $type | 
+                $base + {example_type: $type}])}' macos-matrix.json > macos-examples-matrix.json
           
           echo "linux-matrix=$(cat linux-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
           echo "macos-matrix=$(cat macos-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
@@ -237,7 +231,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-examples-matrix) }}
 
-    name: Linux ${{ matrix.example_name }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: Linux ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
     - uses: actions/checkout@v4
@@ -444,7 +438,7 @@ jobs:
       matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-examples-matrix) }}
 
     runs-on: ${{ matrix.platform }}
-    name: MacOS ${{ matrix.example_name }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
+    name: MacOS ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
 
     defaults:
       run:
