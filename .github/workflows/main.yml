@@ -146,7 +146,11 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
-        path: metagraph/build/
+        path: |
+          metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
+          metagraph/build/unit_tests
+          metagraph/build/integration_tests
+          metagraph/build/test_venv/
         retention-days: 1
 
 
@@ -220,7 +224,9 @@ jobs:
         retry_on: error
         command: |
           export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-          cd metagraph/build && make integration_tests
+          cd metagraph/build
+          chmod +x integration_tests
+          ./test_venv/bin/python ../integration_tests/main.py
 
 
   Linux-Examples:
@@ -357,7 +363,11 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
-        path: metagraph/build/
+        path: |
+          metagraph/build/metagraph_${{ matrix.alphabet }}
+          metagraph/build/unit_tests
+          metagraph/build/integration_tests
+          metagraph/build/test_venv/
         retention-days: 1
 
 
@@ -416,7 +426,10 @@ jobs:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
 
     - name: run integration tests
-      run: cd metagraph/build && make integration_tests
+      run: |
+        cd metagraph/build
+        chmod +x integration_tests
+        ./test_venv/bin/python ../integration_tests/main.py
 
     - name: check metagraph workflows
       run: |
