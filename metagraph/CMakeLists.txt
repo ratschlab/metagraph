@@ -698,6 +698,10 @@ install(TARGETS
     OPTIONAL  # Some targets might not exist in all configurations
 )
 
+# Install SDSL and HTSLIB library (built via ExternalProject_Add)
+install(FILES ${SDSL_INSTALL}/lib/libsdsl.a DESTINATION lib)
+install(FILES ${HTSLIB_INSTALL}/lib/libhts.a DESTINATION lib)
+
 # Install the generated config header
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp DESTINATION include/common)
 
