@@ -723,7 +723,7 @@ install(CODE "
   set(CMAKE_AR \"${CMAKE_AR}\")
   set(BUNDLE_LIBS_LIST \"${BUNDLE_LIBS_LIST}\")
   
-  message(STATUS \"Bundling dependencies into libmetagraph-core.a...\")
+  message(STATUS \"Bundling dependencies into libmetagraph-core-bundle.a...\")
   
   # Create temporary directory for bundling
   file(REMOVE_RECURSE \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
@@ -743,28 +743,29 @@ install(CODE "
     endif()
   endforeach()
   
-  # Create the combined archive using bundling script
+  # Create the combined archive with -bundle suffix to avoid overwriting the original
   execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/bundle_static_libs.sh 
                           \${PROJECT_BINARY_DIR}/metagraph-core-bundle 
-                          \${PROJECT_BINARY_DIR}/libmetagraph-core.a 
+                          \${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a 
                           \${CMAKE_AR}
                   RESULT_VARIABLE BUNDLE_RESULT)
   if(BUNDLE_RESULT)
     message(FATAL_ERROR \"Failed to bundle static libraries (exit code: \${BUNDLE_RESULT})\")
   endif()
   
-  if(NOT EXISTS \"\${PROJECT_BINARY_DIR}/libmetagraph-core.a\")
-    message(FATAL_ERROR \"Bundled libmetagraph-core.a was not created\")
+  if(NOT EXISTS \"\${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a\")
+    message(FATAL_ERROR \"Bundled libmetagraph-core-bundle.a was not created\")
   endif()
   
-  message(STATUS \"Bundled library size: \")
-  execute_process(COMMAND ls -lh \${PROJECT_BINARY_DIR}/libmetagraph-core.a)
+  execute_process(COMMAND du -h \${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a
+                  OUTPUT_VARIABLE BUNDLE_SIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+  string(REGEX REPLACE \"^([^\\t]+).*\" \"\\\\1\" BUNDLE_SIZE \"\${BUNDLE_SIZE}\")
+  message(STATUS \"Created libmetagraph-core-bundle.a (\${BUNDLE_SIZE})\")
 ")
 
-install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
-
-# Install the generated config header
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp DESTINATION include/common)
+# Install the bundled library as libmetagraph-core.a (without -bundle suffix)
+install(FILES ${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a DESTINATION lib RENAME libmetagraph-core.a)
+install(TARGETS metagraph-cli DESTINATION lib)
 
 if(METAGRAPH_BUILD_EXECUTABLE)
   install(TARGETS metagraph DESTINATION bin)
