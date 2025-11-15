@@ -228,6 +228,7 @@ jobs:
     - name: recreate metagraph symlink
       run: |
         cd metagraph/build
+        chmod +x metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
         ln -sf metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }} metagraph
 
     - name: run integration tests
@@ -444,6 +445,7 @@ jobs:
     - name: recreate metagraph symlink
       run: |
         cd metagraph/build
+        chmod +x metagraph_${{ matrix.alphabet }}
         ln -sf metagraph_${{ matrix.alphabet }} metagraph
 
     - name: run integration tests
