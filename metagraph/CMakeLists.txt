@@ -700,34 +700,45 @@ install(CODE "
   file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
   
   # Extract all object files from metagraph-core and dependencies
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libmetagraph-core.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/zlib/libz.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json/libjsoncpp.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libprogress_bar.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libmersenne_twister.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libsdust.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/spdlog/libspdlog.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/sshash/libsshash_static.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libfolly.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${SDSL_INSTALL}/lib/libsdsl.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
-  execute_process(COMMAND \${CMAKE_AR} x \${HTSLIB_INSTALL}/lib/libhts.a
-                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  set(LIBS_TO_BUNDLE
+    \${PROJECT_BINARY_DIR}/libmetagraph-core.a
+    \${PROJECT_BINARY_DIR}/external-libraries/zlib/libz.a
+    \${PROJECT_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json/libjsoncpp.a
+    \${PROJECT_BINARY_DIR}/libprogress_bar.a
+    \${PROJECT_BINARY_DIR}/libmersenne_twister.a
+    \${PROJECT_BINARY_DIR}/libsdust.a
+    \${PROJECT_BINARY_DIR}/external-libraries/spdlog/libspdlog.a
+    \${PROJECT_BINARY_DIR}/external-libraries/sshash/libsshash_static.a
+    \${PROJECT_BINARY_DIR}/libfolly.a
+    \${SDSL_INSTALL}/lib/libsdsl.a
+    \${HTSLIB_INSTALL}/lib/libhts.a
+  )
+  
+  foreach(LIB \${LIBS_TO_BUNDLE})
+    if(NOT EXISTS \"\${LIB}\")
+      message(FATAL_ERROR \"Required library not found for bundling: \${LIB}\")
+    endif()
+    execute_process(COMMAND \${CMAKE_AR} x \${LIB}
+                    WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle
+                    RESULT_VARIABLE AR_RESULT)
+    if(AR_RESULT)
+      message(FATAL_ERROR \"Failed to extract \${LIB} (exit code: \${AR_RESULT})\")
+    endif()
+  endforeach()
   
   # Create the combined archive using bundling script
   execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/bundle_static_libs.sh 
                           \${PROJECT_BINARY_DIR}/metagraph-core-bundle 
                           \${PROJECT_BINARY_DIR}/libmetagraph-core.a 
-                          \${CMAKE_AR})
+                          \${CMAKE_AR}
+                  RESULT_VARIABLE BUNDLE_RESULT)
+  if(BUNDLE_RESULT)
+    message(FATAL_ERROR \"Failed to bundle static libraries (exit code: \${BUNDLE_RESULT})\")
+  endif()
+  
+  if(NOT EXISTS \"\${PROJECT_BINARY_DIR}/libmetagraph-core.a\")
+    message(FATAL_ERROR \"Bundled libmetagraph-core.a was not created\")
+  endif()
   
   message(STATUS \"Bundled library size: \")
   execute_process(COMMAND ls -lh \${PROJECT_BINARY_DIR}/libmetagraph-core.a)
