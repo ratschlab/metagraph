@@ -687,6 +687,15 @@ install(CODE "
 
 install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
 
+# Install all dependency libraries that MetaGraph builds internally
+# This allows external projects to link against them
+install(TARGETS 
+    zlib deflate jsoncpp_lib progress_bar mersenne_twister sdust 
+    spdlog sshash_static XXSDS_DYNAMIC ips4o caches eigen folly
+    DESTINATION lib
+    OPTIONAL  # Some targets might not exist in all configurations
+)
+
 # Install the generated config header
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp DESTINATION include/common)
 
