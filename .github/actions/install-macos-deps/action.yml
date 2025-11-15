@@ -11,6 +11,7 @@ runs:
   using: "composite"
   steps:
     - name: install dependencies
+      shell: bash
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
 
     - name: install dependencies for integration tests
