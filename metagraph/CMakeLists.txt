@@ -625,7 +625,7 @@ endif()
 
 target_link_libraries(metagraph-core PUBLIC ${METALIBS})
 add_subdirectory(external-libraries/Simple-Web-Server)
-target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
+target_link_libraries(metagraph-cli PUBLIC metagraph-core PRIVATE simple-web-server)
 
 if(METAGRAPH_BUILD_EXECUTABLE)
   add_executable(metagraph "src/main.cpp")
@@ -729,14 +729,23 @@ install(CODE "
   file(REMOVE_RECURSE \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
   file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
   
-  # Extract all object files
+  # Extract each library into its own subdirectory to avoid filename collisions
   foreach(LIB \${BUNDLE_LIBS_LIST})
     if(NOT EXISTS \"\${LIB}\")
       message(FATAL_ERROR \"Required library not found for bundling: \${LIB}\")
     endif()
     message(STATUS \"  Extracting: \${LIB}\")
+    
+    # Get library name without path and extension for subdirectory
+    get_filename_component(LIB_NAME \"\${LIB}\" NAME_WE)
+    string(REGEX REPLACE \"^lib\" \"\" LIB_NAME \"\${LIB_NAME}\")
+    
+    # Create subdirectory for this library
+    file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle/\${LIB_NAME})
+    
+    # Extract into subdirectory
     execute_process(COMMAND \${CMAKE_AR} x \${LIB}
-                    WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle
+                    WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle/\${LIB_NAME}
                     RESULT_VARIABLE AR_RESULT)
     if(AR_RESULT)
       message(FATAL_ERROR \"Failed to extract \${LIB} (exit code: \${AR_RESULT})\")
