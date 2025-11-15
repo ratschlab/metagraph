@@ -113,20 +113,20 @@ jobs:
               -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
+    - name: configure ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.sha }} -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
     - name: build subdirectory example
       run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: configure ExternalProject example
-      run: |
-        cd metagraph-examples/ExternalProject
-        mkdir build && cd build
-        # Pass all build flags through to ExternalProjectcmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DMETAGRAPH_GIT_TAG=${{ github.sha }} -DBUILD_STATIC=${{ matrix.build_static }} \
-              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build ExternalProject example
       run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
@@ -264,12 +264,6 @@ jobs:
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
-    - name: build metagraph
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
-
-    - name: build subdirectory example
-      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
     - name: configure ExternalProject example
       run: |
         cd metagraph-examples/ExternalProject
@@ -277,6 +271,13 @@ jobs:
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DMETAGRAPH_GIT_TAG=${{ github.sha }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build metagraph
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+    - name: build subdirectory example
+      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
 
     - name: build ExternalProject example
       run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
