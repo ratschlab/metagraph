@@ -105,32 +105,8 @@ jobs:
               -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
-    - name: configure subdirectory example
-      run: |
-        cd metagraph-examples/subdirectory
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DBUILD_STATIC=${{ matrix.build_static }} \
-              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-
-    - name: configure ExternalProject example
-      run: |
-        cd metagraph-examples/ExternalProject
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} -DBUILD_STATIC=${{ matrix.build_static }} \
-              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
-
-    - name: build subdirectory example
-      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: build ExternalProject example
-      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -158,21 +134,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
-        path: |
-          metagraph/build/
-          metagraph-examples/subdirectory/build/
-          metagraph-examples/ExternalProject/build/
+        path: metagraph/build/
         retention-days: 1
-
-    - name: run subdirectory example
-      run: |
-        cd metagraph-examples/subdirectory/build
-        make run_example
-
-    - name: run ExternalProject example
-      run: |
-        cd metagraph-examples/ExternalProject/build
-        make run_example
 
 
   Linux-UnitTests:
@@ -248,6 +211,103 @@ jobs:
           cd metagraph/build && make integration_tests
 
 
+  Linux-Examples-Subdirectory:
+    runs-on: ubuntu-22.04
+    needs: [setup-matrix, Linux-Build]
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
+
+    name: Linux Subdirectory Example (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: checkout submodules
+      run: git submodule update --init --recursive
+
+    - name: checkout metagraph-examples
+      run: |
+        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+        cd metagraph-examples/subdirectory
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
+
+    - name: install dependencies
+      uses: ./.github/actions/install-linux-deps
+      with:
+        compiler: ${{ matrix.compiler }}
+        cc: ${{ matrix.cc }}
+        cxx: ${{ matrix.cxx }}
+        build_static: ${{ matrix.build_static }}
+
+    - name: download metagraph build
+      uses: actions/download-artifact@v4
+      with:
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        path: metagraph/build/
+
+    - name: configure subdirectory example
+      run: |
+        cd metagraph-examples/subdirectory
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build subdirectory example
+      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: run subdirectory example
+      run: |
+        cd metagraph-examples/subdirectory/build
+        make run_example
+
+
+  Linux-Examples-ExternalProject:
+    runs-on: ubuntu-22.04
+    needs: [setup-matrix, Linux-Build]
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
+
+    name: Linux ExternalProject Example (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: install dependencies
+      uses: ./.github/actions/install-linux-deps
+      with:
+        compiler: ${{ matrix.compiler }}
+        cc: ${{ matrix.cc }}
+        cxx: ${{ matrix.cxx }}
+        build_static: ${{ matrix.build_static }}
+
+    - name: checkout metagraph-examples
+      run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+
+    - name: configure ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build ExternalProject example
+      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: run ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject/build
+        make run_example
+
+
   MacOS-Build:
     needs: setup-matrix
     strategy:
@@ -308,29 +368,8 @@ jobs:
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               ..
 
-    - name: configure subdirectory example
-      run: |
-        cd metagraph-examples/subdirectory
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-
-    - name: configure ExternalProject example
-      run: |
-        cd metagraph-examples/ExternalProject
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
-
-    - name: build subdirectory example
-      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: build ExternalProject example
-      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
@@ -342,21 +381,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
-        path: |
-          metagraph/build/
-          metagraph-examples/subdirectory/build/
-          metagraph-examples/ExternalProject/build/
+        path: metagraph/build/
         retention-days: 1
-
-    - name: run subdirectory example
-      run: |
-        cd metagraph-examples/subdirectory/build
-        make run_example
-
-    - name: run ExternalProject example
-      run: |
-        cd metagraph-examples/ExternalProject/build
-        make run_example
 
 
   MacOS-UnitTests:
@@ -427,6 +453,137 @@ jobs:
         # Test metagraph-workflows pytest
         cd metagraph/workflows
         pytest
+
+
+  MacOS-Examples-Subdirectory:
+    needs: [setup-matrix, MacOS-Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: MacOS Subdirectory Example (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: checkout submodules
+      run: git submodule update --init --recursive
+
+    - name: checkout metagraph-examples
+      run: |
+        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+        cd metagraph-examples/subdirectory
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
+
+    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
+      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
+      run: |
+        # Install Intel Homebrew into /usr/local if missing
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+
+    - name: download metagraph build
+      uses: actions/download-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: metagraph/build/
+
+    - name: configure subdirectory example
+      run: |
+        cd metagraph-examples/subdirectory
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build subdirectory example
+      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: run subdirectory example
+      run: |
+        cd metagraph-examples/subdirectory/build
+        make run_example
+
+
+  MacOS-Examples-ExternalProject:
+    needs: [setup-matrix, MacOS-Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: MacOS ExternalProject Example (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
+      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
+      run: |
+        # Install Intel Homebrew into /usr/local if missing
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+
+    - name: checkout metagraph-examples
+      run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+
+    - name: configure ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build ExternalProject example
+      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: run ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject/build
+        make run_example
+
 
   Metagraph-Workflows:
     name: Test metagraph workflows
