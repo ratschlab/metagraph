@@ -689,8 +689,10 @@ install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
 
 # Install all dependency libraries that MetaGraph builds internally
 # This allows external projects to link against them
+# Note: Some items in METALIBS are system libraries (prefixed with -l), not CMake targets
+# We only install the CMake targets that we build
 install(TARGETS 
-    zlib deflate jsoncpp_lib progress_bar mersenne_twister sdust 
+    zlib jsoncpp_lib progress_bar mersenne_twister sdust 
     spdlog sshash_static XXSDS_DYNAMIC ips4o caches eigen folly
     DESTINATION lib
     OPTIONAL  # Some targets might not exist in all configurations
