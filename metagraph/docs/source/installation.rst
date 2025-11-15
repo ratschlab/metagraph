@@ -88,7 +88,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev
+            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
 
 
     .. group-tab:: CentOS
@@ -160,15 +160,6 @@ To compile MetaGraph, please follow these steps.
 #. Make sure all submodules have been downloaded::
 
     git submodule update --init --recursive
-
-#. Install *sdsl-lite* in ``metagraph/external-libraries/sdsl-lite`` with the following script::
-
-    git submodule sync
-    git submodule update --init --recursive
-
-    pushd metagraph/external-libraries/sdsl-lite
-    ./install.sh $PWD
-    popd
 
 #. Set up the ``build`` directory and change into it::
 

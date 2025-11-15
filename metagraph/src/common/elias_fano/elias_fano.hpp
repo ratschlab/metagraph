@@ -9,6 +9,8 @@
 #include <optional>
 #include <vector>
 
+#include "common/config.hpp"
+
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 

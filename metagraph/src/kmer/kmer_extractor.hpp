@@ -8,6 +8,7 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "common/config.hpp"
 #include "common/vector.hpp"
 #include "common/utils/string_utils.hpp"
 #include "kmer.hpp"
