@@ -318,8 +318,7 @@ endif()
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 
-# makes ASIO not depend on boost
-list(APPEND METAGRAPH_PUBLIC_DEFS ASIO_STANDALONE USE_STANDALONE_ASIO)
+# makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
 set(ASIO_PATH external-libraries/asio/asio)
 
@@ -505,8 +504,39 @@ if(FOLLY_FOUND)
   )
 endif()
 
-# Propagate public compile definitions to dependents
+# Propagate public compile definitions to dependents during build
 target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
+
+# Generate config header with all compile definitions for external consumers
+# External consumers will get definitions from the header instead of CMake
+# Convert list items to #define directives - process both the variable and target property
+get_target_property(TARGET_DEFS metagraph-core COMPILE_DEFINITIONS)
+if(TARGET_DEFS)
+  list(APPEND METAGRAPH_PUBLIC_DEFS ${TARGET_DEFS})
+  list(REMOVE_DUPLICATES METAGRAPH_PUBLIC_DEFS)
+endif()
+
+foreach(def ${METAGRAPH_PUBLIC_DEFS})
+  if(def MATCHES "^([^=]+)=(.*)$")
+    # Definition with value: FOO=bar -> #define FOO bar
+    set(${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
+  else()
+    # Boolean definition: FOO -> #define FOO
+    set(${def} 1)
+  endif()
+endforeach()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/config.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp
+    @ONLY
+)
+
+# Add the generated header to include path
+target_include_directories(metagraph-core PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<INSTALL_INTERFACE:include>
+)
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
@@ -657,18 +687,8 @@ install(CODE "
 
 install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
 
-# Generate the definitions file for ExternalProject_Add use cases
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/MetaGraphDefinitions.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/MetaGraphDefinitions.cmake
-    @ONLY
-)
-
-# Install the definitions file
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/MetaGraphDefinitions.cmake
-    DESTINATION lib/cmake/MetaGraph
-)
+# Install the generated config header
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp DESTINATION include/common)
 
 if(METAGRAPH_BUILD_EXECUTABLE)
   install(TARGETS metagraph DESTINATION bin)
