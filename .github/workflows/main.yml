@@ -125,7 +125,6 @@ jobs:
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
 
     - name: build other
-      if: matrix.build_static == 'OFF'
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     # for potential release
@@ -142,15 +141,21 @@ jobs:
 
     # Upload build artifacts for testing
     - name: upload build artifacts
-      if: matrix.build_static == 'OFF'
       uses: actions/upload-artifact@v4
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
         path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-          metagraph/build/unit_tests
           metagraph/build/integration_tests
           metagraph/build/test_venv/
+        retention-days: 1
+
+    - name: upload unit tests
+      if: matrix.build_static == 'OFF'
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        path: metagraph/build/unit_tests
         retention-days: 1
 
 
@@ -177,11 +182,11 @@ jobs:
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
 
-    - name: download build artifacts
+    - name: download unit tests
       if: matrix.build_static == 'OFF'
       uses: actions/download-artifact@v4
       with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
 
     - name: run unit tests
       if: matrix.build_static == 'OFF'
@@ -202,10 +207,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      if: matrix.build_static == 'OFF'
 
     - name: install dependencies
-      if: matrix.build_static == 'OFF'
       uses: ./.github/actions/install-linux-deps
       with:
         compiler: ${{ matrix.compiler }}
@@ -215,13 +218,11 @@ jobs:
         install_test_deps: 'true'
 
     - name: download build artifacts
-      if: matrix.build_static == 'OFF'
       uses: actions/download-artifact@v4
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
 
     - name: run integration tests
-      if: matrix.build_static == 'OFF'
       uses: nick-fields/retry@v2
       with:
         timeout_minutes: 1000
