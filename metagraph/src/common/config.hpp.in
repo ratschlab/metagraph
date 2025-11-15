@@ -10,19 +10,19 @@
 #endif
 
 #ifndef _DNA_GRAPH
-#cmakedefine01 _DNA_GRAPH
+#cmakedefine _DNA_GRAPH 1
 #endif
 
 #ifndef _DNA5_GRAPH
-#cmakedefine01 _DNA5_GRAPH
+#cmakedefine _DNA5_GRAPH 1
 #endif
 
 #ifndef _DNA_CASE_SENSITIVE_GRAPH
-#cmakedefine01 _DNA_CASE_SENSITIVE_GRAPH
+#cmakedefine _DNA_CASE_SENSITIVE_GRAPH 1
 #endif
 
 #ifndef _PROTEIN_GRAPH
-#cmakedefine01 _PROTEIN_GRAPH
+#cmakedefine _PROTEIN_GRAPH 1
 #endif
 
 #ifndef MODE_TI
@@ -30,7 +30,7 @@
 #endif
 
 #ifndef _USE_FOLLY
-#cmakedefine01 _USE_FOLLY
+#cmakedefine _USE_FOLLY 1
 #endif
 
 #ifndef USE_JEMALLOC
@@ -38,7 +38,7 @@
 #endif
 
 #ifndef _SUPPORT_ZSTD
-#cmakedefine01 _SUPPORT_ZSTD
+#cmakedefine _SUPPORT_ZSTD 1
 #endif
 
 #endif // __METAGRAPH_CONFIG_HPP__
