@@ -68,7 +68,7 @@ jobs:
     - name: checkout metagraph-examples
       run: |
         git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-        cd metagraph-examples
+        cd metagraph-examples/subdirectory
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
 
@@ -104,9 +104,9 @@ jobs:
               -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
-    - name: configure examples
+    - name: configure subdirectory example
       run: |
-        cd metagraph-examples
+        cd metagraph-examples/subdirectory
         mkdir build && cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DBUILD_STATIC=${{ matrix.build_static }} \
@@ -116,8 +116,20 @@ jobs:
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
-    - name: build examples
-      run: cd metagraph-examples/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+    - name: build subdirectory example
+      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: configure ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir build && cd build
+        # Pass all build flags through to ExternalProjectcmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.sha }} -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build ExternalProject example
+      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -138,13 +150,15 @@ jobs:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
 
-    - name: run example
+    - name: run subdirectory example
       run: |
-        cd metagraph-examples
-        ./build/basic_query \
-          data/graphs/test_${{ matrix.alphabet }}_graph.dbg \
-          data/graphs/test_${{ matrix.alphabet }}_graph.column.annodbg \
-          data/test_${{ matrix.alphabet }}_query.fa
+        cd metagraph-examples/subdirectory/build
+        make run_example
+
+    - name: run ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject/build
+        make run_example
 
     - name: run unit tests
       if: matrix.build_static == 'OFF'
@@ -204,7 +218,7 @@ jobs:
     - name: checkout metagraph-examples
       run: |
         git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-        cd metagraph-examples
+        cd metagraph-examples/subdirectory
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
 
@@ -243,9 +257,9 @@ jobs:
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               ..
 
-    - name: configure examples
+    - name: configure subdirectory example
       run: |
-        cd metagraph-examples
+        cd metagraph-examples/subdirectory
         mkdir build && cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
@@ -253,8 +267,19 @@ jobs:
     - name: build metagraph
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
 
-    - name: build examples
-      run: cd metagraph-examples/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+    - name: build subdirectory example
+      run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: configure ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.sha }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+
+    - name: build ExternalProject example
+      run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
     - name: build unit tests
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
@@ -281,13 +306,15 @@ jobs:
         pytest
 
 
-    - name: run example
+    - name: run subdirectory example
       run: |
-        cd metagraph-examples
-        ./build/basic_query \
-          data/graphs/test_${{ matrix.alphabet }}_graph.dbg \
-          data/graphs/test_${{ matrix.alphabet }}_graph.column.annodbg \
-          data/test_${{ matrix.alphabet }}_query.fa
+        cd metagraph-examples/subdirectory/build
+        make run_example
+
+    - name: run ExternalProject example
+      run: |
+        cd metagraph-examples/ExternalProject/build
+        make run_example
 
   Metagraph-Workflows:
     name: Test metagraph workflows
