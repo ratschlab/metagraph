@@ -213,7 +213,7 @@ jobs:
 
   Linux-Examples-Subdirectory:
     runs-on: ubuntu-22.04
-    needs: [setup-matrix, Linux-Build]
+    needs: setup-matrix
 
     strategy:
       fail-fast: false
@@ -242,12 +242,6 @@ jobs:
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
 
-    - name: download metagraph build
-      uses: actions/download-artifact@v4
-      with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
-        path: metagraph/build/
-
     - name: configure subdirectory example
       run: |
         cd metagraph-examples/subdirectory
@@ -268,7 +262,7 @@ jobs:
 
   Linux-Examples-ExternalProject:
     runs-on: ubuntu-22.04
-    needs: [setup-matrix, Linux-Build]
+    needs: setup-matrix
 
     strategy:
       fail-fast: false
@@ -456,7 +450,7 @@ jobs:
 
 
   MacOS-Examples-Subdirectory:
-    needs: [setup-matrix, MacOS-Build]
+    needs: setup-matrix
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
@@ -504,12 +498,6 @@ jobs:
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
 
-    - name: download metagraph build
-      uses: actions/download-artifact@v4
-      with:
-        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
-        path: metagraph/build/
-
     - name: configure subdirectory example
       run: |
         cd metagraph-examples/subdirectory
@@ -527,7 +515,7 @@ jobs:
 
 
   MacOS-Examples-ExternalProject:
-    needs: [setup-matrix, MacOS-Build]
+    needs: setup-matrix
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
