@@ -64,32 +64,18 @@ jobs:
           EOF
           
           # Create Linux examples matrix by adding example_type to base Linux matrix
-          jq '. + {"example_type": ["subdirectory", "externalproject"]} | 
+          jq '. + {"example_type": ["subdirectory", "ExternalProject"]} | 
               .include += [
                 {"example_type": "subdirectory", "example_name": "Subdirectory"},
-                {"example_type": "externalproject", "example_name": "ExternalProject"}
+                {"example_type": "ExternalProject", "example_name": "ExternalProject"}
               ]' linux-matrix.json > linux-examples-matrix.json
           
           # Create macOS examples matrix by adding example_type to base macOS matrix
-          # First expand the include-only macOS matrix into full parameters
-          cat > macos-base.json << 'EOF'
-          {
-            "example_type": ["subdirectory", "externalproject"],
-            "alphabet": ["DNA"],
-            "build_type": ["Debug", "Release"],
-            "platform": ["macos-latest", "macos-15-intel"],
-            "target_arch": ["arm64", "x86_64"],
-            "include": [
-              {"example_type": "subdirectory", "example_name": "Subdirectory"},
-              {"example_type": "externalproject", "example_name": "ExternalProject"}
-            ],
-            "exclude": [
-              {"platform": "macos-15-intel", "target_arch": "arm64"},
-              {"platform": "macos-latest", "target_arch": "x86_64", "build_type": "Debug"}
-            ]
-          }
-          EOF
-          mv macos-base.json macos-examples-matrix.json
+          jq '. + {"example_type": ["subdirectory", "ExternalProject"]} | 
+              .include += [
+                {"example_type": "subdirectory", "example_name": "Subdirectory"},
+                {"example_type": "ExternalProject", "example_name": "ExternalProject"}
+              ]' macos-matrix.json > macos-examples-matrix.json
           
           echo "linux-matrix=$(cat linux-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
           echo "macos-matrix=$(cat macos-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
