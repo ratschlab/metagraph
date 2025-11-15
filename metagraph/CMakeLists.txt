@@ -540,8 +540,7 @@ target_include_directories(metagraph-core PUBLIC
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-add_dependencies(metagraph-core HTSLIB)
-add_dependencies(metagraph-core SDSL)
+add_dependencies(metagraph-core HTSLIB SDSL)
 
 
 set(METALIBS ${METALIBS}
@@ -685,22 +684,56 @@ install(CODE "
   endforeach()
 ")
 
+# Bundle all internal dependencies into libmetagraph-core.a during install
+# This creates a combined static library containing metagraph-core and all bundled dependencies
+install(CODE "
+  set(PROJECT_BINARY_DIR \"${PROJECT_BINARY_DIR}\")
+  set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
+  set(SDSL_INSTALL \"${SDSL_INSTALL}\")
+  set(HTSLIB_INSTALL \"${HTSLIB_INSTALL}\")
+  set(CMAKE_AR \"${CMAKE_AR}\")
+  
+  message(STATUS \"Bundling dependencies into libmetagraph-core.a...\")
+  
+  # Create temporary directory for bundling
+  file(REMOVE_RECURSE \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  
+  # Extract all object files from metagraph-core and dependencies
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libmetagraph-core.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/zlib/libz.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json/libjsoncpp.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libprogress_bar.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libmersenne_twister.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libsdust.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/spdlog/libspdlog.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/external-libraries/sshash/libsshash_static.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${PROJECT_BINARY_DIR}/libfolly.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${SDSL_INSTALL}/lib/libsdsl.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  execute_process(COMMAND \${CMAKE_AR} x \${HTSLIB_INSTALL}/lib/libhts.a
+                  WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  
+  # Create the combined archive using bundling script
+  execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/bundle_static_libs.sh 
+                          \${PROJECT_BINARY_DIR}/metagraph-core-bundle 
+                          \${PROJECT_BINARY_DIR}/libmetagraph-core.a 
+                          \${CMAKE_AR})
+  
+  message(STATUS \"Bundled library size: \")
+  execute_process(COMMAND ls -lh \${PROJECT_BINARY_DIR}/libmetagraph-core.a)
+")
+
 install(TARGETS metagraph-core metagraph-cli DESTINATION lib)
-
-# Install all dependency libraries that MetaGraph builds internally
-# This allows external projects to link against them
-# Note: Some items in METALIBS are system libraries (prefixed with -l), not CMake targets
-# We only install the CMake targets that we build
-install(TARGETS 
-    zlib jsoncpp_lib progress_bar mersenne_twister sdust 
-    spdlog sshash_static XXSDS_DYNAMIC ips4o caches eigen folly
-    DESTINATION lib
-    OPTIONAL  # Some targets might not exist in all configurations
-)
-
-# Install SDSL and HTSLIB library (built via ExternalProject_Add)
-install(FILES ${SDSL_INSTALL}/lib/libsdsl.a DESTINATION lib)
-install(FILES ${HTSLIB_INSTALL}/lib/libhts.a DESTINATION lib)
 
 # Install the generated config header
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp DESTINATION include/common)
