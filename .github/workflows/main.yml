@@ -145,6 +145,7 @@ jobs:
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
         path: |
+          metagraph/build/metagraph
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
           metagraph/build/integration_tests
           metagraph/build/test_venv/
@@ -373,6 +374,7 @@ jobs:
       with:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
         path: |
+          metagraph/build/metagraph
           metagraph/build/metagraph_${{ matrix.alphabet }}
           metagraph/build/unit_tests
           metagraph/build/integration_tests
