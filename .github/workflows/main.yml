@@ -148,6 +148,7 @@ jobs:
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
           metagraph/build/integration_tests
           metagraph/build/test_venv/
+        include-hidden-files: true
         retention-days: 1
 
     - name: upload unit tests
@@ -187,6 +188,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        path: metagraph/build
 
     - name: run unit tests
       if: matrix.build_static == 'OFF'
@@ -221,6 +223,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        path: metagraph/build
 
     - name: run integration tests
       uses: nick-fields/retry@v2
@@ -231,7 +234,7 @@ jobs:
         command: |
           export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
           cd metagraph/build
-          chmod +x integration_tests
+          chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
 
 
@@ -400,6 +403,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: metagraph/build
 
     - name: run unit tests
       run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
@@ -430,11 +434,12 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: metagraph/build
 
     - name: run integration tests
       run: |
         cd metagraph/build
-        chmod +x integration_tests
+        chmod +x test_venv/bin/python
         ./test_venv/bin/python ../integration_tests/main.py
 
     - name: check metagraph workflows
