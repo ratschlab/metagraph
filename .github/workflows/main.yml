@@ -143,7 +143,7 @@ jobs:
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
         path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
           metagraph/build/integration_tests
@@ -154,7 +154,7 @@ jobs:
       if: matrix.build_static == 'OFF'
       uses: actions/upload-artifact@v4
       with:
-        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
         path: metagraph/build/unit_tests
         retention-days: 1
 
@@ -186,7 +186,7 @@ jobs:
       if: matrix.build_static == 'OFF'
       uses: actions/download-artifact@v4
       with:
-        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
 
     - name: run unit tests
       if: matrix.build_static == 'OFF'
@@ -220,7 +220,7 @@ jobs:
     - name: download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
 
     - name: run integration tests
       uses: nick-fields/retry@v2

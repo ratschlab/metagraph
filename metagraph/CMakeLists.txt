@@ -528,15 +528,12 @@ endforeach()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/config.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/common/config.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/config.hpp
     @ONLY
 )
 
 # Add the generated header to include path
-target_include_directories(metagraph-core PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>
-)
+target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen)
 
 file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
@@ -684,6 +681,38 @@ install(CODE "
   endforeach()
 ")
 
+# Collect static libraries from metagraph-core's dependencies
+# Use $<TARGET_FILE:...> to get actual library paths
+set(BUNDLE_LIBS_LIST "$<TARGET_FILE:metagraph-core>")
+
+get_target_property(LINK_LIBS metagraph-core LINK_LIBRARIES)
+if(LINK_LIBS)
+  foreach(LIB ${LINK_LIBS})
+    # Skip if not a CMake target
+    if(NOT TARGET ${LIB})
+      continue()
+    endif()
+    
+    # Check if it's a static library target
+    get_target_property(LIB_TYPE ${LIB} TYPE)
+    if(LIB_TYPE STREQUAL "STATIC_LIBRARY")
+      # Skip imported libraries (e.g., system Boost)
+      get_target_property(IS_IMPORTED ${LIB} IMPORTED)
+      if(IS_IMPORTED)
+        continue()
+      endif()
+      
+      # Add our internal static library
+      string(APPEND BUNDLE_LIBS_LIST ";$<TARGET_FILE:${LIB}>")
+    endif()
+  endforeach()
+endif()
+
+# Add external libraries built by ExternalProject (not CMake targets)
+string(APPEND BUNDLE_LIBS_LIST ";${SDSL_INSTALL}/lib/libsdsl.a")
+string(APPEND BUNDLE_LIBS_LIST ";${HTSLIB_INSTALL}/lib/libhts.a")
+string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
+
 # Bundle all internal dependencies into libmetagraph-core.a during install
 # This creates a combined static library containing metagraph-core and all bundled dependencies
 install(CODE "
@@ -692,6 +721,7 @@ install(CODE "
   set(SDSL_INSTALL \"${SDSL_INSTALL}\")
   set(HTSLIB_INSTALL \"${HTSLIB_INSTALL}\")
   set(CMAKE_AR \"${CMAKE_AR}\")
+  set(BUNDLE_LIBS_LIST \"${BUNDLE_LIBS_LIST}\")
   
   message(STATUS \"Bundling dependencies into libmetagraph-core.a...\")
   
@@ -699,25 +729,12 @@ install(CODE "
   file(REMOVE_RECURSE \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
   file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
   
-  # Extract all object files from metagraph-core and dependencies
-  set(LIBS_TO_BUNDLE
-    \${PROJECT_BINARY_DIR}/libmetagraph-core.a
-    \${PROJECT_BINARY_DIR}/external-libraries/zlib/libz.a
-    \${PROJECT_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json/libjsoncpp.a
-    \${PROJECT_BINARY_DIR}/libprogress_bar.a
-    \${PROJECT_BINARY_DIR}/libmersenne_twister.a
-    \${PROJECT_BINARY_DIR}/libsdust.a
-    \${PROJECT_BINARY_DIR}/external-libraries/spdlog/libspdlog.a
-    \${PROJECT_BINARY_DIR}/external-libraries/sshash/libsshash_static.a
-    \${PROJECT_BINARY_DIR}/libfolly.a
-    \${SDSL_INSTALL}/lib/libsdsl.a
-    \${HTSLIB_INSTALL}/lib/libhts.a
-  )
-  
-  foreach(LIB \${LIBS_TO_BUNDLE})
+  # Extract all object files
+  foreach(LIB \${BUNDLE_LIBS_LIST})
     if(NOT EXISTS \"\${LIB}\")
       message(FATAL_ERROR \"Required library not found for bundling: \${LIB}\")
     endif()
+    message(STATUS \"  Extracting: \${LIB}\")
     execute_process(COMMAND \${CMAKE_AR} x \${LIB}
                     WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle
                     RESULT_VARIABLE AR_RESULT)
