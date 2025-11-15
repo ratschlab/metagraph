@@ -15,49 +15,64 @@ env:
 
 jobs:
 
-  Linux:
+  setup-matrix:
     runs-on: ubuntu-22.04
+    outputs:
+      linux-matrix: ${{ steps.set-matrix.outputs.linux-matrix }}
+      macos-matrix: ${{ steps.set-matrix.outputs.macos-matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          # Define Linux matrix
+          cat > linux-matrix.json << 'EOF'
+          {
+            "alphabet": ["DNA", "Protein"],
+            "build_type": ["Debug", "Release"],
+            "compiler": ["g++-11", "g++-12", "g++-13"],
+            "build_static": ["OFF", "ON"],
+            "with_avx": ["OFF", "ON"],
+            "include": [
+              {"compiler": "g++-11", "cxx": "g++-11", "cc": "gcc-11"},
+              {"compiler": "g++-12", "cxx": "g++-12", "cc": "gcc-12"},
+              {"compiler": "g++-13", "cxx": "g++-13", "cc": "gcc-13"}
+            ],
+            "exclude": [
+              {"alphabet": "Protein", "compiler": "g++-11"},
+              {"alphabet": "Protein", "compiler": "g++-12"},
+              {"compiler": "g++-11", "build_static": "ON"},
+              {"compiler": "g++-12", "build_static": "ON"},
+              {"build_type": "Debug", "build_static": "ON"},
+              {"build_type": "Debug", "compiler": "g++-11"},
+              {"build_type": "Debug", "compiler": "g++-12"},
+              {"with_avx": "OFF", "build_static": "OFF"}
+            ]
+          }
+          EOF
+          
+          # Define macOS matrix
+          cat > macos-matrix.json << 'EOF'
+          {
+            "include": [
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "arm64"},
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-15-intel", "target_arch": "x86_64"},
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "x86_64"},
+              {"alphabet": "DNA", "build_type": "Debug", "platform": "macos-latest", "target_arch": "arm64"}
+            ]
+          }
+          EOF
+          
+          echo "linux-matrix=$(cat linux-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "macos-matrix=$(cat macos-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+
+  Linux-Build:
+    runs-on: ubuntu-22.04
+    needs: setup-matrix
 
     strategy:
       fail-fast: false
-      matrix:
-        alphabet: [DNA, Protein]
-        build_type: [Debug, Release]
-        compiler: [g++-11, g++-12, g++-13]
-        build_static: [OFF, ON]
-        with_avx: [OFF, ON]
-        include:
-          - compiler: g++-11
-            cxx: g++-11
-            cc: gcc-11
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
 
-          - compiler: g++-12
-            cxx: g++-12
-            cc: gcc-12
-
-          - compiler: g++-13
-            cxx: g++-13
-            cc: gcc-13
-
-        exclude:
-          - alphabet: Protein
-            compiler: g++-11
-          - alphabet: Protein
-            compiler: g++-12
-          - compiler: g++-11
-            build_static: ON
-          - compiler: g++-12
-            build_static: ON
-          - build_type: Debug
-            build_static: ON
-          - build_type: Debug
-            compiler: g++-11
-          - build_type: Debug
-            compiler: g++-12
-          - with_avx: OFF
-            build_static: OFF
-
-    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: Linux Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
     - uses: actions/checkout@v4
@@ -73,27 +88,13 @@ jobs:
         ln -s "${GITHUB_WORKSPACE}" metagraph
 
     - name: install dependencies
-      run: |
-        sudo apt-get update
-
-        # If clang, use the default version. Otherwise the compiler install with apt-get.
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install -y ${{ matrix.compiler }}
-        fi
-
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
-
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install -y libcurl4-openssl-dev
-        fi
-
-        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
-        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
-
-    - name: install dependencies for integration tests
-      run: |
-        pip3 install parameterized
-        sudo apt-get install python3-venv
+      uses: ./.github/actions/install-linux-deps
+      with:
+        compiler: ${{ matrix.compiler }}
+        cc: ${{ matrix.cc }}
+        cxx: ${{ matrix.cxx }}
+        build_static: ${{ matrix.build_static }}
+        install_test_deps: 'true'
 
     - name: configure
       run: |
@@ -143,12 +144,25 @@ jobs:
     - name: rename binary
       if: matrix.with_avx == 'OFF'
       run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
+
     - name: upload static binary
       if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-13' }}
       uses: actions/upload-artifact@v4
       with:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
+
+    # Upload build artifacts for testing
+    - name: upload build artifacts
+      if: matrix.build_static == 'OFF'
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+        path: |
+          metagraph/build/
+          metagraph-examples/subdirectory/build/
+          metagraph-examples/ExternalProject/build/
+        retention-days: 1
 
     - name: run subdirectory example
       run: |
@@ -160,11 +174,68 @@ jobs:
         cd metagraph-examples/ExternalProject/build
         make run_example
 
+
+  Linux-UnitTests:
+    runs-on: ubuntu-22.04
+    needs: [setup-matrix, Linux-Build]
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
+
+    name: Linux Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: install dependencies
+      uses: ./.github/actions/install-linux-deps
+      with:
+        compiler: ${{ matrix.compiler }}
+        cc: ${{ matrix.cc }}
+        cxx: ${{ matrix.cxx }}
+        build_static: ${{ matrix.build_static }}
+
+    - name: download build artifacts
+      if: matrix.build_static == 'OFF'
+      uses: actions/download-artifact@v4
+      with:
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
+
     - name: run unit tests
       if: matrix.build_static == 'OFF'
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-        cd metagraph/build && ./unit_tests
+        cd metagraph/build && chmod +x unit_tests && ./unit_tests
+
+
+  Linux-IntegrationTests:
+    runs-on: ubuntu-22.04
+    needs: [setup-matrix, Linux-Build]
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
+
+    name: Linux Integration Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: install dependencies
+      uses: ./.github/actions/install-linux-deps
+      with:
+        compiler: ${{ matrix.compiler }}
+        cc: ${{ matrix.cc }}
+        cxx: ${{ matrix.cxx }}
+        build_static: ${{ matrix.build_static }}
+        install_test_deps: 'true'
+
+    - name: download build artifacts
+      if: matrix.build_static == 'OFF'
+      uses: actions/download-artifact@v4
+      with:
+        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}
 
     - name: run integration tests
       uses: nick-fields/retry@v2
@@ -177,33 +248,14 @@ jobs:
           cd metagraph/build && make integration_tests
 
 
-  MacOS:
+  MacOS-Build:
+    needs: setup-matrix
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Apple Silicon Release
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-latest
-            target_arch: arm64
-          # Intel Release
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-15-intel
-            target_arch: x86_64
-          # Apple Silicon runner + Rosetta for x86_64
-          - alphabet: DNA
-            build_type: Release
-            platform: macos-latest
-            target_arch: x86_64
-          # Debug run on Apple Silicon
-          - alphabet: DNA
-            build_type: Debug
-            platform: macos-latest
-            target_arch: arm64
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
 
     runs-on: ${{ matrix.platform }}
+    name: MacOS Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
 
     defaults:
       run:
@@ -243,10 +295,9 @@ jobs:
         echo "/usr/local/sbin" >> "$GITHUB_PATH"
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c zstd
-
-    - name: install dependencies for integration tests
-      run: pip3 install parameterized --break-system-packages --user
+      uses: ./.github/actions/install-macos-deps
+      with:
+        install_test_deps: 'true'
 
     - name: configure
       run: |
@@ -278,7 +329,6 @@ jobs:
     - name: build subdirectory example
       run: cd metagraph-examples/subdirectory/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
-
     - name: build ExternalProject example
       run: cd metagraph-examples/ExternalProject/build && make -j"$(getconf _NPROCESSORS_ONLN)"
 
@@ -287,6 +337,16 @@ jobs:
 
     - name: build other
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - name: upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: |
+          metagraph/build/
+          metagraph-examples/subdirectory/build/
+          metagraph-examples/ExternalProject/build/
+        retention-days: 1
 
     - name: run subdirectory example
       run: |
@@ -298,8 +358,60 @@ jobs:
         cd metagraph-examples/ExternalProject/build
         make run_example
 
+
+  MacOS-UnitTests:
+    needs: [setup-matrix, MacOS-Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: MacOS Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+
+    - name: download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+
     - name: run unit tests
-      run: cd metagraph/build && ./unit_tests
+      run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+
+
+  MacOS-IntegrationTests:
+    needs: [setup-matrix, MacOS-Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: MacOS Integration Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+      with:
+        install_test_deps: 'true'
+
+    - name: download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
 
     - name: run integration tests
       run: cd metagraph/build && make integration_tests
@@ -319,7 +431,7 @@ jobs:
   Metagraph-Workflows:
     name: Test metagraph workflows
     runs-on: ubuntu-22.04
-    needs: [Linux]
+    needs: [Linux-Build]
 
     steps:
         - uses: actions/checkout@v2
@@ -353,7 +465,7 @@ jobs:
 
   Build-and-Push-Docker:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
-    needs: [Linux, Metagraph-Workflows]
+    needs: [Linux-Build, Linux-UnitTests, Linux-IntegrationTests, Metagraph-Workflows]
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -401,7 +513,7 @@ jobs:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
-    needs: [Linux, Metagraph-Workflows]
+    needs: [Linux-Build, Linux-UnitTests, Linux-IntegrationTests, Metagraph-Workflows]
     steps:
       - uses: actions/checkout@v1
 

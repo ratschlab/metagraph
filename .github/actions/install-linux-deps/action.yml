@@ -1,0 +1,49 @@
+name: 'Install Linux Dependencies'
+description: 'Install dependencies for building and testing MetaGraph on Linux'
+
+inputs:
+  compiler:
+    description: 'Compiler to install (e.g., g++-13)'
+    required: true
+  cc:
+    description: 'C compiler name (e.g., gcc-13)'
+    required: true
+  cxx:
+    description: 'C++ compiler name (e.g., g++-13)'
+    required: true
+  build_static:
+    description: 'Whether building static binaries (ON/OFF)'
+    required: true
+  install_test_deps:
+    description: 'Whether to install integration test dependencies'
+    required: false
+    default: 'false'
+
+runs:
+  using: "composite"
+  steps:
+    - name: install build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+
+        # If clang, use the default version. Otherwise the compiler install with apt-get.
+        if [[ "${{ inputs.compiler }}" != "clang" ]]; then
+            sudo apt-get install -y ${{ inputs.compiler }}
+        fi
+
+        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+
+        if [ "${{ inputs.build_static }}" = "ON" ]; then
+          sudo apt-get install -y libcurl4-openssl-dev
+        fi
+
+        echo "CC=$(which ${{ inputs.cc }})" >> $GITHUB_ENV
+        echo "CXX=$(which ${{ inputs.cxx }})" >> $GITHUB_ENV
+
+    - name: install dependencies for integration tests
+      if: inputs.install_test_deps == 'true'
+      shell: bash
+      run: |
+        pip3 install parameterized
+        sudo apt-get install python3-venv
