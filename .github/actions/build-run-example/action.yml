@@ -74,5 +74,6 @@ runs:
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Show ccache statistics
+      if: ${{ runner.os == 'macOS' }}
       run: ccache --show-stats
       shell: bash
