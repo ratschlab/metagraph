@@ -50,8 +50,8 @@ runs:
           inputs.build-type,
           inputs.alphabet,
           inputs.target-arch && format('-{0}', inputs.target-arch) || '',
-          inputs.build-static && format('-{0}', inputs.build-static) || '',
-          inputs.with-avx && format('-{0}', inputs.with-avx) || '',
+          inputs.build-static && format('-{0}', inputs.build-static == 'ON' && 'static' || 'dynamic') || '',
+          inputs.with-avx && format('-{0}', inputs.with-avx == 'ON' && 'AVX' || 'noAVX') || '',
           inputs.compiler && format('-{0}', inputs.compiler) || '') }}
 
     - name: Setup ccache
