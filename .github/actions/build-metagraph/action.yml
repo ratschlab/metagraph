@@ -20,6 +20,10 @@ inputs:
     description: 'Whether to build unit tests'
     required: false
     default: 'true'
+  target-arch:
+    description: 'Target architecture (arm64 or x86_64, macOS only)'
+    required: false
+    default: 'arm64'
 
 runs:
   using: 'composite'
@@ -31,6 +35,7 @@ runs:
         alphabet: ${{ inputs.alphabet }}
         build-static: ${{ inputs.build-static }}
         with-avx: ${{ inputs.with-avx }}
+        target-arch: ${{ inputs.target-arch }}
 
     - name: Configure
       run: |
