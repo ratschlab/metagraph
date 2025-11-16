@@ -6,10 +6,35 @@ inputs:
     description: 'Whether to install integration test dependencies'
     required: false
     default: 'false'
+  target_arch:
+    description: 'Target architecture (arm64 or x86_64)'
+    required: false
+    default: 'arm64'
 
 runs:
   using: "composite"
   steps:
+    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
+      if: ${{ inputs.target_arch == 'x86_64' }}
+      shell: bash
+      run: |
+        # Install Intel Homebrew into /usr/local if missing
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
     - name: install dependencies
       shell: bash
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate

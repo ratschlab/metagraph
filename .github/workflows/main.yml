@@ -331,30 +331,11 @@ jobs:
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
 
-    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
-      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
-      run: |
-        # Install Intel Homebrew into /usr/local if missing
-        if [[ ! -d /usr/local/Homebrew ]]; then
-          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
-          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-        fi
-        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
-        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
-          echo "Replacing legacy brew wrapper..."
-          sudo rm -f /usr/local/bin/brew
-        fi
-        # Ensure wrapper points to the modern repo location
-        if [[ ! -f /usr/local/bin/brew ]]; then
-          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
-        fi
-        echo "/usr/local/bin" >> "$GITHUB_PATH"
-        echo "/usr/local/sbin" >> "$GITHUB_PATH"
-
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
       with:
         install_test_deps: 'true'
+        target_arch: ${{ matrix.target_arch }}
 
     - name: configure
       run: |
@@ -404,6 +385,8 @@ jobs:
 
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
+      with:
+        target_arch: ${{ matrix.target_arch }}
 
     - name: download build artifacts
       uses: actions/download-artifact@v4
@@ -435,6 +418,7 @@ jobs:
       uses: ./.github/actions/install-macos-deps
       with:
         install_test_deps: 'true'
+        target_arch: ${{ matrix.target_arch }}
 
     - name: download build artifacts
       uses: actions/download-artifact@v4
@@ -497,28 +481,10 @@ jobs:
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
 
-    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
-      if: ${{ matrix.platform == 'macos-latest' && matrix.target_arch == 'x86_64' }}
-      run: |
-        # Install Intel Homebrew into /usr/local if missing
-        if [[ ! -d /usr/local/Homebrew ]]; then
-          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
-          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-        fi
-        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
-        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
-          echo "Replacing legacy brew wrapper..."
-          sudo rm -f /usr/local/bin/brew
-        fi
-        # Ensure wrapper points to the modern repo location
-        if [[ ! -f /usr/local/bin/brew ]]; then
-          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
-        fi
-        echo "/usr/local/bin" >> "$GITHUB_PATH"
-        echo "/usr/local/sbin" >> "$GITHUB_PATH"
-
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
+      with:
+        target_arch: ${{ matrix.target_arch }}
 
     - name: configure example
       run: |
