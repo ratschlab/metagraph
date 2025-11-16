@@ -11,7 +11,8 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
     steps:
-      - id: set-matrix
+      - name: Set up build matrix
+        id: set-matrix
         run: |
           cat > matrix.json << 'EOF'
           {
