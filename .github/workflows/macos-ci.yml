@@ -197,9 +197,3 @@ jobs:
         alphabet: ${{ matrix.alphabet }}
         git-tag: ${{ github.event.pull_request.head.sha || github.sha }}
         target-arch: ${{ matrix.target_arch }}
-
-    - name: Setup tmate session for debugging
-      if: ${{ failure() }}
-      uses: mxschmitt/action-tmate@v3
-      with:
-        limit-access-to-actor: true

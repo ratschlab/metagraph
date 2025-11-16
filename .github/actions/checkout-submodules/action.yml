@@ -3,8 +3,11 @@ description: 'Checkout submodules with caching (requires repository already chec
 
 runs:
   using: 'composite'
+  defaults:
+    run:
+      shell: bash
   steps:
-    - name: Cache submodules
+    - name: Checkout submodules
       uses: actions/cache@v3
       with:
         path: |
@@ -14,4 +17,3 @@ runs:
 
     - name: Checkout submodules
       run: git submodule update --init --recursive --depth 1
-      shell: bash

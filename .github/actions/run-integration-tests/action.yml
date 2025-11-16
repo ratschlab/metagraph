@@ -17,6 +17,9 @@ inputs:
 
 runs:
   using: 'composite'
+  defaults:
+    run:
+      shell: bash
   steps:
     - name: Run integration tests (with retry)
       if: inputs.use-retry == 'true'
@@ -32,7 +35,6 @@ runs:
           ./test_venv/bin/python ../integration_tests/main.py
       env:
         LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
-      shell: bash
 
     - name: Run integration tests (no retry)
       if: inputs.use-retry != 'true'
@@ -43,4 +45,3 @@ runs:
         ./test_venv/bin/python ../integration_tests/main.py
       env:
         LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
-      shell: bash

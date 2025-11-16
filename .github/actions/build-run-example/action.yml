@@ -30,6 +30,9 @@ inputs:
 
 runs:
   using: 'composite'
+  defaults:
+    run:
+      shell: arch -${{ inputs.target-arch }} /bin/bash -e {0}
   steps:
     - name: Setup ccache
       uses: ./.github/actions/setup-ccache
@@ -59,18 +62,14 @@ runs:
       env:
         BUILD_STATIC: ${{ inputs.build-static != 'OFF' && inputs.build-static || '' }}
         WITH_AVX: ${{ inputs.with-avx != 'ON' && inputs.with-avx || '' }}
-      shell: bash
 
     - name: Build example
       run: cd metagraph-examples/${{ inputs.example-type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-      shell: bash
 
     - name: Run example
       run: |
         cd metagraph-examples/${{ inputs.example-type }}/build
         make run_example
-      shell: bash
 
     - name: Show ccache statistics
-      shell: bash
       run: ccache --show-stats
