@@ -1,19 +1,9 @@
-name: 'Checkout with Submodules'
-description: 'Checkout repository with cached submodules'
-
-inputs:
-  fetch-depth:
-    description: 'Number of commits to fetch. 0 for all history, 1 for shallow clone'
-    required: false
-    default: '1'
+name: 'Checkout Submodules with Cache'
+description: 'Checkout submodules with caching (requires repository already checked out)'
 
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ inputs.fetch-depth }}
-
     - name: Cache submodules
       uses: actions/cache@v3
       with:

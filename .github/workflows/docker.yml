@@ -15,6 +15,10 @@ jobs:
       packages: write
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
     - uses: ./.github/actions/checkout-with-submodules
 
     - name: Log in to the Container registry

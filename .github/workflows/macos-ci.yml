@@ -45,6 +45,10 @@ jobs:
         shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
     - uses: ./.github/actions/checkout-with-submodules
 
     - name: install dependencies
@@ -161,6 +165,10 @@ jobs:
         shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
     - uses: ./.github/actions/checkout-with-submodules
       if: matrix.example_type == 'subdirectory'
 

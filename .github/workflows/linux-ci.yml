@@ -54,6 +54,10 @@ jobs:
     name: Linux Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
     - uses: ./.github/actions/checkout-with-submodules
 
     - name: install dependencies
@@ -192,6 +196,10 @@ jobs:
     name: Linux ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
     - uses: ./.github/actions/checkout-with-submodules
       if: matrix.example_type == 'subdirectory'
 
