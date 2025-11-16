@@ -11,8 +11,6 @@ runs:
           .git/modules
           metagraph/external-libraries
         key: submodules-${{ hashFiles('.gitmodules') }}
-        restore-keys: |
-          submodules-
 
     - name: Checkout submodules
       run: git submodule update --init --recursive --depth 1

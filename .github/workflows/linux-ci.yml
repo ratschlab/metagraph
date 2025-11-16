@@ -60,7 +60,7 @@ jobs:
         fetch-depth: 1
 
     - name: Checkout submodules
-      uses: ./.github/actions/checkout-with-submodules
+      uses: ./.github/actions/checkout-submodules
 
     - name: install dependencies
       uses: ./.github/actions/install-linux-deps
@@ -206,7 +206,7 @@ jobs:
         fetch-depth: 1
 
     - name: Checkout submodules
-      uses: ./.github/actions/checkout-with-submodules
+      uses: ./.github/actions/checkout-submodules
       if: matrix.example_type == 'subdirectory'
 
     - name: Setup examples

@@ -22,6 +22,14 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Cache apt packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          /var/cache/apt/archives
+          /var/lib/apt/lists
+        key: apt-${{ runner.os }}-${{ inputs.compiler }}-${{ inputs.build_static }}-v1
+
     - name: install build dependencies
       shell: bash
       run: |
@@ -40,6 +48,13 @@ runs:
 
         echo "CC=$(which ${{ inputs.cc }})" >> $GITHUB_ENV
         echo "CXX=$(which ${{ inputs.cxx }})" >> $GITHUB_ENV
+
+    - name: Cache pip packages
+      if: inputs.install_test_deps == 'true'
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-v1
 
     - name: install dependencies for integration tests
       if: inputs.install_test_deps == 'true'
