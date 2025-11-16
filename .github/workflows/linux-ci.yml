@@ -54,27 +54,7 @@ jobs:
     name: Linux Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Cache submodules
-      uses: actions/cache@v3
-      with:
-        path: |
-          .git/modules
-          metagraph/external-libraries
-        key: submodules-${{ hashFiles('.gitmodules') }}
-        restore-keys: |
-          submodules-
-
-    - name: checkout submodules
-      run: git submodule update --init --recursive --depth 1
-
-    - name: checkout metagraph-examples
-      run: |
-        git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-        cd metagraph-examples/subdirectory
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}" metagraph
+    - uses: ./.github/actions/checkout-with-submodules
 
     - name: install dependencies
       uses: ./.github/actions/install-linux-deps
@@ -85,24 +65,13 @@ jobs:
         build_static: ${{ matrix.build_static }}
         install_test_deps: 'true'
 
-    - name: configure
-      run: |
-        mkdir metagraph/build
-        cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DBUILD_STATIC=${{ matrix.build_static }} \
-              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-
-    - name: build metagraph
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
-
-    - name: build unit tests
-      if: matrix.build_static == 'OFF'
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
-
-    - name: build other
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+    - uses: ./.github/actions/build-metagraph
+      with:
+        build-type: ${{ matrix.build_type }}
+        alphabet: ${{ matrix.alphabet }}
+        build-static: ${{ matrix.build_static }}
+        with-avx: ${{ matrix.with_avx }}
+        build-unit-tests: ${{ matrix.build_static == 'OFF' && 'true' || 'false' }}
 
     # for potential release
     - name: rename binary
@@ -200,29 +169,16 @@ jobs:
         build_static: ${{ matrix.build_static }}
         install_test_deps: 'true'
 
-    - name: download build artifacts
-      uses: actions/download-artifact@v4
+    - uses: ./.github/actions/setup-metagraph-binary
       with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
-        path: metagraph/build
+        artifact-name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        alphabet: ${{ matrix.alphabet }}
+        with-avx: ${{ matrix.with_avx }}
 
-    - name: recreate metagraph symlink
-      run: |
-        cd metagraph/build
-        chmod +x metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-        ln -sf metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }} metagraph
-
-    - name: run integration tests
-      uses: nick-fields/retry@v2
+    - uses: ./.github/actions/run-integration-tests
       with:
-        timeout_minutes: 1000
-        max_attempts: 5
-        retry_on: error
-        command: |
-          export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-          cd metagraph/build
-          chmod +x test_venv/bin/python
-          ./test_venv/bin/python ../integration_tests/main.py
+        use-retry: 'true'
+        ld-library-path: '/usr/local/lib/'
 
 
   Examples:
@@ -236,34 +192,12 @@ jobs:
     name: Linux ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: ./.github/actions/checkout-with-submodules
+      if: matrix.example_type == 'subdirectory'
+
+    - uses: ./.github/actions/setup-examples
       with:
-        fetch-depth: 1
-
-    - name: Cache submodules
-      if: matrix.example_type == 'subdirectory'
-      uses: actions/cache@v3
-      with:
-        path: |
-          .git/modules
-          metagraph/external-libraries
-        key: submodules-${{ hashFiles('.gitmodules') }}
-        restore-keys: |
-          submodules-
-
-    - name: checkout submodules
-      if: matrix.example_type == 'subdirectory'
-      run: git submodule update --init --recursive --depth 1
-
-    - name: checkout metagraph-examples
-      run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
-
-    - name: setup metagraph symlink for subdirectory
-      if: matrix.example_type == 'subdirectory'
-      run: |
-        cd metagraph-examples/subdirectory
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}" metagraph
+        example-type: ${{ matrix.example_type }}
 
     - name: install dependencies
       uses: ./.github/actions/install-linux-deps
@@ -273,27 +207,11 @@ jobs:
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
 
-    - name: configure example
-      run: |
-        cd metagraph-examples/${{ matrix.example_type }}
-        mkdir build && cd build
-        if [ "${{ matrix.example_type }}" = "subdirectory" ]; then
-          cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-                -DBUILD_STATIC=${{ matrix.build_static }} \
-                -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-                -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-        else
-          cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-                -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
-                -DBUILD_STATIC=${{ matrix.build_static }} \
-                -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
-                -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-        fi
-
-    - name: build example
-      run: cd metagraph-examples/${{ matrix.example_type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: run example
-      run: |
-        cd metagraph-examples/${{ matrix.example_type }}/build
-        make run_example
+    - uses: ./.github/actions/build-run-example
+      with:
+        example-type: ${{ matrix.example_type }}
+        build-type: ${{ matrix.build_type }}
+        alphabet: ${{ matrix.alphabet }}
+        build-static: ${{ matrix.build_static }}
+        with-avx: ${{ matrix.with_avx }}
+        git-tag: ${{ github.event.pull_request.head.sha || github.sha }}

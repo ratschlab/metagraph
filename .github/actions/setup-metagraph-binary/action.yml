@@ -1,0 +1,35 @@
+name: 'Setup Metagraph Binary'
+description: 'Download build artifacts and recreate metagraph symlink'
+
+inputs:
+  artifact-name:
+    description: 'Name of the artifact to download'
+    required: true
+  alphabet:
+    description: 'Alphabet (DNA or Protein)'
+    required: true
+  with-avx:
+    description: 'Whether AVX is enabled (ON or OFF)'
+    required: false
+    default: 'ON'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: metagraph/build
+      shell: bash
+
+    - name: Recreate metagraph symlink
+      run: |
+        cd metagraph/build
+        binary_name="metagraph_${{ inputs.alphabet }}"
+        if [ "${{ inputs.with-avx }}" = "OFF" ]; then
+          binary_name="${binary_name}_noAVX"
+        fi
+        chmod +x "${binary_name}"
+        ln -sf "${binary_name}" metagraph
+      shell: bash
