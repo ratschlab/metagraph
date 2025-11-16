@@ -14,15 +14,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Cache Homebrew packages
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/Library/Caches/Homebrew
-          /usr/local/Cellar
-          /opt/homebrew/Cellar
-        key: brew-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target_arch }}-v1
-
     - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
       if: ${{ inputs.target_arch == 'x86_64' }}
       shell: bash
@@ -47,13 +38,6 @@ runs:
     - name: install dependencies
       shell: bash
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate ccache
-
-    - name: Cache pip packages
-      if: inputs.install_test_deps == 'true'
-      uses: actions/cache@v3
-      with:
-        path: ~/Library/Caches/pip
-        key: pip-${{ runner.os }}-v1
 
     - name: install dependencies for integration tests
       if: inputs.install_test_deps == 'true'
