@@ -21,10 +21,10 @@ jobs:
     uses: ./.github/workflows/workflows.yml
 
   Docker:
-    needs: [Linux, Workflows]
+    needs: [Workflows]
     uses: ./.github/workflows/docker.yml
 
   Release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [Linux, Workflows]
+    needs: [Workflows]
     uses: ./.github/workflows/release.yml

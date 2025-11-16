@@ -107,7 +107,9 @@ jobs:
         shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
@@ -191,11 +193,24 @@ jobs:
         shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Cache submodules
+      if: matrix.example_type == 'subdirectory'
+      uses: actions/cache@v3
+      with:
+        path: |
+          .git/modules
+          metagraph/external-libraries
+        key: submodules-${{ hashFiles('.gitmodules') }}
+        restore-keys: |
+          submodules-
 
     - name: checkout submodules
       if: matrix.example_type == 'subdirectory'
-      run: git submodule update --init --recursive
+      run: git submodule update --init --recursive --depth 1
 
     - name: checkout metagraph-examples
       run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples

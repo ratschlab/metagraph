@@ -17,9 +17,21 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
+      with:
+        fetch-depth: 1
+
+    - name: Cache submodules
+      uses: actions/cache@v3
+      with:
+        path: |
+          .git/modules
+          metagraph/external-libraries
+        key: submodules-${{ hashFiles('.gitmodules') }}
+        restore-keys: |
+          submodules-
 
     - name: checkout submodules
-      run: git submodule update --init --recursive
+      run: git submodule update --init --recursive --depth 1
 
     - name: Log in to the Container registry
       uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9

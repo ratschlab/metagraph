@@ -9,12 +9,24 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Cache submodules
+        uses: actions/cache@v3
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            submodules-
 
       - name: checkout submodules
-        run: git submodule update --init --recursive
+        run: git submodule update --init --recursive --depth 1
 
-      - name: fetch static binary
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
