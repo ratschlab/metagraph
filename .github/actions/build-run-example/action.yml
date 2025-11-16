@@ -27,6 +27,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Setup ccache
+      uses: ./.github/actions/setup-ccache
+      with:
+        build-type: ${{ inputs.build-type }}
+        alphabet: ${{ inputs.alphabet }}
+        build-static: ${{ inputs.build-static }}
+        with-avx: ${{ inputs.with-avx }}
+
     - name: Configure example
       run: |
         cd metagraph-examples/${{ inputs.example-type }}
@@ -57,3 +65,7 @@ runs:
         cd metagraph-examples/${{ inputs.example-type }}/build
         make run_example
       shell: bash
+
+    - name: Show ccache statistics
+      shell: bash
+      run: ccache --show-stats

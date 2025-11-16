@@ -40,7 +40,7 @@ runs:
             sudo apt-get install -y ${{ inputs.compiler }}
         fi
 
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev ccache
 
         if [ "${{ inputs.build_static }}" = "ON" ]; then
           sudo apt-get install -y libcurl4-openssl-dev

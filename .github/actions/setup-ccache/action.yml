@@ -1,0 +1,39 @@
+name: 'Setup ccache'
+description: 'Configure and cache ccache for build acceleration'
+
+inputs:
+  build-type:
+    description: 'CMake build type (Debug or Release)'
+    required: true
+  alphabet:
+    description: 'Alphabet type (DNA or Protein)'
+    required: true
+  build-static:
+    description: 'Build static binaries (ON or OFF)'
+    required: false
+    default: 'OFF'
+  with-avx:
+    description: 'Enable AVX instructions (ON or OFF)'
+    required: false
+    default: 'ON'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache ccache
+      if: runner.os == 'macOS'
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/ccache
+        key: ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.build-static }}-${{ inputs.with-avx }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.build-static }}-${{ inputs.with-avx }}-
+          ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-
+          ccache-${{ runner.os }}-${{ inputs.build-type }}-
+
+    - name: Setup ccache
+      shell: bash
+      run: |
+        ccache --set-config=max_size=2G
+        ccache --set-config=compression=true
+        ccache --zero-stats

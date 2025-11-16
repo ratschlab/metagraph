@@ -46,7 +46,7 @@ runs:
 
     - name: install dependencies
       shell: bash
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate ccache
 
     - name: Cache pip packages
       if: inputs.install_test_deps == 'true'
