@@ -10,6 +10,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
+      unit-tests-matrix: ${{ steps.set-matrix.outputs.unit-tests-matrix }}
     steps:
       - name: Set up build matrix
         id: set-matrix
@@ -41,8 +42,12 @@ jobs:
           
           jq '. + {"example_type": ["subdirectory", "ExternalProject"]}' matrix.json > examples-matrix.json
           
+          # Create unit tests matrix by adding exclude for build_static == ON
+          jq '.exclude += [{"build_static": "ON"}]' matrix.json > unit-tests-matrix.json
+          
           echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
           echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "unit-tests-matrix=$(cat unit-tests-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
 
   Build:
     runs-on: ubuntu-22.04
@@ -52,7 +57,13 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
 
-    name: Linux Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: >-
+      Linux Build
+      (${{ matrix.alphabet }},
+      ${{ matrix.build_type }},
+      ${{ matrix.compiler }},
+      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
+      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
 
     steps:
     - uses: actions/checkout@v4
@@ -78,7 +89,8 @@ jobs:
         alphabet: ${{ matrix.alphabet }}
         build-static: ${{ matrix.build_static }}
         with-avx: ${{ matrix.with_avx }}
-        build-unit-tests: ${{ matrix.build_static == 'OFF' && 'true' || 'false' }}
+        compiler: ${{ matrix.compiler }}
+        platform: ubuntu-22.04
 
     # for potential release
     - name: rename binary
@@ -96,7 +108,12 @@ jobs:
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        name: ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
+          matrix.alphabet,
+          matrix.build_type,
+          matrix.compiler,
+          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
+          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
         path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
           metagraph/build/integration_tests
@@ -108,7 +125,12 @@ jobs:
       if: matrix.build_static == 'OFF'
       uses: actions/upload-artifact@v4
       with:
-        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        name: ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
+          matrix.alphabet,
+          matrix.build_type,
+          matrix.compiler,
+          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
+          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
         path: metagraph/build/unit_tests
         retention-days: 1
 
@@ -119,18 +141,20 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.unit-tests-matrix) }}
 
-    name: Linux Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: >-
+      Linux Unit Tests
+      (${{ matrix.alphabet }},
+      ${{ matrix.build_type }},
+      ${{ matrix.compiler }},
+      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
+      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
 
     steps:
     - uses: actions/checkout@v4
-      if: matrix.build_static == 'OFF'
-      with:
-        fetch-depth: 1
 
     - name: install dependencies
-      if: matrix.build_static == 'OFF'
       uses: ./.github/actions/install-linux-deps
       with:
         compiler: ${{ matrix.compiler }}
@@ -139,14 +163,17 @@ jobs:
         build_static: ${{ matrix.build_static }}
 
     - name: download unit tests
-      if: matrix.build_static == 'OFF'
       uses: actions/download-artifact@v4
       with:
-        name: unit-tests-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        name: ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
+          matrix.alphabet,
+          matrix.build_type,
+          matrix.compiler,
+          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
+          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
         path: metagraph/build
 
     - name: run unit tests
-      if: matrix.build_static == 'OFF'
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && chmod +x unit_tests && ./unit_tests
@@ -160,12 +187,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
 
-    name: Linux Integration Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: >-
+      Linux Integration Tests
+      (${{ matrix.alphabet }},
+      ${{ matrix.build_type }},
+      ${{ matrix.compiler }},
+      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
+      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: install dependencies
       uses: ./.github/actions/install-linux-deps
@@ -179,14 +210,18 @@ jobs:
     - name: Setup metagraph binary
       uses: ./.github/actions/setup-metagraph-binary
       with:
-        artifact-name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
+        artifact-name: ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
+          matrix.alphabet,
+          matrix.build_type,
+          matrix.compiler,
+          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
+          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
         alphabet: ${{ matrix.alphabet }}
-        with-avx: ${{ matrix.with_avx }}
 
     - name: Run integration tests
       uses: ./.github/actions/run-integration-tests
       with:
-        use-retry: 'true'
+        max-attempts: 5
         ld-library-path: '/usr/local/lib/'
 
 
@@ -198,12 +233,16 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrix.outputs.examples-matrix) }}
 
-    name: Linux ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    name: >-
+      Linux ${{ matrix.example_type }}
+      (${{ matrix.alphabet }},
+      ${{ matrix.build_type }},
+      ${{ matrix.compiler }},
+      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
+      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: Checkout submodules
       uses: ./.github/actions/checkout-submodules
@@ -230,4 +269,5 @@ jobs:
         alphabet: ${{ matrix.alphabet }}
         build-static: ${{ matrix.build_static }}
         with-avx: ${{ matrix.with_avx }}
-        git-tag: ${{ github.event.pull_request.head.sha || github.sha }}
+        compiler: ${{ matrix.compiler }}
+        platform: ubuntu-22.04

@@ -65,6 +65,7 @@ jobs:
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
         target-arch: ${{ matrix.target_arch }}
+        platform: ${{ matrix.platform }}
 
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
@@ -126,8 +127,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
@@ -143,6 +142,8 @@ jobs:
 
     - name: Run integration tests
       uses: ./.github/actions/run-integration-tests
+      with:
+        max-attempts: 1
 
     - name: check metagraph workflows
       run: |
@@ -172,8 +173,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: Checkout submodules
       uses: ./.github/actions/checkout-submodules
@@ -195,5 +194,5 @@ jobs:
         example-type: ${{ matrix.example_type }}
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
-        git-tag: ${{ github.event.pull_request.head.sha || github.sha }}
         target-arch: ${{ matrix.target_arch }}
+        platform: ${{ matrix.platform }}

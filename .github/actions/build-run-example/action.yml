@@ -11,28 +11,26 @@ inputs:
   alphabet:
     description: 'Alphabet type (DNA or Protein)'
     required: true
+  platform:
+    description: 'Platform/runner (e.g., macos-latest, macos-15-intel, ubuntu-22.04)'
+    required: true
   build-static:
     description: 'Build static binaries (ON or OFF)'
     required: false
-    default: 'OFF'
   with-avx:
     description: 'Enable AVX instructions (ON or OFF)'
     required: false
-    default: 'ON'
-  git-tag:
-    description: 'Git tag for ExternalProject (only used if example-type is ExternalProject)'
-    required: false
-    default: ''
   target-arch:
     description: 'Target architecture (arm64 or x86_64, macOS only)'
     required: false
-    default: 'arm64'
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
+    required: false
 
 runs:
   using: 'composite'
   steps:
     - name: Setup ccache
-      if: ${{ runner.os == 'macOS' }}
       uses: ./.github/actions/setup-ccache
       with:
         build-type: ${{ inputs.build-type }}
@@ -41,26 +39,30 @@ runs:
         with-avx: ${{ inputs.with-avx }}
         target-arch: ${{ inputs.target-arch }}
         job-type: ${{ inputs.example-type }}
+        compiler: ${{ inputs.compiler }}
+        platform: ${{ inputs.platform }}
 
-    - name: Configure example
+    - name: Configure subdirectory example
+      if: inputs.example-type == 'subdirectory'
       run: |
         cd metagraph-examples/${{ inputs.example-type }}
         mkdir -p build && cd build
-        if [ "${{ inputs.example-type }}" = "subdirectory" ]; then
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
-                ${BUILD_STATIC:+-DBUILD_STATIC=$BUILD_STATIC} \
-                ${WITH_AVX:+-DWITH_AVX=$WITH_AVX -DWITH_MSSE42=$WITH_AVX} \
-                -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
-        else
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
-                -DMETAGRAPH_GIT_TAG=${{ inputs.git-tag }} \
-                ${BUILD_STATIC:+-DBUILD_STATIC=$BUILD_STATIC} \
-                ${WITH_AVX:+-DWITH_AVX=$WITH_AVX -DWITH_MSSE42=$WITH_AVX} \
-                -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
-        fi
-      env:
-        BUILD_STATIC: ${{ inputs.build-static != 'OFF' && inputs.build-static || '' }}
-        WITH_AVX: ${{ inputs.with-avx != 'ON' && inputs.with-avx || '' }}
+        cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
+              ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
+              ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
+              -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
+
+    - name: Configure ExternalProject example
+      if: inputs.example-type == 'ExternalProject'
+      run: |
+        cd metagraph-examples/${{ inputs.example-type }}
+        mkdir -p build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
+              ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
+              ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
+              -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Build example
@@ -74,6 +76,5 @@ runs:
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Show ccache statistics
-      if: ${{ runner.os == 'macOS' }}
       run: ccache --show-stats
       shell: bash

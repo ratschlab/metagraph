@@ -8,22 +8,21 @@ inputs:
   alphabet:
     description: 'Alphabet type (DNA or Protein)'
     required: true
+  platform:
+    description: 'Platform/runner (e.g., macos-latest, macos-15-intel, ubuntu-22.04)'
+    required: true
   build-static:
     description: 'Build static binaries (ON or OFF)'
     required: false
-    default: 'OFF'
   with-avx:
     description: 'Enable AVX instructions (ON or OFF)'
     required: false
-    default: 'ON'
-  build-unit-tests:
-    description: 'Whether to build unit tests'
-    required: false
-    default: 'true'
   target-arch:
     description: 'Target architecture (arm64 or x86_64, macOS only)'
     required: false
-    default: 'arm64'
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
+    required: false
 
 runs:
   using: 'composite'
@@ -37,18 +36,17 @@ runs:
         with-avx: ${{ inputs.with-avx }}
         target-arch: ${{ inputs.target-arch }}
         job-type: 'Build'
+        compiler: ${{ inputs.compiler }}
+        platform: ${{ inputs.platform }}
 
     - name: Configure
       run: |
         mkdir -p metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
-              ${BUILD_STATIC:+-DBUILD_STATIC=$BUILD_STATIC} \
-              ${WITH_AVX:+-DWITH_AVX=$WITH_AVX -DWITH_MSSE42=$WITH_AVX} \
+              ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
+              ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
               -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
-      env:
-        BUILD_STATIC: ${{ inputs.build-static != 'OFF' && inputs.build-static || '' }}
-        WITH_AVX: ${{ inputs.with-avx != 'ON' && inputs.with-avx || '' }}
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Build metagraph
@@ -56,7 +54,7 @@ runs:
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Build unit tests
-      if: inputs.build-unit-tests == 'true'
+      if: inputs.build-static != 'ON'
       run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 

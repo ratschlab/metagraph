@@ -8,22 +8,24 @@ inputs:
   alphabet:
     description: 'Alphabet type (DNA or Protein)'
     required: true
+  platform:
+    description: 'Platform/runner (e.g., macos-latest, macos-15-intel, ubuntu-22.04)'
+    required: true
+  job-type:
+    description: 'Job type (Build, ExternalProject, or subdirectory)'
+    required: true
   build-static:
     description: 'Build static binaries (ON or OFF)'
     required: false
-    default: 'OFF'
   with-avx:
     description: 'Enable AVX instructions (ON or OFF)'
     required: false
-    default: 'ON'
   target-arch:
     description: 'Target architecture (arm64 or x86_64, macOS only)'
     required: false
-    default: 'arm64'
-  job-type:
-    description: 'Job type (Build, ExternalProject, or subdirectory)'
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
     required: false
-    default: 'Build'
 
 runs:
   using: 'composite'
@@ -41,7 +43,15 @@ runs:
       uses: actions/cache@v3
       with:
         path: ${{ runner.os == 'macOS' && '~/Library/Caches/ccache' || '~/.cache/ccache' }}
-        key: ccache-${{ runner.os }}-${{ inputs.job-type }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.target-arch }}-${{ inputs.build-static }}-${{ inputs.with-avx }}
+        key: ${{ format('ccache-{0}-{1}-{2}-{3}{4}{5}{6}{7}',
+          inputs.platform || runner.os,
+          inputs.job-type,
+          inputs.build-type,
+          inputs.alphabet,
+          inputs.target-arch && format('-{0}', inputs.target-arch) || '',
+          inputs.build-static && format('-{0}', inputs.build-static) || '',
+          inputs.with-avx && format('-{0}', inputs.with-avx) || '',
+          inputs.compiler && format('-{0}', inputs.compiler) || '') }}
 
     - name: Setup ccache
       shell: bash

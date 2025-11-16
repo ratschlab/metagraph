@@ -6,40 +6,24 @@ inputs:
     description: 'Working directory containing the build'
     required: false
     default: 'metagraph/build'
-  use-retry:
-    description: 'Whether to use retry mechanism'
-    required: false
-    default: 'false'
+  max-attempts:
+    description: 'Maximum number of retry attempts'
+    required: true
   ld-library-path:
     description: 'Additional LD_LIBRARY_PATH entries'
     required: false
-    default: ''
 
 runs:
   using: 'composite'
   steps:
-    - name: Run integration tests (with retry)
-      if: inputs.use-retry == 'true'
+    - name: Run integration tests
       uses: nick-fields/retry@v2
-      env:
-        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
       with:
         timeout_minutes: 1000
-        max_attempts: 5
+        max_attempts: ${{ inputs.max-attempts }}
         retry_on: error
         command: |
-          ${LD_LIBRARY_PATH:+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LD_LIBRARY_PATH"}
+          ${{ inputs.ld-library-path && format('export LD_LIBRARY_PATH="{0}:$LD_LIBRARY_PATH"', inputs.ld-library-path) || '' }}
           cd ${{ inputs.working-directory }}
           chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
-
-    - name: Run integration tests (no retry)
-      if: inputs.use-retry != 'true'
-      shell: bash
-      env:
-        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
-      run: |
-        ${LD_LIBRARY_PATH:+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LD_LIBRARY_PATH"}
-        cd ${{ inputs.working-directory }}
-        chmod +x test_venv/bin/python
-        ./test_venv/bin/python ../integration_tests/main.py
