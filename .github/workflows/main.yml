@@ -15,15 +15,18 @@ env:
 
 jobs:
 
-  Linux-SetupMatrix:
+  setup-matrix:
     runs-on: ubuntu-22.04
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
+      linux-matrix: ${{ steps.set-matrix.outputs.linux-matrix }}
+      macos-matrix: ${{ steps.set-matrix.outputs.macos-matrix }}
+      linux-examples-matrix: ${{ steps.set-matrix.outputs.linux-examples-matrix }}
+      macos-examples-matrix: ${{ steps.set-matrix.outputs.macos-examples-matrix }}
     steps:
       - id: set-matrix
         run: |
-          cat > matrix.json << 'EOF'
+          # Define Linux matrix
+          cat > linux-matrix.json << 'EOF'
           {
             "alphabet": ["DNA", "Protein"],
             "build_type": ["Debug", "Release"],
@@ -48,20 +51,8 @@ jobs:
           }
           EOF
           
-          jq '. + {"example_type": ["subdirectory", "ExternalProject"]}' matrix.json > examples-matrix.json
-          
-          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-          echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-
-  MacOS-SetupMatrix:
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
-    steps:
-      - id: set-matrix
-        run: |
-          cat > matrix.json << 'EOF'
+          # Define macOS matrix
+          cat > macos-matrix.json << 'EOF'
           {
             "include": [
               {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "arm64"},
@@ -72,20 +63,26 @@ jobs:
           }
           EOF
           
+          # Create Linux examples matrix by adding example_type to base Linux matrix
+          jq '. + {"example_type": ["subdirectory", "ExternalProject"]}' linux-matrix.json > linux-examples-matrix.json
+          
+          # Create macOS examples matrix by expanding each base config with both example types
           jq '{include: ([.include[] as $base | 
                 ("subdirectory", "ExternalProject") as $type | 
-                $base + {example_type: $type}])}' matrix.json > examples-matrix.json
+                $base + {example_type: $type}])}' macos-matrix.json > macos-examples-matrix.json
           
-          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-          echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "linux-matrix=$(cat linux-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "macos-matrix=$(cat macos-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "linux-examples-matrix=$(cat linux-examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "macos-examples-matrix=$(cat macos-examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
 
   Linux-Build:
     runs-on: ubuntu-22.04
-    needs: Linux-SetupMatrix
+    needs: setup-matrix
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.Linux-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
 
     name: Linux Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
@@ -165,11 +162,11 @@ jobs:
 
   Linux-UnitTests:
     runs-on: ubuntu-22.04
-    needs: [Linux-SetupMatrix, Linux-Build]
+    needs: [setup-matrix, Linux-Build]
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.Linux-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
 
     name: Linux Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
@@ -202,11 +199,11 @@ jobs:
 
   Linux-IntegrationTests:
     runs-on: ubuntu-22.04
-    needs: [Linux-SetupMatrix, Linux-Build]
+    needs: [setup-matrix, Linux-Build]
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.Linux-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-matrix) }}
 
     name: Linux Integration Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
@@ -249,11 +246,11 @@ jobs:
 
   Linux-Examples:
     runs-on: ubuntu-22.04
-    needs: Linux-SetupMatrix
+    needs: setup-matrix
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.Linux-SetupMatrix.outputs.examples-matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.linux-examples-matrix) }}
 
     name: Linux ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
@@ -309,10 +306,10 @@ jobs:
 
 
   MacOS-Build:
-    needs: MacOS-SetupMatrix
+    needs: setup-matrix
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.MacOS-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
 
     runs-on: ${{ matrix.platform }}
     name: MacOS Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
@@ -371,10 +368,10 @@ jobs:
 
 
   MacOS-UnitTests:
-    needs: [MacOS-SetupMatrix, MacOS-Build]
+    needs: [setup-matrix, MacOS-Build]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.MacOS-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
 
     runs-on: ${{ matrix.platform }}
     name: MacOS Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
@@ -402,10 +399,10 @@ jobs:
 
 
   MacOS-IntegrationTests:
-    needs: [MacOS-SetupMatrix, MacOS-Build]
+    needs: [setup-matrix, MacOS-Build]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.MacOS-SetupMatrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-matrix) }}
 
     runs-on: ${{ matrix.platform }}
     name: MacOS Integration Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
@@ -455,10 +452,10 @@ jobs:
 
 
   MacOS-Examples:
-    needs: MacOS-SetupMatrix
+    needs: setup-matrix
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.MacOS-SetupMatrix.outputs.examples-matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.macos-examples-matrix) }}
 
     runs-on: ${{ matrix.platform }}
     name: MacOS ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.target_arch }})
