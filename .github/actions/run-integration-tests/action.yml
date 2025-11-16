@@ -21,6 +21,8 @@ runs:
     - name: Run integration tests (with retry)
       if: inputs.use-retry == 'true'
       uses: nick-fields/retry@v2
+      env:
+        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
       with:
         timeout_minutes: 1000
         max_attempts: 5
@@ -30,16 +32,14 @@ runs:
           cd ${{ inputs.working-directory }}
           chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
-      env:
-        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
-      shell: bash
 
     - name: Run integration tests (no retry)
       if: inputs.use-retry != 'true'
+      shell: bash
+      env:
+        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
       run: |
         ${LD_LIBRARY_PATH:+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LD_LIBRARY_PATH"}
         cd ${{ inputs.working-directory }}
         chmod +x test_venv/bin/python
         ./test_venv/bin/python ../integration_tests/main.py
-      env:
-        LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}

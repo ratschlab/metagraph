@@ -36,7 +36,7 @@ runs:
         echo "/usr/local/sbin" >> "$GITHUB_PATH"
 
     - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate ccache
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
 
     - name: install dependencies for integration tests

@@ -32,6 +32,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup ccache
+      if: ${{ runner.os == 'macOS' }}
       uses: ./.github/actions/setup-ccache
       with:
         build-type: ${{ inputs.build-type }}
