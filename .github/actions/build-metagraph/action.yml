@@ -36,6 +36,7 @@ runs:
         build-static: ${{ inputs.build-static }}
         with-avx: ${{ inputs.with-avx }}
         target-arch: ${{ inputs.target-arch }}
+        job-type: 'Build'
 
     - name: Configure
       run: |

@@ -20,18 +20,20 @@ inputs:
     description: 'Target architecture (arm64 or x86_64, macOS only)'
     required: false
     default: 'arm64'
+  job-type:
+    description: 'Job type (Build, ExternalProject, or subdirectory)'
+    required: false
+    default: 'Build'
 
 runs:
   using: 'composite'
   steps:
     - name: Cache ccache
-      if: runner.os == 'macOS'
+      if: ${{ runner.os == 'macOS' || inputs.job-type == 'Build' }}
       uses: actions/cache@v3
       with:
-        path: ~/Library/Caches/ccache
-        key: ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.target-arch }}-${{ inputs.build-static }}-${{ inputs.with-avx }}-${{ github.sha }}
-        restore-keys: |
-          ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.target-arch }}-${{ inputs.build-static }}-${{ inputs.with-avx }}-
+        path: ${{ runner.os == 'macOS' && '~/Library/Caches/ccache' || '~/.cache/ccache' }}
+        key: ccache-${{ runner.os }}-${{ inputs.job-type }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.target-arch }}-${{ inputs.build-static }}-${{ inputs.with-avx }}
 
     - name: Setup ccache
       shell: bash
