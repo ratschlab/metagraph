@@ -21,11 +21,9 @@ inputs:
 
 runs:
   using: "composite"
-  defaults:
-    run:
-      shell: bash
   steps:
     - name: install build dependencies
+      shell: bash
       run: |
         sudo apt-get update
 
@@ -45,6 +43,7 @@ runs:
 
     - name: install dependencies for integration tests
       if: inputs.install_test_deps == 'true'
+      shell: bash
       run: |
         pip3 install parameterized
         sudo apt-get install python3-venv

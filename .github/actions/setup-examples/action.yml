@@ -8,12 +8,10 @@ inputs:
 
 runs:
   using: 'composite'
-  defaults:
-    run:
-      shell: bash
   steps:
     - name: Checkout metagraph-examples
       run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+      shell: bash
 
     - name: Setup metagraph symlink for subdirectory
       if: inputs.example-type == 'subdirectory'
@@ -21,3 +19,4 @@ runs:
         cd metagraph-examples/subdirectory
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
+      shell: bash

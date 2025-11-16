@@ -15,9 +15,6 @@ inputs:
 
 runs:
   using: 'composite'
-  defaults:
-    run:
-      shell: bash
   steps:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
@@ -34,3 +31,4 @@ runs:
         fi
         chmod +x "${binary_name}"
         ln -sf "${binary_name}" metagraph
+      shell: bash

@@ -23,9 +23,6 @@ inputs:
 
 runs:
   using: 'composite'
-  defaults:
-    run:
-      shell: bash
   steps:
     - name: Cache ccache
       if: runner.os == 'macOS'
@@ -37,6 +34,7 @@ runs:
           ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.alphabet }}-${{ inputs.target-arch }}-${{ inputs.build-static }}-${{ inputs.with-avx }}-
 
     - name: Setup ccache
+      shell: bash
       run: |
         ccache --set-config=max_size=2G
         ccache --set-config=compression=true
