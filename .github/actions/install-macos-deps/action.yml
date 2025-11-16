@@ -16,7 +16,7 @@ runs:
   steps:
     - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
       if: ${{ inputs.target_arch == 'x86_64' }}
-      shell: arch -${{ inputs.target_arch }} /bin/bash -e {0}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
       run: |
         # Install Intel Homebrew into /usr/local if missing
         if [[ ! -d /usr/local/Homebrew ]]; then
@@ -36,8 +36,8 @@ runs:
         echo "/usr/local/sbin" >> "$GITHUB_PATH"
 
     - name: install dependencies
-      shell: arch -${{ inputs.target_arch }} /bin/bash -e {0}
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate ccache
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
 
     - name: install dependencies for integration tests
       if: inputs.install_test_deps == 'true'
