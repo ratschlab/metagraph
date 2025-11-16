@@ -58,7 +58,8 @@ jobs:
       with:
         fetch-depth: 1
 
-    - uses: ./.github/actions/checkout-with-submodules
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-with-submodules
 
     - name: install dependencies
       uses: ./.github/actions/install-linux-deps
@@ -69,7 +70,8 @@ jobs:
         build_static: ${{ matrix.build_static }}
         install_test_deps: 'true'
 
-    - uses: ./.github/actions/build-metagraph
+    - name: Build metagraph
+      uses: ./.github/actions/build-metagraph
       with:
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
@@ -173,13 +175,15 @@ jobs:
         build_static: ${{ matrix.build_static }}
         install_test_deps: 'true'
 
-    - uses: ./.github/actions/setup-metagraph-binary
+    - name: Setup metagraph binary
+      uses: ./.github/actions/setup-metagraph-binary
       with:
         artifact-name: build-linux-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.compiler }}-${{ matrix.with_avx }}-${{ matrix.build_static }}
         alphabet: ${{ matrix.alphabet }}
         with-avx: ${{ matrix.with_avx }}
 
-    - uses: ./.github/actions/run-integration-tests
+    - name: Run integration tests
+      uses: ./.github/actions/run-integration-tests
       with:
         use-retry: 'true'
         ld-library-path: '/usr/local/lib/'
@@ -200,10 +204,12 @@ jobs:
       with:
         fetch-depth: 1
 
-    - uses: ./.github/actions/checkout-with-submodules
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-with-submodules
       if: matrix.example_type == 'subdirectory'
 
-    - uses: ./.github/actions/setup-examples
+    - name: Setup examples
+      uses: ./.github/actions/setup-examples
       with:
         example-type: ${{ matrix.example_type }}
 
@@ -215,7 +221,8 @@ jobs:
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
 
-    - uses: ./.github/actions/build-run-example
+    - name: Build and run example
+      uses: ./.github/actions/build-run-example
       with:
         example-type: ${{ matrix.example_type }}
         build-type: ${{ matrix.build_type }}

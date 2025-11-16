@@ -49,7 +49,8 @@ jobs:
       with:
         fetch-depth: 1
 
-    - uses: ./.github/actions/checkout-with-submodules
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-with-submodules
 
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
@@ -57,7 +58,8 @@ jobs:
         install_test_deps: 'true'
         target_arch: ${{ matrix.target_arch }}
 
-    - uses: ./.github/actions/build-metagraph
+    - name: Build metagraph
+      uses: ./.github/actions/build-metagraph
       with:
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
@@ -131,12 +133,14 @@ jobs:
         install_test_deps: 'true'
         target_arch: ${{ matrix.target_arch }}
 
-    - uses: ./.github/actions/setup-metagraph-binary
+    - name: Setup metagraph binary
+      uses: ./.github/actions/setup-metagraph-binary
       with:
         artifact-name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
         alphabet: ${{ matrix.alphabet }}
 
-    - uses: ./.github/actions/run-integration-tests
+    - name: Run integration tests
+      uses: ./.github/actions/run-integration-tests
 
     - name: check metagraph workflows
       run: |
@@ -169,10 +173,12 @@ jobs:
       with:
         fetch-depth: 1
 
-    - uses: ./.github/actions/checkout-with-submodules
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-with-submodules
       if: matrix.example_type == 'subdirectory'
 
-    - uses: ./.github/actions/setup-examples
+    - name: Setup examples
+      uses: ./.github/actions/setup-examples
       with:
         example-type: ${{ matrix.example_type }}
 
@@ -181,7 +187,8 @@ jobs:
       with:
         target_arch: ${{ matrix.target_arch }}
 
-    - uses: ./.github/actions/build-run-example
+    - name: Build and run example
+      uses: ./.github/actions/build-run-example
       with:
         example-type: ${{ matrix.example_type }}
         build-type: ${{ matrix.build_type }}
