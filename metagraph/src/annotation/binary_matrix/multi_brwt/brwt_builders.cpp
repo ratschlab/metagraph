@@ -675,6 +675,101 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
     return delta;
 }
 
+void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix, size_t num_threads) {
+    size_t num_nodes = 0;
+    brwt_matrix->BFT([&](const BRWT &node) {
+        if (node.child_nodes_.size())
+            num_nodes++;
+    });
+
+    ProgressBar progress_bar(num_nodes, "Strip Multi-BRWT",
+                             std::cerr, !common::get_verbose());
+
+    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
+    strip_all_ones_rows(brwt_matrix, thread_pool, progress_bar);
+}
+
+void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
+                                        ThreadPool &thread_pool,
+                                        ProgressBar &progress) {
+    assert(brwt_matrix);
+
+    if (!brwt_matrix->child_nodes_.size())
+        return;  // Leaf node, nothing to do
+
+    // DFS: First recursively process all BRWT children
+    for (auto &child_ptr : brwt_matrix->child_nodes_) {
+        strip_all_ones_rows(child_ptr.get(), thread_pool, progress);
+    }
+
+    // Now compute nonones_rows_ at this node
+    // Take all nonones_rows_ vectors from child nodes, recompute them in nonzero_rows_ coordinates
+    // (insert ones at positions where nonzero_rows_ is false), then compute OR between them
+    uint64_t num_nonzero = brwt_matrix->nonzero_rows_->num_set_bits();
+    sdsl::bit_vector all_ones(num_nonzero, true);
+
+    for (size_t j = 0; j < brwt_matrix->child_nodes_.size(); ++j) {
+        const auto *child_brwt = brwt_matrix->child_nodes_[j].get();
+
+        // 1.1.1.11
+        // 1 1 . ..
+        //
+        sdsl::bit_vector child_nonzero = child_brwt->nonzero_rows_->to_vector();
+        // zero in non_zero -> zero in all_ones
+        all_ones &= child_nonzero;
+        assert(child_nonzero.size() == num_nonzero);
+
+        if (child_brwt->nonones_rows_) {
+            uint64_t child_i = 0;
+            uint64_t w = 0;
+            call_ones(child_nonzero, [&](auto i) {
+                if (child_i % 64 == 0) {
+                    w = child_brwt->nonones_rows_->get_int(child_i,
+                        std::min(static_cast<uint64_t>(64),
+                                 child_brwt->nonones_rows_->size() - child_i)
+                    );
+                }
+
+                if (!(w & 1))
+                    all_ones[i] = false;
+
+                w >>= 1;
+                child_i++;
+            });
+        }
+    }
+
+    bit_vector_stat all_ones_bv(std::move(all_ones));
+
+    for (size_t j = 0; j < brwt_matrix->child_nodes_.size(); ++j) {
+        auto *child_brwt = brwt_matrix->child_nodes_[j].get();
+
+        // 1.1.1.11
+        // 1 1 . ..
+        //
+        sdsl::bit_vector child_nonzero = child_brwt->nonzero_rows_->to_vector();
+
+        if (child_brwt->nonones_rows_) {
+            sdsl::bit_vector child_all_ones
+                    = generate_subindex(all_ones_bv, child_nonzero,
+                                        child_brwt->nonzero_rows_->num_set_bits(),
+                                        thread_pool);
+            sdsl::bit_vector child_nonones = child_brwt->nonones_rows_->to_vector();
+            utils::erase(&child_nonones, child_all_ones);
+            child_brwt->nonones_rows_
+                    = std::make_unique<bit_vector_smallrank>(std::move(child_nonones));
+        }
+
+        utils::erase(&child_nonzero, all_ones_bv);
+        child_brwt->nonzero_rows_ = std::make_unique<bit_vector_smallrank>(child_nonzero);
+    }
+
+    all_ones = all_ones_bv.convert_to<sdsl::bit_vector>();
+    all_ones.flip(); // convert to non-ones
+    brwt_matrix->nonones_rows_ = std::make_unique<bit_vector_smallrank>(std::move(all_ones));
+    progress+= 1;
+}
+
 } // namespace matrix
 } // namespace annot
 } // namespace mtg

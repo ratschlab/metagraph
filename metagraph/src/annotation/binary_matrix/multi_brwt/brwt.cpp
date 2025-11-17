@@ -1,5 +1,6 @@
 #include "brwt.hpp"
 
+#include <cstring>
 #include <queue>
 #include <numeric>
 
@@ -29,6 +30,11 @@ bool BRWT::get(Row row, Column column) const {
     // terminate if the index bit is unset
     if (!rank)
         return false;
+
+    // Check if this rank position is all-ones (not in nonones_rows_)
+    // nonones_rows_ is indexed by rank in nonzero_rows_ (0-indexed)
+    if (nonones_rows_ && !(rank = nonones_rows_->conditional_rank1(rank - 1)))
+        return true; // All-ones row: return true for all columns
 
     auto child_node = assignments_.group(column);
     return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
@@ -212,8 +218,38 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
         }
     }
 
+    std::vector<bool> is_all_ones_row(child_row_ids.size(), false);
+    // Now update child_row_ids using nonones_rows_ to exclude all-ones rows
+    if (nonones_rows_) {
+        for (size_t i = 0, j = 0; i < row_ids.size() && j < child_row_ids.size(); ++i) {
+            if (skip_row[i])
+                continue;
+            // Check if this is an all-ones row
+            uint64_t rank = nonones_rows_->conditional_rank1(child_row_ids[j]);
+            if (!rank) {
+                // All-ones row: mark it and remove from child_row_ids
+                is_all_ones_row[j] = true;
+            } else {
+                // Update to adjusted rank
+                child_row_ids[j] = rank - 1;
+            }
+            ++j;
+        }
+        utils::erase(&child_row_ids, is_all_ones_row);
+    }
+
     if (!child_row_ids.size()) {
         for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (!skip_row[i]) {
+                // Handle all-ones rows: return all columns for these rows
+                for (Column col = 0; col < num_columns(); ++col) {
+                    if constexpr(utils::is_pair_v<T>) {
+                        throw std::runtime_error("Stripping all-ones rows from BRWT with attributes is not supported");
+                    } else {
+                        slice->push_back(col);
+                    }
+                }
+            }
             slice->push_back(delim);
         }
         return;
@@ -246,12 +282,23 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
     size_t slice_offset = slice->size();
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
+    for (size_t i = 0, j = 0; i < row_ids.size(); ++i) {
         if (!skip_row[i]) {
-            // merge rows from child submatrices
-            for (size_t &p : pos) {
-                while ((*slice)[p++] != delim) {
-                    slice->push_back((*slice)[p - 1]);
+            if (!is_all_ones_row[j++]) {
+                // merge rows from child submatrices
+                for (size_t &p : pos) {
+                    while ((*slice)[p++] != delim) {
+                        slice->push_back((*slice)[p - 1]);
+                    }
+                }
+            } else {
+                // Handle all-ones rows: return all columns for these rows
+                for (Column col = 0; col < num_columns(); ++col) {
+                    if constexpr(utils::is_pair_v<T>) {
+                        throw std::runtime_error("Stripping all-ones rows from BRWT with attributes is not supported");
+                    } else {
+                        slice->push_back(col);
+                    }
                 }
             }
         }
@@ -279,14 +326,44 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
         return result;
     }
 
+    // Step 1: Make the recursive call to get child row indices
     auto child_node = assignments_.group(column);
     auto rows = child_nodes_[child_node]->get_column(assignments_.rank(column));
 
     // check if we need to update the row indexes
-    if (num_nonzero_rows == nonzero_rows_->size())
+    if (num_nonzero_rows == nonzero_rows_->size()
+            && (!nonones_rows_ || nonones_rows_->size() == nonones_rows_->num_set_bits()))
         return rows;
 
-    // shift indexes
+    // Step 2: Map child row indices to parent ranks (accounting for all-ones rows) and merge with all-ones rows
+    // Child row indices are indices in the child's coordinate system, which correspond to
+    // ranks in the parent's nonones_rows_ system (0-indexed)
+    if (nonones_rows_) {
+        std::vector<uint64_t> nnz_rows;
+        nnz_rows.reserve(rows.size() + nonones_rows_->size() - nonones_rows_->num_set_bits());
+
+        uint64_t idx = 0;
+        uint64_t child_idx = 0;
+        auto it = rows.begin();
+        nonones_rows_->call_ones([&](uint64_t i) {
+            while (idx < i) {
+                nnz_rows.push_back(idx++);  // all-ones rows
+            }
+            if (it != rows.end() && child_idx == *it) {
+                nnz_rows.push_back(idx);
+                ++it;
+            }
+            idx++;
+            child_idx++;
+        });
+        assert(it == rows.end());
+        while (idx < nonones_rows_->size()) {
+            nnz_rows.push_back(idx++);
+        }
+        rows = nnz_rows;
+    }
+
+    // Step 3: Map parent ranks to actual row indices (accounting for zero rows)
     for (size_t i = 0; i < rows.size(); ++i) {
         rows[i] = nonzero_rows_->select1(rows[i] + 1);
     }
@@ -303,6 +380,22 @@ bool BRWT::load(std::istream &in) {
 
         if (!nonzero_rows_->load(in))
             return false;
+
+        // Check for version string to determine format (only present when nonones_rows_ exists)
+        auto start_pos = in.tellg();
+        char version_buf[9];
+        in.read(version_buf, 9);
+        if (in.gcount() == 9 && std::memcmp(version_buf, "brwt-v2.0", 9) == 0) {
+            // New format: version string present, so nonones_rows_ exists
+            nonones_rows_ = std::make_unique<bit_vector_smallrank>();
+            if (!nonones_rows_->load(in))
+                return false;
+        } else {
+            // old format: no version string, rewind to before the read attempt
+            in.clear();
+            in.seekg(start_pos);
+            nonones_rows_.reset();
+        }
 
         size_t num_child_nodes = load_number(in);
         child_nodes_.clear();
@@ -329,6 +422,16 @@ void BRWT::serialize(std::ostream &out) const {
                 || child_nodes_.size() == assignments_.num_groups());
 
     nonzero_rows_->serialize(out);
+
+    // Serialize nonones_rows_ if present
+    if (nonones_rows_) {
+        // Write version string for new format (only when nonones_rows_ exists)
+        const char *version = "brwt-v2.0";
+        out.write(version, 9);  // 9 bytes including null terminator
+        nonones_rows_->serialize(out);
+    }
+    // If nonones_rows_ doesn't exist, format is exactly the same as old format
+    // (no version string, no sentinel - goes directly to num_child_nodes)
 
     serialize_number(out, child_nodes_.size());
     for (const auto &child : child_nodes_) {

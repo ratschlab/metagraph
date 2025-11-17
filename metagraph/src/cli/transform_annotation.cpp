@@ -9,6 +9,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
@@ -1017,6 +1018,14 @@ int relax_multi_brwt(Config *config) {
     logger->trace("Relaxing BRWT tree...");
     relax_BRWT(&dynamic_cast<matrix::BRWT &>(const_cast<matrix::BinaryMatrix &>(*mat)),
                config->relax_arity_brwt, get_num_threads());
+
+    if (!dynamic_cast<const matrix::IntMatrix *>(&annotator->get_matrix())
+            && !dynamic_cast<const TupleBRWT *>(&annotator->get_matrix())) {
+        logger->trace("Stripping all-one rows in the BRWT tree...");
+        matrix::BRWTOptimizer::strip_all_ones_rows(
+                    &dynamic_cast<matrix::BRWT &>(const_cast<matrix::BinaryMatrix &>(*mat)),
+                    get_num_threads());
+    }
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

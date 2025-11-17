@@ -10,6 +10,8 @@
 #include "common/threads/threading.hpp"
 #include "brwt.hpp"
 
+class ProgressBar;
+
 
 namespace mtg {
 namespace annot {
@@ -65,6 +67,9 @@ class BRWTOptimizer {
     static void relax(BRWT *brwt_matrix,
                       uint64_t max_arity = -1,
                       size_t num_threads = 1);
+
+    // identify and strip rows of all ones to compress the BRWT further
+    static void strip_all_ones_rows(BRWT *brwt_matrix, size_t num_threads = 1);
   private:
     // check if removing this node is going to reduce the size
     static bool should_prune(const BRWT &node);
@@ -72,6 +77,7 @@ class BRWTOptimizer {
     static void reassign(size_t node_rank, BRWT *parent, size_t num_threads);
     // estimate delta between the transformed tree and the current one
     static double pruning_delta(const BRWT &node);
+    static void strip_all_ones_rows(BRWT *brwt_matrix, ThreadPool &thread_pool, ProgressBar &progress);
 };
 
 } // namespace matrix

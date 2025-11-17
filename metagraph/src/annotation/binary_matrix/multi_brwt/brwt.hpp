@@ -64,6 +64,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // assigns columns to the child nodes
     RangePartition assignments_;
     std::unique_ptr<bit_vector> nonzero_rows_;
+    // tracks rows that are NOT all-ones (indexed by rank in nonzero_rows_)
+    // nullptr means all-ones rows are not tracked
+    std::unique_ptr<bit_vector> nonones_rows_;
     // generally, these child matrices can be abstract BinaryMatrix instances
     std::vector<std::unique_ptr<BRWT>> child_nodes_;
 };

@@ -21,6 +21,7 @@ class BRWTOptimized : public BRWT {
     template <typename... Args>
     BRWTOptimized(Args&&... args) : BRWT(std::forward<Args>(args)...) {
         annot::matrix::BRWTOptimizer::relax(this);
+        annot::matrix::BRWTOptimizer::strip_all_ones_rows(this);
     }
 };
 
