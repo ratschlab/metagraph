@@ -446,10 +446,9 @@ uint64_t BRWT::num_relations() const {
     uint64_t num_set_bits = 0;
     for (const auto &submatrix_ptr : child_nodes_) {
         num_set_bits += submatrix_ptr->num_relations();
-        if (nonones_rows_)
-            num_set_bits += (nonones_rows_->size() - nonones_rows_->num_set_bits())
-                                * submatrix_ptr->num_columns();
     }
+    if (nonones_rows_)
+        num_set_bits += (nonones_rows_->size() - nonones_rows_->num_set_bits()) * num_columns();
 
     return num_set_bits;
 }
