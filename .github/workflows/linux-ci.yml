@@ -247,7 +247,6 @@ jobs:
 
     - name: Checkout submodules
       uses: ./.github/actions/checkout-submodules
-      if: matrix.example_type == 'subdirectory'
 
     - name: Setup examples
       uses: ./.github/actions/setup-examples
