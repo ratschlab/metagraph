@@ -37,7 +37,6 @@ runs:
         target-arch: ${{ inputs.target-arch }}
         job-type: 'Build'
         compiler: ${{ inputs.compiler }}
-        platform: ${{ inputs.platform }}
 
     - name: Configure
       run: |

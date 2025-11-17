@@ -11,9 +11,6 @@ inputs:
   alphabet:
     description: 'Alphabet type (DNA or Protein)'
     required: true
-  platform:
-    description: 'Platform/runner (e.g., macos-latest, macos-15-intel, ubuntu-22.04)'
-    required: true
   build-static:
     description: 'Build static binaries (ON or OFF)'
     required: false
@@ -40,7 +37,6 @@ runs:
         target-arch: ${{ inputs.target-arch }}
         job-type: ${{ inputs.example-type }}
         compiler: ${{ inputs.compiler }}
-        platform: ${{ inputs.platform }}
 
     - name: Configure subdirectory example
       if: inputs.example-type == 'subdirectory'

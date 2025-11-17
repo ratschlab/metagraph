@@ -90,7 +90,6 @@ jobs:
         build-static: ${{ matrix.build_static }}
         with-avx: ${{ matrix.with_avx }}
         compiler: ${{ matrix.compiler }}
-        platform: ubuntu-22.04
 
     # for potential release
     - name: rename binary
@@ -270,4 +269,3 @@ jobs:
         build-static: ${{ matrix.build_static }}
         with-avx: ${{ matrix.with_avx }}
         compiler: ${{ matrix.compiler }}
-        platform: ubuntu-22.04

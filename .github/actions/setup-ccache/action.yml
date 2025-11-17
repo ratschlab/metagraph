@@ -8,9 +8,6 @@ inputs:
   alphabet:
     description: 'Alphabet type (DNA or Protein)'
     required: true
-  platform:
-    description: 'Platform/runner (e.g., macos-latest, macos-15-intel, ubuntu-22.04)'
-    required: true
   job-type:
     description: 'Job type (Build, ExternalProject, or subdirectory)'
     required: true
@@ -45,7 +42,7 @@ runs:
       with:
         path: ${{ runner.os == 'macOS' && '~/Library/Caches/ccache' || '~/.cache/ccache' }}
         key: ${{ format('ccache-{0}-{1}-{2}-{3}{4}{5}{6}{7}',
-          inputs.platform || runner.os,
+          runner.image,
           inputs.job-type,
           inputs.build-type,
           inputs.alphabet,

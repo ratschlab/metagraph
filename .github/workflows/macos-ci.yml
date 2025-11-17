@@ -65,7 +65,6 @@ jobs:
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
         target-arch: ${{ matrix.target_arch }}
-        platform: ${{ matrix.platform }}
 
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
@@ -195,4 +194,3 @@ jobs:
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
         target-arch: ${{ matrix.target_arch }}
-        platform: ${{ matrix.platform }}
