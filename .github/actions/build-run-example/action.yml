@@ -64,10 +64,11 @@ runs:
               ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
               -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
         
-        # After cmake runs, touch the stamp files to skip download step
-        # This prevents ExternalProject from re-cloning since the source is already present via symlink
+        # After cmake runs, touch the stamp files to skip download/update steps
+        # This prevents ExternalProject from re-cloning/fetching since the source is already present via symlink
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Build example
