@@ -20,3 +20,11 @@ runs:
         rm -rf metagraph
         ln -s "${GITHUB_WORKSPACE}" metagraph
       shell: bash
+
+    - name: Setup metagraph symlink for ExternalProject
+      if: inputs.example-type == 'ExternalProject'
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir -p build/metagraph-external-prefix/src
+        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+      shell: bash
