@@ -1,0 +1,86 @@
+name: 'Build and Run Example'
+description: 'Configure, build, and run metagraph example'
+
+inputs:
+  platform:
+    description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
+    required: true
+  example-type:
+    description: 'Type of example to build (subdirectory or ExternalProject)'
+    required: true
+  build-type:
+    description: 'CMake build type (Debug or Release)'
+    required: true
+  alphabet:
+    description: 'Alphabet type (DNA or Protein)'
+    required: true
+  build-static:
+    description: 'Build static binaries (ON or OFF)'
+    required: false
+  with-avx:
+    description: 'Enable AVX instructions (ON or OFF)'
+    required: false
+  target-arch:
+    description: 'Target architecture (arm64 or x86_64, macOS only)'
+    required: false
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup ccache
+      uses: ./.github/actions/setup-ccache
+      with:
+        platform: ${{ inputs.platform }}
+        build-type: ${{ inputs.build-type }}
+        alphabet: ${{ inputs.alphabet }}
+        job-type: ${{ inputs.example-type }}
+        build-static: ${{ inputs.build-static }}
+        with-avx: ${{ inputs.with-avx }}
+        target-arch: ${{ inputs.target-arch }}
+        compiler: ${{ inputs.compiler }}
+
+    - name: Configure subdirectory example
+      if: inputs.example-type == 'subdirectory'
+      run: |
+        cd metagraph-examples/${{ inputs.example-type }}
+        mkdir -p build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
+              ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
+              ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
+              -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
+
+    - name: Configure ExternalProject example
+      if: inputs.example-type == 'ExternalProject'
+      run: |
+        cd metagraph-examples/${{ inputs.example-type }}
+        mkdir -p build && cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
+              -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
+              ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
+              ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
+              -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
+        
+        # After cmake runs, touch the stamp files to skip download/update steps
+        # This prevents ExternalProject from re-cloning/fetching since the source is already present via symlink
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
+
+    - name: Build example
+      run: cd metagraph-examples/${{ inputs.example-type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
+
+    - name: Run example
+      run: |
+        cd metagraph-examples/${{ inputs.example-type }}/build
+        make run_example
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
+
+    - name: Show ccache statistics
+      run: ccache --show-stats
+      shell: bash

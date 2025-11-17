@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "common/config.hpp"
 
 namespace mtg {
 namespace kmer {

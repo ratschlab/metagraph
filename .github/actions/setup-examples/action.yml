@@ -1,0 +1,30 @@
+name: 'Setup Examples'
+description: 'Clone metagraph-examples and optionally link metagraph subdirectory'
+
+inputs:
+  example-type:
+    description: 'Type of example (subdirectory or ExternalProject)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout metagraph-examples
+      run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
+      shell: bash
+
+    - name: Setup metagraph symlink for subdirectory
+      if: inputs.example-type == 'subdirectory'
+      run: |
+        cd metagraph-examples/subdirectory
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
+      shell: bash
+
+    - name: Setup metagraph symlink for ExternalProject
+      if: inputs.example-type == 'ExternalProject'
+      run: |
+        cd metagraph-examples/ExternalProject
+        mkdir -p build/metagraph-external-prefix/src
+        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+      shell: bash
