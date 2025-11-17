@@ -772,6 +772,10 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
         }
 
         utils::erase(&child_nonzero, all_ones_bv);
+        logger->trace("Erased: {} rows, {:.1}%", all_ones_bv.num_set_bits(),
+                        (double)(child_brwt->nonzero_rows_->num_set_bits()
+                            - sdsl::util::cnt_one_bits(child_nonzero))
+                        / child_brwt->nonzero_rows_->num_set_bits());
         child_brwt->nonzero_rows_ = std::make_unique<bit_vector_smallrank>(child_nonzero);
     }
 
