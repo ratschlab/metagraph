@@ -12,6 +12,9 @@ inputs:
   ld-library-path:
     description: 'Additional LD_LIBRARY_PATH entries'
     required: false
+  target-arch:
+    description: 'Target architecture (for macOS: arm64 or x86_64)'
+    required: false
 
 runs:
   using: 'composite'
@@ -26,4 +29,4 @@ runs:
           ${{ inputs.ld-library-path && format('export LD_LIBRARY_PATH="{0}:$LD_LIBRARY_PATH"', inputs.ld-library-path) || '' }}
           cd ${{ inputs.working-directory }}
           chmod +x test_venv/bin/python
-          ./test_venv/bin/python ../integration_tests/main.py
+          ${{ inputs.target-arch && format('arch -{0} ', inputs.target-arch) || '' }}./test_venv/bin/python ../integration_tests/main.py

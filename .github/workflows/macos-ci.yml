@@ -145,6 +145,7 @@ jobs:
       uses: ./.github/actions/run-integration-tests
       with:
         max-attempts: 1
+        target-arch: ${{ matrix.target_arch }}
 
     - name: check metagraph workflows
       run: |
