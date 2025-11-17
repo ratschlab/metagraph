@@ -4,7 +4,7 @@ description: 'Configure, build, and run metagraph example'
 inputs:
   platform:
     description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
-    required: false
+    required: true
   example-type:
     description: 'Type of example to build (subdirectory or ExternalProject)'
     required: true

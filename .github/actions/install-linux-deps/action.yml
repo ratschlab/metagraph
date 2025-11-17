@@ -14,10 +14,9 @@ inputs:
   build_static:
     description: 'Whether building static binaries (ON/OFF)'
     required: true
-  install_test_deps:
-    description: 'Whether to install integration test dependencies'
-    required: false
-    default: 'false'
+  job-type:
+    description: 'Job type: build, unit-tests, integration-tests, or examples'
+    required: true
 
 runs:
   using: "composite"
@@ -41,8 +40,8 @@ runs:
         echo "CC=$(which ${{ inputs.cc }})" >> $GITHUB_ENV
         echo "CXX=$(which ${{ inputs.cxx }})" >> $GITHUB_ENV
 
-    - name: install dependencies for integration tests
-      if: inputs.install_test_deps == 'true'
+    - name: Install Python packages for tests
+      if: inputs.job-type == 'integration-tests'
       shell: bash
       run: |
         pip3 install parameterized

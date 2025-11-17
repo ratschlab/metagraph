@@ -2,23 +2,21 @@ name: 'Install macOS Dependencies'
 description: 'Install dependencies for building and testing MetaGraph on macOS'
 
 inputs:
-  install_test_deps:
-    description: 'Whether to install integration test dependencies'
-    required: false
-    default: 'false'
+  job-type:
+    description: 'Type of job (build, unit-tests, integration-tests, examples)'
+    required: true
   target_arch:
     description: 'Target architecture (arm64 or x86_64)'
-    required: false
-    default: 'arm64'
+    required: true
 
 runs:
   using: "composite"
   steps:
-    - name: (Only for arm64 -> x86_64) Install Rosetta Homebrew in /usr/local
-      if: ${{ inputs.target_arch == 'x86_64' }}
+    - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
+      if: ${{ inputs.target_arch != runner.arch }}
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
       run: |
-        # Install Intel Homebrew into /usr/local if missing
+        # Install Intel Homebrew into /usr/local if missing (for cross-compilation)
         if [[ ! -d /usr/local/Homebrew ]]; then
           echo "Installing Intel Homebrew to /usr/local under Rosetta..."
           arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
@@ -39,7 +37,16 @@ runs:
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
       shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
 
+    - name: (Only for cross-compilation) Install OpenSSL for target architecture
+      if: ${{ inputs.target_arch != runner.arch }}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
+      run: |
+        # When cross-compiling (e.g., running x86_64 binaries on ARM64 via Rosetta),
+        # we need OpenSSL for the target architecture. Ccache installed during build
+        # pulls in OpenSSL, but test jobs downloading artifacts need it explicitly.
+        brew install openssl@3
+
     - name: install dependencies for integration tests
-      if: inputs.install_test_deps == 'true'
+      if: inputs.job-type == 'integration-tests'
       shell: bash
       run: pip3 install parameterized --break-system-packages --user

@@ -2,6 +2,9 @@ name: 'Setup ccache'
 description: 'Configure and cache ccache for build acceleration'
 
 inputs:
+  platform:
+    description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
+    required: true
   build-type:
     description: 'CMake build type (Debug or Release)'
     required: true
@@ -17,14 +20,11 @@ inputs:
   with-avx:
     description: 'Enable AVX instructions (ON or OFF)'
     required: false
-  platform:
-    description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
     required: false
   target-arch:
     description: 'Target architecture (arm64 or x86_64, macOS only)'
-    required: false
-  compiler:
-    description: 'Compiler name (for Linux only, e.g., g++-13)'
     required: false
 
 runs:

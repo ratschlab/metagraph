@@ -56,7 +56,7 @@ jobs:
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
       with:
-        install_test_deps: 'true'
+        job-type: build
         target_arch: ${{ matrix.target_arch }}
 
     - name: Build metagraph
@@ -100,6 +100,7 @@ jobs:
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
       with:
+        job-type: unit-tests
         target_arch: ${{ matrix.target_arch }}
 
     - name: download build artifacts
@@ -131,7 +132,7 @@ jobs:
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
       with:
-        install_test_deps: 'true'
+        job-type: integration-tests
         target_arch: ${{ matrix.target_arch }}
 
     - name: Setup metagraph binary
@@ -186,6 +187,7 @@ jobs:
     - name: install dependencies
       uses: ./.github/actions/install-macos-deps
       with:
+        job-type: examples
         target_arch: ${{ matrix.target_arch }}
 
     - name: Build and run example

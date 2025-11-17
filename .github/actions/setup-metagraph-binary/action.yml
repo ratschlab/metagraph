@@ -8,10 +8,6 @@ inputs:
   alphabet:
     description: 'Alphabet (DNA or Protein)'
     required: true
-  with-avx:
-    description: 'Whether AVX is enabled (ON or OFF)'
-    required: false
-    default: 'ON'
 
 runs:
   using: 'composite'
@@ -26,7 +22,8 @@ runs:
       run: |
         cd metagraph/build
         binary_name="metagraph_${{ inputs.alphabet }}"
-        if [ "${{ inputs.with-avx }}" = "OFF" ]; then
+        # Check if _noAVX variant exists (for non-static builds with AVX OFF)
+        if [ -f "${binary_name}_noAVX" ]; then
           binary_name="${binary_name}_noAVX"
         fi
         chmod +x "${binary_name}"

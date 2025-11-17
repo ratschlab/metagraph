@@ -80,7 +80,7 @@ jobs:
         cc: ${{ matrix.cc }}
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
-        install_test_deps: 'true'
+        job-type: build
 
     - name: Build metagraph
       uses: ./.github/actions/build-metagraph
@@ -161,6 +161,7 @@ jobs:
         cc: ${{ matrix.cc }}
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
+        job-type: unit-tests
 
     - name: download unit tests
       uses: actions/download-artifact@v4
@@ -205,7 +206,7 @@ jobs:
         cc: ${{ matrix.cc }}
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
-        install_test_deps: 'true'
+        job-type: integration-tests
 
     - name: Setup metagraph binary
       uses: ./.github/actions/setup-metagraph-binary
@@ -260,6 +261,7 @@ jobs:
         cc: ${{ matrix.cc }}
         cxx: ${{ matrix.cxx }}
         build_static: ${{ matrix.build_static }}
+        job-type: examples
 
     - name: Build and run example
       uses: ./.github/actions/build-run-example
