@@ -2,8 +2,11 @@ name: 'Build and Run Example'
 description: 'Configure, build, and run metagraph example'
 
 inputs:
+  platform:
+    description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
+    required: false
   example-type:
-    description: 'Type of example (subdirectory or ExternalProject)'
+    description: 'Type of example to build (subdirectory or ExternalProject)'
     required: true
   build-type:
     description: 'CMake build type (Debug or Release)'
@@ -28,14 +31,16 @@ runs:
   using: 'composite'
   steps:
     - name: Setup ccache
+      if: inputs.example-type == 'subdirectory'
       uses: ./.github/actions/setup-ccache
       with:
+        platform: ${{ inputs.platform }}
         build-type: ${{ inputs.build-type }}
         alphabet: ${{ inputs.alphabet }}
+        job-type: ${{ inputs.example-type }}
         build-static: ${{ inputs.build-static }}
         with-avx: ${{ inputs.with-avx }}
         target-arch: ${{ inputs.target-arch }}
-        job-type: ${{ inputs.example-type }}
         compiler: ${{ inputs.compiler }}
 
     - name: Configure subdirectory example

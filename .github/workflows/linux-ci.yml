@@ -85,6 +85,7 @@ jobs:
     - name: Build metagraph
       uses: ./.github/actions/build-metagraph
       with:
+        platform: ubuntu-22.04
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
         build-static: ${{ matrix.build_static }}
@@ -263,6 +264,7 @@ jobs:
     - name: Build and run example
       uses: ./.github/actions/build-run-example
       with:
+        platform: ubuntu-22.04
         example-type: ${{ matrix.example_type }}
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}

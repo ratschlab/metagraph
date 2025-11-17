@@ -30,12 +30,13 @@ runs:
     - name: Setup ccache
       uses: ./.github/actions/setup-ccache
       with:
+        platform: ${{ inputs.platform }}
         build-type: ${{ inputs.build-type }}
         alphabet: ${{ inputs.alphabet }}
+        job-type: Build
         build-static: ${{ inputs.build-static }}
         with-avx: ${{ inputs.with-avx }}
         target-arch: ${{ inputs.target-arch }}
-        job-type: 'Build'
         compiler: ${{ inputs.compiler }}
 
     - name: Configure

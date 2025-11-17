@@ -62,6 +62,7 @@ jobs:
     - name: Build metagraph
       uses: ./.github/actions/build-metagraph
       with:
+        platform: ${{ matrix.platform }}
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
         target-arch: ${{ matrix.target_arch }}
@@ -190,6 +191,7 @@ jobs:
     - name: Build and run example
       uses: ./.github/actions/build-run-example
       with:
+        platform: ${{ matrix.platform }}
         example-type: ${{ matrix.example_type }}
         build-type: ${{ matrix.build_type }}
         alphabet: ${{ matrix.alphabet }}
