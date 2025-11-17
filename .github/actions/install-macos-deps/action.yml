@@ -13,8 +13,8 @@ runs:
   using: "composite"
   steps:
     - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
-      if: ${{ inputs.target_arch != runner.arch }}
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
+      if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
       run: |
         # Install Intel Homebrew into /usr/local if missing (for cross-compilation)
         if [[ ! -d /usr/local/Homebrew ]]; then
@@ -35,11 +35,11 @@ runs:
 
     - name: install dependencies
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
 
     - name: (Only for cross-compilation) Install OpenSSL for target architecture
-      if: ${{ inputs.target_arch != runner.arch }}
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target_arch) || 'bash' }}
+      if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
       run: |
         # When cross-compiling (e.g., running x86_64 binaries on ARM64 via Rosetta),
         # we need OpenSSL for the target architecture. Ccache installed during build

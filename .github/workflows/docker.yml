@@ -23,7 +23,7 @@ jobs:
       uses: ./.github/actions/checkout-submodules
 
     - name: Log in to the Container registry
-      uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      uses: docker/login-action@v3
       with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -31,12 +31,12 @@ jobs:
 
     - name: Extract metadata (tags, labels) for Docker
       id: meta
-      uses: docker/metadata-action@v3
+      uses: docker/metadata-action@v5
       with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
     - name: Build Docker image
-      uses: docker/build-push-action@v2
+      uses: docker/build-push-action@v6
       with:
           context: .
           push: false
@@ -45,7 +45,7 @@ jobs:
 
     - name: Build and push Docker image
       if: github.event_name != 'pull_request'
-      uses: docker/build-push-action@v2
+      uses: docker/build-push-action@v6
       with:
           context: .
           push: true

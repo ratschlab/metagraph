@@ -51,7 +51,7 @@ runs:
               ${{ inputs.build-static && format('-DBUILD_STATIC={0}', inputs.build-static) || '' }} \
               ${{ inputs.with-avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', inputs.with-avx) || '' }} \
               -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }} ..
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Configure ExternalProject example
       if: inputs.example-type == 'ExternalProject'
@@ -69,17 +69,17 @@ runs:
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Build example
       run: cd metagraph-examples/${{ inputs.example-type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Run example
       run: |
         cd metagraph-examples/${{ inputs.example-type }}/build
         make run_example
-      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) || 'bash' }}
+      shell: ${{ runner.os == 'macOS' && format('arch -{0} /bin/bash -eo pipefail {{0}}', inputs.target-arch) || 'bash' }}
 
     - name: Show ccache statistics
       run: ccache --show-stats
