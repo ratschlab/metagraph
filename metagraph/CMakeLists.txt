@@ -198,7 +198,10 @@ if(NOT DEFINED BUILD_KMC)
 set(BUILD_KMC TRUE)
 endif()
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+  -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
+  -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
+  .
   RESULT_VARIABLE result
   WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
 )
@@ -270,6 +273,8 @@ set(SDSL_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/sdsl)
 ExternalProject_Add(SDSL
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/sdsl-lite
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
+             -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
+             -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
   INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
           COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
 )
@@ -385,11 +390,20 @@ endfunction()
 make_osx_arch_flags(OSX_ARCH_FLAGS)
 
 set(HTSLIB_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/htslib)
+# Set up ccache wrapper for HTSLIB if available
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+  set(HTSLIB_CC "${CCACHE_PROGRAM} ${CMAKE_C_COMPILER}")
+else()
+  set(HTSLIB_CC "${CMAKE_C_COMPILER}")
+endif()
+
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
+      "CC=${HTSLIB_CC}"
       "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
       "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
