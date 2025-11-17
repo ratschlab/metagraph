@@ -422,7 +422,7 @@ class TestAPIClientMultiple(TestingBase):
         if num_retries == 0:
             raise "Couldn't start server"
 
-        wait_time_sec = 5
+        wait_time_sec = 1 + cls.mult // 10
         print("Waiting {} sec for the server (PID {}) to start up".format(
             wait_time_sec, cls.server_process.pid), flush=True)
         time.sleep(wait_time_sec)
