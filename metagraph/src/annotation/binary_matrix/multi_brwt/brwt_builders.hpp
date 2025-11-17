@@ -77,7 +77,7 @@ class BRWTOptimizer {
     static void reassign(size_t node_rank, BRWT *parent, size_t num_threads);
     // estimate delta between the transformed tree and the current one
     static double pruning_delta(const BRWT &node);
-    static void strip_all_ones_rows(BRWT *brwt_matrix, ThreadPool &thread_pool, ProgressBar &progress);
+    static void strip_all_ones_rows(BRWT *brwt_matrix, size_t num_threads, ProgressBar &progress);
 };
 
 } // namespace matrix

@@ -685,12 +685,12 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix, size_t num_threads) {
     ProgressBar progress_bar(num_nodes, "Strip Multi-BRWT",
                              std::cerr, !common::get_verbose());
 
-    ThreadPool thread_pool(num_threads, 100'000 * num_threads);
-    strip_all_ones_rows(brwt_matrix, thread_pool, progress_bar);
+    ThreadPool thread_pool(0);
+    strip_all_ones_rows(brwt_matrix, num_threads, progress_bar);
 }
 
 void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
-                                        ThreadPool &thread_pool,
+                                        size_t num_threads,
                                         ProgressBar &progress) {
     assert(brwt_matrix);
 
@@ -699,7 +699,7 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
 
     // DFS: First recursively process all BRWT children
     for (auto &child_ptr : brwt_matrix->child_nodes_) {
-        strip_all_ones_rows(child_ptr.get(), thread_pool, progress);
+        strip_all_ones_rows(child_ptr.get(), num_threads, progress);
     }
 
     // Now compute nonones_rows_ at this node
@@ -708,6 +708,7 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
     uint64_t num_nonzero = brwt_matrix->nonzero_rows_->num_set_bits();
     sdsl::bit_vector all_ones(num_nonzero, true);
 
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < brwt_matrix->child_nodes_.size(); ++j) {
         const auto *child_brwt = brwt_matrix->child_nodes_[j].get();
 
@@ -716,12 +717,17 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
         //
         sdsl::bit_vector child_nonzero = child_brwt->nonzero_rows_->to_vector();
         // zero in non_zero -> zero in all_ones
-        all_ones &= child_nonzero;
+        #pragma omp critical
+        {
+            all_ones &= child_nonzero;
+        }
         assert(child_nonzero.size() == num_nonzero);
 
         if (child_brwt->nonones_rows_) {
             uint64_t child_i = 0;
             uint64_t w = 0;
+
+            std::atomic_thread_fence(std::memory_order_release);
             call_ones(child_nonzero, [&](auto i) {
                 if (child_i % 64 == 0) {
                     w = child_brwt->nonones_rows_->get_int(child_i,
@@ -731,16 +737,21 @@ void BRWTOptimizer::strip_all_ones_rows(BRWT *brwt_matrix,
                 }
 
                 if (!(w & 1))
-                    all_ones[i] = false;
+                    unset_bit(all_ones.data(), i, false, std::memory_order_relaxed);
 
                 w >>= 1;
                 child_i++;
             });
+            std::atomic_thread_fence(std::memory_order_acquire);
         }
+
     }
 
     bit_vector_stat all_ones_bv(std::move(all_ones));
 
+    ThreadPool thread_pool(0);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < brwt_matrix->child_nodes_.size(); ++j) {
         auto *child_brwt = brwt_matrix->child_nodes_[j].get();
 
