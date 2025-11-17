@@ -31,7 +31,6 @@ runs:
   using: 'composite'
   steps:
     - name: Setup ccache
-      if: inputs.example-type == 'subdirectory'
       uses: ./.github/actions/setup-ccache
       with:
         platform: ${{ inputs.platform }}
