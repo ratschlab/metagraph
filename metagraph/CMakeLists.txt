@@ -767,7 +767,7 @@ install(CODE "
   endforeach()
   
   # Create the combined archive with -bundle suffix to avoid overwriting the original
-  execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/bundle_static_libs.sh 
+  execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/scripts/bundle_static_libs.sh 
                           \${PROJECT_BINARY_DIR}/metagraph-core-bundle 
                           \${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a 
                           \${CMAKE_AR}
