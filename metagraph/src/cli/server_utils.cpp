@@ -117,11 +117,11 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     } catch (const CustomResponse &) {
         // Do nothing — response already handled by the callback `process`
     } catch (const std::exception &e) {
-        logger->error("[Server] Error on request {}: {}", request_id, e.what());
+        logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         response->write(SimpleWeb::StatusCode::client_error_bad_request,
                         json_str_with_error_msg(e.what()));
     } catch (...) {
-        logger->error("[Server] Error on request {}", request_id);
+        logger->warn("[Server] Error on request {}", request_id);
         response->write(SimpleWeb::StatusCode::server_error_internal_server_error,
                         json_str_with_error_msg("Internal server error"));
     }

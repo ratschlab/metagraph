@@ -502,9 +502,11 @@ int run_server(Config *config) {
         });
     };
 
-    server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
+    server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
-        logger->info("[Server] Not found " + request->path);
+        size_t request_id = num_requests++;
+        logger->warn("[Server] Not found {} for request {} from {}", request->path, request_id,
+                     request->remote_endpoint().address().to_string());
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
     };
@@ -515,7 +517,7 @@ int run_server(Config *config) {
         // Handle errors here, ignoring a few trivial ones.
         if (ec.value() != asio::stream_errc::eof
                 && ec.value() != asio::error::operation_aborted) {
-            logger->info("[Server] Got error {} {} {}",
+            logger->warn("[Server] Got error {} {} {}",
                          ec.message(), ec.category().name(), ec.value());
         }
     };
