@@ -340,18 +340,18 @@ int run_server(Config *config) {
         }
 
         logger->info("Loading graphs...");
-        std::mutex mu_graphs;
         for (const auto &[name, graphs] : indexes) {
             for (const auto &[graph_fname, anno_fname] : graphs) {
-                Config config_copy = *config;
-                config_copy.infbase = graph_fname;
-                config_copy.infbase_annotators = { anno_fname };
-                graphs_pool.enqueue([config_copy{std::move(config_copy)},&graphs_cache,&mu_graphs]() {
-                    auto index = initialize_annotated_dbg(config_copy);
-                    std::lock_guard<std::mutex> lock(mu_graphs);
-                    graphs_cache[{ config_copy.infbase, config_copy.infbase_annotators[0] }] = std::move(index);
-                });
+                graphs_cache[{ graph_fname, anno_fname }] = nullptr;
             }
+        }
+        for (auto &[graph_anno, anno_dbg] : graphs_cache) {
+            Config config_copy = *config;
+            config_copy.infbase = graph_anno.first;
+            config_copy.infbase_annotators = { graph_anno.second };
+            graphs_pool.enqueue([config_copy{std::move(config_copy)},anno_dbg{std::ref(anno_dbg)}]() {
+                initialize_annotated_dbg(config_copy).swap(anno_dbg);
+            });
         }
         graphs_pool.join();
 
@@ -359,14 +359,12 @@ int run_server(Config *config) {
             k = graphs_cache.begin()->second->get_graph().get_k();
             is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
         }
-        for (const auto &[name, graphs] : indexes) {
-            for (const auto &[graph_fname, anno_fname] : graphs) {
-                auto &graph = graphs_cache[{ graph_fname, anno_fname }]->get_graph();
-                if (k && *k != graph.get_k())
-                    k.reset();
-                if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
-                    is_canonical.reset();
-            }
+        for (auto &[graph_anno, anno_dbg] : graphs_cache) {
+            auto &graph = anno_dbg->get_graph();
+            if (k && *k != graph.get_k())
+                k.reset();
+            if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                is_canonical.reset();
         }
 
         logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
@@ -452,9 +450,12 @@ int run_server(Config *config) {
                     root.append(label);
                 }
             } else {
-                for (const auto &[_, anno_dbg] : graphs_cache) {
-                    for (const std::string &label : anno_dbg.get()->get_annotator().get_label_encoder().get_labels()) {
-                        root.append(label);
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        const auto &labels = graphs_cache[{ graph_fname, anno_fname }]->get_annotator().get_label_encoder().get_labels();
+                        for (const std::string &label : labels) {
+                            root.append(label);
+                        }
                     }
                 }
             }
@@ -472,8 +473,10 @@ int run_server(Config *config) {
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
                 uint64_t num_labels = 0;
-                for (const auto &[_, anno_dbg] : graphs_cache) {
-                    num_labels += anno_dbg.get()->get_annotator().num_labels();
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
+                    }
                 }
                 root["annotation"]["labels"] = num_labels;
                 if (k)
