@@ -337,7 +337,7 @@ int run_server(Config *config) {
             utils::with_mmap(true);
         }
 
-        logger->info("Loading graphs...");
+        logger->info("[Server] Loading graphs...");
         for (const auto &[name, graphs] : indexes) {
             for (const auto &[graph_fname, anno_fname] : graphs) {
                 graphs_cache[{ graph_fname, anno_fname }] = nullptr;
@@ -356,7 +356,7 @@ int run_server(Config *config) {
             logger->error("[Server] No graphs to serve. Exiting.");
             exit(1);
         }
-        logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
+        logger->info("[Server] All graphs were loaded and stats collected. Ready to serve queries.");
     }
 
     // the actual server
@@ -369,7 +369,7 @@ int run_server(Config *config) {
                 throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
             Json::Value content_json = parse_json_string(content);
-            logger->info("Request {}: {}", request_id, content_json.toStyledString());
+            logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
             Json::Value result;
 
             // simple case with a single graph pair
@@ -498,7 +498,7 @@ int run_server(Config *config) {
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
-        logger->info("Not found " + request->path);
+        logger->info("[Server] Not found " + request->path);
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
     };
