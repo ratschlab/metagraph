@@ -381,31 +381,37 @@ int run_server(Config *config) {
                 std::vector<std::string> graphs_to_query
                         = filter_graphs_from_list(indexes, content_json, request_id);
                 std::mutex mu;
-                std::vector<std::shared_future<void>> futures;
+                std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                         futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
-                            auto json = process_search_request(content_json, *index, *config);
-                            std::lock_guard<std::mutex> lock(mu);
-                            if (result.empty()) {
-                                result = std::move(json);
-                            } else {
-                                assert(json.size() == result.size());
-                                for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
-                                    if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
-                                            != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
-                                        throw std::logic_error("ERROR: Results for different sequences can't be merged");
-                                    }
-                                    for (auto&& value : json[i]["results"]) {
-                                        result[i]["results"].append(std::move(value));
+                            try {
+                                auto json = process_search_request(content_json, *index, *config);
+                                std::lock_guard<std::mutex> lock(mu);
+                                if (result.empty()) {
+                                    result = std::move(json);
+                                } else {
+                                    assert(json.size() == result.size());
+                                    for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                        if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
+                                                != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
+                                            throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                                        }
+                                        for (auto&& value : json[i]["results"]) {
+                                            result[i]["results"].append(std::move(value));
+                                        }
                                     }
                                 }
+                            } catch (...) {
+                                return std::current_exception();
                             }
+                            return std::exception_ptr();
                         }));
                     }
                 }
                 for (auto &future : futures) {
-                    future.wait();
+                    if (future.get())
+                        std::rethrow_exception(future.get());
                 }
             }
             return result;
