@@ -467,26 +467,29 @@ int run_server(Config *config) {
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
-                uint64_t num_labels = 0;
-                std::optional<uint64_t> k = graphs_cache.begin()->second->get_graph().get_k();
-                std::optional<bool> is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
+                uint64_t k = graphs_cache.begin()->second->get_graph().get_k();
+                bool is_consistent_k = true;
+                bool is_canonical = (graphs_cache.begin()->second->get_graph().get_mode()
+                                        == graph::DeBruijnGraph::CANONICAL);
+                bool is_consistent_canonical = true;
                 for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
                     const auto &graph = anno_dbg->get_graph();
-                    if (k && *k != graph.get_k())
-                        k.reset();
-                    if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
-                        is_canonical.reset();
+                    if (k != graph.get_k())
+                        is_consistent_k = false;
+                    if (is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                        is_consistent_canonical = false;
                 }
+                if (is_consistent_k)
+                    root["graph"]["k"] = k;
+                if (is_consistent_canonical)
+                    root["graph"]["is_canonical_mode"] = is_canonical;
+                uint64_t num_labels = 0;
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
                         num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
                     }
                 }
                 root["annotation"]["labels"] = num_labels;
-                if (k.has_value())
-                    root["graph"]["k"] = k.value();
-                if (is_canonical.has_value())
-                    root["graph"]["is_canonical_mode"] = is_canonical.value();
             } else {
                 root["graph"]["filename"] = std::filesystem::path(config->infbase).filename().string();
                 root["graph"]["k"] = static_cast<uint64_t>(anno_graph.get()->get_graph().get_k());
@@ -505,7 +508,8 @@ int run_server(Config *config) {
     server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        logger->warn("[Server] Not found {} for request {} from {}", request->path, request_id,
+        logger->warn("[Server] Not found {} for {} request {} from {}",
+                     request->path, request->method, request_id,
                      request->remote_endpoint().address().to_string());
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
