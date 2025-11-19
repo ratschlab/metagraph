@@ -468,7 +468,7 @@ int run_server(Config *config) {
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
                 uint64_t num_labels = 0;
-                std::optional<size_t> k = graphs_cache.begin()->second->get_graph().get_k();
+                std::optional<uint64_t> k = graphs_cache.begin()->second->get_graph().get_k();
                 std::optional<bool> is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
                 for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
                     const auto &graph = anno_dbg->get_graph();
@@ -483,10 +483,10 @@ int run_server(Config *config) {
                     }
                 }
                 root["annotation"]["labels"] = num_labels;
-                if (k)
-                    root["graph"]["k"] = static_cast<uint64_t>(*k);
-                if (is_canonical)
-                    root["graph"]["is_canonical_mode"] = *is_canonical;
+                if (k.has_value())
+                    root["graph"]["k"] = k.value();
+                if (is_canonical.has_value())
+                    root["graph"]["is_canonical_mode"] = is_canonical.value();
             } else {
                 root["graph"]["filename"] = std::filesystem::path(config->infbase).filename().string();
                 root["graph"]["k"] = static_cast<uint64_t>(anno_graph.get()->get_graph().get_k());
