@@ -34,7 +34,7 @@ Json::Value process_search_request(const Json::Value &json,
                                    const Config &config_orig) {
     const auto &fasta = json["FASTA"];
     if (fasta.isNull())
-        throw std::domain_error("No input sequences received from client");
+        throw std::invalid_argument("No input sequences received from client");
 
     Config config(config_orig);
     // discovery_fraction a proxy of 1 - %similarity
@@ -50,14 +50,14 @@ Json::Value process_search_request(const Json::Value &json,
         config.alignment_max_nodes_per_seq_char).asDouble();
 
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
                 + std::to_string(config.discovery_fraction));
     }
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
@@ -164,7 +164,7 @@ Json::Value process_align_request(const std::string &received_message,
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }

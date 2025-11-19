@@ -87,7 +87,7 @@ Json::Value parse_json_string(const std::string &msg) {
     std::string errors;
 
     if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &errors))
-        throw std::domain_error("Bad json received: " + errors);
+        throw std::invalid_argument("Bad json received: " + errors);
 
     return json;
 }
@@ -117,15 +117,15 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     } catch (const CustomResponse &) {
         // Do nothing — response already handled by the callback `process`
     } catch (const std::exception &e) {
-        logger->info("[Server] Error on request: {}", e.what());
+        logger->error("[Server] Error on request {}: {}", request_id, e.what());
         response->write(SimpleWeb::StatusCode::client_error_bad_request,
                         json_str_with_error_msg(e.what()));
     } catch (...) {
-        logger->info("[Server] Error on request");
+        logger->error("[Server] Error on request {}", request_id);
         response->write(SimpleWeb::StatusCode::server_error_internal_server_error,
                         json_str_with_error_msg("Internal server error"));
     }
-    logger->info("Request {} finished in {} sec", request_id, timer.elapsed());
+    logger->info("[Server] Request {} finished in {} sec", request_id, timer.elapsed());
 }
 
 } // namespace cli
