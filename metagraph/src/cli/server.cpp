@@ -280,8 +280,6 @@ int run_server(Config *config) {
     set_num_threads(0);
 
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
-    std::optional<size_t> k;
-    std::optional<bool> is_canonical;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -354,19 +352,10 @@ int run_server(Config *config) {
             });
         }
         graphs_pool.join();
-
-        if (config->fnames.size()) {
-            k = graphs_cache.begin()->second->get_graph().get_k();
-            is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
+        if (graphs_cache.empty()) {
+            logger->error("[Server] No graphs to serve. Exiting.");
+            exit(1);
         }
-        for (auto &[graph_anno, anno_dbg] : graphs_cache) {
-            auto &graph = anno_dbg->get_graph();
-            if (k && *k != graph.get_k())
-                k.reset();
-            if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
-                is_canonical.reset();
-        }
-
         logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
     }
 
@@ -473,6 +462,15 @@ int run_server(Config *config) {
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
                 uint64_t num_labels = 0;
+                std::optional<size_t> k = graphs_cache.begin()->second->get_graph().get_k();
+                std::optional<bool> is_canonical = graphs_cache.begin()->second->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL;
+                for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
+                    const auto &graph = anno_dbg->get_graph();
+                    if (k && *k != graph.get_k())
+                        k.reset();
+                    if (is_canonical && *is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                        is_canonical.reset();
+                }
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
                         num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
