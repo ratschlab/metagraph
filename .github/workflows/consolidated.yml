@@ -518,15 +518,14 @@ jobs:
       shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
       run: brew install openssl@3
 
-    - &install-ccache-macos
-      name: Install ccache (macOS)
+    - name: Install ccache (macOS)
       shell: arch -${{ matrix.target_arch }} /bin/bash -e {0}
       run: brew install ccache
 
     - name: Cache ccache
       uses: actions/cache@v3
       with:
-        path: &ccache-path-macos ~/Library/Caches/ccache
+        path: ~/Library/Caches/ccache
         key: ccache-${{ matrix.platform }}-Build-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
 
     - *setup-ccache-config
@@ -771,12 +770,14 @@ jobs:
       shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
       run: brew install openssl@3
 
-    - *install-ccache-macos
+    - name: Install ccache (macOS)
+      shell: arch -${{ matrix.target_arch }} /bin/bash -e {0}
+      run: brew install ccache
 
     - name: Cache ccache
       uses: actions/cache@v3
       with:
-        path: *ccache-path-macos
+        path: ~/Library/Caches/ccache
         key: ccache-${{ matrix.platform }}-${{ matrix.example_type }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
 
     - *setup-ccache-config
