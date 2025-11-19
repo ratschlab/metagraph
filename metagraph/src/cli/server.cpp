@@ -356,7 +356,7 @@ int run_server(Config *config) {
             logger->error("[Server] No graphs to serve. Exiting.");
             exit(1);
         }
-        logger->info("[Server] All graphs were loaded and stats collected. Ready to serve queries.");
+        logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
     }
 
     // the actual server
