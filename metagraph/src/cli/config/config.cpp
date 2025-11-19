@@ -1241,7 +1241,7 @@ if (advanced) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
             fprintf(stderr, "\t                       \t\t\tFormula: min-count <= \\sum_i 1{min-value <= c_i <= max-value} <= max-count\n");
-            fprintf(stderr, "\t                       \t\t\tWith --count-kmers: min-count <= \\sum(filtered_counts) <= max-count\n");
+            fprintf(stderr, "\t                       \t\t\tWith --count-kmers: min-count <= \\sum_i c_i 1{min-value <= c_i <= max-value} <= max-count\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
             fprintf(stderr, "\t   --count-kmers \t\taggregate k-mer counts (requires input annotations with counts) [off]\n");
             fprintf(stderr, "\t   --count-width [INT] \t\tnumber of bits for aggregated k-mer counts (values saturate at max) [8]\n");
