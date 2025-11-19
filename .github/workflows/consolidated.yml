@@ -103,6 +103,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.matrix) }}
 
+    env:
+      JOB_TYPE: Build
+
     name: >-
       Linux Build
       (${{ matrix.alphabet }},
@@ -148,11 +151,12 @@ jobs:
       shell: bash
       run: sudo apt-get install -y ccache
 
-    - name: Cache ccache
+    - &cache-ccache-linux
+      name: Cache ccache
       uses: actions/cache@v3
       with:
-        path: &ccache-path-linux ~/.cache/ccache
-        key: ccache-ubuntu-22.04-Build-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}-${{ matrix.compiler }}
+        path: ~/.cache/ccache
+        key: ccache-${{ runner.os }}-${{ env.JOB_TYPE }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}-${{ matrix.compiler }}
 
     - &setup-ccache-config
       name: Setup ccache config
@@ -206,13 +210,13 @@ jobs:
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
+        name: &linux-artifact-name ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
           matrix.alphabet,
           matrix.build_type,
           matrix.compiler,
           matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
           matrix.build_static == 'ON' && 'static' || 'dynamic') }}
-        path: &build-artifacts-linux |
+        path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
           metagraph/build/integration_tests
           metagraph/build/test_venv/
@@ -223,7 +227,7 @@ jobs:
       if: matrix.build_static == 'OFF'
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
+        name: &linux-unit-tests-artifact-name ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
           matrix.alphabet,
           matrix.build_type,
           matrix.compiler,
@@ -257,16 +261,10 @@ jobs:
     - name: download unit tests
       uses: actions/download-artifact@v4
       with:
-        name: ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
-          matrix.alphabet,
-          matrix.build_type,
-          matrix.compiler,
-          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
-          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
+        name: *linux-unit-tests-artifact-name
         path: metagraph/build
 
-    - &run-unit-tests-linux
-      name: run unit tests
+    - name: run unit tests
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && chmod +x unit_tests && ./unit_tests
@@ -279,6 +277,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.matrix) }}
+
+    env:
+      LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
+      INTEGRATION_TEST_TIMEOUT: 1000
+      INTEGRATION_TEST_ATTEMPTS: 5
 
     name: >-
       Linux Integration Tests
@@ -302,15 +305,11 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
-          matrix.alphabet,
-          matrix.build_type,
-          matrix.compiler,
-          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
-          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
+        name: *linux-artifact-name
         path: metagraph/build
 
-    - name: Recreate metagraph symlink
+    - &recreate-metagraph-symlink
+      name: Recreate metagraph symlink
       run: |
         cd metagraph/build
         binary_name="metagraph_${{ matrix.alphabet }}"
@@ -321,14 +320,14 @@ jobs:
         ln -sf "${binary_name}" metagraph
       shell: bash
 
-    - name: Run integration tests
+    - &run-integration-tests
+      name: Run integration tests
       uses: nick-fields/retry@v2
       with:
-        timeout_minutes: 1000
-        max_attempts: 5
+        timeout_minutes: ${{ env.INTEGRATION_TEST_TIMEOUT }}
+        max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
         retry_on: error
         command: |
-          export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
           cd metagraph/build
           chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
@@ -341,6 +340,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.examples-matrix) }}
+
+    env:
+      JOB_TYPE: Examples
 
     name: >-
       Linux ${{ matrix.example_type }}
@@ -382,11 +384,7 @@ jobs:
 
     - *install-ccache-linux
 
-    - name: Cache ccache
-      uses: actions/cache@v3
-      with:
-        path: *ccache-path-linux
-        key: ccache-ubuntu-22.04-${{ matrix.example_type }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}-${{ matrix.compiler }}
+    - *cache-ccache-linux
 
     - *setup-ccache-config
 
@@ -441,6 +439,10 @@ jobs:
       matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.matrix) }}
 
     runs-on: ${{ matrix.platform }}
+
+    env:
+      JOB_TYPE: Build
+
     name: macOS Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
 
     defaults:
@@ -481,11 +483,12 @@ jobs:
     - name: Install ccache (macOS)
       run: brew install ccache
 
-    - name: Cache ccache
+    - &cache-ccache-macos
+      name: Cache ccache
       uses: actions/cache@v3
       with:
         path: ~/Library/Caches/ccache
-        key: ccache-${{ matrix.platform }}-Build-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
+        key: ccache-${{ matrix.platform }}-${{ env.JOB_TYPE }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
 
     - *setup-ccache-config
 
@@ -510,8 +513,8 @@ jobs:
     - name: upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
-        path: &build-artifacts-macos |
+        name: &macos-artifact-name build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}
           metagraph/build/unit_tests
           metagraph/build/integration_tests
@@ -562,11 +565,10 @@ jobs:
     - name: download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        name: *macos-artifact-name
         path: metagraph/build
 
-    - &run-unit-tests-macos
-      name: run unit tests
+    - name: run unit tests
       run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
 
 
@@ -577,6 +579,11 @@ jobs:
       matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.matrix) }}
 
     runs-on: ${{ matrix.platform }}
+
+    env:
+      INTEGRATION_TEST_TIMEOUT: 1000
+      INTEGRATION_TEST_ATTEMPTS: 1
+
     name: macOS IntegrationTests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
 
     defaults:
@@ -617,25 +624,16 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        name: *macos-artifact-name
         path: metagraph/build
 
-    - name: Recreate metagraph symlink
-      run: |
-        cd metagraph/build
-        binary_name="metagraph_${{ matrix.alphabet }}"
-        if [ -f "${binary_name}_noAVX" ]; then
-          binary_name="${binary_name}_noAVX"
-        fi
-        chmod +x "${binary_name}"
-        ln -sf "${binary_name}" metagraph
-      shell: bash
+    - *recreate-metagraph-symlink
 
     - name: Run integration tests
       uses: nick-fields/retry@v2
       with:
-        timeout_minutes: 1000
-        max_attempts: 1
+        timeout_minutes: ${{ env.INTEGRATION_TEST_TIMEOUT }}
+        max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
         retry_on: error
         command: |
           cd metagraph/build
@@ -660,6 +658,10 @@ jobs:
       matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.examples-matrix) }}
 
     runs-on: ${{ matrix.platform }}
+
+    env:
+      JOB_TYPE: Examples
+
     name: macOS ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
 
     defaults:
@@ -718,11 +720,7 @@ jobs:
     - name: Install ccache (macOS)
       run: brew install ccache
 
-    - name: Cache ccache
-      uses: actions/cache@v3
-      with:
-        path: ~/Library/Caches/ccache
-        key: ccache-${{ matrix.platform }}-${{ matrix.example_type }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
+    - *cache-ccache-macos
 
     - *setup-ccache-config
 
