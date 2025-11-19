@@ -2,14 +2,15 @@ name: MetaGraph CI (Consolidated)
 
 on:
   push:
-    branches: &main_branches
+    branches:
       - master
     tags:
       - 'v*'
   pull_request:
-    branches: *main_branches
+    branches:
+      - master
 
-env: &global_env
+env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -112,14 +113,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with: &checkout_with
-        fetch-depth: 1
 
     - &checkout-submodules-cache
       name: Checkout submodules cache
       uses: actions/cache@v3
       with:
-        path: &submodules-cache-path |
+        path: |
           .git/modules
           metagraph/external-libraries
         key: submodules-${{ hashFiles('.gitmodules') }}
@@ -129,7 +128,8 @@ jobs:
       run: git submodule update --init --recursive --depth 1
       shell: bash
 
-    - name: install build dependencies
+    - &install-linux-deps
+      name: install build dependencies
       shell: bash
       run: |
         sudo apt-get update
@@ -252,19 +252,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: install build dependencies
-      shell: bash
-      run: |
-        sudo apt-get update
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install -y ${{ matrix.compiler }}
-        fi
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install -y libcurl4-openssl-dev
-        fi
-        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
-        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
+    - *install-linux-deps
 
     - name: download unit tests
       uses: actions/download-artifact@v4
@@ -303,19 +291,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: install build dependencies
-      shell: bash
-      run: |
-        sudo apt-get update
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install -y ${{ matrix.compiler }}
-        fi
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install -y libcurl4-openssl-dev
-        fi
-        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
-        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
+    - *install-linux-deps
 
     - name: Install Python packages for tests
       shell: bash
@@ -402,19 +378,7 @@ jobs:
         ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
       shell: bash
 
-    - name: install build dependencies
-      shell: bash
-      run: |
-        sudo apt-get update
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install -y ${{ matrix.compiler }}
-        fi
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install -y libcurl4-openssl-dev
-        fi
-        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
-        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
+    - *install-linux-deps
 
     - *install-ccache-linux
 
@@ -485,7 +449,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with: *checkout_with
 
     - *checkout-submodules-cache
 
@@ -571,7 +534,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with: *checkout_with
 
     - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
       if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
@@ -806,7 +768,6 @@ jobs:
 
     steps:
         - uses: actions/checkout@v4
-          with: *checkout_with
 
         - name: Set up Python
           uses: actions/setup-python@v6
@@ -849,7 +810,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with: *checkout_with
 
     - *checkout-submodules-cache
 
@@ -904,7 +864,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with: *checkout_with
 
       - *checkout-submodules-cache
 
