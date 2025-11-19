@@ -279,7 +279,6 @@ int run_server(Config *config) {
     size_t num_server_threads = std::max(1u, get_num_threads());
     set_num_threads(0);
 
-    tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
     std::optional<size_t> k;
     std::optional<bool> is_canonical;
@@ -338,15 +337,6 @@ int run_server(Config *config) {
             logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
                          " Make sure they're on a fast disk.");
             utils::with_mmap(true);
-        }
-
-        logger->info("Collecting graph stats...");
-        for (const auto &[name, graphs] : indexes) {
-            for (const auto &[graph_fname, anno_fname] : graphs) {
-                auto &out = name_labels[name];
-                const auto &labels = read_labels(anno_fname);
-                out.insert(out.end(), labels.begin(), labels.end());
-            }
         }
 
         logger->info("Loading graphs...");
@@ -462,8 +452,8 @@ int run_server(Config *config) {
                     root.append(label);
                 }
             } else {
-                for (const auto &[name, labels] : name_labels) {
-                    for (const std::string &label : labels) {
+                for (const auto &[_, anno_dbg] : graphs_cache) {
+                    for (const std::string &label : anno_dbg.get()->get_annotator().get_label_encoder().get_labels()) {
                         root.append(label);
                     }
                 }
@@ -482,8 +472,8 @@ int run_server(Config *config) {
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
                 uint64_t num_labels = 0;
-                for (const auto &[name, labels] : name_labels) {
-                    num_labels += labels.size();
+                for (const auto &[_, anno_dbg] : graphs_cache) {
+                    num_labels += anno_dbg.get()->get_annotator().num_labels();
                 }
                 root["annotation"]["labels"] = num_labels;
                 if (k)
