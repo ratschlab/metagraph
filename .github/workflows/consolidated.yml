@@ -130,12 +130,18 @@ jobs:
       shell: bash
       run: sudo apt-get install -y ccache
 
-    - &cache-ccache-linux
+    - &compute-matrix-hash
+      name: Compute matrix hash
+      id: matrix-hash
+      run: echo "hash=${{ hashFiles(format('{0}', toJson(matrix))) }}" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - &cache-ccache
       name: Cache ccache
       uses: actions/cache@v3
       with:
-        path: ~/.cache/ccache
-        key: ccache-${{ runner.os }}-${{ env.JOB_TYPE }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}-${{ matrix.compiler }}
+        path: ${{ runner.os == 'Linux' && '~/.cache/ccache' || '~/Library/Caches/ccache' }}
+        key: ccache-${{ runner.os }}-${{ matrix.job_type }}-${{ steps.matrix-hash.outputs.hash }}
 
     - &setup-ccache-config
       name: Setup ccache config
@@ -173,6 +179,27 @@ jobs:
       run: ccache --show-stats
       shell: bash
 
+    # Upload build artifacts for testing
+    - &upload-build-artifacts
+      name: upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: &artifact-name build-${{ runner.os }}-${{ steps.matrix-hash.outputs.hash }}
+        path: |
+          metagraph/build/metagraph_${{ matrix.alphabet }}
+          metagraph/build/integration_tests
+          metagraph/build/test_venv/
+        include-hidden-files: true
+        retention-days: 1
+
+    - &upload-unit-tests
+      name: upload unit tests
+      uses: actions/upload-artifact@v4
+      with:
+        name: &unit-tests-artifact-name unit-tests-${{ runner.os }}-${{ steps.matrix-hash.outputs.hash }}
+        path: metagraph/build/unit_tests
+        retention-days: 1
+
     # for potential release
     - name: rename binary
       if: matrix.with_avx == 'OFF'
@@ -184,36 +211,6 @@ jobs:
       with:
         name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-
-    # Upload build artifacts for testing
-    - name: upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: &linux-artifact-name ${{ format('build-linux-{0}-{1}-{2}-{3}-{4}',
-          matrix.alphabet,
-          matrix.build_type,
-          matrix.compiler,
-          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
-          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
-        path: |
-          metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-          metagraph/build/integration_tests
-          metagraph/build/test_venv/
-        include-hidden-files: true
-        retention-days: 1
-
-    - name: upload unit tests
-      if: matrix.build_static == 'OFF'
-      uses: actions/upload-artifact@v4
-      with:
-        name: &linux-unit-tests-artifact-name ${{ format('unit-tests-linux-{0}-{1}-{2}-{3}-{4}',
-          matrix.alphabet,
-          matrix.build_type,
-          matrix.compiler,
-          matrix.with_avx == 'ON' && 'AVX' || 'noAVX',
-          matrix.build_static == 'ON' && 'static' || 'dynamic') }}
-        path: metagraph/build/unit_tests
-        retention-days: 1
 
 
   linux-unit-tests:
@@ -229,12 +226,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - *compute-matrix-hash
+
     - *install-linux-deps
 
     - name: download unit tests
       uses: actions/download-artifact@v4
       with:
-        name: *linux-unit-tests-artifact-name
+        name: *unit-tests-artifact-name
         path: metagraph/build
 
     - name: run unit tests
@@ -261,6 +260,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - *compute-matrix-hash
+
     - *install-linux-deps
 
     - name: Install Python packages for tests
@@ -272,7 +273,7 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: *linux-artifact-name
+        name: *artifact-name
         path: metagraph/build
 
     - &recreate-metagraph-symlink
@@ -329,9 +330,11 @@ jobs:
 
     - *install-linux-deps
 
+    - *compute-matrix-hash
+
     - *install-ccache-linux
 
-    - *cache-ccache-linux
+    - *cache-ccache
 
     - *setup-ccache-config
 
@@ -390,6 +393,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - *compute-matrix-hash
+
     - *checkout-submodules-cache
 
     - *checkout-submodules-update
@@ -448,16 +453,9 @@ jobs:
 
     - *show-ccache-stats
 
-    - name: upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: &macos-artifact-name build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
-        path: |
-          metagraph/build/metagraph_${{ matrix.alphabet }}
-          metagraph/build/unit_tests
-          metagraph/build/integration_tests
-          metagraph/build/test_venv/
-        retention-days: 1
+    - *upload-build-artifacts
+
+    - *upload-unit-tests
 
 
   macos-unit-tests:
@@ -504,7 +502,7 @@ jobs:
     - name: download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: *macos-artifact-name
+        name: *artifact-name
         path: metagraph/build
 
     - name: run unit tests
@@ -531,6 +529,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - *compute-matrix-hash
 
     - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
       if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
@@ -563,7 +563,7 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: *macos-artifact-name
+        name: *artifact-name
         path: metagraph/build
 
     - *recreate-metagraph-symlink
@@ -610,6 +610,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - *compute-matrix-hash
+
     - *checkout-submodules-cache
 
     - *checkout-submodules-update
@@ -643,12 +645,7 @@ jobs:
     - name: Install ccache (macOS)
       run: brew install ccache
 
-    - &cache-ccache-macos
-      name: Cache ccache
-      uses: actions/cache@v3
-      with:
-        path: ~/Library/Caches/ccache
-        key: ccache-${{ matrix.platform }}-${{ env.JOB_TYPE }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
+    - *cache-ccache
 
     - *setup-ccache-config
 
