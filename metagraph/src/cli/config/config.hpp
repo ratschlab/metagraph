@@ -107,6 +107,7 @@ class Config {
     unsigned long long int num_chars = 0;
 
     uint8_t count_width = 8;
+    bool enumerate_headers = false;
 
     // Alignment options
     bool alignment_edit_distance = false;

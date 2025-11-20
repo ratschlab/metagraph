@@ -334,7 +334,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     thread_pool.join();
 
-    if (config.count_kmers) {
+    if (config.count_kmers || config.enumerate_headers) {
         // add k-mer counts to existing binary annotations
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
@@ -358,7 +358,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             const std::string &counts_fname
                     = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
 
-            if (fs::exists(counts_fname)) {
+            if (!config.enumerate_headers && fs::exists(counts_fname)) {
                 add_kmer_counts(
                     file,
                     anno_graph->get_graph(),
@@ -379,9 +379,17 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                 );
             } else {
-                logger->warn("No k-mer counts found at '{}', "
-                             "will try reading counts from headers",
-                             counts_fname);
+                if (config.enumerate_headers) {
+                    logger->warn("Indexing headers in file '{}', "
+                                 "will take indexes of sequence headers as counts. "
+                                 "Make sure all k-mers in each file are unique! (This will not be checked)",
+                                 counts_fname);
+                } else {
+                    logger->warn("No k-mer counts found at '{}', "
+                                 "will try reading counts from headers",
+                                 counts_fname);
+                }
+                size_t num_sequences = 0;
                 call_annotations(
                     file,
                     config.refpath,
@@ -391,18 +399,32 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.max_count,
                     config.filename_anno,
                     config.annotate_sequence_headers,
-                    /*parse_counts_from_headers*/true,
+                    /*parse_counts_from_headers*/ !config.enumerate_headers,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
                     config.anno_labels,
                     [&](std::string sequence, auto labels, uint64_t kmer_count) {
+                        if (config.enumerate_headers) {
+                            // index sequence IDs as counts
+                            kmer_count = num_sequences++ / (1 + config.forward_and_reverse);
+                            if (kmer_count > sdsl::bits::lo_set[config.count_width]) {
+                                logger->error("Number of sequences exceeds the maximum "
+                                              "representable with {} bits. Increase the value --count-width",
+                                              config.count_width);
+                                exit(1);
+                            }
+                        }
                         if (sequence.size() >= k) {
+                            //logger->info("{}: {}, {}", fmt::join(labels, ", "), kmer_count, sequence.size() - k + 1);
                             batcher.push_and_pay(sequence.size(),
                                                  std::move(sequence), std::move(labels),
                                                  std::vector<uint64_t>(sequence.size() - k + 1, kmer_count));
                         }
                     }
                 );
+                if (config.enumerate_headers)
+                    logger->info("Indexed {} header IDs in file '{}' as counts",
+                                 num_sequences++ / (1 + config.forward_and_reverse), counts_fname);
             }
         }
     }

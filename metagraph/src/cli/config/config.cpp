@@ -131,6 +131,8 @@ Config::Config(int argc, char *argv[]) {
             print_counts_hist = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
+        } else if (!strcmp(argv[i], "--enum-headers")) {
+            enumerate_headers = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
             std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
@@ -455,7 +457,7 @@ Config::Config(int argc, char *argv[]) {
                      " to represent k-mer abundance" << std::endl;
         print_usage_and_exit = true;
     }
-    if (!count_kmers)
+    if (!count_kmers && !enumerate_headers)
         count_width = 0;
 
     if (count_width > 32) {
@@ -1225,6 +1227,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
+            fprintf(stderr, "\t   --enum-headers \tenumerate headers and index sequence IDs as counts [off]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
