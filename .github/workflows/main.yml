@@ -143,7 +143,6 @@ jobs:
         [[ -n "${{ matrix.compiler }}"     ]] && descriptor+="-${{ matrix.compiler }}"
         [[ -n "${{ matrix.build_static }}" ]] && descriptor+="-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}"
         [[ -n "${{ matrix.with_avx }}"     ]] && descriptor+="-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}"
-        [[ -n "${{ matrix.platform }}"     ]] && descriptor+="-${{ matrix.platform }}"
         [[ -n "${{ matrix.target_arch }}"  ]] && descriptor+="-${{ matrix.target_arch }}"
         echo "descriptor=${descriptor}" >> $GITHUB_OUTPUT
 
