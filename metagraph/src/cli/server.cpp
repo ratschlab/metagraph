@@ -345,8 +345,9 @@ int run_server(Config *config) {
         }
         for (auto &[graph_anno, anno_dbg] : graphs_cache) {
             Config config_copy = *config;
-            config_copy.infbase = graph_anno.first;
-            config_copy.infbase_annotators = { graph_anno.second };
+            const auto &[graph_fname, anno_fname] = graph_anno;
+            config_copy.infbase = graph_fname;
+            config_copy.infbase_annotators = { anno_fname };
             graphs_pool.enqueue([config_copy{std::move(config_copy)},anno_dbg{std::ref(anno_dbg)}]() {
                 initialize_annotated_dbg(config_copy).swap(anno_dbg);
             });
@@ -467,10 +468,10 @@ int run_server(Config *config) {
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
-                uint64_t k = graphs_cache.begin()->second->get_graph().get_k();
+                const auto &graph = graphs_cache.begin()->second->get_graph();
+                size_t k = graph.get_k();
                 bool is_consistent_k = true;
-                bool is_canonical = (graphs_cache.begin()->second->get_graph().get_mode()
-                                        == graph::DeBruijnGraph::CANONICAL);
+                bool is_canonical = (graph.get_mode() == graph::DeBruijnGraph::CANONICAL);
                 bool is_consistent_canonical = true;
                 for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
                     const auto &graph = anno_dbg->get_graph();
@@ -480,7 +481,7 @@ int run_server(Config *config) {
                         is_consistent_canonical = false;
                 }
                 if (is_consistent_k)
-                    root["graph"]["k"] = k;
+                    root["graph"]["k"] = static_cast<uint64_t>(k);
                 if (is_consistent_canonical)
                     root["graph"]["is_canonical_mode"] = is_canonical;
                 uint64_t num_labels = 0;
