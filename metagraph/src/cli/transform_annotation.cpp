@@ -427,33 +427,45 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        const bool sum_counts = config->count_kmers;
         const bool filter_values = config->min_value > 1
                                     || config->max_value
-                                        < std::numeric_limits<unsigned int>::max();
+                                        < std::numeric_limits<decltype(config->max_value)>::max();
         
-        uint64_t min_threshold = config->min_count, max_threshold = config->max_count;
-        if (sum_counts) {
-            if (config->min_fraction > 0.0 || config->max_fraction < 1.0) {
-                logger->warn("--min-fraction and --max-fraction are ignored when --count-kmers is used. "
+        uint64_t min_threshold = config->min_count;
+        uint64_t max_threshold = config->max_count;
+        const bool fraction_upper_bounded = config->max_fraction < 1.0;
+        const bool count_upper_bounded = config->max_count < std::numeric_limits<decltype(config->max_count)>::max();
+        const bool upper_bounded = fraction_upper_bounded || count_upper_bounded;
+        if (config->min_fraction > 0.0 || fraction_upper_bounded) {
+            if (config->count_kmers) {
+                logger->error("--min-fraction and --max-fraction are ignored when --count-kmers is used. "
                             "Use --min-count and --max-count to filter by aggregated k-mer counts.");
+                exit(1);
             }
-        } else {
             min_threshold = std::max<uint64_t>(std::ceil(num_columns * config->min_fraction),
                                                min_threshold);
             max_threshold = std::min<uint64_t>(std::floor(num_columns * config->max_fraction),
                                                max_threshold);
         }
-
-        uint64_t max_sum = max_threshold + 1;
-        if (sum_counts) {
-            max_sum = std::min<uint64_t>(max_sum, (1ULL << config->count_width) - 1);
+        uint64_t max_sum = max_threshold + upper_bounded;
+        if (config->count_kmers) {
+            uint64_t max_representable = sdsl::bits::lo_set[config->count_width];
+            if (upper_bounded) {
+                if (max_representable < max_sum) {
+                    logger->error("Max representable value with count width {} is {}, "
+                                  "which is smaller than {} required to filter by aggregated counts",
+                                  config->count_width, max_representable, max_sum);
+                    exit(1);
+                }
+            } else {
+                max_sum = max_representable;
+            }
         }
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(max_sum) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns", std::cerr, !get_verbose());
         std::mutex mu;
 
-        if (sum_counts || filter_values) {
+        if (config->count_kmers || filter_values) {
             auto on_column = [&](uint64_t, const std::string &,
                                  std::unique_ptr<bit_vector>&& col,
                                  sdsl::int_vector<>&& values) {
@@ -472,7 +484,7 @@ int transform_annotation(Config *config) {
                 for (uint64_t r = 0; r < values.size(); ++r) {
                     if (values[r] >= config->min_value && values[r] <= config->max_value) {
                         uint64_t pos = col->select1(r + 1);
-                        if (sum_counts) {
+                        if (config->count_kmers) {
                             sum[pos] = std::min(max_sum, sum[pos] + values[r]);
                         } else {
                             sum[pos] = std::min(max_sum, sum[pos] + 1);
@@ -509,7 +521,7 @@ int transform_annotation(Config *config) {
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        if (sum_counts) {
+        if (config->count_kmers) {
             logger->trace("Selecting k-mers with aggregated counts {} <= * <= {}",
                           min_threshold, max_threshold);
         } else {
