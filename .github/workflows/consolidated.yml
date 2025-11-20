@@ -20,18 +20,15 @@ jobs:
   # Setup matrices for all builds
   # ========================================================================
   
-  setup-linux-matrix:
+  setup-matrices:
     runs-on: ubuntu-22.04
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
-      unit-tests-matrix: ${{ steps.set-matrix.outputs.unit-tests-matrix }}
+      matrices: ${{ steps.set-matrices.outputs.matrices }}
     steps:
-      - name: Set up build matrix
-        id: set-matrix
+      - name: Set up all matrices
+        id: set-matrices
         run: |
-          cat > matrix.json << 'EOF'
-          {
+          linux_base='{
             "alphabet": ["DNA", "Protein"],
             "build_type": ["Debug", "Release"],
             "compiler": ["g++-11", "g++-12", "g++-13"],
@@ -52,44 +49,26 @@ jobs:
               {"build_type": "Debug", "compiler": "g++-12"},
               {"with_avx": "OFF", "build_static": "OFF"}
             ]
-          }
-          EOF
+          }'
           
-          jq '. + {"example_type": ["subdirectory", "ExternalProject"]}' matrix.json > examples-matrix.json
-          
-          # Create unit tests matrix by adding exclude for build_static == ON
-          jq '.exclude += [{"build_static": "ON"}]' matrix.json > unit-tests-matrix.json
-          
-          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-          echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-          echo "unit-tests-matrix=$(cat unit-tests-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-
-  setup-macos-matrix:
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
-    steps:
-      - name: Set up build matrix
-        id: set-matrix
-        run: |
-          cat > matrix.json << 'EOF'
-          {
+          macos_base='{
             "include": [
               {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "arm64"},
               {"alphabet": "DNA", "build_type": "Release", "platform": "macos-15-intel", "target_arch": "x86_64"},
               {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "x86_64"},
               {"alphabet": "DNA", "build_type": "Debug", "platform": "macos-latest", "target_arch": "arm64"}
             ]
-          }
-          EOF
+          }'
           
-          jq '{include: ([.include[] as $base | 
-                ("subdirectory", "ExternalProject") as $type | 
-                $base + {example_type: $type}])}' matrix.json > examples-matrix.json
+          matrices=$(jq -n \
+            --argjson linux_base "$linux_base" \
+            --argjson macos_base "$macos_base" \
+            '{
+              linux: (["Build", "Examples", "UnitTests", "IntegrationTests"] | map({key: ., value: ($linux_base + {job_type: [.]})}) | from_entries),
+              macos: (["Build", "Examples", "UnitTests", "IntegrationTests"] | map({key: ., value: {include: [$macos_base.include[] | . + {job_type: .}]}}) | from_entries)
+            }')
           
-          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
-          echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "matrices=$(echo "$matrices" | jq -c .)" >> $GITHUB_OUTPUT
 
   # ========================================================================
   # Linux builds
@@ -97,17 +76,14 @@ jobs:
 
   linux-build:
     runs-on: ubuntu-22.04
-    needs: setup-linux-matrix
+    needs: setup-matrices
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Build }}
 
-    env:
-      JOB_TYPE: Build
-
-    name: >-
-      Linux Build
+    name: &linux-job-name >-
+      Linux ${{ matrix.job_type }}
       (${{ matrix.alphabet }},
       ${{ matrix.build_type }},
       ${{ matrix.compiler }},
@@ -239,19 +215,13 @@ jobs:
 
   linux-unit-tests:
     runs-on: ubuntu-22.04
-    needs: [setup-linux-matrix, linux-build]
+    needs: [setup-matrices, linux-build]
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.unit-tests-matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.UnitTests }}
 
-    name: >-
-      Linux Unit Tests
-      (${{ matrix.alphabet }},
-      ${{ matrix.build_type }},
-      ${{ matrix.compiler }},
-      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
-      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
+    name: *linux-job-name
 
     steps:
     - uses: actions/checkout@v4
@@ -272,24 +242,18 @@ jobs:
 
   linux-integration-tests:
     runs-on: ubuntu-22.04
-    needs: [setup-linux-matrix, linux-build]
+    needs: [setup-matrices, linux-build]
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.IntegrationTests }}
 
     env:
       LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
       INTEGRATION_TEST_TIMEOUT: 1000
       INTEGRATION_TEST_ATTEMPTS: 5
 
-    name: >-
-      Linux Integration Tests
-      (${{ matrix.alphabet }},
-      ${{ matrix.build_type }},
-      ${{ matrix.compiler }},
-      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
-      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
+    name: *linux-job-name
 
     steps:
     - uses: actions/checkout@v4
@@ -335,22 +299,16 @@ jobs:
 
   linux-examples:
     runs-on: ubuntu-22.04
-    needs: setup-linux-matrix
+    needs: setup-matrices
 
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-linux-matrix.outputs.examples-matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Examples }}
 
     env:
       JOB_TYPE: Examples
 
-    name: >-
-      Linux ${{ matrix.example_type }}
-      (${{ matrix.alphabet }},
-      ${{ matrix.build_type }},
-      ${{ matrix.compiler }},
-      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
-      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
+    name: *linux-job-name
 
     steps:
     - uses: actions/checkout@v4
@@ -364,21 +322,7 @@ jobs:
       run: git clone https://github.com/ratschlab/metagraph-examples.git metagraph-examples
       shell: bash
 
-    - name: Setup metagraph symlink for subdirectory
-      if: matrix.example_type == 'subdirectory'
-      run: |
-        cd metagraph-examples/subdirectory
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}" metagraph
-      shell: bash
-
-    - name: Setup metagraph symlink for ExternalProject
-      if: matrix.example_type == 'ExternalProject'
-      run: |
-        cd metagraph-examples/ExternalProject
-        mkdir -p build/metagraph-external-prefix/src
-        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
-      shell: bash
+    - *checkout-examples
 
     - *install-linux-deps
 
@@ -388,41 +332,35 @@ jobs:
 
     - *setup-ccache-config
 
-    - name: Configure subdirectory example
-      if: matrix.example_type == 'subdirectory'
+    - name: Build and run subdirectory example
       run: |
-        cd metagraph-examples/${{ matrix.example_type }}
+        cd metagraph-examples/subdirectory
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
         mkdir -p build && cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               ${{ matrix.build_static == 'ON' && format('-DBUILD_STATIC={0}', matrix.build_static) || '' }} \
               ${{ matrix.with_avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', matrix.with_avx) || '' }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+        make -j"$(getconf _NPROCESSORS_ONLN)"
+        make run_example
       shell: bash
 
-    - name: Configure ExternalProject example
-      if: matrix.example_type == 'ExternalProject'
+    - name: Build and run ExternalProject example
       run: |
-        cd metagraph-examples/${{ matrix.example_type }}
-        mkdir -p build && cd build
+        cd metagraph-examples/ExternalProject
+        mkdir -p build/metagraph-external-prefix/src
+        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+        cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
               ${{ matrix.build_static == 'ON' && format('-DBUILD_STATIC={0}', matrix.build_static) || '' }} \
               ${{ matrix.with_avx && format('-DWITH_AVX={0} -DWITH_MSSE42={0}', matrix.with_avx) || '' }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-        
-        # After cmake runs, touch the stamp files to skip download/update steps
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
-      shell: bash
-
-    - name: Build example
-      run: cd metagraph-examples/${{ matrix.example_type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-      shell: bash
-
-    - name: Run example
-      run: |
-        cd metagraph-examples/${{ matrix.example_type }}/build
+        make -j"$(getconf _NPROCESSORS_ONLN)"
         make run_example
       shell: bash
 
@@ -433,17 +371,14 @@ jobs:
   # ========================================================================
 
   macos-build:
-    needs: setup-macos-matrix
+    needs: setup-matrices
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.Build }}
 
     runs-on: ${{ matrix.platform }}
 
-    env:
-      JOB_TYPE: Build
-
-    name: macOS Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+    name: &macos-job-name macOS ${{ matrix.job_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
 
     defaults:
       run:
@@ -523,13 +458,14 @@ jobs:
 
 
   macos-unit-tests:
-    needs: [setup-macos-matrix, macos-build]
+    needs: [setup-matrices, macos-build]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.UnitTests }}
 
     runs-on: ${{ matrix.platform }}
-    name: macOS Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+
+    name: *macos-job-name
 
     defaults:
       run:
@@ -573,10 +509,10 @@ jobs:
 
 
   macos-integration-tests:
-    needs: [setup-macos-matrix, macos-build]
+    needs: [setup-matrices, macos-build]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.IntegrationTests }}
 
     runs-on: ${{ matrix.platform }}
 
@@ -584,7 +520,7 @@ jobs:
       INTEGRATION_TEST_TIMEOUT: 1000
       INTEGRATION_TEST_ATTEMPTS: 1
 
-    name: macOS IntegrationTests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+    name: *macos-job-name
 
     defaults:
       run:
@@ -652,17 +588,17 @@ jobs:
 
 
   macos-examples:
-    needs: setup-macos-matrix
+    needs: setup-matrices
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup-macos-matrix.outputs.examples-matrix) }}
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.Examples }}
 
     runs-on: ${{ matrix.platform }}
 
     env:
       JOB_TYPE: Examples
 
-    name: macOS ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+    name: *macos-job-name
 
     defaults:
       run:
@@ -676,22 +612,6 @@ jobs:
     - *checkout-submodules-update
 
     - *checkout-examples
-
-    - name: Setup metagraph symlink for subdirectory
-      if: matrix.example_type == 'subdirectory'
-      run: |
-        cd metagraph-examples/subdirectory
-        rm -rf metagraph
-        ln -s "${GITHUB_WORKSPACE}" metagraph
-      shell: bash
-
-    - name: Setup metagraph symlink for ExternalProject
-      if: matrix.example_type == 'ExternalProject'
-      run: |
-        cd metagraph-examples/ExternalProject
-        mkdir -p build/metagraph-external-prefix/src
-        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
-      shell: bash
 
     - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
       if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
@@ -720,37 +640,39 @@ jobs:
     - name: Install ccache (macOS)
       run: brew install ccache
 
-    - *cache-ccache-macos
+    - &cache-ccache-macos
+      name: Cache ccache
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/ccache
+        key: ccache-${{ matrix.platform }}-${{ env.JOB_TYPE }}-${{ matrix.build_type }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
 
     - *setup-ccache-config
 
-    - name: Configure subdirectory example
-      if: matrix.example_type == 'subdirectory'
+    - name: Build and run subdirectory example
       run: |
-        cd metagraph-examples/${{ matrix.example_type }}
+        cd metagraph-examples/subdirectory
+        rm -rf metagraph
+        ln -s "${GITHUB_WORKSPACE}" metagraph
         mkdir -p build && cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+        make -j"$(getconf _NPROCESSORS_ONLN)"
+        make run_example
 
-    - name: Configure ExternalProject example
-      if: matrix.example_type == 'ExternalProject'
+    - name: Build and run ExternalProject example
       run: |
-        cd metagraph-examples/${{ matrix.example_type }}
-        mkdir -p build && cd build
+        cd metagraph-examples/ExternalProject
+        mkdir -p build/metagraph-external-prefix/src
+        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+        cd build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
-        
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
         touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
-
-    - name: Build example
-      run: cd metagraph-examples/${{ matrix.example_type }}/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - name: Run example
-      run: |
-        cd metagraph-examples/${{ matrix.example_type }}/build
+        make -j"$(getconf _NPROCESSORS_ONLN)"
         make run_example
 
     - *show-ccache-stats
