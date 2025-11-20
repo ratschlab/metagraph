@@ -693,7 +693,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     name: Create Release
     runs-on: ubuntu-22.04
-    needs: [test-workflows]
+    needs: [test-workflows, linux-unit-tests, linux-integration-tests]
 
     steps:
       - uses: actions/checkout@v4
@@ -702,9 +702,10 @@ jobs:
 
       - *checkout-submodules-update
 
-      - name: Download all artifacts
+      - name: Download static binary artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: metagraph_*
           path: artifacts
 
       - name: Tag name
