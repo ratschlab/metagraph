@@ -33,6 +33,7 @@ jobs:
         id: set-matrices
         run: |
           linux_base='{
+            "platform": "ubuntu-22.04",
             "alphabet": ["DNA", "Protein"],
             "build_type": ["Debug", "Release"],
             "compiler": ["g++-11", "g++-12", "g++-13"],
@@ -82,7 +83,7 @@ jobs:
   # ========================================================================
 
   linux-build:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
     needs: setup-matrices
 
     strategy:
@@ -138,7 +139,7 @@ jobs:
       name: Compute matrix descriptor
       id: matrix-descriptor
       run: |
-        descriptor="${{ runner.os }}-${{ matrix.alphabet }}-${{ matrix.build_type }}"
+        descriptor="${{ matrix.platform }}-${{ matrix.alphabet }}-${{ matrix.build_type }}"
         [[ -n "${{ matrix.compiler }}"     ]] && descriptor+="-${{ matrix.compiler }}"
         [[ -n "${{ matrix.build_static }}" ]] && descriptor+="-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}"
         [[ -n "${{ matrix.with_avx }}"     ]] && descriptor+="-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}"
@@ -217,7 +218,7 @@ jobs:
 
 
   linux-unit-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
     needs: [setup-matrices, linux-build]
 
     strategy:
@@ -249,7 +250,7 @@ jobs:
 
 
   linux-integration-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
     needs: [setup-matrices, linux-build]
 
     strategy:
@@ -301,7 +302,7 @@ jobs:
 
 
   linux-examples:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
     needs: setup-matrices
 
     strategy:
