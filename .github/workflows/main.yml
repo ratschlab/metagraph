@@ -190,7 +190,7 @@ jobs:
       name: upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: &artifact-name build-${{ runner.os }}-${{ steps.matrix-descriptor.outputs.descriptor }}
+        name: &artifact-name build-${{ steps.matrix-descriptor.outputs.descriptor }}
         path: |
           metagraph/build/metagraph_${{ matrix.alphabet }}
           metagraph/build/unit_tests
