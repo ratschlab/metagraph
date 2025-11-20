@@ -15,6 +15,7 @@ from metagraph import helpers
 DEFAULT_TOP_LABELS = 100
 DEFAULT_DISCOVERY_FRACTION = 0
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
+DEFAULT_SEED_LENGTH = 19
 
 JsonDict = Dict[str, Any]
 JsonStrList = List[str]
@@ -101,6 +102,7 @@ class GraphClientJson:
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
               connect_anchors: bool = True,
               extend_chains: bool = True) -> Tuple[JsonDict, str]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
@@ -113,6 +115,7 @@ class GraphClientJson:
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
                   'min_exact_match': min_exact_match,
+                  'seed_length': seed_length,
                   'connect_anchors': connect_anchors,
                   'extend_chains': extend_chains}
 
@@ -225,6 +228,7 @@ class GraphClient:
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
               connect_anchors: bool = True,
               extend_chains: bool = True) -> pd.DataFrame:
         """
@@ -238,6 +242,8 @@ class GraphClient:
         :type       max_alternative_alignments:  int
         :param      max_num_nodes_per_seq_char:  The maximum number of nodes to consider per sequence character during extension [default: 10.0]
         :type       max_num_nodes_per_seq_char:  float
+        :param      seed_length                  The minimum seed length
+        :type       seed_length                  int
         :param      connect_anchors:             If True, traverse the graph to align the query regions that fall between anchors
         :type       connect_anchors:             bool
         :param      extend_chains:               If True, perform ends-free extension from the first and last anchors in a chain
@@ -249,6 +255,7 @@ class GraphClient:
         json_obj = self._json_client.align(sequence, min_exact_match,
                                            max_alternative_alignments,
                                            max_num_nodes_per_seq_char,
+                                           seed_length,
                                            connect_anchors, extend_chains)
 
         return helpers.df_from_align_result(json_obj)
@@ -336,6 +343,7 @@ class MultiGraphClient:
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
               connect_anchors: bool = True,
               extend_chains: bool = True) -> Dict[
         str, Union[pd.DataFrame, Future]]:
@@ -354,6 +362,7 @@ class MultiGraphClient:
                 result[name] = graph_client.align(sequence, min_exact_match,
                                                   max_alternative_alignments,
                                                   max_num_nodes_per_seq_char,
+                                                  seed_length,
                                                   connect_anchors, extend_chains)
 
             return result
@@ -369,6 +378,7 @@ class MultiGraphClient:
             futures[name] = executor.submit(graph_client.align, sequence, min_exact_match,
                                             max_alternative_alignments,
                                             max_num_nodes_per_seq_char,
+                                            seed_length,
                                             connect_anchors, extend_chains)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')

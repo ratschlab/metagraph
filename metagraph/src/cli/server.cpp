@@ -155,6 +155,10 @@ Json::Value process_align_request(const std::string &received_message,
         "max_alternative_alignments",
         (uint64_t)config.alignment_num_alternative_paths).asInt();
 
+    config.alignment_min_seed_length = json.get(
+        "seed_length",
+        (uint64_t)config.alignment_min_seed_length).asInt();
+
     if (!config.alignment_num_alternative_paths) {
         // TODO: better throw an exception and send an error response to the client
         logger->warn("[Server] Got invalid value of alignment_num_alternative_paths = {}."
