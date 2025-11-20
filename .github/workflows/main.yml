@@ -33,7 +33,7 @@ jobs:
         id: set-matrices
         run: |
           linux_base='{
-            "platform": "ubuntu-22.04",
+            "platform": ["ubuntu-22.04"],
             "alphabet": ["DNA", "Protein"],
             "build_type": ["Debug", "Release"],
             "compiler": ["g++-11", "g++-12", "g++-13"],
