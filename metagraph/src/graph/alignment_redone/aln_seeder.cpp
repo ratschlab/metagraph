@@ -668,19 +668,28 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                             // auto [res, contig_end] = buckets.offset_to_id(offset, k);
                             auto res = buckets.offset_to_id(offset, k);
-                            uint64_t contig_end = res.contig_end(k);
+                            assert(res.contig_id != sshash::constants::invalid_uint64);
                             assert(res.contig_size);
-                            assert(res.kmer_id_in_contig < res.contig_size);
+
+                            uint64_t contig_end = res.contig_end(k);
+                            if (offset + k - 1 >= contig_end)
+                                continue;
+
                             assert(contig_end > offset);
-                            auto contig_begin = offset - res.kmer_id_in_contig;
-                            assert(contig_begin < contig_end);
+                            assert(res.kmer_id_in_contig < res.contig_size);
+
+                            assert(offset >= res.kmer_id_in_contig);
+                            // auto contig_begin = offset - res.kmer_id_in_contig;
+                            auto contig_begin = res.contig_begin(k);
                             assert(contig_begin <= offset);
+
+                            assert(contig_begin < contig_end);
 
                             size_t contig_length = contig_end - contig_begin;
                             std::ignore = contig_length;
                             assert(contig_length == res.contig_size + k - 1);
 
-                            sshash::kmer_iterator<kmer_t> start_bv_it(dict.strings(), m, offset);
+                            sshash::kmer_iterator<kmer_t> start_bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
                             // sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                             assert(offset + m <= contig_end);
                             uint64_t window_size = std::min<uint64_t>({
@@ -695,7 +704,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 if (start_read_kmer != mmer)
                                     continue;
 
-                                sshash::kmer_iterator<kmer_t> bv_it(dict.strings(), m, offset);
+                                sshash::kmer_iterator<kmer_t> bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
                                 // sshash::bit_vector_iterator<kmer_t> bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                                 for (size_t w = 0; w < window_size; ++w) {
                                     // kmer_t read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
