@@ -587,6 +587,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     const auto &minimizers = dict.get_minimizers();
                     const auto &offsets = buckets.offsets;
                     size_t m = dict.m();
+                    common::logger->trace("Mininizer size: {}", m);
                     size_t k = dict.k();
                     size_t min_match_length = std::max(m, config_.min_seed_length);
                     auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
@@ -2544,7 +2545,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         update_score(score, it, dist);
                     }
                     return;
-                } else if (query_i.end() > query_j.begin()) {
+                }
+
+                if (query_i.end() > query_j.begin()) {
                     // overlapping nucleotides
                     // std::cerr << "oln" << a_i << " -> " << a_j << "\n";
                     assert(query_j.data() > query_i.data());
@@ -2566,7 +2569,45 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     //     update_score(score, it, dist);
                     // }
                     // return;
-                } else if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
+                }
+
+                if (sshash) {
+                    size_t traversed = get_sshash_distance(a_i.get_path().back(), a_j.get_path()[0]);
+                    if (traversed > 0
+                            && traversed != std::numeric_limits<size_t>::max()
+                            && traversed + a_i.get_path().size() + query_j.size() > query_i.size() + 1) {
+                        traversed += a_i.get_path().size() - 1 - query_i.size() + query_j.size();
+                        // if (traversed + a_j.get_path().size() + a_i.get_end_trim() <= a_j.get_end_trim() + 1) {
+                        //     std::cerr << a_i << "\t" << a_i.get_path_spelling() << "\t" << traversed << "\t" << a_j << "\t" << a_j.get_path_spelling() << std::endl;
+                        // }
+                        // assert(traversed + a_j.get_path().size() + a_i.get_end_trim() > a_j.get_end_trim() + 1);
+                        // traversed += a_j.get_path().size() - 1 + a_i.get_end_trim() - a_j.get_end_trim();
+                        size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
+                        if (gap) {
+                            //score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                            score += config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty;
+                        }
+                        size_t nmismatch = query_j.data() - (query_i.data() + query_i.size());
+
+                        // don't double-penalize insertions
+                        if (dist > static_cast<ssize_t>(traversed) && gap <= nmismatch)
+                            nmismatch -= gap;
+
+                        // size_t nmismatch = std::min<ssize_t>(traversed, dist);
+                        std::string_view query_trim_window(query_i.data() + query_i.size(), nmismatch);
+                        auto cur_mismatch = config_.score_sequences(query_trim_window,
+                                                                    std::string_view(dummy.c_str(), nmismatch));
+
+                        // std::cerr << "\t" << a_i << "\t" << a_j << "\t" << traversed << "\t" << dist << "\t" << nmismatch << "\n";
+
+                        score += cur_mismatch;
+
+                        if (score > score_j)
+                            update_score(score, it, traversed);
+                    }
+                }
+
+                if (a_i.get_end_trim() && a_i.get_clipping() + a_i.get_seed().size() + a_i.get_end_trim() >= a_j.get_clipping()) {
                     // overlap in end parts
                     std::string_view a_i_trim = a_i.get_trim_spelling();
 
@@ -2628,8 +2669,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                             }
                         }
                     }
-                    return;
-                } else if (!a_i.get_end_trim() && query_i.end() != query_j.begin()) {
+                }
+
+                if (!a_i.get_end_trim() && query_i.end() != query_j.begin()) {
                     // detect insertions
                     // std::cerr << "ins\tq: " << query_dist << "\td: " << traversed << "\tg: " << gap << "\t" << a_i << " " << a_i.get_path_spelling() << "\t" << a_j << " " << a_j.get_path_spelling() << "\n";
 
@@ -2672,6 +2714,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
                 // TODO: if a_i.get_end_trim() != 0, then we need to deal with
                 //       a combination of D from the trim, X to the trim, then I of the query
+
+                return;
                 if (!sshash)
                     return;
 
