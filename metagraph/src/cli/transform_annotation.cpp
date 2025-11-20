@@ -433,13 +433,10 @@ int transform_annotation(Config *config) {
         
         uint64_t min_threshold = config->min_count;
         uint64_t max_threshold = config->max_count;
-        const bool fraction_upper_bounded = config->max_fraction < 1.0;
-        const bool count_upper_bounded = config->max_count < std::numeric_limits<decltype(config->max_count)>::max();
-        const bool upper_bounded = fraction_upper_bounded || count_upper_bounded;
-        if (config->min_fraction > 0.0 || fraction_upper_bounded) {
+        if (config->min_fraction > 0.0 || config->max_fraction < 1.0) {
             if (config->count_kmers) {
                 logger->error("--min-fraction and --max-fraction are ignored when --count-kmers is used. "
-                            "Use --min-count and --max-count to filter by aggregated k-mer counts.");
+                              "Use --min-count and --max-count to filter by aggregated k-mer counts.");
                 exit(1);
             }
             min_threshold = std::max<uint64_t>(std::ceil(num_columns * config->min_fraction),
@@ -447,6 +444,8 @@ int transform_annotation(Config *config) {
             max_threshold = std::min<uint64_t>(std::floor(num_columns * config->max_fraction),
                                                max_threshold);
         }
+        const bool upper_bounded = config->max_fraction < 1.0
+                                     || config->max_count < std::numeric_limits<decltype(config->max_count)>::max();
         uint64_t max_sum = max_threshold + upper_bounded;
         if (config->count_kmers) {
             uint64_t max_representable = sdsl::bits::lo_set[config->count_width];
@@ -460,6 +459,8 @@ int transform_annotation(Config *config) {
             } else {
                 max_sum = max_representable;
             }
+        } else {
+            max_sum = std::min(max_sum, num_columns);
         }
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(max_sum) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns", std::cerr, !get_verbose());
