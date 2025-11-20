@@ -1,4 +1,4 @@
-name: MetaGraph CI (Consolidated)
+name: MetaGraph CI
 
 on:
   push:
