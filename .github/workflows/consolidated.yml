@@ -60,12 +60,15 @@ jobs:
             ]
           }'
           
+          job_types='["Build", "Examples", "UnitTests", "IntegrationTests"]'
+          
           matrices=$(jq -n \
             --argjson linux_base "$linux_base" \
             --argjson macos_base "$macos_base" \
+            --argjson job_types "$job_types" \
             '{
-              linux: (["Build", "Examples", "UnitTests", "IntegrationTests"] | map({key: ., value: ($linux_base + {job_type: [.]})}) | from_entries),
-              macos: (["Build", "Examples", "UnitTests", "IntegrationTests"] | map({key: ., value: {include: [$macos_base.include[] | . + {job_type: .}]}}) | from_entries)
+              linux: ($job_types | map({key: ., value: ($linux_base + {job_type: [.]})}) | from_entries),
+              macos: ($job_types | map(. as $jt | {key: $jt, value: {include: [$macos_base.include[] | . + {job_type: $jt}]}}) | from_entries)
             }')
           
           echo "matrices=$(echo "$matrices" | jq -c .)" >> $GITHUB_OUTPUT
