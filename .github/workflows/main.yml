@@ -85,7 +85,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Build }}
 
-    env:
+    env: &linux-env
       CCACHE_DIR: ~/.cache/ccache
 
     name: &linux-job-name >-
@@ -287,7 +287,8 @@ jobs:
         ln -sf "${binary_name}" metagraph
       shell: bash
 
-    - name: Run integration tests
+    - &run-integration-tests
+      name: Run integration tests
       uses: nick-fields/retry@v2
       with:
         timeout_minutes: ${{ env.INTEGRATION_TEST_TIMEOUT }}
@@ -307,8 +308,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Examples }}
 
-    env:
-      JOB_TYPE: Examples
+    env: *linux-env
 
     name: *linux-job-name
 
@@ -383,19 +383,17 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
-    env:
+    env: &macos-env
       CCACHE_DIR: ~/Library/Caches/ccache
 
     name: &macos-job-name macOS ${{ matrix.job_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
 
-    defaults:
+    defaults: &macos-shell-defaults
       run:
         shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
     - uses: actions/checkout@v4
-
-    - *compute-matrix-descriptor
 
     - *checkout-submodules-cache
 
@@ -419,14 +417,19 @@ jobs:
         echo "/usr/local/bin" >> "$GITHUB_PATH"
         echo "/usr/local/sbin" >> "$GITHUB_PATH"
 
-    - name: install dependencies
+    - &install-macos-deps
+      name: install dependencies
       run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
 
-    - name: (Only for cross-compilation) Install OpenSSL for target architecture
+    - &install-openssl-cross-compile
+      name: (Only for cross-compilation) Install OpenSSL for target architecture
       if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
       run: brew install openssl@3
 
-    - name: Install ccache (macOS)
+    - *compute-matrix-descriptor
+
+    - &install-ccache-macos
+      name: Install ccache (macOS)
       run: brew install ccache
 
     - *cache-ccache
@@ -456,21 +459,18 @@ jobs:
 
     name: *macos-job-name
 
-    defaults:
-      run:
-        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+    defaults: *macos-shell-defaults
 
     steps:
     - uses: actions/checkout@v4
 
     - *install-rosetta-homebrew
 
-    - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+    - *install-macos-deps
 
-    - name: (Only for cross-compilation) Install OpenSSL for target architecture
-      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
-      run: brew install openssl@3
+    - *install-openssl-cross-compile
+
+    - *compute-matrix-descriptor
 
     - *download-build-artifacts
 
@@ -491,42 +491,28 @@ jobs:
 
     name: *macos-job-name
 
-    defaults:
-      run:
-        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+    defaults: *macos-shell-defaults
 
     steps:
     - uses: actions/checkout@v4
 
-    - *compute-matrix-descriptor
-
     - *install-rosetta-homebrew
 
-    - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+    - *install-macos-deps
 
-    - name: (Only for cross-compilation) Install OpenSSL for target architecture
-      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
-      run: brew install openssl@3
+    - *install-openssl-cross-compile
 
     - name: install dependencies for integration tests
       shell: bash
       run: pip3 install parameterized --break-system-packages --user
 
+    - *compute-matrix-descriptor
+
     - *download-build-artifacts
 
     - *recreate-metagraph-symlink
 
-    - name: Run integration tests
-      uses: nick-fields/retry@v2
-      with:
-        timeout_minutes: ${{ env.INTEGRATION_TEST_TIMEOUT }}
-        max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
-        retry_on: error
-        command: |
-          cd metagraph/build
-          chmod +x test_venv/bin/python
-          arch -${{ matrix.target_arch }} ./test_venv/bin/python ../integration_tests/main.py
+    - *run-integration-tests
 
     - name: check metagraph workflows
       run: |
@@ -547,15 +533,11 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
-    env:
-      JOB_TYPE: Examples
-      CCACHE_DIR: ~/Library/Caches/ccache
+    env: *macos-env
 
     name: *macos-job-name
 
-    defaults:
-      run:
-        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+    defaults: *macos-shell-defaults
 
     steps:
     - uses: actions/checkout@v4
@@ -570,15 +552,11 @@ jobs:
 
     - *install-rosetta-homebrew
 
-    - name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+    - *install-macos-deps
 
-    - name: (Only for cross-compilation) Install OpenSSL for target architecture
-      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
-      run: brew install openssl@3
+    - *install-openssl-cross-compile
 
-    - name: Install ccache (macOS)
-      run: brew install ccache
+    - *install-ccache-macos
 
     - *cache-ccache
 
