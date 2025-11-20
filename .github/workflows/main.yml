@@ -134,7 +134,7 @@ jobs:
       name: Compute matrix descriptor
       id: matrix-descriptor
       run: |
-        descriptor="${{ matrix.alphabet }}-${{ matrix.build_type }}"
+        descriptor="${{ runner.os }}-${{ matrix.alphabet }}-${{ matrix.build_type }}"
         [[ -n "${{ matrix.compiler }}"     ]] && descriptor+="-${{ matrix.compiler }}"
         [[ -n "${{ matrix.build_static }}" ]] && descriptor+="-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}"
         [[ -n "${{ matrix.with_avx }}"     ]] && descriptor+="-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}"
