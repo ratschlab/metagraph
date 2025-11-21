@@ -24,6 +24,7 @@ bool check_if_writable(const std::string &filename);
 
 // Call with_mmap() to check and with_mmap(true) to set. Off by default.
 bool with_mmap(bool set_bit = false);
+void set_mmap(bool set_bit);
 
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
