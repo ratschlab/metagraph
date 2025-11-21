@@ -578,10 +578,12 @@ jobs:
           with:
               python-version: 3.13
 
-        - name: fetch static binary
+        - &download-static-artifacts
+          name: Download static binary artifacts
           uses: actions/download-artifact@v4
           with:
-              path: artifacts
+            pattern: metagraph_*
+            path: artifacts
 
         - name: setup metagraph binary
           run: |
@@ -673,11 +675,7 @@ jobs:
 
       - *checkout-submodules-update
 
-      - name: Download static binary artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: metagraph_*
-          path: artifacts
+      - *download-static-artifacts
 
       - name: Tag name
         id: tag_name
