@@ -1252,7 +1252,7 @@ if (advanced) {
             fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --min-count instead\n");
             fprintf(stderr, "\t   --max-value [INT] \t\tignore pre-aggregation counts larger than this [inf]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers with aggregated count larger than this [inf]\n");
-            fprintf(stderr, "\t                       \t\tin --count-kmers mode: max_count+1 must fit in count_width bits\n");
+            fprintf(stderr, "\t                       \t\tin --count-kmers mode: max_count+1 must fit in count_width bits (unless inf)\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
             fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --max-count instead\n");
             fprintf(stderr, "\t   --compute-overlap [STR] \tcompute the number of shared bits in columns of this annotation and ANNOTATOR [off]\n");
