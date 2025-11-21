@@ -23,6 +23,9 @@
 #include <string>
 #include <map>
 
+// IMPORTANT: When using ExternalProject_Add, metagraph.hpp should be the FIRST
+// MetaGraph header included. It contains compile-time configuration definitions
+// that affect how other MetaGraph headers are interpreted.
 #include "metagraph.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "cli/load/load_annotation.hpp"

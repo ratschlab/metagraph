@@ -56,6 +56,17 @@ target_link_libraries(your_app PRIVATE metagraph-cli metagraph-core
 add_dependencies(your_app metagraph-external)
 ```
 
+**CRITICAL for ExternalProject_Add**: Always include `metagraph.hpp` as the **FIRST** header:
+
+```cpp
+// metagraph.hpp MUST be included FIRST when using ExternalProject_Add!
+// It provides compile-time configuration definitions (_DNA_GRAPH, _USE_FOLLY, etc.)
+// that affect how other MetaGraph headers are interpreted.
+#include "metagraph.hpp"
+#include "seq_io/sequence_io.hpp"
+// ... other MetaGraph headers
+```
+
 See [`CMakeLists.txt`](CMakeLists.txt) for the most up-to-date working version, and more configurations you might need, depending on the system.
 
 ## When to Use
