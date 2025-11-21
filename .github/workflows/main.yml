@@ -94,7 +94,7 @@ jobs:
       CCACHE_DIR: ~/.cache/ccache
       LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
       INTEGRATION_TEST_ATTEMPTS: 5
-      SHELL_CMD: bash
+      SHELL_PREFIX: ""
       MATRIX_DESCRIPTOR: >-
         ${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.alphabet }}-${{ matrix.compiler }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}
       CMAKE_ARGS: >-
@@ -287,11 +287,10 @@ jobs:
         timeout_minutes: 1000
         max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
         retry_on: error
-        shell: ${{ env.SHELL_CMD }}
         command: |
           cd metagraph/build
           chmod +x test_venv/bin/python
-          ./test_venv/bin/python ../integration_tests/main.py
+          ${{ env.SHELL_PREFIX }} ./test_venv/bin/python ../integration_tests/main.py
 
 
   linux-examples:
@@ -364,7 +363,7 @@ jobs:
     env: &macos-env
       CCACHE_DIR: ~/Library/Caches/ccache
       INTEGRATION_TEST_ATTEMPTS: 1
-      SHELL_CMD: &macos-shell arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+      SHELL_PREFIX: arch -${{ matrix.target_arch }}
       MATRIX_DESCRIPTOR: >-
         ${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
       CMAKE_ARGS: >-
@@ -375,7 +374,7 @@ jobs:
 
     defaults: &macos-shell-defaults
       run:
-        shell: *macos-shell
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
 
     steps:
     - uses: actions/checkout@v4
