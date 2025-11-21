@@ -58,8 +58,18 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // appends to `slice`
     template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
+    template <typename T>
+    void slice_rows(const std::vector<Row> &row_ids,
+                    std::vector<std::tuple<const BRWT*, size_t, std::vector<bool>>> path,
+                    size_t cutoff_depth, size_t max_columns_cutoff,
+                    std::mutex &mu, ThreadPool &thread_pool, Vector<Vector<T>> *slices) const;
+    template <typename T>
+    void slice_rows_basic(const std::vector<Row> &rows, Vector<T> *slice) const;
 
     void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
+
+    std::pair<std::vector<bool>, std::vector<BRWT::Row>>
+    get_zero_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
