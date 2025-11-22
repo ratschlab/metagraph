@@ -40,6 +40,8 @@ Install the [latest release](https://github.com/ratschlab/metagraph/releases/lat
 conda install -c bioconda -c conda-forge metagraph
 ```
 
+test
+
 ### Docker
 
 If docker is available on the system, immediately get started with
