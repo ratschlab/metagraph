@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "common/config.hpp"
-
 #if _USE_FOLLY
 // Don't re-define the type traits for uint128_t in folly that break the build
 #include <folly/folly-config.h>

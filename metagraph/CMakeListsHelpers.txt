@@ -160,8 +160,6 @@ if(CCACHE_FOUND)
     # Use modern CMAKE_*_COMPILER_LAUNCHER which propagates better to external projects
     set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_FOUND}" PARENT_SCOPE)
     set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_FOUND}" PARENT_SCOPE)
-    # Also set the old method for backwards compatibility
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
 else()
     message(STATUS "ccache not found. Run 'brew install ccache' to speed up re-compilation")
 endif(CCACHE_FOUND)
