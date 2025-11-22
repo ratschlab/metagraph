@@ -136,6 +136,10 @@ jobs:
       name: Install build dependencies
       run: |
         sudo apt-get update
+        if [[ "${{ matrix.compiler }}" == "g++-13" ]]; then
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            sudo apt-get update
+        fi
         if [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install -y ${{ matrix.compiler }}
         fi
