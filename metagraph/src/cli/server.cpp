@@ -110,14 +110,14 @@ Json::Value process_search_request(const Json::Value &json,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
 
     // Query sequences and callback by appending result to vector with mutex for thread safety
-    engine.query_fasta(tf.name(),
+    query_fasta(tf.name(),
         [&](const SeqSearchResult &result) {
             std::lock_guard<std::mutex> lock(result_mutex);
             search_results.emplace_back(std::move(result));
-        }
+        },
+        config, anno_graph, aligner_config.get(), dummy_pool
     );
 
     // Ensure JSON results are sorted by their ID
@@ -129,7 +129,7 @@ Json::Value process_search_request(const Json::Value &json,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
+        search_response.append(seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k()));
     }
 
     return search_response;

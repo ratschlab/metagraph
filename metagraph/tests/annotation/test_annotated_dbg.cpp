@@ -17,6 +17,17 @@
 #include "test_annotated_dbg_helpers.hpp"
 
 
+namespace mtg {
+namespace cli {
+
+int32_t score_kmer_presence_mask(size_t k,
+                                 const sdsl::bit_vector &kmer_presence_mask,
+                                 int32_t match_score = 1,
+                                 int32_t mismatch_score = 2);
+
+} // namespace cli
+} // namespace mtg
+
 namespace {
 
 using namespace mtg;
@@ -2026,7 +2037,7 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
 
     size_t i = 0;
     for (const auto &[vector, score] : results) {
-        EXPECT_EQ(score, anno_graph->score_kmer_presence_mask(vector)) << i;
+        EXPECT_EQ(score, mtg::cli::score_kmer_presence_mask(anno_graph->get_graph().get_k(), vector)) << i;
         ++i;
     }
 }

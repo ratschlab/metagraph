@@ -170,6 +170,8 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-size")) {
             query_batch_size = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--batch-min-matches")) {
+            batch_min_matches = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
@@ -1339,6 +1341,7 @@ if (advanced) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --batch-size [INT] \tquery batch size in bp (0 to disable batch query) [100'000'000]\n");
+            fprintf(stderr, "\t   --batch-min-matches [FLOAT] \taggregate batches unless this they have this ratio of k-mer matches [0.0]\n");
 if (advanced) {
             fprintf(stderr, "\t   --threads-each [INT]\tnumber of parallel batches [1]\n");
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");

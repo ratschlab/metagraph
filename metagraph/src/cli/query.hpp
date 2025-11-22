@@ -144,11 +144,11 @@ class SeqSearchResult {
      * represented sequence.
      *
      * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
-     * @param anno_graph        reference to annotated dbg for kmer presence mask scoring
+     * @param k                 k-mer length for kmer presence mask scoring
      * @param verbose_output    do not collapse continuous ranges of coords (or counts)
      * @return  Json::Value instance representing sequence result
      */
-    Json::Value to_json(bool verbose_output, const graph::AnnotatedDBG &anno_graph) const;
+    Json::Value to_json(bool verbose_output, size_t k) const;
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -159,12 +159,12 @@ class SeqSearchResult {
      * @param delimiter             the delimiter between labels for that sequence
      * @param suppress_unlabeled    do not print seq_name if sequence is unlabeled
      * @param verbose_output        do not collapse continuous ranges of coords or counts
-     * @param anno_graph            reference to annotated dbg for kmer presence mask scoring
+     * @param k                     k-mer length for kmer presence mask scoring
      */
     std::string to_string(std::string delimiter,
                           bool suppress_unlabeled,
                           bool verbose_output,
-                          const graph::AnnotatedDBG &anno_graph) const;
+                          size_t k) const;
 
   private:
     QuerySequence sequence_;             // query sequence this result represents
@@ -182,47 +182,27 @@ enum QueryMode {
     SIGNATURE
 };
 
-class QueryExecutor {
-  public:
-    QueryExecutor(const Config &config,
-                  const graph::AnnotatedDBG &anno_graph,
-                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
-                  ThreadPool &thread_pool)
-      : config_(config), anno_graph_(anno_graph),
-        aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) {}
-
-    /**
-     * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
-     *
-     * Provide a callback which receives a reference to a SeqSearchResult instance which the
-     * callback function should use as desired (typically generate a string/JSON output).
-     *
-     * @param file_path     path to FASTA file
-     * @param callback      callback function
-     *
-     * @return the number of base pairs (characters) in query file
-     */
-    size_t query_fasta(const std::string &file_path,
-                       const std::function<void(const SeqSearchResult &)> &callback);
-
-    static SeqSearchResult execute_query(QuerySequence&& sequence,
-                                         QueryMode query_mode,
-                                         size_t num_top_labels,
-                                         double discovery_fraction,
-                                         double presence_fraction,
-                                         const graph::AnnotatedDBG &anno_graph);
-
-  private:
-    const Config &config_;
-    const graph::AnnotatedDBG &anno_graph_;
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
-    ThreadPool &thread_pool_;
-
-    size_t batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
-                               const std::function<void(const SeqSearchResult &)> &callback);
-};
-
+/**
+ * Query sequences from a FASTA files.
+ *
+ * Provide a callback which receives a reference to a SeqSearchResult instance which the
+ * callback function should use as desired (typically generate a string/JSON output).
+ *
+ * @param file_path     path to FASTA file
+ * @param callback      callback function
+ * @param config        config object
+ * @param anno_graph    annotated de Bruijn graph
+ * @param aligner_config alignment config
+ * @param thread_pool   thread pool to use for parallel processing
+ *
+ * @return the number of base pairs (characters) in query file
+ */
+size_t query_fasta(const std::string &file_path,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config,
+                   ThreadPool &thread_pool);
 
 int query_graph(Config *config);
 
