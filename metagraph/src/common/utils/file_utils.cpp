@@ -26,6 +26,10 @@ std::mutex TMP_DIRS_MUTEX;
 
 static bool WITH_MMAP = false;
 
+void set_mmap(bool set_bit) {
+    WITH_MMAP = set_bit;
+}
+
 bool with_mmap(bool set_bit) {
     if (set_bit) {
         WITH_MMAP = true;
