@@ -19,19 +19,17 @@ const size_t kRowBatchSize = 10'000;
 
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {
-    std::vector<BinaryMatrix::SetBitPositions> result;
+    std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t begin = 0; begin < rows.size(); begin += kRowBatchSize) {
-        const uint64_t end = std::min<uint64_t>(begin + kRowBatchSize, rows.size());
-
+    for (size_t begin = 0; begin < rows.size(); begin += kRowBatchSize) {
+        size_t end = std::min(begin + kRowBatchSize, rows.size());
         auto batch = get_rows(std::vector<Row>(rows.begin() + begin, rows.begin() + end));
-
         #pragma omp critical
         {
-            for (uint64_t i = begin; i < end; ++i) {
-                result[i] = std::move(batch[i - begin]);
-            }
+            std::copy(std::make_move_iterator(batch.begin()),
+                      std::make_move_iterator(batch.end()),
+                      result.begin() + begin);
         }
     }
 
