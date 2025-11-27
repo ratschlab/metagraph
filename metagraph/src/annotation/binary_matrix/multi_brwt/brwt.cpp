@@ -129,57 +129,6 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::pair<std::vector<bool>, std::vector<BRWT::Row>>
-BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
-    std::vector<Row> child_row_ids;
-    child_row_ids.reserve(row_ids.size());
-
-    std::vector<bool> skip_row(row_ids.size(), true);
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        assert(row_ids[i] < num_rows());
-
-        uint64_t global_offset = row_ids[i];
-
-        // if next word contains 5 or more positions, query the whole word
-        // we assume that get_int is roughly 5 times slower than operator[]
-        if (i + 4 < row_ids.size()
-                && row_ids[i + 4] < global_offset + 64
-                && row_ids[i + 4] >= global_offset
-                && global_offset + 64 <= nonzero_rows_->size()) {
-            // get the word
-            uint64_t word = nonzero_rows_->get_int(global_offset, 64);
-            uint64_t rank = -1ULL;
-
-            do {
-                // check index
-                uint8_t offset = row_ids[i] - global_offset;
-                if (word & (1ULL << offset)) {
-                    if (rank == -1ULL)
-                        rank = global_offset > 0
-                                ? nonzero_rows_->rank1(global_offset - 1)
-                                : 0;
-
-                    // map index from parent's to children's coordinate system
-                    child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
-                    skip_row[i] = false;
-                }
-            } while (++i < row_ids.size()
-                        && row_ids[i] < global_offset + 64
-                        && row_ids[i] >= global_offset);
-            --i;
-
-        } else {
-            // check index
-            if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
-                // map index from parent's to children's coordinate system
-                child_row_ids.push_back(rank - 1);
-                skip_row[i] = false;
-            }
-        }
-    }
-    return std::make_pair(std::move(skip_row), std::move(child_row_ids));
-}
 
 // If T = Column
 //      return positions of set bits.
@@ -268,6 +217,58 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     }
 
     slice->erase(slice->begin() + slice_start, slice->begin() + slice_offset);
+}
+
+std::pair<std::vector<bool>, std::vector<BRWT::Row>>
+BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
+    std::vector<Row> child_row_ids;
+    child_row_ids.reserve(row_ids.size());
+
+    std::vector<bool> skip_row(row_ids.size(), true);
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        assert(row_ids[i] < num_rows());
+
+        uint64_t global_offset = row_ids[i];
+
+        // if next word contains 5 or more positions, query the whole word
+        // we assume that get_int is roughly 5 times slower than operator[]
+        if (i + 4 < row_ids.size()
+                && row_ids[i + 4] < global_offset + 64
+                && row_ids[i + 4] >= global_offset
+                && global_offset + 64 <= nonzero_rows_->size()) {
+            // get the word
+            uint64_t word = nonzero_rows_->get_int(global_offset, 64);
+            uint64_t rank = -1ULL;
+
+            do {
+                // check index
+                uint8_t offset = row_ids[i] - global_offset;
+                if (word & (1ULL << offset)) {
+                    if (rank == -1ULL)
+                        rank = global_offset > 0
+                                ? nonzero_rows_->rank1(global_offset - 1)
+                                : 0;
+
+                    // map index from parent's to children's coordinate system
+                    child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
+                    skip_row[i] = false;
+                }
+            } while (++i < row_ids.size()
+                        && row_ids[i] < global_offset + 64
+                        && row_ids[i] >= global_offset);
+            --i;
+
+        } else {
+            // check index
+            if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
+                // map index from parent's to children's coordinate system
+                child_row_ids.push_back(rank - 1);
+                skip_row[i] = false;
+            }
+        }
+    }
+    return std::make_pair(std::move(skip_row), std::move(child_row_ids));
 }
 
 template <typename T>
