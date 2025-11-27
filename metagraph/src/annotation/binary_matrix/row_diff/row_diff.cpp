@@ -64,7 +64,7 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
 }
 
 std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
+IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
@@ -79,7 +79,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 2048) private(node_to_rd)
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 2048) private(node_to_rd)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 

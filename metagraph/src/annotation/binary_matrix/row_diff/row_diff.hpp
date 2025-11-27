@@ -54,7 +54,7 @@ class IRowDiff {
   protected:
     // get row-diff paths starting at |row_ids|
     std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
+    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads = 1) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
@@ -188,9 +188,8 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
     // No sorting in order not to break the topological order for row-diff annotation
 
-    // TODO: make it parallel
     // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows, num_threads);
     common::logger->trace("RD: paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids, num_threads);
