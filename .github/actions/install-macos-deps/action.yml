@@ -1,0 +1,52 @@
+name: 'Install macOS Dependencies'
+description: 'Install dependencies for building and testing MetaGraph on macOS'
+
+inputs:
+  job-type:
+    description: 'Type of job (build, unit-tests, integration-tests, examples)'
+    required: true
+  target_arch:
+    description: 'Target architecture (arm64 or x86_64)'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
+      if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
+      run: |
+        # Install Intel Homebrew into /usr/local if missing (for cross-compilation)
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        # Replace any legacy wrapper that points to /usr/local/Library/Homebrew
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        # Ensure wrapper points to the modern repo location
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
+    - name: install dependencies
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
+
+    - name: (Only for cross-compilation) Install OpenSSL for target architecture
+      if: ${{ runner.arch == 'ARM64' && inputs.target_arch == 'x86_64' }}
+      shell: arch -${{ inputs.target_arch }} /bin/bash -eo pipefail {0}
+      run: |
+        # When cross-compiling (e.g., running x86_64 binaries on ARM64 via Rosetta),
+        # we need OpenSSL for the target architecture. Ccache installed during build
+        # pulls in OpenSSL, but test jobs downloading artifacts need it explicitly.
+        brew install openssl@3
+
+    - name: install dependencies for integration tests
+      if: inputs.job-type == 'integration-tests'
+      shell: bash
+      run: pip3 install parameterized --break-system-packages --user

@@ -34,7 +34,7 @@ Json::Value process_search_request(const Json::Value &json,
                                    const Config &config_orig) {
     const auto &fasta = json["FASTA"];
     if (fasta.isNull())
-        throw std::domain_error("No input sequences received from client");
+        throw std::invalid_argument("No input sequences received from client");
 
     Config config(config_orig);
     // discovery_fraction a proxy of 1 - %similarity
@@ -50,14 +50,14 @@ Json::Value process_search_request(const Json::Value &json,
         config.alignment_max_nodes_per_seq_char).asDouble();
 
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
                 + std::to_string(config.discovery_fraction));
     }
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
@@ -164,7 +164,7 @@ Json::Value process_align_request(const std::string &received_message,
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
@@ -214,7 +214,7 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     }
     server_startup.config.port = config.port;
     server_startup.config.timeout_request = 30;    // 30 sec to finish headers
-    server_startup.config.timeout_content = 1800;  // 30 minutes for body/compute (per request) max
+    server_startup.config.timeout_content = 900;   // 15 minutes for body/compute (per request) max
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
@@ -275,6 +275,12 @@ int run_server(Config *config) {
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
+    ThreadPool graphs_pool(get_num_threads());
+    size_t num_server_threads = std::max(1u, get_num_threads());
+    set_num_threads(0);
+
+    std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
@@ -330,23 +336,29 @@ int run_server(Config *config) {
                          " Make sure they're on a fast disk.");
             utils::with_mmap(true);
         }
-    }
 
-    ThreadPool graphs_pool(get_num_threads());
-    size_t num_server_threads = std::max(1u, get_num_threads());
-    set_num_threads(0);
-
-    logger->info("Collecting graph stats...");
-    tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
-    for (const auto &[name, graphs] : indexes) {
-        for (const auto &[graph_fname, anno_fname] : graphs) {
-            auto &out = name_labels[name];
-            const auto &labels = read_labels(anno_fname);
-            out.insert(out.end(), labels.begin(), labels.end());
+        logger->info("[Server] Loading graphs...");
+        for (const auto &[name, graphs] : indexes) {
+            for (const auto &[graph_fname, anno_fname] : graphs) {
+                graphs_cache[{ graph_fname, anno_fname }] = nullptr;
+            }
         }
+        for (auto &[graph_anno, anno_dbg] : graphs_cache) {
+            Config config_copy = *config;
+            const auto &[graph_fname, anno_fname] = graph_anno;
+            config_copy.infbase = graph_fname;
+            config_copy.infbase_annotators = { anno_fname };
+            graphs_pool.enqueue([config_copy{std::move(config_copy)},anno_dbg{std::ref(anno_dbg)}]() {
+                initialize_annotated_dbg(config_copy).swap(anno_dbg);
+            });
+        }
+        graphs_pool.join();
+        if (graphs_cache.empty()) {
+            logger->error("[Server] No graphs to serve. Exiting.");
+            exit(1);
+        }
+        logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
     }
-
-    logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
 
     // the actual server
     HttpServer server;
@@ -358,7 +370,7 @@ int run_server(Config *config) {
                 throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
             Json::Value content_json = parse_json_string(content);
-            logger->info("Request {}: {}", request_id, content_json.toStyledString());
+            logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
             Json::Value result;
 
             // simple case with a single graph pair
@@ -370,35 +382,37 @@ int run_server(Config *config) {
                 std::vector<std::string> graphs_to_query
                         = filter_graphs_from_list(indexes, content_json, request_id);
                 std::mutex mu;
-                std::vector<std::shared_future<void>> futures;
+                std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        Config config_copy = *config;
-                        config_copy.infbase = graph_fname;
-                        config_copy.infbase_annotators = { anno_fname };
-                        futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&result,&mu]() {
-                            auto index = initialize_annotated_dbg(config_copy);
-                            auto json = process_search_request(content_json, *index, config_copy);
-                            std::lock_guard<std::mutex> lock(mu);
-                            if (result.empty()) {
-                                result = std::move(json);
-                            } else {
-                                assert(json.size() == result.size());
-                                for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
-                                    if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
-                                            != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
-                                        throw std::logic_error("ERROR: Results for different sequences can't be merged");
-                                    }
-                                    for (auto&& value : json[i]["results"]) {
-                                        result[i]["results"].append(std::move(value));
+                        futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
+                            try {
+                                auto json = process_search_request(content_json, *index, *config);
+                                std::lock_guard<std::mutex> lock(mu);
+                                if (result.empty()) {
+                                    result = std::move(json);
+                                } else {
+                                    assert(json.size() == result.size());
+                                    for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                        if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
+                                                != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
+                                            throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                                        }
+                                        for (auto&& value : json[i]["results"]) {
+                                            result[i]["results"].append(std::move(value));
+                                        }
                                     }
                                 }
+                            } catch (...) {
+                                return std::current_exception();
                             }
+                            return std::exception_ptr();
                         }));
                     }
                 }
                 for (auto &future : futures) {
-                    future.wait();
+                    if (future.get())
+                        std::rethrow_exception(future.get());
                 }
             }
             return result;
@@ -432,9 +446,12 @@ int run_server(Config *config) {
                     root.append(label);
                 }
             } else {
-                for (const auto &[name, labels] : name_labels) {
-                    for (const std::string &label : labels) {
-                        root.append(label);
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        const auto &labels = graphs_cache[{ graph_fname, anno_fname }]->get_annotator().get_label_encoder().get_labels();
+                        for (const std::string &label : labels) {
+                            root.append(label);
+                        }
                     }
                 }
             }
@@ -451,9 +468,27 @@ int run_server(Config *config) {
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
+                const auto &graph = graphs_cache.begin()->second->get_graph();
+                size_t k = graph.get_k();
+                bool is_consistent_k = true;
+                bool is_canonical = (graph.get_mode() == graph::DeBruijnGraph::CANONICAL);
+                bool is_consistent_canonical = true;
+                for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
+                    const auto &graph = anno_dbg->get_graph();
+                    if (k != graph.get_k())
+                        is_consistent_k = false;
+                    if (is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                        is_consistent_canonical = false;
+                }
+                if (is_consistent_k)
+                    root["graph"]["k"] = static_cast<uint64_t>(k);
+                if (is_consistent_canonical)
+                    root["graph"]["is_canonical_mode"] = is_canonical;
                 uint64_t num_labels = 0;
-                for (const auto &[name, labels] : name_labels) {
-                    num_labels += labels.size();
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
+                    }
                 }
                 root["annotation"]["labels"] = num_labels;
             } else {
@@ -466,15 +501,17 @@ int run_server(Config *config) {
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
                 root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
-                root["annotation"]["relations"] = static_cast<uint64_t>(annotation.num_relations());
             }
             return root;
         });
     };
 
-    server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
+    server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
-        logger->info("Not found " + request->path);
+        size_t request_id = num_requests++;
+        logger->warn("[Server] Not found {} for {} request {} from {}",
+                     request->path, request->method, request_id,
+                     request->remote_endpoint().address().to_string());
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
     };
@@ -485,7 +522,7 @@ int run_server(Config *config) {
         // Handle errors here, ignoring a few trivial ones.
         if (ec.value() != asio::stream_errc::eof
                 && ec.value() != asio::error::operation_aborted) {
-            logger->info("[Server] Got error {} {} {}",
+            logger->warn("[Server] Got error {} {} {}",
                          ec.message(), ec.category().name(), ec.value());
         }
     };

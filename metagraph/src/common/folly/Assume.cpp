@@ -1,5 +1,7 @@
 // Adapted from folly
 
+#include "common/config.hpp"
+
 #if _USE_FOLLY
 
 #include <iostream>

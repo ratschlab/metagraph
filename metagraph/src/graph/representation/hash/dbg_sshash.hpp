@@ -9,6 +9,7 @@
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "common/config.hpp"
 
 namespace mtg::graph {
 

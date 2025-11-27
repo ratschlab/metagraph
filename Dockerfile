@@ -17,20 +17,21 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libbz2-dev \
     libdeflate-dev \
     libjemalloc-dev \
+    liblzma-dev \
     libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ENV CC /usr/bin/gcc-11
-ENV CXX /usr/bin/g++-11
+ENV CC=/usr/bin/gcc-11
+ENV CXX=/usr/bin/g++-11
 
 RUN mkdir -p /opt/metagraph/build_docker /opt/ccache_docker
 RUN chmod o+rwx /opt/metagraph /opt/ccache_docker
 
 ENV CCACHE_DIR=/opt/ccache_docker
 
-FROM metagraph_dev_env as metagraph_bin
+FROM metagraph_dev_env AS metagraph_bin
 ARG CODE_BASE
 
 COPY . ${CODE_BASE}

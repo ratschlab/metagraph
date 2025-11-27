@@ -353,7 +353,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -476,7 +476,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -595,7 +595,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -724,7 +724,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -840,7 +840,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -968,7 +968,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1046,7 +1046,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
         check_labels(*anno_graph, std::string(100, 'G'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(*anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1237,7 +1237,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 temps[4].assign(100 - (k + 1) + 1 + 2, false);
@@ -1298,7 +1298,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1317,7 +1317,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1336,7 +1336,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;
@@ -1640,7 +1640,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 results[1].emplace_back("Third", 2);
@@ -1685,7 +1685,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1702,7 +1702,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1718,7 +1718,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;

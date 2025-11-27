@@ -22,6 +22,7 @@ endif()
 find_package(OpenMP REQUIRED)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}" PARENT_SCOPE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}" PARENT_SCOPE)
+set(OpenMP_CXX_FLAGS "${OpenMP_CXX_FLAGS}" PARENT_SCOPE)
 set(OpenMP_CXX_LIBRARIES "${OpenMP_CXX_LIBRARIES}" PARENT_SCOPE)
 set(OpenMP_CXX_VERSION "${OpenMP_CXX_VERSION}" PARENT_SCOPE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -80,7 +81,7 @@ endfunction()
 
 function (findFolly)
 unset(FOLLY_FOUND PARENT_SCOPE)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Jemalloc)
 
 if(Jemalloc_FOUND)
@@ -92,10 +93,15 @@ endif()
 set(Jemalloc_FOUND ${Jemalloc_FOUND} PARENT_SCOPE)
 
 message(STATUS "Configuring Folly")
+set(_folly_old_req_includes "${CMAKE_REQUIRED_INCLUDES}")
+if(JEMALLOC_INCLUDE_DIRS)
+  list(APPEND CMAKE_REQUIRED_INCLUDES ${JEMALLOC_INCLUDE_DIRS})
+endif()
 include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
+set(CMAKE_REQUIRED_INCLUDES "${_folly_old_req_includes}")
 configure_file(
   external-libraries/folly/CMake/folly-config.h.cmake
-  ${CMAKE_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
+  ${PROJECT_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
 )
 add_library(fbvector STATIC
   external-libraries/folly/folly/ScopeGuard.cpp
@@ -105,7 +111,7 @@ target_include_directories(fbvector SYSTEM PRIVATE
   ${JEMALLOC_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
   external-libraries/folly
-  ${CMAKE_BINARY_DIR}/external-libraries/folly/include
+  ${PROJECT_BINARY_DIR}/external-libraries/folly/include
   ${PROJECT_SOURCE_DIR}/src/common
 )
 target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES} ${Boost_LIBRARIES})
@@ -151,6 +157,10 @@ endfunction()
 function (enableCCache)
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
+    # Use modern CMAKE_*_COMPILER_LAUNCHER which propagates better to external projects
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_FOUND}" PARENT_SCOPE)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_FOUND}" PARENT_SCOPE)
+    # Also set the old method for backwards compatibility
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
 else()
     message(STATUS "ccache not found. Run 'brew install ccache' to speed up re-compilation")
