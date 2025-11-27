@@ -21,69 +21,9 @@ env:
 jobs:
 
   # ========================================================================
-  # Setup matrices for all builds
-  # ========================================================================
-  
-  setup-matrices:
-    runs-on: ubuntu-22.04
-    outputs:
-      matrices: ${{ steps.set-matrices.outputs.matrices }}
-    steps:
-      - name: Set up all matrices
-        id: set-matrices
-        run: |
-          linux_base='{
-            "platform": ["ubuntu-22.04"],
-            "alphabet": ["DNA", "Protein"],
-            "build_type": ["Debug", "Release"],
-            "compiler": ["g++-11", "g++-12", "g++-13"],
-            "build_static": ["OFF", "ON"],
-            "with_avx": ["OFF", "ON"],
-            "include": [
-              {"compiler": "g++-11", "cxx": "g++-11", "cc": "gcc-11"},
-              {"compiler": "g++-12", "cxx": "g++-12", "cc": "gcc-12"},
-              {"compiler": "g++-13", "cxx": "g++-13", "cc": "gcc-13"}
-            ],
-            "exclude": [
-              {"alphabet": "Protein", "compiler": "g++-11"},
-              {"alphabet": "Protein", "compiler": "g++-12"},
-              {"compiler": "g++-11", "build_static": "ON"},
-              {"compiler": "g++-12", "build_static": "ON"},
-              {"build_type": "Debug", "build_static": "ON"},
-              {"build_type": "Debug", "compiler": "g++-11"},
-              {"build_type": "Debug", "compiler": "g++-12"},
-              {"with_avx": "OFF", "build_static": "OFF"}
-            ]
-          }'
-          
-          macos_base='{
-            "include": [
-              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "arm64"},
-              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-15-intel", "target_arch": "x86_64"},
-              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "x86_64"},
-              {"alphabet": "DNA", "build_type": "Debug", "platform": "macos-latest", "target_arch": "arm64"}
-            ]
-          }'
-          
-          job_types='["Build", "Examples", "UnitTests", "IntegrationTests"]'
-          
-          matrices=$(jq -n \
-            --argjson linux_base "$linux_base" \
-            --argjson macos_base "$macos_base" \
-            --argjson job_types "$job_types" \
-            '{
-              linux: ($job_types | map({key: ., value: ($linux_base + {job_type: [.]})}) | from_entries),
-              macos: ($job_types | map(. as $jt | {key: $jt, value: {include: [$macos_base.include[] | . + {job_type: $jt}]}}) | from_entries)
-            }')
-          
-          echo "matrices=$(echo "$matrices" | jq -c .)" >> $GITHUB_OUTPUT
-
-
-  # ========================================================================
   # Linux builds (all valid combinations)
   # ========================================================================
 
-  # Linux builds: 10 valid combinations
   linux-dna-release-gcc11-dynamic-avx:
     uses: ./.github/workflows/linux.yml
     with:
@@ -218,37 +158,37 @@ jobs:
       - linux-protein-debug-gcc13-static-avx
 
     steps:
-        - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-        - name: Set up Python
-          uses: actions/setup-python@v6
-          with:
-              python-version: 3.13
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
 
-        - &download-static-artifacts
-          name: Download static binary artifacts
-          uses: actions/download-artifact@v4
-          with:
-            pattern: metagraph_*
-            path: artifacts
+      - &download-static-artifacts
+        name: Download static binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: metagraph_*
+          path: artifacts
 
-        - name: setup metagraph binary
-          run: |
-            sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
-            sudo chmod +rx /usr/local/bin/metagraph
-            /usr/local/bin/metagraph --help
-            metagraph --help
+      - name: setup metagraph binary
+        run: |
+          sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
+          sudo chmod +rx /usr/local/bin/metagraph
+          /usr/local/bin/metagraph --help
+          metagraph --help
 
-        - name: Install python dependencies
-          run: |
-              python -m pip install --upgrade pip
-              pip install pytest
-              pip install -r metagraph/workflows/requirements.txt
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r metagraph/workflows/requirements.txt
 
-        - name: Test metagraph-workflows pytest
-          run: |
-              cd metagraph/workflows
-              pytest
+      - name: Test metagraph-workflows pytest
+        run: |
+          cd metagraph/workflows
+          pytest
 
   # ========================================================================
   # Docker build
@@ -262,31 +202,40 @@ jobs:
       packages: write
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - *checkout-submodules-cache
+      - &checkout-submodules-cache
+        name: Checkout submodules cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}
 
-    - *checkout-submodules-update
+      - &checkout-submodules-update
+        name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Log in to the Container registry
-      uses: docker/login-action@v3
-      with:
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract metadata (tags, labels) for Docker
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-    - name: Build Docker image
-      uses: docker/build-push-action@v6
-      with:
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
           context: .
           push: false
           tags: ${{ steps.meta.outputs.tags }}
@@ -294,10 +243,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-    - name: Build and push Docker image
-      if: github.event_name != 'pull_request'
-      uses: docker/build-push-action@v6
-      with:
+      - name: Build and push Docker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
