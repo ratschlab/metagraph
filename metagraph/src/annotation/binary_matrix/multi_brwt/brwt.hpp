@@ -63,10 +63,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
 
     template <typename T>
-    void slice_rows(const std::vector<Row> &row_ids,
-                    std::vector<std::tuple<const BRWT*, size_t, std::vector<bool>>> path,
-                    size_t cutoff_depth, size_t max_columns_cutoff,
-                    ThreadPool &thread_pool, std::function<void(const Vector<T>&)> call_slice) const;
+    void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+                    std::vector<std::pair<const BRWT*, size_t>> call_stack,
+                    size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
+                    std::function<void(const std::vector<size_t>&, const Vector<T>&)> call_slice) const;
 
     std::pair<std::vector<bool>, std::vector<BRWT::Row>>
     get_zero_rows(const std::vector<Row> &rows) const;
