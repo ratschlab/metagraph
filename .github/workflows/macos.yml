@@ -24,8 +24,8 @@ jobs:
     env: &macos-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
       INTEGRATION_TEST_ATTEMPTS: 1
-      ARTIFACT: >-
-        artifact-${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
+      DESCRIPTOR: >-
+        ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
       CMAKE_ARGS: >-
         -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
         -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
