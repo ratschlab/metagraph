@@ -129,7 +129,6 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-
 // If T = Column
 //      return positions of set bits.
 // If T = std::pair<Column, uint64_t>
@@ -219,6 +218,45 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     slice->erase(slice->begin() + slice_start, slice->begin() + slice_offset);
 }
 
+template <typename T>
+void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+                      std::vector<std::pair<const BRWT*, size_t>> call_stack,
+                      size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
+                      std::function<void(const std::vector<size_t>&, const Vector<T>&)> call_slice) const {
+    if (child_nodes_.size()
+            && row_ids.size()
+            && call_stack.size() < cutoff_depth
+            && num_columns() > max_columns_cutoff) {
+        // construct indexing for children and the inverse mapping
+        auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
+
+        utils::erase(&rows, skip_row);
+        call_stack.emplace_back(this, 0);
+
+        for (size_t j = 0; j < child_nodes_.size(); ++j) {
+            call_stack.back().second = j;
+            thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&thread_pool]() {
+                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(rows), std::move(call_stack), cutoff_depth,
+                                                  max_columns_cutoff, thread_pool, call_slice);
+            });
+        }
+    } else {
+        Vector<T> slice;
+        slice.reserve(row_ids.size() * 4);
+        slice_rows(row_ids, &slice);
+        // transform column indexes
+        for (auto it = call_stack.rbegin(); it != call_stack.rend(); ++it) {
+            const auto &[node, j] = *it;
+            for (size_t i = 0; i < slice.size(); ++i) {
+                auto &col = utils::get_first(slice[i]);
+                if (col != std::numeric_limits<Column>::max())
+                    col = node->assignments_.get(j, col);
+            }
+        }
+        call_slice(rows, slice);
+    }
+}
+
 std::pair<std::vector<bool>, std::vector<BRWT::Row>>
 BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
     std::vector<Row> child_row_ids;
@@ -269,45 +307,6 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
         }
     }
     return std::make_pair(std::move(skip_row), std::move(child_row_ids));
-}
-
-template <typename T>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
-                      std::vector<std::pair<const BRWT*, size_t>> call_stack,
-                      size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
-                      std::function<void(const std::vector<size_t>&, const Vector<T>&)> call_slice) const {
-    if (child_nodes_.size()
-            && row_ids.size()
-            && call_stack.size() < cutoff_depth
-            && num_columns() > max_columns_cutoff) {
-        // construct indexing for children and the inverse mapping
-        auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
-
-        utils::erase(&rows, skip_row);
-        call_stack.emplace_back(this, 0);
-
-        for (size_t j = 0; j < child_nodes_.size(); ++j) {
-            call_stack.back().second = j;
-            thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(rows), std::move(call_stack), cutoff_depth,
-                                                  max_columns_cutoff, thread_pool, call_slice);
-            });
-        }
-    } else {
-        Vector<T> slice;
-        slice.reserve(row_ids.size() * 4);
-        slice_rows(row_ids, &slice);
-        // transform column indexes
-        for (auto it = call_stack.rbegin(); it != call_stack.rend(); ++it) {
-            const auto &[node, j] = *it;
-            for (size_t i = 0; i < slice.size(); ++i) {
-                auto &col = utils::get_first(slice[i]);
-                if (col != std::numeric_limits<Column>::max())
-                    col = node->assignments_.get(j, col);
-            }
-        }
-        call_slice(rows, slice);
-    }
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
