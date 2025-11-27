@@ -7,7 +7,6 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
-#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
@@ -186,19 +185,22 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    if (num_threads > 1 && !std::is_same_v<BaseMatrix, BRWT>)
-        return BinaryMatrix::get_rows_dict(rows, num_threads);
-
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
     // No sorting in order not to break the topological order for row-diff annotation
 
+    // TODO: make it parallel
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
     common::logger->trace("RD: paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
 
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids, num_threads);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
     rd_ids = std::vector<Row>();
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < rd_rows.size(); ++i) {
+        std::sort(rd_rows[i].begin(), rd_rows[i].end());
+    }
 
     // reconstruct annotation rows from row-diff
     SetBitPositions result;
@@ -207,7 +209,6 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
         result.resize(0);
         // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
