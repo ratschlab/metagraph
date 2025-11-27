@@ -61,6 +61,7 @@ Config::Config(int argc, char *argv[]) {
         identity = QUERY;
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
+        num_top_labels = 10'000;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -543,7 +544,7 @@ Config::Config(int argc, char *argv[]) {
     if (count_kmers || query_presence)
         map_sequences = true;
 
-    if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
+    if (identity == QUERY && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
@@ -575,8 +576,14 @@ Config::Config(int argc, char *argv[]) {
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == QUERY || identity == SERVER_QUERY) && infbase_annotators.size() != 1)
+    if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
+
+    if (identity == SERVER_QUERY
+            && (fnames.size() > 1
+                || (fnames.size() && (infbase.size() || infbase_annotators.size()))
+                || (fnames.empty() && (infbase.empty() || infbase_annotators.size() != 1))))
+        print_usage_and_exit = true;  // only one of fnames or (infbase & annotator) must be used
 
     if ((identity == TRANSFORM
             || identity == CLEAN
@@ -1234,13 +1241,20 @@ if (advanced) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
             fprintf(stderr, "\t                       \t\t\tFormula: min-count <= \\sum_i 1{min-value <= c_i <= max-value} <= max-count\n");
+            fprintf(stderr, "\t                       \t\t\tWith --count-kmers: min-count <= \\sum_i c_i 1{min-value <= c_i <= max-value} <= max-count\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
-            fprintf(stderr, "\t   --min-value [INT] \t\tmin value for filtering [1]\n");
-            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tsum up k-mer counts across columns [off]\n");
+            fprintf(stderr, "\t   --count-width [INT] \t\tnumber of bits for aggregated k-mer counts (--count-kmers only) [8]\n");
+            fprintf(stderr, "\t                       \t\tvalid range: [2, 32]. Values saturate at 2^W - 1.\n");
+            fprintf(stderr, "\t   --min-value [INT] \t\tignore pre-aggregation counts smaller than this [1]\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers with aggregated count smaller than this [1]\n");
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
-            fprintf(stderr, "\t   --max-value [INT] \t\tmax value for filtering [inf]\n");
-            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
+            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --min-count instead\n");
+            fprintf(stderr, "\t   --max-value [INT] \t\tignore pre-aggregation counts larger than this [inf]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers with aggregated count larger than this [inf]\n");
+            fprintf(stderr, "\t                       \t\tin --count-kmers mode: max_count+1 must fit in count_width bits (unless inf)\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
+            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --max-count instead\n");
             fprintf(stderr, "\t   --compute-overlap [STR] \tcompute the number of shared bits in columns of this annotation and ANNOTATOR [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
@@ -1369,7 +1383,10 @@ if (advanced) {
 }
         } break;
         case SERVER_QUERY: {
-            fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s server_query (-i <GRAPH> -a <ANNOTATION> | <GRAPHS.csv>) [options]\n\n"
+                            "\tThe index must be passed with flags -i -a or with a file GRAPHS.csv listing one\n"
+                            "\tor more indexes, a file with rows: '<name>,<graph_path>,<annotation_path>\\n'.\n"
+                            "\t(If multiple rows have the same name, all those graphs will be queried for that name.)\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
@@ -1379,6 +1396,7 @@ if (advanced) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+            fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
         } break;
     }
 

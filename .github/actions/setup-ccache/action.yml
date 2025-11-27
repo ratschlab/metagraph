@@ -1,0 +1,62 @@
+name: 'Setup ccache'
+description: 'Configure and cache ccache for build acceleration'
+
+inputs:
+  platform:
+    description: 'Platform/runner identifier (e.g., ubuntu-22.04, macos-latest)'
+    required: true
+  build-type:
+    description: 'CMake build type (Debug or Release)'
+    required: true
+  alphabet:
+    description: 'Alphabet type (DNA or Protein)'
+    required: true
+  job-type:
+    description: 'Job type (Build, ExternalProject, or subdirectory)'
+    required: true
+  build-static:
+    description: 'Build static binaries (ON or OFF)'
+    required: false
+  with-avx:
+    description: 'Enable AVX instructions (ON or OFF)'
+    required: false
+  compiler:
+    description: 'Compiler name (for Linux only, e.g., g++-13)'
+    required: false
+  target-arch:
+    description: 'Target architecture (arm64 or x86_64, macOS only)'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install ccache (macOS)
+      if: runner.os == 'macOS'
+      shell: ${{ format('arch -{0} /bin/bash -e {{0}}', inputs.target-arch) }}
+      run: brew install ccache
+
+    - name: Install ccache (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get install -y ccache
+
+    - name: Cache ccache
+      uses: actions/cache@v3
+      with:
+        path: ${{ runner.os == 'macOS' && '~/Library/Caches/ccache' || '~/.cache/ccache' }}
+        key: ${{ format('ccache-{0}-{1}-{2}-{3}{4}{5}{6}{7}',
+          inputs.platform || runner.os,
+          inputs.job-type,
+          inputs.build-type,
+          inputs.alphabet,
+          inputs.target-arch && format('-{0}', inputs.target-arch) || '',
+          inputs.build-static && format('-{0}', inputs.build-static == 'ON' && 'static' || 'dynamic') || '',
+          inputs.with-avx && format('-{0}', inputs.with-avx == 'ON' && 'AVX' || 'noAVX') || '',
+          inputs.compiler && format('-{0}', inputs.compiler) || '') }}
+
+    - name: Setup ccache
+      shell: bash
+      run: |
+        ccache --set-config=max_size=2G
+        ccache --set-config=compression=true
+        ccache --zero-stats

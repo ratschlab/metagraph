@@ -76,7 +76,7 @@ pygments_style = 'sphinx'
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-import sphinx_bootstrap_theme
+# import sphinx_bootstrap_theme
 html_theme = 'furo'
 # html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 html_logo = 'images/mtg_icon.png'

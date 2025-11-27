@@ -64,7 +64,7 @@ int clean_graph(Config *config) {
     }
 
     if (config->min_count > 1
-            || config->max_count < std::numeric_limits<unsigned int>::max()
+            || config->max_count < std::numeric_limits<decltype(config->max_count)>::max()
             || config->min_unitig_median_kmer_abundance != 1
             || config->count_slice_quantiles[0] != 0
             || config->count_slice_quantiles[1] != 1) {
@@ -100,7 +100,7 @@ int clean_graph(Config *config) {
         }
 
         if (config->min_count > 1
-                || config->max_count < std::numeric_limits<unsigned int>::max()) {
+                || config->max_count < std::numeric_limits<decltype(config->max_count)>::max()) {
             const auto &weights = *graph->get_extension<graph::NodeWeights>();
 
             graph = std::make_shared<graph::MaskedDeBruijnGraph>(graph,

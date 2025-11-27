@@ -9,8 +9,9 @@ import shutil
 script_path = os.path.dirname(os.path.realpath(__file__))
 
 METAGRAPH_EXE = f'{os.getcwd()}/metagraph'
-DNA_MODE = os.readlink(METAGRAPH_EXE).endswith("_DNA")
-PROTEIN_MODE = os.readlink(METAGRAPH_EXE).endswith("_Protein")
+_target = os.readlink(METAGRAPH_EXE)
+DNA_MODE = "DNA" in _target
+PROTEIN_MODE = "Protein" in _target
 METAGRAPH = METAGRAPH_EXE
 
 def update_prefix(PREFIX):

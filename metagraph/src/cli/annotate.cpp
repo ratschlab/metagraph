@@ -37,6 +37,7 @@ void call_annotations(const std::string &file,
                       size_t max_count,
                       bool filename_anno,
                       bool annotate_sequence_headers,
+                      bool parse_counts_from_headers,
                       const std::string &fasta_anno_comment_delim,
                       const std::string &fasta_header_delimiter,
                       const std::vector<std::string> &anno_labels,
@@ -60,7 +61,7 @@ void call_annotations(const std::string &file,
                 labels.insert(labels.end(),
                               variant_labels.begin(), variant_labels.end());
 
-                callback(std::move(seq), labels);
+                callback(std::move(seq), labels, 1);
 
                 total_seqs += 1;
 
@@ -79,7 +80,7 @@ void call_annotations(const std::string &file,
         read_kmers(
             file,
             [&](std::string_view sequence) {
-                callback(std::string(sequence), labels);
+                callback(std::string(sequence), labels, 1);
 
                 total_seqs += 1;
 
@@ -95,6 +96,7 @@ void call_annotations(const std::string &file,
         );
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
+        bool parsed_first_header = false;
         read_fasta_file_critical(
             file,
             [&](kseq_t *read_stream) {
@@ -112,7 +114,24 @@ void call_annotations(const std::string &file,
                     }
                 }
 
-                callback(read_stream->seq.s, labels);
+                uint64_t abundance = 1;
+
+                if (parse_counts_from_headers) {
+                    if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
+                        abundance = *count;
+                        parsed_first_header = true;
+                    } else if (parsed_first_header) {
+                        mtg::common::logger->error("Inconsistent k-mer count headers in file '{}'", file);
+                        exit(1);
+                    } else {
+                        parse_counts_from_headers = false;
+                        mtg::common::logger->warn("No k-mer count found in header '{}', "
+                                                  "will treat all sequences as having k-mer count 1",
+                                                  read_stream->name.s);
+                    }
+                }
+
+                callback(read_stream->seq.s, labels, abundance);
 
                 total_seqs += 1;
 
@@ -255,10 +274,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.max_count,
                 config.filename_anno,
                 config.annotate_sequence_headers,
+                /*parse_counts_from_headers*/false,
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
                 config.anno_labels,
-                [&](std::string sequence, auto labels) {
+                [&](std::string sequence, auto labels, uint64_t) {
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
                         logger->error("All input sequences must have the same"
@@ -295,10 +315,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.max_count,
             config.filename_anno,
             config.annotate_sequence_headers,
+            /*parse_counts_from_headers*/false,
             config.fasta_anno_comment_delim,
             config.fasta_header_delimiter,
             config.anno_labels,
-            [&](std::string sequence, auto labels) {
+            [&](std::string sequence, auto labels, uint64_t) {
                 if (sequence.size() >= k) {
                     batcher.push_and_pay(sequence.size(),
                                          std::move(sequence), std::move(labels));
@@ -351,8 +372,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                 );
             } else {
-                logger->warn("No k-mer counts found at '{}'. Every input k-mer"
-                             " will have count 1.", counts_fname);
+                logger->warn("No k-mer counts found at '{}', "
+                             "will try reading counts from headers",
+                             counts_fname);
                 call_annotations(
                     file,
                     config.refpath,
@@ -362,14 +384,15 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.max_count,
                     config.filename_anno,
                     config.annotate_sequence_headers,
+                    /*parse_counts_from_headers*/true,
                     config.fasta_anno_comment_delim,
                     config.fasta_header_delimiter,
                     config.anno_labels,
-                    [&](std::string sequence, auto labels) {
+                    [&](std::string sequence, auto labels, uint64_t kmer_count) {
                         if (sequence.size() >= k) {
                             batcher.push_and_pay(sequence.size(),
                                                  std::move(sequence), std::move(labels),
-                                                 std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                                                 std::vector<uint64_t>(sequence.size() - k + 1, kmer_count));
                         }
                     }
                 );

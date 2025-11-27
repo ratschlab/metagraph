@@ -9,11 +9,15 @@ import requests
 
 import pandas as pd
 
-from metagraph.client import GraphClientJson, MultiGraphClient
+from metagraph.client import GraphClientJson, MultiGraphClient, GraphClient
 from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
+from itertools import product
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+
+GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
+
 
 class TestAPIBase(TestingBase):
     @classmethod
@@ -53,14 +57,13 @@ class TestAPIBase(TestingBase):
 
     def _start_server(self, graph, annotation):
         construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
-                                            --port {self.port} --address {self.host} -p {2}'
+                                            --port {self.port} --address {self.host} -p 2'
 
         return subprocess.Popen(shlex.split(construct_command))
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
@@ -249,8 +252,7 @@ class TestAPIRaw(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -356,10 +358,172 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_fraction=0.01, abundance_sum=True)
 
+    @unittest.expectedFailure
+    def test_api_search_bad_graphs(self):
+        df = self.graph_client.search(self.sample_query, parallel=False, graphs=['X'])
+
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode', 'threads_each'),
+    input_values=[(mode, 1) for mode in GRAPH_MODES] + [('basic', 4)])
+class TestAPIClientMultiple(TestingBase):
+    @classmethod
+    def setUpClass(
+        cls,
+        fasta_paths=[
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            TEST_DATA_DIR + '/transcripts_1000.fa'
+        ],
+        anno_repr='column',
+    ):
+        super().setUpClass()
+
+        graph_paths = [
+            cls.tempdir.name + '/graph_1.dbg',
+            cls.tempdir.name + '/graph_2.dbg',
+        ]
+        annotation_path_bases = [
+            cls.tempdir.name + '/annotation_1',
+            cls.tempdir.name + '/annotation_2',
+        ]
+
+        cls._build_graph(fasta_paths[0], graph_paths[0], 6, 'succinct', mode=cls.mode)
+        cls._annotate_graph(fasta_paths[0], graph_paths[0], annotation_path_bases[0], anno_repr)
+
+        cls._build_graph(fasta_paths[1], graph_paths[1], 6, 'succinct', mode=cls.mode)
+        cls._annotate_graph(fasta_paths[1], graph_paths[1], annotation_path_bases[1], anno_repr)
+
+        cls.mult = 1 if cls.threads_each < 2 else 200  # duplicate graphs so that there are more to query
+
+        graphs_file = cls.tempdir.name + '/graphs.txt'
+        with open(graphs_file, 'w') as f:
+            f.write('\n'.join([
+                f'G1,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
+                f'G3,{graph_paths[1]},{annotation_path_bases[1]}.{anno_repr}.annodbg',
+            ] * cls.mult))
+
+        cls.host = '127.0.0.1'
+        os.environ['NO_PROXY'] = cls.host
+        cls.port = 3456
+        num_retries = 100
+        while num_retries > 0:
+            cls.server_process = subprocess.Popen(shlex.split(
+                f'{METAGRAPH} server_query {graphs_file} \
+                --port {cls.port} --address {cls.host} -p 2 --threads-each {cls.threads_each}'
+            ))
+            try:
+                cls.server_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                break
+            cls.port += 1
+            num_retries -= 1
+        if num_retries == 0:
+            raise "Couldn't start server"
+
+        wait_time_sec = 1
+        print("Waiting {} sec for the server (PID {}) to start up".format(
+            wait_time_sec, cls.server_process.pid), flush=True)
+        time.sleep(wait_time_sec)
+
+        cls.graph_client = MultiGraphClient()
+        cls.graph_name = 'G1,G2x2,G3'
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+        cls.client = GraphClient(cls.host, cls.port, cls.graph_name)
+
+        cls.sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.expected_rows_1 = (98 if cls.mode == 'basic' else 99) * cls.mult
+        cls.expected_matches_1 = (840 if cls.mode == 'basic' else 1381) * cls.mult
+
+        cls.expected_rows_2 = cls.expected_rows_1 * 2
+        cls.expected_matches_2 = cls.expected_matches_1 * 2
+
+        cls.expected_rows_3 = (100) * cls.mult
+        cls.expected_matches_3 = (2843 if cls.mode == 'basic' else 3496) * cls.mult
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server_process.kill()
+
+    def test_api_query_df_multiple_1(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_1)
+
+    def test_api_query_df_multiple_2(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G2'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_2, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_2)
+
+    def test_api_query_df_multiple_3(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G3'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches_3)
+
+    def test_api_query_df_multiple_12(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1', 'G2'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2)
+
+    def test_api_query_df_multiple_all(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, graphs=['G1', 'G2', 'G3'])
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
+
+    def test_api_query_df_multiple(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01)
+        df = ret[self.graph_name]
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(),
+                         self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
+
+    @unittest.expectedFailure
+    def test_api_query_df_multiple_bad(self):
+        df = self.graph_client.search(self.sample_query, parallel=False, graphs=['G1', 'X'])
+
+    def test_api_stats_multiple_graphs(self):
+        """Test /stats endpoint with multiple graphs returns aggregated stats"""
+        ret = self.client._json_client.stats()
+
+        # Should have annotation section with aggregated labels
+        self.assertIn("annotation", ret.keys())
+        self.assertIn("labels", ret["annotation"])
+
+        # Total labels should be sum of all graphs
+        self.assertEqual(ret["annotation"]["labels"], 1300 * self.mult)
+
+    def test_api_column_labels_multiple_graphs(self):
+        """Test /column_labels endpoint with multiple graphs returns all labels"""
+        ret = self.graph_client.column_labels()
+
+        self.assertIn(self.graph_name, ret.keys())
+        label_list = ret[self.graph_name]
+        # Should have labels from all graphs combined
+        self.assertEqual(len(label_list), 1300 * self.mult)
+        # All labels should start with 'ENST' (from the test data)
+        self.assertTrue(all(l.startswith('ENST') for l in label_list))
+        # Check that the total number of deduplicated labels equals to 1000
+        self.assertEqual(len(set(label_list)), 1000)
+
+
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -417,8 +581,7 @@ class TestAPIJson(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -449,8 +612,7 @@ class TestAPIClientWithProperties(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithCoordinates(TestAPIBase):
     """
     Testing whether API works well given coordinate aware annotations
@@ -509,8 +671,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientWithCounts(TestAPIBase):
     """
     Testing whether API works well given k-mer count aware annotations
@@ -564,8 +725,7 @@ class TestAPIClientWithCounts(TestAPIBase):
 
 
 # No canonical mode for Protein alphabets
-@parameterized_class(('mode',),
-    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
+@parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIClientParallel(TestAPIBase):
     """
     Testing whether or not parallel requests work

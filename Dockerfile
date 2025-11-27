@@ -17,20 +17,21 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     libbz2-dev \
     libdeflate-dev \
     libjemalloc-dev \
+    liblzma-dev \
     libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ENV CC /usr/bin/gcc-11
-ENV CXX /usr/bin/g++-11
+ENV CC=/usr/bin/gcc-11
+ENV CXX=/usr/bin/g++-11
 
 RUN mkdir -p /opt/metagraph/build_docker /opt/ccache_docker
 RUN chmod o+rwx /opt/metagraph /opt/ccache_docker
 
 ENV CCACHE_DIR=/opt/ccache_docker
 
-FROM metagraph_dev_env as metagraph_bin
+FROM metagraph_dev_env AS metagraph_bin
 ARG CODE_BASE
 
 COPY . ${CODE_BASE}
@@ -41,7 +42,7 @@ RUN make build-sdsl-lite \
     && make build-metagraph alphabet=DNA5 \
     && make build-metagraph alphabet=Protein
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 ARG CODE_BASE
 
 # the image used in production. It contains a basic runtime environment for metagraph without build tools along with
@@ -53,6 +54,7 @@ RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     python3 \
     python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/metagraph_* /usr/local/bin/
@@ -61,6 +63,9 @@ RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 
 RUN mkdir ${CODE_BASE}
 COPY . ${CODE_BASE}
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
 RUN pip3 install ${CODE_BASE}/metagraph/api/python
 RUN pip3 install ${CODE_BASE}/metagraph/workflows

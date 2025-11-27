@@ -1,0 +1,200 @@
+name: macOS CI
+
+on:
+  workflow_call:
+
+jobs:
+
+  setup-matrix:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      examples-matrix: ${{ steps.set-matrix.outputs.examples-matrix }}
+    steps:
+      - name: Set up build matrix
+        id: set-matrix
+        run: |
+          cat > matrix.json << 'EOF'
+          {
+            "include": [
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "arm64"},
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-15-intel", "target_arch": "x86_64"},
+              {"alphabet": "DNA", "build_type": "Release", "platform": "macos-latest", "target_arch": "x86_64"},
+              {"alphabet": "DNA", "build_type": "Debug", "platform": "macos-latest", "target_arch": "arm64"}
+            ]
+          }
+          EOF
+          
+          jq '{include: ([.include[] as $base | 
+                ("subdirectory", "ExternalProject") as $type | 
+                $base + {example_type: $type}])}' matrix.json > examples-matrix.json
+          
+          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+          echo "examples-matrix=$(cat examples-matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+
+  Build:
+    needs: setup-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: macOS Build (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-submodules
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+      with:
+        job-type: build
+        target_arch: ${{ matrix.target_arch }}
+
+    - name: Build metagraph
+      uses: ./.github/actions/build-metagraph
+      with:
+        platform: ${{ matrix.platform }}
+        build-type: ${{ matrix.build_type }}
+        alphabet: ${{ matrix.alphabet }}
+        target-arch: ${{ matrix.target_arch }}
+
+    - name: upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: |
+          metagraph/build/metagraph_${{ matrix.alphabet }}
+          metagraph/build/unit_tests
+          metagraph/build/integration_tests
+          metagraph/build/test_venv/
+        retention-days: 1
+
+
+  UnitTests:
+    needs: [setup-matrix, Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: macOS Unit Tests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+      with:
+        job-type: unit-tests
+        target_arch: ${{ matrix.target_arch }}
+
+    - name: download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        path: metagraph/build
+
+    - name: run unit tests
+      run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+
+
+  IntegrationTests:
+    needs: [setup-matrix, Build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: macOS IntegrationTests (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+      with:
+        job-type: integration-tests
+        target_arch: ${{ matrix.target_arch }}
+
+    - name: Setup metagraph binary
+      uses: ./.github/actions/setup-metagraph-binary
+      with:
+        artifact-name: build-macos-${{ matrix.alphabet }}-${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.target_arch }}
+        alphabet: ${{ matrix.alphabet }}
+
+    - name: Run integration tests
+      uses: ./.github/actions/run-integration-tests
+      with:
+        max-attempts: 1
+        target-arch: ${{ matrix.target_arch }}
+
+    - name: check metagraph workflows
+      run: |
+        export PATH="$(pwd)/metagraph/build/:$PATH"
+        metagraph --help
+        # Install python dependencies
+        python -m pip install --upgrade pip
+        pip install pytest
+        pip install -r metagraph/workflows/requirements.txt
+        # Test metagraph-workflows pytest
+        cd metagraph/workflows
+        pytest
+
+
+  Examples:
+    needs: setup-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.examples-matrix) }}
+
+    runs-on: ${{ matrix.platform }}
+    name: macOS ${{ matrix.example_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+
+    defaults:
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Checkout submodules
+      uses: ./.github/actions/checkout-submodules
+
+    - name: Setup examples
+      uses: ./.github/actions/setup-examples
+      with:
+        example-type: ${{ matrix.example_type }}
+
+    - name: install dependencies
+      uses: ./.github/actions/install-macos-deps
+      with:
+        job-type: examples
+        target_arch: ${{ matrix.target_arch }}
+
+    - name: Build and run example
+      uses: ./.github/actions/build-run-example
+      with:
+        platform: ${{ matrix.platform }}
+        example-type: ${{ matrix.example_type }}
+        build-type: ${{ matrix.build_type }}
+        alphabet: ${{ matrix.alphabet }}
+        target-arch: ${{ matrix.target_arch }}

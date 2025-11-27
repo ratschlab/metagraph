@@ -6,6 +6,10 @@ Python API
 The MetaGraph API provides a simple way to query indexes (running on a remote server or locally) in Python and supports both exact k-mer
 matching as well as inexact search (alignment).
 
+.. attention:: The API described here was used in the internal implementation of :ref:`metagraph_online`
+    and can also be used to query indexes hosted **locally**. For the API of MetaGraph Online, refer to
+    `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_.
+
 .. _install api:
 
 Installation
