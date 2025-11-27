@@ -25,12 +25,9 @@ BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {
     for (size_t begin = 0; begin < rows.size(); begin += kRowBatchSize) {
         size_t end = std::min(begin + kRowBatchSize, rows.size());
         auto batch = get_rows(std::vector<Row>(rows.begin() + begin, rows.begin() + end));
-        #pragma omp critical
-        {
-            std::copy(std::make_move_iterator(batch.begin()),
-                      std::make_move_iterator(batch.end()),
-                      result.begin() + begin);
-        }
+        std::copy(std::make_move_iterator(batch.begin()),
+                  std::make_move_iterator(batch.end()),
+                  result.begin() + begin);
     }
 
     return result;

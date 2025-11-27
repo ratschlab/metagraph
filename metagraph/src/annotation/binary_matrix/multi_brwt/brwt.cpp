@@ -37,7 +37,7 @@ bool BRWT::get(Row row, Column column) const {
 
 template <class Slice, class Callback>
 void call_sliced_rows(Slice &slice, Callback call_row) {
-    for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
+    for (auto row_begin = slice.begin(); row_begin != slice.end(); ) {
         // every row in `slice` ends with `-1`
         auto row_end = row_begin;
         while (utils::get_first(*row_end) != std::numeric_limits<BRWT::Column>::max()) {
