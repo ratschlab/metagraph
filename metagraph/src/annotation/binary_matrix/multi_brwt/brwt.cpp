@@ -36,27 +36,38 @@ bool BRWT::get(Row row, Column column) const {
     return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
 }
 
+template <class Slice, class Callback>
+void call_sliced_rows(Slice &slice, Callback call_row) {
+    for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
+        // every row in `slice` ends with `-1`
+        auto row_end = row_begin;
+        while (utils::get_first(*row_end) != std::numeric_limits<BRWT::Column>::max()) {
+            ++row_end;
+            assert(row_end != slice.end());
+        }
+        call_row(row_begin, row_end);
+        row_begin = row_end + 1;
+    }
+}
+
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
-    Column delim = std::numeric_limits<Column>::max();
-
-    Vector<Vector<Column>> slices;
     ThreadPool thread_pool(num_threads);
     std::mutex mu;
-    slice_rows(row_ids, {}, 20, std::max(10, (int)num_columns() / 20), mu, thread_pool, &slices);
-    thread_pool.join();
-
-    std::vector<size_t> pos(slices.size(), 0);
-    for (size_t r = 0; r < row_ids.size(); ++r) {
-        // merge rows from submatrices
-        for (size_t i = 0; i < slices.size(); ++i) {
-            while (slices[i][pos[i]++] != delim) {
-                rows[r].push_back(slices[i][pos[i] - 1]);
-            }
+    std::vector<SetBitPositions> rows(row_ids.size());
+    slice_rows<Column>(row_ids, {}, 20, std::max(10, (int)num_columns() / 20), thread_pool,
+        [&](const Vector<Column> &slice) {
+            size_t i = 0;
+            std::lock_guard<std::mutex> lock(mu);
+            call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+                for ( ; row_begin != row_end; ++row_begin) {
+                    rows[i].push_back(*row_begin);
+                }
+                i++;
+            });
         }
-    }
+    );
+    thread_pool.join();
     return rows;
 }
 
@@ -69,20 +80,6 @@ void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
     // TODO: It may be faster if index columns are queried in ranges instead of with element-wise
     // access queries.
     slice_rows(utils::arange<Row>(begin, end - begin), slice);
-}
-
-template <class T, class Callback>
-void call_sliced_rows(Vector<T> &slice, Callback call_row) {
-    for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
-        // every row in `slice` ends with `-1`
-        auto row_end = row_begin;
-        while (utils::get_first(*row_end) != std::numeric_limits<BRWT::Column>::max()) {
-            ++row_end;
-            assert(row_end != slice.end());
-        }
-        call_row(row_begin, row_end);
-        row_begin = row_end + 1;
-    }
 }
 
 void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
@@ -191,7 +188,7 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
 //      return positions of set bits with their column ranks.
 // Appends to `slice`
 template <typename T>
-void BRWT::slice_rows_basic(const std::vector<Row> &row_ids, Vector<T> *slice) const {
+void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     T delim;
     if constexpr(utils::is_pair_v<T>) {
         delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
@@ -243,7 +240,7 @@ void BRWT::slice_rows_basic(const std::vector<Row> &row_ids, Vector<T> *slice) c
 
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
         pos[j] = slice->size();
-        child_nodes_[j]->slice_rows_basic<T>(child_row_ids, slice);
+        child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
 
         assert(slice->size() >= pos[j] + child_row_ids.size());
 
@@ -275,50 +272,45 @@ void BRWT::slice_rows_basic(const std::vector<Row> &row_ids, Vector<T> *slice) c
 }
 
 template <typename T>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
-    return slice_rows_basic(row_ids, slice);
-}
-
-template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids,
-                      std::vector<std::tuple<const BRWT*, size_t, std::vector<bool>>> path,
+                      std::vector<std::tuple<const BRWT*, size_t, std::vector<bool>>> call_stack,
                       size_t cutoff_depth, size_t max_columns_cutoff,
-                      std::mutex &mu, ThreadPool &thread_pool, Vector<Vector<T>> *slices) const {
-    T delim;
-    if constexpr(utils::is_pair_v<T>) {
-        delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
-    } else {
-        delim = std::numeric_limits<Column>::max();
-    }
+                      ThreadPool &thread_pool, std::function<void(const Vector<T>&)> call_slice) const {
     if (child_nodes_.size()
             && row_ids.size()
-            && path.size() < cutoff_depth
+            && call_stack.size() < cutoff_depth
             && num_columns() > max_columns_cutoff) {
         // construct indexing for children and the inverse mapping
         auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
 
-        path.emplace_back(this, 0, std::move(skip_row));
+        call_stack.emplace_back(this, 0, std::move(skip_row));
 
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
-            std::get<1>(path.back()) = j;
-            thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&mu,&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(path), cutoff_depth, max_columns_cutoff,
-                                                  mu, thread_pool, slices);
+            std::get<1>(call_stack.back()) = j;
+            thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&thread_pool]() {
+                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(call_stack), cutoff_depth,
+                                                  max_columns_cutoff, thread_pool, call_slice);
             });
         }
     } else {
+        T delim;
+        if constexpr(utils::is_pair_v<T>) {
+            delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
+        } else {
+            delim = std::numeric_limits<Column>::max();
+        }
         Vector<T> slice;
         slice.reserve(row_ids.size() * 4);
-        slice_rows_basic(row_ids, &slice);
+        slice_rows(row_ids, &slice);
         // transform column indexes and insert empty rows
-        for (auto it = path.rbegin(); it != path.rend(); ++it) {
+        for (auto it = call_stack.rbegin(); it != call_stack.rend(); ++it) {
             const auto &[node, j, skip_row] = *it;
 
             size_t pos = 0;
             for (size_t i = 0; i < skip_row.size(); ++i) {
                 if (!skip_row[i]) {
                     // merge rows from child submatrices
-                    while (slice[pos++] != delim) {
+                    while (utils::get_first(slice[pos++]) != std::numeric_limits<Column>::max()) {
                         auto &v = slice[pos - 1];
                         auto &col = utils::get_first(v);
                         col = node->assignments_.get(j, col);
@@ -330,8 +322,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids,
             slice.erase(slice.begin(), slice.begin() + pos);
         }
 
-        std::lock_guard<std::mutex> lock(mu);
-        slices->push_back(std::move(slice));
+        call_slice(std::move(slice));
     }
 }
 
