@@ -71,6 +71,20 @@ void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
     slice_rows(utils::arange<Row>(begin, end - begin), slice);
 }
 
+template <class T, class Callback>
+void call_sliced_rows(Vector<T> &slice, Callback call_row) {
+    for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
+        // every row in `slice` ends with `-1`
+        auto row_end = row_begin;
+        while (utils::get_first(*row_end) != std::numeric_limits<BRWT::Column>::max()) {
+            ++row_end;
+            assert(row_end != slice.end());
+        }
+        call_row(row_begin, row_end);
+        row_begin = row_end + 1;
+    }
+}
+
 void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
                      bool show_progress) const {
     Vector<Column> slice;
@@ -85,28 +99,18 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
         slice.resize(0);
         slice_rows(begin, end, &slice);
 
-        for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
-            // every row in `slice` ends with `-1`
-            auto row_end = std::find(row_begin, slice.end(),
-                                     std::numeric_limits<Column>::max());
-            std::sort(row_begin, row_end);
-            row_begin = row_end + 1;
-        }
+        call_sliced_rows(slice, [](auto row_begin, auto row_end) { std::sort(row_begin, row_end); });
 
         SetBitPositions row;
         row.reserve(num_columns());
 
         #pragma omp ordered
         {
-            for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
-                // every row in `slice` ends with `-1`
-                auto row_end = std::find(row_begin, slice.end(),
-                                         std::numeric_limits<Column>::max());
+            call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
                 row.assign(row_begin, row_end);
                 callback(row);
                 ++progress_bar;
-                row_begin = row_end + 1;
-            }
+            });
         }
     }
 }
@@ -114,8 +118,6 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
-    std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
-
     Vector<std::pair<Column, uint64_t>> slice;
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
@@ -124,19 +126,10 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
 
     assert(slice.size() >= row_ids.size());
 
-    auto row_begin = slice.begin();
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        // every row in `slice` ends with `-1`
-        auto row_end = row_begin;
-        while (row_end->first != std::numeric_limits<Column>::max()) {
-            ++row_end;
-            assert(row_end != slice.end());
-        }
-        rows[i].assign(row_begin, row_end);
-        row_begin = row_end + 1;
-    }
-
+    std::vector<Vector<std::pair<Column, uint64_t>>> rows;
+    call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+        rows.emplace_back(row_begin, row_end);
+    });
     return rows;
 }
 
