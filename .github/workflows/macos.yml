@@ -1,0 +1,284 @@
+# Reusable workflow for MacOS builds
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      alphabet:
+        required: true
+        type: string
+        target_arch:
+          required: true
+          type: string
+
+jobs:
+    
+  build:
+    needs: setup-matrices
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.Build }}
+
+    runs-on: ${{ inputs.platform }}
+
+    env: &macos-env
+      CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
+      INTEGRATION_TEST_ATTEMPTS: 1
+      ARTIFACT: >-
+        artifact-${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
+      CMAKE_ARGS: >-
+        -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+        -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
+
+    name: Build
+
+    defaults: &macos-shell-defaults
+      run:
+        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - &checkout-submodules-cache
+      name: Checkout submodules cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          .git/modules
+          metagraph/external-libraries
+        key: submodules-${{ hashFiles('.gitmodules') }}
+
+    - &checkout-submodules-update
+      name: Checkout submodules
+      run: git submodule update --init --recursive --depth 1
+
+    - &install-rosetta-homebrew
+      name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
+      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
+      run: |
+        if [[ ! -d /usr/local/Homebrew ]]; then
+          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
+          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
+          echo "Replacing legacy brew wrapper..."
+          sudo rm -f /usr/local/bin/brew
+        fi
+        if [[ ! -f /usr/local/bin/brew ]]; then
+          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
+        fi
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/sbin" >> "$GITHUB_PATH"
+
+    - &install-macos-deps
+      name: install dependencies
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
+
+    - &install-openssl-cross-compile
+      name: (Only for cross-compilation) Install OpenSSL for target architecture
+      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
+      run: brew install openssl@3
+
+    - &install-ccache-macos
+      name: Install ccache (macOS)
+      run: brew install ccache
+
+    - &cache-ccache
+      name: Cache ccache
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.CCACHE_DEFAULT_DIR }}
+        key: ccache-${{ env.DESCRIPTOR }}
+
+    - &setup-ccache-config
+      name: Setup ccache config
+      run: |
+        ccache --set-config=max_size=2G
+        ccache --set-config=compression=true
+        ccache --zero-stats
+
+    - &configure-metagraph
+      name: Configure
+      run: |
+        mkdir -p metagraph/build
+        cd metagraph/build
+        cmake ${CMAKE_ARGS} ..
+
+    - &build-metagraph
+      name: Build metagraph
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+    - &build-unit-tests
+      name: Build unit tests
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
+
+    - &build-other
+      name: Build other
+      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+    - &show-ccache-stats
+      name: Show ccache statistics
+      run: ccache --show-stats
+
+    - &upload-build-artifacts
+      name: upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: artifact-${{ env.DESCRIPTOR }}
+        path: |
+          metagraph/build/metagraph_${{ inputs.alphabet }}
+          metagraph/build/unit_tests
+          metagraph/build/integration_tests
+          metagraph/build/test_venv/
+        include-hidden-files: true
+        retention-days: 1
+
+
+  unit-tests:
+    needs: [build]
+
+    runs-on: ${{ inputs.platform }}
+
+    env: *macos-env
+
+    name: Unit Tests
+
+    defaults: *macos-shell-defaults
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - *install-rosetta-homebrew
+
+    - *install-macos-deps
+
+    - *install-openssl-cross-compile
+
+    - &download-build-artifacts
+      name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: *artifact
+        path: metagraph/build
+
+    - &run-unit-tests
+      name: run unit tests
+      run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+
+
+  integration-tests:
+    needs: [build]
+
+    runs-on: ${{ inputs.platform }}
+
+    env: *macos-env
+
+    name: Integration Tests
+
+    defaults: *macos-shell-defaults
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - *install-rosetta-homebrew
+
+    - *install-macos-deps
+
+    - *install-openssl-cross-compile
+
+    - name: install dependencies for integration tests
+      shell: bash
+      run: pip3 install parameterized --break-system-packages --user
+
+    - *download-build-artifacts
+
+    - &recreate-metagraph-symlink
+      name: Recreate metagraph symlink
+      run: |
+        cd metagraph/build
+        binary_name="metagraph_${{ inputs.alphabet }}"
+        chmod +x "${binary_name}"
+        ln -sf "${binary_name}" metagraph
+
+    - &run-integration-tests
+      name: Run integration tests
+      uses: nick-fields/retry@v2
+      with:
+        timeout_minutes: 1000
+        max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
+        retry_on: error
+        command: |
+          cd metagraph/build
+          chmod +x test_venv/bin/python
+          arch -${{ inputs.target_arch }} ./test_venv/bin/python ../integration_tests/main.py
+
+
+    - name: check metagraph workflows
+      run: |
+        export PATH="$(pwd)/metagraph/build/:$PATH"
+        metagraph --help
+        python -m pip install --upgrade pip
+        pip install pytest
+        pip install -r metagraph/workflows/requirements.txt
+        cd metagraph/workflows
+        pytest
+
+
+  examples:
+
+    runs-on: ${{ inputs.platform }}
+
+    env: *macos-env
+
+    name: Examples
+
+    defaults: *macos-shell-defaults
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - *checkout-submodules-cache
+
+    - *checkout-submodules-update
+
+    - *install-rosetta-homebrew
+
+    - *install-macos-deps
+
+    - *install-openssl-cross-compile
+
+    - *install-ccache-macos
+
+    - *cache-ccache
+
+    - *setup-ccache-config
+
+    - &build-subdirectory-example
+      name: Build and run subdirectory example
+      run: |
+        cd metagraph/examples/subdirectory
+        mkdir -p build && cd build
+        cmake ${CMAKE_ARGS} ..
+        make -j"$(getconf _NPROCESSORS_ONLN)"
+        make run_example
+
+    - &build-externalproject-example
+      name: Build and run ExternalProject example
+      run: |
+        cd metagraph/examples/ExternalProject
+        mkdir -p build/metagraph-external-prefix/src
+        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+        cd build
+        cmake -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} ${CMAKE_ARGS} ..
+        # Skip GitHub sync for speed and to bypass github.sha unavailability in PRs from forks
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
+        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
+        make -j"$(getconf _NPROCESSORS_ONLN)"
+        make run_example
+
+    - *show-ccache-stats

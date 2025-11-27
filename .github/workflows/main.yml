@@ -78,473 +78,125 @@ jobs:
           
           echo "matrices=$(echo "$matrices" | jq -c .)" >> $GITHUB_OUTPUT
 
-  # ========================================================================
-  # Linux builds
-  # ========================================================================
-
-  linux-build:
-    runs-on: ${{ matrix.platform }}
-    needs: setup-matrices
-
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Build }}
-
-    env: &linux-env
-      CCACHE_DEFAULT_DIR: ~/.cache/ccache
-      LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
-      INTEGRATION_TEST_ATTEMPTS: 5
-      SHELL_PREFIX: ""
-      MATRIX_DESCRIPTOR: >-
-        ${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.alphabet }}-${{ matrix.compiler }}-${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }}-${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }}
-      CMAKE_ARGS: >-
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DBUILD_STATIC=${{ matrix.build_static }}
-        -DWITH_AVX=${{ matrix.with_avx }}
-        -DWITH_MSSE42=${{ matrix.with_avx }}
-        -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }}
-
-    name: &linux-job-name >-
-      Linux ${{ matrix.job_type }}
-      (${{ matrix.alphabet }},
-      ${{ matrix.build_type }},
-      ${{ matrix.compiler }},
-      ${{ matrix.build_static == 'ON' && 'static' || 'dynamic' }},
-      ${{ matrix.with_avx == 'ON' && 'AVX' || 'noAVX' }})
-
-    defaults: &linux-shell-defaults
-      run:
-        shell: bash
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - &checkout-submodules-cache
-      name: Checkout submodules cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          .git/modules
-          metagraph/external-libraries
-        key: submodules-${{ hashFiles('.gitmodules') }}
-
-    - &checkout-submodules-update
-      name: Checkout submodules
-      run: git submodule update --init --recursive --depth 1
-
-    - &install-linux-deps
-      name: Install build dependencies
-      run: |
-        sudo apt-get update
-        if [[ "${{ matrix.compiler }}" == "g++-13" ]]; then
-            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            sudo apt-get update
-        fi
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
-            sudo apt-get install -y ${{ matrix.compiler }}
-        fi
-        sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
-        if [ "${{ matrix.build_static }}" = "ON" ]; then
-          sudo apt-get install -y libcurl4-openssl-dev
-        fi
-        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
-        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
-
-    - &install-ccache-linux
-      name: Install ccache (Linux)
-      run: sudo apt-get install -y ccache
-
-    - &cache-ccache
-      name: Cache ccache
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.CCACHE_DEFAULT_DIR }}
-        key: ccache-${{ matrix.job_type }}-${{ env.MATRIX_DESCRIPTOR }}
-
-    - &setup-ccache-config
-      name: Setup ccache config
-      run: |
-        ccache --set-config=max_size=2G
-        ccache --set-config=compression=true
-        ccache --zero-stats
-
-    - &configure-metagraph
-      name: Configure
-      run: |
-        mkdir -p metagraph/build
-        cd metagraph/build
-        cmake ${CMAKE_ARGS} ..
-
-    - &build-metagraph
-      name: Build metagraph
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
-
-    - &build-unit-tests
-      name: Build unit tests
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
-
-    - &build-other
-      name: Build other
-      run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
-
-    - &show-ccache-stats
-      name: Show ccache statistics
-      run: ccache --show-stats
-
-    - &upload-build-artifacts
-      name: upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: &artifact-name artifacts-${{ env.MATRIX_DESCRIPTOR }}
-        path: |
-          metagraph/build/metagraph_${{ matrix.alphabet }}
-          metagraph/build/unit_tests
-          metagraph/build/integration_tests
-          metagraph/build/test_venv/
-        include-hidden-files: true
-        retention-days: 1
-
-    # for potential release
-    - name: rename binary
-      if: matrix.with_avx == 'OFF'
-      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
-
-    - name: upload static binary
-      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-13' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
-        path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-
-
-  linux-unit-tests:
-    runs-on: ${{ matrix.platform }}
-    needs: [setup-matrices, linux-build]
-
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.UnitTests }}
-
-    env: *linux-env
-
-    name: *linux-job-name
-
-    defaults: *linux-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *install-linux-deps
-
-    - &download-build-artifacts
-      name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: *artifact-name
-        path: metagraph/build
-
-    - &run-unit-tests
-      name: run unit tests
-      run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
-
-
-  linux-integration-tests:
-    runs-on: ${{ matrix.platform }}
-    needs: [setup-matrices, linux-build]
-
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.IntegrationTests }}
-
-
-    env: *linux-env
-
-    name: *linux-job-name
-
-    defaults: *linux-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *install-linux-deps
-
-
-    - name: Install Python packages for tests
-      run: |
-        pip3 install parameterized
-        sudo apt-get install python3-venv
-
-    - *download-build-artifacts
-
-    - &recreate-metagraph-symlink
-      name: Recreate metagraph symlink
-      run: |
-        cd metagraph/build
-        binary_name="metagraph_${{ matrix.alphabet }}"
-        chmod +x "${binary_name}"
-        ln -sf "${binary_name}" metagraph
-
-    - &run-integration-tests
-      name: Run integration tests
-      uses: nick-fields/retry@v2
-      with:
-        timeout_minutes: 1000
-        max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
-        retry_on: error
-        command: |
-          cd metagraph/build
-          chmod +x test_venv/bin/python
-          ${{ env.SHELL_PREFIX }} ./test_venv/bin/python ../integration_tests/main.py
-
-
-  linux-examples:
-    runs-on: ${{ matrix.platform }}
-    needs: setup-matrices
-
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).linux.Examples }}
-
-    env: *linux-env
-
-    name: *linux-job-name
-
-    defaults: *linux-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *checkout-submodules-cache
-
-    - *checkout-submodules-update
-
-    - *install-linux-deps
-
-    - *install-ccache-linux
-
-    - *cache-ccache
-
-    - *setup-ccache-config
-
-    - &build-subdirectory-example
-      name: Build and run subdirectory example
-      run: |
-        cd metagraph/examples/subdirectory
-        mkdir -p build && cd build
-        cmake ${CMAKE_ARGS} ..
-        make -j"$(getconf _NPROCESSORS_ONLN)"
-        make run_example
-
-    - &build-externalproject-example
-      name: Build and run ExternalProject example
-      run: |
-        cd metagraph/examples/ExternalProject
-        mkdir -p build/metagraph-external-prefix/src
-        ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
-        cd build
-        cmake -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} ${CMAKE_ARGS} ..
-        # Skip GitHub sync for speed and to bypass github.sha unavailability in PRs from forks
-        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
-        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
-        touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
-        make -j"$(getconf _NPROCESSORS_ONLN)"
-        make run_example
-
-    - *show-ccache-stats
 
   # ========================================================================
-  # macOS builds
+  # Linux builds (all valid combinations)
   # ========================================================================
 
-  macos-build:
-    needs: setup-matrices
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.Build }}
-
-    runs-on: ${{ matrix.platform }}
-
-    env: &macos-env
-      CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
-      INTEGRATION_TEST_ATTEMPTS: 1
-      SHELL_PREFIX: arch -${{ matrix.target_arch }}
-      MATRIX_DESCRIPTOR: >-
-        ${{ matrix.build_type }}-${{ matrix.platform }}-${{ matrix.alphabet }}-${{ matrix.target_arch }}
-      CMAKE_ARGS: >-
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }}
-
-    name: &macos-job-name macOS ${{ matrix.job_type }} (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
-
-    defaults: &macos-shell-defaults
-      run:
-        shell: arch -${{ matrix.target_arch }} /bin/bash -eo pipefail {0}
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *checkout-submodules-cache
-
-    - *checkout-submodules-update
-
-    - &install-rosetta-homebrew
-      name: (Only for cross-compilation) Install Rosetta Homebrew in /usr/local
-      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
-      run: |
-        if [[ ! -d /usr/local/Homebrew ]]; then
-          echo "Installing Intel Homebrew to /usr/local under Rosetta..."
-          arch -x86_64 /bin/bash -lc '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-        fi
-        if [[ -f /usr/local/bin/brew ]] && grep -q '/usr/local/Library/Homebrew' /usr/local/bin/brew; then
-          echo "Replacing legacy brew wrapper..."
-          sudo rm -f /usr/local/bin/brew
-        fi
-        if [[ ! -f /usr/local/bin/brew ]]; then
-          sudo ln -s /usr/local/Homebrew/bin/brew /usr/local/bin/brew
-        fi
-        echo "/usr/local/bin" >> "$GITHUB_PATH"
-        echo "/usr/local/sbin" >> "$GITHUB_PATH"
-
-    - &install-macos-deps
-      name: install dependencies
-      run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate
-
-    - &install-openssl-cross-compile
-      name: (Only for cross-compilation) Install OpenSSL for target architecture
-      if: ${{ runner.arch == 'ARM64' && matrix.target_arch == 'x86_64' }}
-      run: brew install openssl@3
-
-    - &install-ccache-macos
-      name: Install ccache (macOS)
-      run: brew install ccache
-
-    - *cache-ccache
-
-    - *setup-ccache-config
-
-    - *configure-metagraph
-
-    - *build-metagraph
-
-    - *build-unit-tests
-
-    - *build-other
-
-    - *show-ccache-stats
-
-    - *upload-build-artifacts
-
-
-  macos-unit-tests:
-    needs: [setup-matrices, macos-build]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.UnitTests }}
-
-    runs-on: ${{ matrix.platform }}
-
-    env: *macos-env
-
-    name: *macos-job-name
-
-    defaults: *macos-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *install-rosetta-homebrew
-
-    - *install-macos-deps
-
-    - *install-openssl-cross-compile
-
-    - *download-build-artifacts
-
-    - *run-unit-tests
-
-
-  macos-integration-tests:
-    needs: [setup-matrices, macos-build]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.IntegrationTests }}
-
-    runs-on: ${{ matrix.platform }}
-
-    env: *macos-env
-
-    name: *macos-job-name
-
-    defaults: *macos-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *install-rosetta-homebrew
-
-    - *install-macos-deps
-
-    - *install-openssl-cross-compile
-
-    - name: install dependencies for integration tests
-      shell: bash
-      run: pip3 install parameterized --break-system-packages --user
-
-    - *download-build-artifacts
-
-    - *recreate-metagraph-symlink
-
-    - *run-integration-tests
-
-    - name: check metagraph workflows
-      run: |
-        export PATH="$(pwd)/metagraph/build/:$PATH"
-        metagraph --help
-        python -m pip install --upgrade pip
-        pip install pytest
-        pip install -r metagraph/workflows/requirements.txt
-        cd metagraph/workflows
-        pytest
-
-
-  macos-examples:
-    needs: setup-matrices
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup-matrices.outputs.matrices).macos.Examples }}
-
-    runs-on: ${{ matrix.platform }}
-
-    env: *macos-env
-
-    name: *macos-job-name
-
-    defaults: *macos-shell-defaults
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - *checkout-submodules-cache
-
-    - *checkout-submodules-update
-
-    - *install-rosetta-homebrew
-
-    - *install-macos-deps
-
-    - *install-openssl-cross-compile
-
-    - *install-ccache-macos
-
-    - *cache-ccache
-
-    - *setup-ccache-config
-
-    - *build-subdirectory-example
-
-    - *build-externalproject-example
-
-    - *show-ccache-stats
+  # Linux builds: 10 valid combinations
+  linux-dna-release-gcc11-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: DNA
+      compiler: g++-11
+      build_static: OFF
+      with_avx: ON
+  linux-dna-release-gcc12-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: DNA
+      compiler: g++-12
+      build_static: OFF
+      with_avx: ON
+  linux-dna-release-gcc13-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: DNA
+      compiler: g++-13
+      build_static: OFF
+      with_avx: ON
+  linux-dna-release-gcc13-static-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: DNA
+      compiler: g++-13
+      build_static: ON
+      with_avx: ON
+  linux-dna-debug-gcc13-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Debug
+      alphabet: DNA
+      compiler: g++-13
+      build_static: OFF
+      with_avx: ON
+  linux-dna-debug-gcc13-static-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Debug
+      alphabet: DNA
+      compiler: g++-13
+      build_static: ON
+      with_avx: ON
+  linux-protein-release-gcc13-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: Protein
+      compiler: g++-13
+      build_static: OFF
+      with_avx: ON
+  linux-protein-release-gcc13-static-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: Protein
+      compiler: g++-13
+      build_static: ON
+      with_avx: ON
+  linux-protein-debug-gcc13-dynamic-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Debug
+      alphabet: Protein
+      compiler: g++-13
+      build_static: OFF
+      with_avx: ON
+  linux-protein-debug-gcc13-static-avx:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Debug
+      alphabet: Protein
+      compiler: g++-13
+      build_static: ON
+      with_avx: ON
+
+  # ========================================================================
+  # macOS builds (all valid combinations)
+  # ========================================================================
+
+  macos-release-latest-arm64:
+    uses: ./.github/workflows/macos.yml
+    with:
+      build_type: Release
+      platform: macos-latest
+      alphabet: DNA
+      target_arch: arm64
+  macos-release-15intel-x86_64:
+    uses: ./.github/workflows/macos.yml
+    with:
+      build_type: Release
+      platform: macos-15-intel
+      alphabet: DNA
+      target_arch: x86_64
+  macos-release-latest-x86_64:
+    uses: ./.github/workflows/macos.yml
+    with:
+      build_type: Release
+      platform: macos-latest
+      alphabet: DNA
+      target_arch: x86_64
+  macos-debug-latest-arm64:
+    uses: ./.github/workflows/macos.yml
+    with:
+      build_type: Debug
+      platform: macos-latest
+      alphabet: DNA
+      target_arch: arm64
 
   # ========================================================================
   # Workflow tests
@@ -553,7 +205,17 @@ jobs:
   test-workflows:
     name: Test metagraph workflows
     runs-on: ubuntu-22.04
-    needs: [linux-build]
+    needs:
+      - linux-dna-release-gcc11-dynamic-avx
+      - linux-dna-release-gcc12-dynamic-avx
+      - linux-dna-release-gcc13-dynamic-avx
+      - linux-dna-release-gcc13-static-avx
+      - linux-dna-debug-gcc13-dynamic-avx
+      - linux-dna-debug-gcc13-static-avx
+      - linux-protein-release-gcc13-dynamic-avx
+      - linux-protein-release-gcc13-static-avx
+      - linux-protein-debug-gcc13-dynamic-avx
+      - linux-protein-debug-gcc13-static-avx
 
     steps:
         - uses: actions/checkout@v4
@@ -594,7 +256,7 @@ jobs:
 
   docker-build-and-push:
     runs-on: ubuntu-22.04
-    needs: [test-workflows, linux-unit-tests, linux-integration-tests]
+    needs: [test-workflows]
     permissions:
       contents: read
       packages: write
@@ -651,7 +313,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     name: Create Release
     runs-on: ubuntu-22.04
-    needs: [test-workflows, linux-unit-tests, linux-integration-tests]
+    needs: [test-workflows]
 
     steps:
       - uses: actions/checkout@v4
