@@ -1071,14 +1071,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
-    size_t num_sliced_rows = from_full_to_small.size();
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
                                        num_threads);
 
-    logger->trace("[Query graph construction] Query annotation with {} rows ({} sliced), {} labels,"
-                  " and {} set bits constructed in {} sec", annotation->num_objects(), num_sliced_rows,
+    logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
+                  " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
 

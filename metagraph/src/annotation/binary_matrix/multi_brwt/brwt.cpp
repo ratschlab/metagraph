@@ -4,7 +4,6 @@
 #include <numeric>
 
 #include <progress_bar.hpp>
-#include <omp.h>
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
