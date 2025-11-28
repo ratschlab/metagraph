@@ -67,14 +67,13 @@ def product(graph_types, anno_types):
     class_name_func=get_test_class_name
 )
 class TestQuery(TestingBase):
-    def _run_with_memory_monitor(self, query_command, expected_stdout_len):
+    def _run_and_check_stdoutlen(self, query_command, expected_stdout_len):
         """Run command with /usr/bin/time and report memory usage"""
         # Get system memory before
         mem_before = psutil.virtual_memory()
         sys_before_gb = (mem_before.total - mem_before.available) / 1024 / 1024 / 1024
         sys_total_gb = mem_before.total / 1024 / 1024 / 1024
         sys_before_pct = mem_before.percent
-        print(f"\n\033[33m[MEM BEFORE]\033[0m {self.graph_repr}+{self.anno_repr}: System before: {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%)", flush=True)
 
         # Use /usr/bin/time to measure memory
         if platform.system() == 'Darwin':  # macOS
@@ -108,7 +107,7 @@ class TestQuery(TestingBase):
                     mem_mb = 0
 
             if mem_mb > 0:
-                print(f"\033[33m[ MEM AFTER]\033[0m {self.graph_repr}+{self.anno_repr}: Peak={mem_mb:.1f}MB | System after: {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%)", flush=True)
+                print(f"\033[33m[  MEMORY  ]\033[0m {self.graph_repr}+{self.anno_repr}: System before: {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%) | System after: {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%) | Peak={mem_mb:.1f}MB", flush=True)
 
         if res.returncode != 0:
             print(f"\n[ERROR] Command failed with return code {res.returncode}")
@@ -193,7 +192,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 137140)
+        self._run_and_check_stdoutlen(query_command, 137140)
 
         query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -202,7 +201,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 136959)
+        self._run_and_check_stdoutlen(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_query_both(self):
@@ -214,7 +213,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 261390)
+        self._run_and_check_stdoutlen(query_command, 261390)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -223,7 +222,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 260215)
+        self._run_and_check_stdoutlen(query_command, 260215)
 
     def test_query_parallel(self):
         """query graph (multi-threaded)"""
@@ -235,7 +234,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 137140)
+        self._run_and_check_stdoutlen(query_command, 137140)
 
         query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -245,7 +244,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 136959)
+        self._run_and_check_stdoutlen(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_query_both_parallel(self):
@@ -258,7 +257,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 261390)
+        self._run_and_check_stdoutlen(query_command, 261390)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -268,7 +267,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 260215)
+        self._run_and_check_stdoutlen(query_command, 260215)
 
     def test_query_with_align(self):
         query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -279,7 +278,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12249 if DNA_MODE else 12244
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -289,7 +288,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12355 if DNA_MODE else 12350
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         # align to graph (multi-threaded)
         query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -301,7 +300,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12249 if DNA_MODE else 12244
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -312,7 +311,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12355 if DNA_MODE else 12350
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_query_with_align_both(self):
@@ -325,7 +324,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 24567)
+        self._run_and_check_stdoutlen(query_command, 24567)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -335,7 +334,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 24779)
+        self._run_and_check_stdoutlen(query_command, 24779)
 
     def test_batch_query(self):
         query_command = '{exe} query --batch-size 100000000 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -345,7 +344,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 137140)
+        self._run_and_check_stdoutlen(query_command, 137140)
 
         query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -354,7 +353,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 136959)
+        self._run_and_check_stdoutlen(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_batch_query_both(self):
@@ -366,7 +365,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 261390)
+        self._run_and_check_stdoutlen(query_command, 261390)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -375,7 +374,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 260215)
+        self._run_and_check_stdoutlen(query_command, 260215)
 
     def test_batch_query_parallel(self):
         """query graph (multi-threaded)"""
@@ -387,7 +386,7 @@ class TestQuery(TestingBase):
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 137140)
+        self._run_and_check_stdoutlen(query_command, 137140)
 
         query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -397,7 +396,7 @@ class TestQuery(TestingBase):
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 136959)
+        self._run_and_check_stdoutlen(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_batch_query_both_parallel(self):
@@ -410,7 +409,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 261390)
+        self._run_and_check_stdoutlen(query_command, 261390)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
@@ -420,7 +419,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 260215)
+        self._run_and_check_stdoutlen(query_command, 260215)
 
     def test_batch_query_with_align(self):
         query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -431,7 +430,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12249 if DNA_MODE else 12244
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -441,7 +440,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12355 if DNA_MODE else 12350
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         # align to graph (multi-threaded)
         query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -453,7 +452,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12249 if DNA_MODE else 12244
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
         query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -464,7 +463,7 @@ class TestQuery(TestingBase):
         ) + MMAP_FLAG
 
         expected_len = 12355 if DNA_MODE else 12350
-        self._run_with_memory_monitor(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, expected_len)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_batch_query_with_align_both(self):
@@ -477,7 +476,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 24567)
+        self._run_and_check_stdoutlen(query_command, 24567)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -487,7 +486,7 @@ class TestQuery(TestingBase):
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
 
-        self._run_with_memory_monitor(query_command, 24779)
+        self._run_and_check_stdoutlen(query_command, 24779)
 
     def test_batch_query_with_tiny_batch(self):
         query_command = '{exe} query --batch-size 100000000 --batch-size 100 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
