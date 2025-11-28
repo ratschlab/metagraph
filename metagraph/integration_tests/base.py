@@ -166,28 +166,28 @@ class TestingBase(unittest.TestCase):
             command += ' --count-kmers'
 
         # Monitor RAM and disk usage before command
-        
+
         mem_before = psutil.virtual_memory()
         disk_before = shutil.disk_usage('/')
-        sys_before_gb = mem_before.used / 1024 / 1024 / 1024
+        sys_before_gb = (mem_before.total - mem_before.available) / 1024 / 1024 / 1024
         sys_total_gb = mem_before.total / 1024 / 1024 / 1024
         sys_before_pct = mem_before.percent
         disk_before_gb = disk_before.used / 1024 / 1024 / 1024
         disk_total_gb = disk_before.total / 1024 / 1024 / 1024
         disk_before_pct = (disk_before.used / disk_before.total) * 100
-        
+
         print(f"\n\033[33m[RESOURCE BEFORE]\033[0m Annotation: RAM {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%) | Disk {disk_before_gb:.1f}/{disk_total_gb:.1f}GB ({disk_before_pct:.1f}%)", flush=True)
 
         res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-        
+
         # Monitor RAM and disk usage after command
         mem_after = psutil.virtual_memory()
         disk_after = shutil.disk_usage('/')
-        sys_after_gb = mem_after.used / 1024 / 1024 / 1024
+        sys_after_gb = (mem_after.total - mem_after.available) / 1024 / 1024 / 1024
         sys_after_pct = mem_after.percent
         disk_after_gb = disk_after.used / 1024 / 1024 / 1024
         disk_after_pct = (disk_after.used / disk_after.total) * 100
-        
+
         print(f"\033[33m[RESOURCE AFTER ]\033[0m Annotation: RAM {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%) | Disk {disk_after_gb:.1f}/{disk_total_gb:.1f}GB ({disk_after_pct:.1f}%)", flush=True)
         if res.returncode != 0:
             raise AssertionError(f"Annotate command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")

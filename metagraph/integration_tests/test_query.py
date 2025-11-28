@@ -71,25 +71,25 @@ class TestQuery(TestingBase):
         """Run command with /usr/bin/time and report memory usage"""
         # Get system memory before
         mem_before = psutil.virtual_memory()
-        sys_before_gb = mem_before.used / 1024 / 1024 / 1024
+        sys_before_gb = (mem_before.total - mem_before.available) / 1024 / 1024 / 1024
         sys_total_gb = mem_before.total / 1024 / 1024 / 1024
         sys_before_pct = mem_before.percent
         print(f"\n\033[33m[MEM BEFORE]\033[0m {self.graph_repr}+{self.anno_repr}: System before: {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%)", flush=True)
-        
+
         # Use /usr/bin/time to measure memory
         if platform.system() == 'Darwin':  # macOS
             time_cmd = '/usr/bin/time -l'
         else:  # Linux
             time_cmd = '/usr/bin/time -v'
-        
+
         full_command = f"{time_cmd} {query_command}"
         res = subprocess.run(full_command, shell=True, stdout=PIPE, stderr=PIPE)
-        
+
         # Get system memory after
         mem_after = psutil.virtual_memory()
-        sys_after_gb = mem_after.used / 1024 / 1024 / 1024
+        sys_after_gb = (mem_after.total - mem_after.available) / 1024 / 1024 / 1024
         sys_after_pct = mem_after.percent
-        
+
         # Extract memory info from stderr
         stderr_text = res.stderr.decode()
         if 'maximum resident set size' in stderr_text.lower():
@@ -106,18 +106,18 @@ class TestQuery(TestingBase):
                     mem_mb = mem_bytes / 1024 / 1024
                 else:
                     mem_mb = 0
-            
+
             if mem_mb > 0:
                 print(f"\033[33m[ MEM AFTER]\033[0m {self.graph_repr}+{self.anno_repr}: Peak={mem_mb:.1f}MB | System after: {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%)", flush=True)
-        
+
         if res.returncode != 0:
             print(f"\n[ERROR] Command failed with return code {res.returncode}")
             print(f"STDERR: {stderr_text[:500]}")
-        
+
         self.assertEqual(res.returncode, 0)
         if expected_stdout_len is not None:
             self.assertEqual(len(res.stdout), expected_stdout_len)
-        
+
         return res
 
     @classmethod
@@ -192,7 +192,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 137140)
 
         query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -201,7 +201,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
@@ -213,7 +213,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 261390)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -222,7 +222,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 260215)
 
     def test_query_parallel(self):
@@ -234,7 +234,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 137140)
 
         query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -244,7 +244,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
@@ -257,7 +257,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 261390)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -267,7 +267,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 260215)
 
     def test_query_with_align(self):
@@ -277,7 +277,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
         ) + MMAP_FLAG
-        
+
         expected_len = 12249 if DNA_MODE else 12244
         self._run_with_memory_monitor(query_command, expected_len)
 
@@ -287,7 +287,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
         ) + MMAP_FLAG
-        
+
         expected_len = 12355 if DNA_MODE else 12350
         self._run_with_memory_monitor(query_command, expected_len)
 
@@ -299,7 +299,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         expected_len = 12249 if DNA_MODE else 12244
         self._run_with_memory_monitor(query_command, expected_len)
 
@@ -310,7 +310,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         expected_len = 12355 if DNA_MODE else 12350
         self._run_with_memory_monitor(query_command, expected_len)
 
@@ -324,7 +324,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 24567)
 
         query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -334,7 +334,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 24779)
 
     def test_batch_query(self):
@@ -344,7 +344,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 137140)
 
         query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -353,7 +353,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
@@ -365,7 +365,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 261390)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -374,7 +374,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 260215)
 
     def test_batch_query_parallel(self):
@@ -386,7 +386,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 137140)
 
         query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
@@ -396,7 +396,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_threads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 136959)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
@@ -419,7 +419,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 260215)
 
     def test_batch_query_with_align(self):
@@ -476,7 +476,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 24567)
 
         query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -486,7 +486,7 @@ class TestQuery(TestingBase):
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
         ) + MMAP_FLAG
-        
+
         self._run_with_memory_monitor(query_command, 24779)
 
     def test_batch_query_with_tiny_batch(self):
