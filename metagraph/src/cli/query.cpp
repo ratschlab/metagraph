@@ -3,6 +3,7 @@
 #include <mutex>
 #include <sstream>
 
+#include <omp.h>
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
@@ -1275,8 +1276,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(config_.parallel_each);
     size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+    omp_set_max_active_levels(2);
+    #pragma omp parallel num_threads(config_.parallel_each)
+    #pragma omp single
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
@@ -1289,7 +1292,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             num_bytes_read += it->seq.l;
         }
 
-        thread_pool.enqueue([&](std::vector<QuerySequence> seq_batch, uint64_t num_bytes_read) {
+        #pragma omp task firstprivate(seq_batch, num_bytes_read) shared(callback)
+        {
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
@@ -1311,7 +1315,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
                 anno_graph_,
-                [&](auto callback) {
+                [&seq_batch](auto callback) {
                     for (const auto &seq : seq_batch) {
                         callback(seq.sequence);
                     }
@@ -1340,11 +1344,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
                           batch_timer.elapsed());
-        }, std::move(seq_batch), num_bytes_read);
+        }
 
         num_bp += num_bytes_read;
     }
-    thread_pool.join();
 
     return num_bp;
 }
