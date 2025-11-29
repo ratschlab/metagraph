@@ -1285,10 +1285,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         // A generator that can be called multiple times until all sequences
         // are called
-        std::vector<QuerySequence> seq_batch;
+        auto seq_batch = std::make_shared<std::vector<QuerySequence>>();
 
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
-            seq_batch.push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
+            seq_batch->push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
             num_bytes_read += it->seq.l;
         }
 
@@ -1298,14 +1298,14 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
             if (aligner_config_ && !config_.batch_align) {
-                alignments_batch.resize(seq_batch.size());
+                alignments_batch.resize(seq_batch->size());
                 logger->trace("Aligning sequences from batch against the full graph...");
                 batch_timer.reset();
 
                 #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
-                for (size_t i = 0; i < seq_batch.size(); ++i) {
+                for (size_t i = 0; i < seq_batch->size(); ++i) {
                     // Set alignment for this seq_batch
-                    alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
+                    alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
                                                          anno_graph_, *aligner_config_);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
@@ -1316,7 +1316,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             auto query_graph = construct_query_graph(
                 anno_graph_,
                 [&seq_batch](auto callback) {
-                    for (const auto &seq : seq_batch) {
+                    for (const auto &seq : *seq_batch) {
                         callback(seq.sequence);
                     }
                 },
@@ -1328,9 +1328,9 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             batch_timer.reset();
 
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
-            for (size_t i = 0; i < seq_batch.size(); ++i) {
+            for (size_t i = 0; i < seq_batch->size(); ++i) {
                 SeqSearchResult search_result
-                    = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
+                    = query_sequence(std::move((*seq_batch)[i]), *query_graph, config_,
                                      config_.batch_align ? aligner_config_.get() : NULL);
 
                 if (alignments_batch.size())
