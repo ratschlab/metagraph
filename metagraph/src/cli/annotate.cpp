@@ -245,12 +245,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         #pragma omp parallel num_threads(get_num_threads())
         #pragma omp single
         for (const auto &file : files) {
-            BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
-                [&anno_graph](auto&& data) {
-                    auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
+            using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
+            BatchAccumulator<Seq> batcher(
+                [&anno_graph](std::vector<Seq>&& data) {
+                    auto *data_p = new std::vector<Seq>(std::move(data));
                     #pragma omp task firstprivate(data_p) shared(anno_graph)
                     {
-                        std::shared_ptr<std::decay_t<decltype(*data_p)>> data_ptr(data_p);
+                        std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
                         anno_graph->annotate_kmer_coords(*data_ptr);
                     }
                 },
@@ -305,12 +306,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     #pragma omp parallel num_threads(get_num_threads())
     #pragma omp single
     for (const auto &file : files) {
-        BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
-            [&anno_graph](auto&& data) {
-                auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
+        using Seq = std::pair<std::string, std::vector<std::string>>;
+        BatchAccumulator<Seq> batcher(
+            [&anno_graph](std::vector<Seq>&& data) {
+                auto *data_p = new std::vector<Seq>(std::move(data));
                 #pragma omp task firstprivate(data_p) shared(anno_graph)
                 {
-                    std::shared_ptr<std::decay_t<decltype(*data_p)>> data_ptr(data_p);
+                    std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
                     anno_graph->annotate_sequences(*data_ptr);
                 }
             },
@@ -345,14 +347,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
 
-            BatchAccumulator<std::tuple<std::string,
-                                        std::vector<std::string>,
-                                        std::vector<uint64_t>>> batcher(
-                [&anno_graph](auto&& data) {
-                    auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
+            using Seq = std::tuple<std::string, std::vector<std::string>, std::vector<uint64_t>>;
+            BatchAccumulator<Seq> batcher(
+                [&anno_graph](std::vector<Seq>&& data) {
+                    auto *data_p = new std::vector<Seq>(std::move(data));
                     #pragma omp task firstprivate(data_p) shared(anno_graph)
                     {
-                        std::shared_ptr<std::decay_t<decltype(*data_p)>> data_ptr(data_p);
+                        std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
                         for (auto &[seq, labels, kmer_counts] : *data_ptr) {
                             anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
                         }

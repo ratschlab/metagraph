@@ -1285,15 +1285,18 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         // A generator that can be called multiple times until all sequences
         // are called
-        auto seq_batch = std::make_shared<std::vector<QuerySequence>>();
+        auto seq_batch = std::make_unique<std::vector<QuerySequence>>();
 
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
             seq_batch->push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
             num_bytes_read += it->seq.l;
         }
 
-        #pragma omp task firstprivate(seq_batch, num_bytes_read) shared(callback)
+        auto *seq_batch_p = seq_batch.release();
+
+        #pragma omp task firstprivate(seq_batch_p, num_bytes_read) shared(callback)
         {
+            std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
