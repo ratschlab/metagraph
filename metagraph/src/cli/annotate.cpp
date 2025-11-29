@@ -241,11 +241,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
     omp_set_max_active_levels(2);
-    #pragma omp parallel num_threads(get_num_threads())
-    #pragma omp single
-    {
     if (config.coordinates) {
-        #pragma omp taskgroup
+        #pragma omp parallel num_threads(get_num_threads())
+        #pragma omp single
         for (const auto &file : files) {
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
                 [&](auto&& data) {
@@ -296,9 +294,12 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-    } else {
-    // iterate over input files
-    #pragma omp taskgroup
+        anno_graph->get_annotator().serialize(annotator_filename);
+        return;
+    }
+
+    #pragma omp parallel num_threads(get_num_threads())
+    #pragma omp single
     for (const auto &file : files) {
         BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
             [&](auto&& data) {
@@ -332,7 +333,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     if (config.count_kmers) {
         // add k-mer counts to existing binary annotations
-        #pragma omp taskgroup
+        #pragma omp parallel num_threads(get_num_threads())
+        #pragma omp single
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
 
@@ -402,8 +404,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             }
         }
     }
-    }
-    } // #pragma omp single
 
     anno_graph->get_annotator().serialize(annotator_filename);
 }
