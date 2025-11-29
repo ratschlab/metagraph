@@ -246,7 +246,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         #pragma omp single
         for (const auto &file : files) {
             BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
-                [&](auto&& data) {
+                [&anno_graph](auto&& data) {
                     auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
                     #pragma omp task firstprivate(data_p) shared(anno_graph)
                     {
@@ -306,7 +306,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     #pragma omp single
     for (const auto &file : files) {
         BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
-            [&](auto&& data) {
+            [&anno_graph](auto&& data) {
                 auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
                 #pragma omp task firstprivate(data_p) shared(anno_graph)
                 {
@@ -348,7 +348,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             BatchAccumulator<std::tuple<std::string,
                                         std::vector<std::string>,
                                         std::vector<uint64_t>>> batcher(
-                [&](auto&& data) {
+                [&anno_graph](auto&& data) {
                     auto *data_p = new std::decay_t<decltype(data)>(std::move(data));
                     #pragma omp task firstprivate(data_p) shared(anno_graph)
                     {
