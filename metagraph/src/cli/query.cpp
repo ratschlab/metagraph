@@ -1134,7 +1134,7 @@ int query_graph(Config *config) {
         };
         size_t num_bp = executor.query_fasta(file, query_callback);
         auto time = curr_timer.elapsed();
-        logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
+        logger->trace("File '{}' with {} base pairs was processed in {:.3f} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
     }
 
@@ -1338,12 +1338,15 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
                 callback(search_result);
             }
+            auto query_time = batch_timer.elapsed();
 
-            logger->trace("Query graph constructed for batch of sequences"
-                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+            logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
+                          " redundancy: {:.2f} bp/kmer,"
+                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
-                          batch_timer.elapsed());
+                          query_time, query_graph_construction + query_time,
+                          num_bytes_read / (query_graph_construction + query_time));
         }
 
         num_bp += num_bytes_read;
