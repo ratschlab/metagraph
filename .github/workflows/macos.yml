@@ -232,7 +232,7 @@ jobs:
 
 
   examples:
-    if: ${{ inputs.build_type == 'Debug' || (runner.arch == 'ARM64' && inputs.target_arch == 'x86_64') }}
+    if: ${{ inputs.build_type == 'Debug' || (inputs.platform == 'macos-latest' && inputs.target_arch == 'x86_64') }}
 
     runs-on: ${{ inputs.platform }}
 
