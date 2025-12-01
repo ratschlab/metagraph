@@ -1,4 +1,4 @@
-# MetaGraph C++ API Examples
+# How to Use MetaGraph as a C++ Library
 
 Examples demonstrating how to integrate MetaGraph into your C++ project using CMake.
 

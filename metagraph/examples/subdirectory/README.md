@@ -1,4 +1,4 @@
-# MetaGraph `add_subdirectory` Example
+# Using MetaGraph as a Library With `add_subdirectory`
 
 Integrate MetaGraph using `add_subdirectory` for simple, direct access to the library.
 

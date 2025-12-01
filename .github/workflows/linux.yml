@@ -12,6 +12,12 @@ on:
       compiler:
         required: true
         type: string
+      cc:
+        required: true
+        type: string
+      cxx:
+        required: true
+        type: string
       build_static:
         required: true
         type: string
@@ -89,7 +95,7 @@ jobs:
       - &setup-ccache-config
         name: Setup ccache config
         run: |
-          ccache --set-config=max_size=2G
+          ccache --set-config=max_size=1G
           ccache --set-config=compression=true
           ccache --zero-stats
 
@@ -165,7 +171,12 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 120
+          max_attempts: 1
+          retry_on: error
+          command: cd metagraph/build && chmod +x unit_tests && ./unit_tests
 
 
   integration-tests:
