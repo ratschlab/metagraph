@@ -66,6 +66,11 @@ jobs:
       - &install-linux-deps
         name: Install build dependencies
         run: |
+          # Remove broken Microsoft APT sources that may be present on the runner and cause `apt-get update` to fail
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list || true
+          sudo sed -i.bak '/packages.microsoft.com/d' /etc/apt/sources.list || true
+
+          # Update package lists and install required packages
           sudo apt-get update
           if [[ "${{ inputs.compiler }}" == "g++-13" ]]; then
               sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
