@@ -29,7 +29,7 @@ jobs:
   build:
     runs-on: &platform ubuntu-22.04
 
-    env: &linux-env
+    env: &linux-build-env
       CCACHE_DEFAULT_DIR: ~/.cache/ccache
       LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
       INTEGRATION_TEST_ATTEMPTS: 5
@@ -85,12 +85,11 @@ jobs:
         name: Install ccache (Linux)
         run: sudo apt-get install -y ccache
 
-      - &cache-ccache
-        name: Cache ccache
+      - name: Cache ccache
         uses: actions/cache@v3
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
-          key: ccache-${{ env.DESCRIPTOR }}
+          key: ccache-build-${{ env.DESCRIPTOR }}
 
       - &setup-ccache-config
         name: Setup ccache config
@@ -151,7 +150,7 @@ jobs:
     runs-on: *platform
     needs: [build]
 
-    env: *linux-env
+    env: *linux-build-env
 
     name: Unit Tests
 
@@ -183,7 +182,7 @@ jobs:
     runs-on: *platform
     needs: [build]
 
-    env: *linux-env
+    env: *linux-build-env
 
     name: Integration Tests
 
@@ -225,8 +224,7 @@ jobs:
   examples:
     runs-on: *platform
 
-    env: *linux-env
-
+    env: *linux-build-env
     name: Examples
 
     defaults: *linux-shell-defaults
@@ -242,7 +240,11 @@ jobs:
 
       - *install-ccache-linux
 
-      - *cache-ccache
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-examples-${{ env.DESCRIPTOR }}
 
       - *setup-ccache-config
 

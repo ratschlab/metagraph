@@ -19,9 +19,9 @@ on:
 jobs:
     
   build:
-    runs-on: ${{ inputs.platform }}
+    runs-on: &platform ${{ inputs.platform }}
 
-    env: &macos-env
+    env: &macos-build-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
       INTEGRATION_TEST_ATTEMPTS: 1
       DESCRIPTOR: >-
@@ -83,12 +83,11 @@ jobs:
         name: Install ccache (macOS)
         run: brew install ccache
 
-      - &cache-ccache
-        name: Cache ccache
+      - name: Cache ccache
         uses: actions/cache@v3
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
-          key: ccache-${{ env.DESCRIPTOR }}
+          key: ccache-build-${{ env.DESCRIPTOR }}
 
       - &setup-ccache-config
         name: Setup ccache config
@@ -137,11 +136,11 @@ jobs:
   unit-tests:
     needs: [build]
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: *platform
 
     name: Unit Tests
 
-    env: *macos-env
+    env: *macos-build-env
 
     defaults: *macos-shell-defaults
 
@@ -177,9 +176,9 @@ jobs:
   integration-tests:
     needs: [build]
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: *platform
 
-    env: *macos-env
+    env: *macos-build-env
 
     name: Integration Tests
 
@@ -234,9 +233,9 @@ jobs:
   examples:
     if: ${{ inputs.build_type == 'Debug' || (inputs.platform == 'macos-latest' && inputs.target_arch == 'x86_64') }}
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: *platform
 
-    env: *macos-env
+    env: *macos-build-env
 
     name: Examples
 
@@ -257,7 +256,11 @@ jobs:
 
       - *install-ccache-macos
 
-      - *cache-ccache
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-examples-${{ env.DESCRIPTOR }}
 
       - *setup-ccache-config
 
