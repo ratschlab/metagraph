@@ -7,24 +7,271 @@ on:
     tags:
       - 'v*'
   pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
 
+  # ========================================================================
+  # Linux builds (all valid combinations)
+  # ========================================================================
+
   Linux:
-    uses: ./.github/workflows/linux-ci.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        alphabet: [DNA, Protein]
+        build_type: [Debug, Release]
+        compiler: [g++-11, g++-12, g++-13]
+        build_static: [OFF, ON]
+        with_avx: [OFF, ON]
+        include:
+          - compiler: g++-11
+            cxx: g++-11
+            cc: gcc-11
 
-  macOS:
-    uses: ./.github/workflows/macos-ci.yml
+          - compiler: g++-12
+            cxx: g++-12
+            cc: gcc-12
 
-  Workflows:
-    needs: [Linux]
-    uses: ./.github/workflows/workflows.yml
+          - compiler: g++-13
+            cxx: g++-13
+            cc: gcc-13
 
-  Docker:
-    needs: [Workflows]
-    uses: ./.github/workflows/docker.yml
+        exclude:
+          - alphabet: Protein
+            compiler: g++-11
+          - alphabet: Protein
+            compiler: g++-12
+          - compiler: g++-11
+            build_static: ON
+          - compiler: g++-12
+            build_static: ON
+          - build_type: Debug
+            build_static: ON
+          - build_type: Debug
+            compiler: g++-11
+          - build_type: Debug
+            compiler: g++-12
+          - with_avx: OFF
+            build_static: OFF
 
-  Release:
+    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: ${{ matrix.build_type }}
+      alphabet: ${{ matrix.alphabet }}
+      compiler: ${{ matrix.compiler }}
+      cc: ${{ matrix.cc }}
+      cxx: ${{ matrix.cxx }}
+      build_static: ${{ matrix.build_static }}
+      with_avx: ${{ matrix.with_avx }}
+
+  # ========================================================================
+  # macOS builds (all valid combinations)
+  # ========================================================================
+
+
+  MacOS:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon Release
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-latest
+            target_arch: arm64
+          # Intel Release
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-15-intel
+            target_arch: x86_64
+          # Apple Silicon runner + Rosetta for x86_64
+          - alphabet: DNA
+            build_type: Release
+            platform: macos-latest
+            target_arch: x86_64
+          # Debug run on Apple Silicon
+          - alphabet: DNA
+            build_type: Debug
+            platform: macos-latest
+            target_arch: arm64
+    name: MacOS (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.platform }}, ${{ matrix.target_arch }})
+    uses: ./.github/workflows/macos.yml
+    with:
+      build_type: ${{ matrix.build_type }}
+      platform: ${{ matrix.platform }}
+      alphabet: ${{ matrix.alphabet }}
+      target_arch: ${{ matrix.target_arch }}
+  # ========================================================================
+  # Workflow tests
+  # ========================================================================
+
+  test-workflows:
+    name: Test metagraph workflows
+    runs-on: ubuntu-22.04
+    needs:
+      - Linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - &download-static-artifacts
+        name: Download static binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: metagraph_*
+          path: artifacts
+
+      - name: setup metagraph binary
+        run: |
+          sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
+          sudo chmod +rx /usr/local/bin/metagraph
+          /usr/local/bin/metagraph --help
+          metagraph --help
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r metagraph/workflows/requirements.txt
+
+      - name: Test metagraph-workflows pytest
+        run: |
+          cd metagraph/workflows
+          pytest
+
+  # ========================================================================
+  # Docker build
+  # ========================================================================
+
+  docker-build-and-push:
+    runs-on: ubuntu-22.04
+    needs: [test-workflows]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - &checkout-submodules-cache
+        name: Checkout submodules cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}
+
+      - &checkout-submodules-update
+        name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Docker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ========================================================================
+  # Release
+  # ========================================================================
+
+  create-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [Workflows]
-    uses: ./.github/workflows/release.yml
+    name: Create Release
+    runs-on: ubuntu-22.04
+    needs: [test-workflows]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *checkout-submodules-cache
+
+      - *checkout-submodules-update
+
+      - *download-static-artifacts
+
+      - name: Tag name
+        id: tag_name
+        run: |
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "VER=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: read current version
+        id: read_version
+        run: |
+          content=`cat package.json`
+          content="${content//'%'/'%25'}"
+          content="${content//$'\n'/'%0A'}"
+          content="${content//$'\r'/'%0D'}"
+          echo "packageJson=$content" >> $GITHUB_OUTPUT
+
+      - name: build source archive including submodules
+        run: |
+          [[ v${{fromJson(steps.read_version.outputs.packageJson).version}} == ${{ steps.tag_name.outputs.TAG }} ]] \
+            || (echo "::error file=package.json::Version in package.json (v${{fromJson(steps.read_version.outputs.packageJson).version}}) does not match tag ${{ steps.tag_name.outputs.TAG }}. Update package.json and set the tag again."; \
+                exit 1)
+          mkdir -p artifacts/sources
+          tag=${{ steps.tag_name.outputs.TAG }}
+          bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${tag}-sources-with-submodules.tar.gz
+          bash .github/workflows/git-archive-all.sh --format zip artifacts/sources/${tag}-sources-with-submodules.zip
+
+      - name: create release with static binaries
+        uses: svenstaro/upload-release-action@v2
+        with:
+          release_name: Version ${{ steps.tag_name.outputs.VER }}
+          body: |
+            The pre-compiled binaries (only for Linux) are statically linked and hence don't require additional libraries to be installed.
+            The *_noAVX binaries are compiled without the modern AVX2 and MSSE4.2 instructions and should be used when the processor does not support these instructions.
+          file: 'artifacts/*/*'
+          file_glob: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          prerelease: true

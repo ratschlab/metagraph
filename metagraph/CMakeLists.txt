@@ -541,8 +541,8 @@ foreach(def ${METAGRAPH_PUBLIC_DEFS})
 endforeach()
 
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/config.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/config.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/compile_definitions.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/compile_definitions.hpp
     @ONLY
 )
 
