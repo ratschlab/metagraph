@@ -435,7 +435,7 @@ int annotate_graph(Config *config) {
         // |config->separately| is true
 
         // annotate multiple files in parallel, each with |parallel_each| threads
-        size_t num_threads = get_num_threads();
+        size_t num_threads = std::max<size_t>(1, get_num_threads());
         set_num_threads(std::max(1u, config->parallel_each));
         omp_set_max_active_levels(3);
 
@@ -454,7 +454,7 @@ int annotate_graph(Config *config) {
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
                     : files[i],
-                2000 / std::max((size_t)1, num_threads));
+                2000 / num_threads);
         }
     }
 
