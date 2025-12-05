@@ -31,6 +31,8 @@ class BinaryMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const = 0;
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows,
+                                                  size_t num_threads) const;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<SetBitPositions> get_rows_dict(std::vector<Row> *rows,
@@ -89,6 +91,8 @@ class RowMajor : public BinaryMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const final;
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows,
+                                                  size_t num_threads) const final;
 };
 
 class GetEntrySupport {

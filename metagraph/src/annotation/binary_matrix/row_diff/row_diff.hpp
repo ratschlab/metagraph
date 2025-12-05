@@ -54,7 +54,7 @@ class IRowDiff {
   protected:
     // get row-diff paths starting at |row_ids|
     std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
+    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads = 1) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
@@ -185,19 +185,21 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    if (num_threads > 1)
-        return BinaryMatrix::get_rows_dict(rows, num_threads);
-
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
     // No sorting in order not to break the topological order for row-diff annotation
 
     // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows, num_threads);
     common::logger->trace("RD: paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
 
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids, num_threads);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
     rd_ids = std::vector<Row>();
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < rd_rows.size(); ++i) {
+        std::sort(rd_rows[i].begin(), rd_rows[i].end());
+    }
 
     // reconstruct annotation rows from row-diff
     SetBitPositions result;
@@ -206,7 +208,6 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
         result.resize(0);
         // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
