@@ -240,7 +240,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     // not too small, not too large
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
-    omp_set_max_active_levels(2);
+
     if (config.coordinates) {
         #pragma omp parallel num_threads(get_num_threads())
         #pragma omp single
@@ -428,6 +428,7 @@ int annotate_graph(Config *config) {
     const auto graph = load_critical_dbg(config->infbase);
 
     if (!config->separately) {
+        omp_set_max_active_levels(2);
         annotate_data(graph, *config, files, config->outfbase);
 
     } else {
@@ -436,6 +437,7 @@ int annotate_graph(Config *config) {
         // annotate multiple files in parallel, each with |parallel_each| threads
         size_t num_threads = get_num_threads();
         set_num_threads(std::max(1u, config->parallel_each));
+        omp_set_max_active_levels(3);
 
         if (!config->outfbase.empty()) {
             try {
