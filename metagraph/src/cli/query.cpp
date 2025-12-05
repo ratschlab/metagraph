@@ -1097,8 +1097,6 @@ int query_graph(Config *config) {
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
@@ -1109,7 +1107,7 @@ int query_graph(Config *config) {
         ));
     }
 
-    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
+    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config));
 
     // iterate over input files
     for (const auto &file : files) {
@@ -1250,17 +1248,17 @@ size_t QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](QuerySequence &sequence) {
+        thread_pool.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
             callback(query_sequence(std::move(sequence), anno_graph_,
                                     config_, aligner_config_.get()));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
-
     // wait while all threads finish processing the current file
-    thread_pool_.join();
+    thread_pool.join();
 
     return num_bp;
 }
