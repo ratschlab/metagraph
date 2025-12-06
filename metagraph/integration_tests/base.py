@@ -44,11 +44,20 @@ class TestingBase(unittest.TestCase):
         cls.tempdir = TemporaryDirectory()
 
     @staticmethod
+    def _run_command(command: str, error_prefix: str, shell: bool = False):
+        """Run a subprocess command and raise AssertionError if it fails."""
+        if shell:
+            res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+        else:
+            res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+        if res.returncode != 0:
+            raise AssertionError(f"{error_prefix} failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+        return res
+
+    @staticmethod
     def _get_stats(graph_path):
         stats_command = METAGRAPH + ' stats ' + graph_path + ' --mmap'
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            raise AssertionError(f"Command '{stats_command}' failed with return code {res.returncode} and error: {res.stderr.decode()}")
+        TestingBase._run_command(stats_command, f"Command '{stats_command}'")
         stats_command = METAGRAPH + ' stats ' + graph_path + MMAP_FLAG
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         parsed = dict()
@@ -83,9 +92,7 @@ class TestingBase(unittest.TestCase):
             input=input
         ) + MMAP_FLAG
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            raise AssertionError(f"Build command failed with return code {res.returncode}\nCommand: {construct_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+        TestingBase._run_command(construct_command, "Build command", shell=True)
 
         if mode == 'primary':
             transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
@@ -98,9 +105,7 @@ class TestingBase(unittest.TestCase):
                 input=output
             ) + MMAP_FLAG
 
-            res = subprocess.run([transform_command], shell=True, stdout=PIPE, stderr=PIPE)
-            if res.returncode != 0:
-                raise AssertionError(f"Transform command failed with return code {res.returncode}\nCommand: {transform_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+            TestingBase._run_command(transform_command, "Transform command", shell=True)
 
             construct_command = '{exe} build --mode primary -p {num_threads} {extra_params} \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
@@ -113,9 +118,7 @@ class TestingBase(unittest.TestCase):
                 input='{}.fasta.gz'.format(output)
             ) + MMAP_FLAG
 
-            res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
-            if res.returncode != 0:
-                raise AssertionError(f"Build primary command failed with return code {res.returncode}\nCommand: {construct_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+            TestingBase._run_command(construct_command, "Build primary command", shell=True)
 
     @staticmethod
     def _clean(graph, output, extra_params=''):
@@ -127,9 +130,7 @@ class TestingBase(unittest.TestCase):
             extra_params=extra_params,
             input=graph
         ) + MMAP_FLAG
-        res = subprocess.run([clean_command], shell=True, stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            raise AssertionError(f"Clean command failed with return code {res.returncode}\nCommand: {clean_command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+        TestingBase._run_command(clean_command, "Clean command", shell=True)
 
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
@@ -176,7 +177,7 @@ class TestingBase(unittest.TestCase):
         disk_total_gb = disk_before.total / 1024 / 1024 / 1024
         disk_before_pct = (disk_before.used / disk_before.total) * 100
 
-        res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = TestingBase._run_command(command, "Annotate command", shell=True)
 
         # Monitor RAM and disk usage after command
         mem_after = psutil.virtual_memory()
@@ -188,8 +189,6 @@ class TestingBase(unittest.TestCase):
 
         print(f"\033[33m[ RESOURCE ]\033[0m Before: RAM {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%) | Disk {disk_before_gb:.1f}/{disk_total_gb:.1f}GB ({disk_before_pct:.1f}%)\n"
               f"\033[33m[          ]\033[0m  After: RAM {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%) | Disk {disk_after_gb:.1f}/{disk_total_gb:.1f}GB ({disk_after_pct:.1f}%)", flush=True)
-        if res.returncode != 0:
-            raise AssertionError(f"Annotate command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
         if target_anno == anno_repr:
             return
@@ -212,9 +211,7 @@ class TestingBase(unittest.TestCase):
         if not no_fork_opt:
             if target_anno.startswith('row_diff'):
                 print('-- Building RowDiff without fork optimization...')
-            res = subprocess.run([command + other_args], shell=True, stdout=PIPE, stderr=PIPE)
-            if res.returncode != 0:
-                raise AssertionError(f"Transform_anno command failed with return code {res.returncode}\nCommand: {command + other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+            TestingBase._run_command(command + other_args, "Transform_anno command", shell=True)
 
         if target_anno == 'row_diff':
             without_input_anno = command.split(' ')
@@ -223,36 +220,24 @@ class TestingBase(unittest.TestCase):
             if not no_anchor_opt:
                 if separate:
                     print('-- Building RowDiff succ/pred...')
-                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True, stdout=PIPE, stderr=PIPE)
-                    if res.returncode != 0:
-                        raise AssertionError(f"RowDiff stage 1 (separate) command failed with return code {res.returncode}\nCommand: echo \"\" | {without_input_anno} --row-diff-stage 1\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
-                res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True, stdout=PIPE, stderr=PIPE)
-                if res.returncode != 0:
-                    raise AssertionError(f"RowDiff stage 1 command failed with return code {res.returncode}\nCommand: {command} --row-diff-stage 1{other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+                    TestingBase._run_command('echo \"\" | ' + without_input_anno + ' --row-diff-stage 1', "RowDiff stage 1 (separate) command", shell=True)
+                TestingBase._run_command(command + ' --row-diff-stage 1' + other_args, "RowDiff stage 1 command", shell=True)
                 subprocess.run([f'rm -f {output}.row_count'], shell=True)
             if separate:
                 print('-- Assigning anchors...')
-                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True, stdout=PIPE, stderr=PIPE)
-                if res.returncode != 0:
-                    raise AssertionError(f"RowDiff stage 2 (separate) command failed with return code {res.returncode}\nCommand: echo \"\" | {without_input_anno} --row-diff-stage 2\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
-            res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True, stdout=PIPE, stderr=PIPE)
-            if res.returncode != 0:
-                raise AssertionError(f"RowDiff stage 2 command failed with return code {res.returncode}\nCommand: {command} --row-diff-stage 2{other_args}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+                TestingBase._run_command('echo \"\" | ' + without_input_anno + ' --row-diff-stage 2', "RowDiff stage 2 (separate) command", shell=True)
+            TestingBase._run_command(command + ' --row-diff-stage 2' + other_args, "RowDiff stage 2 command", shell=True)
             subprocess.run([f'rm -f {output}.row_reduction'], shell=True)
 
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg' + MMAP_FLAG
-                res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-                if res.returncode != 0:
-                    raise AssertionError(f"Transform_anno (final) command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+                TestingBase._run_command(command, "Transform_anno (final) command", shell=True)
                 subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
             else:
                 subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
-            res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-            if res.returncode != 0:
-                raise AssertionError(f"Relax_brwt command failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+            TestingBase._run_command(command, "Relax_brwt command", shell=True)

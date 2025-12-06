@@ -23,7 +23,6 @@ jobs:
 
     env: &macos-build-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
-      INTEGRATION_TEST_ATTEMPTS: 1
       DESCRIPTOR: >-
         ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
       CMAKE_ARGS: >-
@@ -162,7 +161,6 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        shell: bash
         run: |
           cd metagraph/build
           chmod +x unit_tests
@@ -190,7 +188,6 @@ jobs:
       - *install-openssl-cross-compile
 
       - name: install dependencies for integration tests
-        shell: bash
         run: pip3 install parameterized --break-system-packages --user
 
       - *download-build-artifacts
@@ -205,7 +202,6 @@ jobs:
 
       - &run-integration-tests
         name: Run integration tests
-        shell: bash
         run: |
           cd metagraph/build
           chmod +x test_venv/bin/python
