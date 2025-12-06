@@ -1274,9 +1274,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / config_.parallel_each);
+    size_t parallel_each = std::max<size_t>(1, config_.parallel_each);
+    size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / parallel_each);
     omp_set_max_active_levels(2);
-    #pragma omp parallel num_threads(config_.parallel_each)
+    #pragma omp parallel num_threads(parallel_each)
     #pragma omp single
     while (it != end) {
         uint64_t num_bytes_read = 0;
