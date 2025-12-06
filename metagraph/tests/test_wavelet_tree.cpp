@@ -134,11 +134,11 @@ void reference_based_test(const wavelet_tree &vector,
 }
 
 TYPED_TEST(WaveletTreeTest, Queries) {
-    wavelet_tree *vector = new TypeParam(4);
+    wavelet_tree *vector = new TypeParam(2);
     ASSERT_TRUE(vector);
     delete vector;
 
-    vector = new TypeParam(4, std::vector<int>(10, 0));
+    vector = new TypeParam(2, std::vector<int>(10, 0));
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
@@ -160,7 +160,7 @@ TYPED_TEST(WaveletTreeTest, Queries) {
     ASSERT_DEBUG_DEATH(vector->select(1, 0), "");
     delete vector;
 
-    vector = new TypeParam(4, std::vector<int>(10, 2));
+    vector = new TypeParam(2, std::vector<int>(10, 2));
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
@@ -184,7 +184,7 @@ TYPED_TEST(WaveletTreeTest, Queries) {
 
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    vector = new TypeParam(4, numbers);
+    vector = new TypeParam(2, numbers);
     ASSERT_TRUE(vector);
     reference_based_test(*vector, numbers);
 
@@ -319,7 +319,7 @@ void test_wavelet_tree_batch_ins_del(wavelet_tree_dyn *vector,
 TEST(wavelet_tree_dyn, InsertDelete) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree_dyn vector(4, numbers);
+    wavelet_tree_dyn vector(2, numbers);
 
     test_wavelet_tree_ins_del(&vector, &numbers);
 }
@@ -329,14 +329,14 @@ TEST(wavelet_tree_dyn, InsertDeleteBatch) {
                                       0, 1, 2, 0, 3, 2, 1, 1,
                                       3, 1, 0, 2, 3, 2, 2, 1,
                                       3, 2, 1, 2, 3, 3, 3, 0 };
-    wavelet_tree_dyn vector(4);
+    wavelet_tree_dyn vector(2);
 
     test_wavelet_tree_batch_ins_del(&vector, numbers);
 }
 
 TEST(wavelet_tree_dyn, Insert) {
     std::vector<uint64_t> numbers(1024, 0);
-    auto vector = std::make_unique<wavelet_tree_dyn>(4, numbers);
+    auto vector = std::make_unique<wavelet_tree_dyn>(2, numbers);
     ASSERT_EQ(1024u, vector->size());
     ASSERT_EQ(0u, vector->operator[](0));
     EXPECT_EQ(vector->size(), vector->rank(0, vector->size() - 1));
@@ -367,7 +367,7 @@ TYPED_TEST(WaveletTreeTest, ToVector) {
 TYPED_TEST(WaveletTreeTest, Serialization) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new TypeParam(4, numbers);
+    wavelet_tree *vector = new TypeParam(2, numbers);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
     vector->serialize(outstream);
