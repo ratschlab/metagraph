@@ -151,12 +151,12 @@ TYPED_TEST(WaveletTreeTest, Queries) {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(2, i));
         EXPECT_EQ(i, vector->select(0, i + 1));
-        ASSERT_DEBUG_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(2, 0));
     EXPECT_EQ(0u, vector->rank(2, 1'000));
     EXPECT_EQ(10u, vector->rank(0, 1'000));
     ASSERT_DEBUG_DEATH(vector->select(1, 1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select(1, 1), "");
     ASSERT_DEBUG_DEATH(vector->select(1, 0), "");
     delete vector;
 
@@ -173,12 +173,12 @@ TYPED_TEST(WaveletTreeTest, Queries) {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(3, i));
         EXPECT_EQ(i, vector->select(2, i + 1));
-        ASSERT_DEBUG_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(0, 0));
     EXPECT_EQ(0u, vector->rank(0, 1'000));
     EXPECT_EQ(10u, vector->rank(2, 1'000));
     ASSERT_DEBUG_DEATH(vector->select(3, 1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select(1, 1), "");
     ASSERT_DEBUG_DEATH(vector->select(1, 0), "");
     delete vector;
 
@@ -195,7 +195,7 @@ TYPED_TEST(WaveletTreeTest, Queries) {
 TEST(wavelet_tree_dyn, Set) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree_dyn vector(4, numbers);
+    wavelet_tree_dyn vector(2, numbers);
 
     reference_based_test(vector, numbers);
 
