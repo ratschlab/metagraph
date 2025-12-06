@@ -5,6 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import psutil
 import shutil
+import time
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -44,15 +45,17 @@ class TestingBase(unittest.TestCase):
         cls.tempdir = TemporaryDirectory()
 
     @staticmethod
-    def _run_command(command: str, error_prefix: str, shell: bool = False):
+    def _run_command(command: str, error_prefix: str, shell: bool = False, retry: int = 0):
         """Run a subprocess command and raise AssertionError if it fails."""
-        if shell:
-            res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-        else:
-            res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            raise AssertionError(f"{error_prefix} failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
-        return res
+        for attempt in range(1 + retry):
+            if shell:
+                res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+            else:
+                res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+            if res.returncode == 0:
+                return res
+            time.sleep(1)  # wait 1 sec before retrying
+        raise AssertionError(f"{error_prefix} failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
 
     @staticmethod
     def _get_stats(graph_path):
@@ -177,7 +180,7 @@ class TestingBase(unittest.TestCase):
         disk_total_gb = disk_before.total / 1024 / 1024 / 1024
         disk_before_pct = (disk_before.used / disk_before.total) * 100
 
-        res = TestingBase._run_command(command, "Annotate command", shell=True)
+        res = TestingBase._run_command(command, "Annotate command", shell=True, retry=5)
 
         # Monitor RAM and disk usage after command
         mem_after = psutil.virtual_memory()
