@@ -17,7 +17,7 @@ void SortedMultisetDisk<T, C>::sort_and_dedupe() {
             [](const value_type &first, const value_type &second) {
                 return first.first < second.first;
             },
-            this->num_threads_);
+            ips4o::StdThreadPool(this->num_threads_));
 
     auto first = this->data_.begin();
     auto last = this->data_.end();
