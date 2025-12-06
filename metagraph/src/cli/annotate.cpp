@@ -27,6 +27,8 @@ using namespace mtg::seq_io;
 
 using mtg::common::logger;
 
+const size_t LOGGING_INTERVAL_SEQS = 100'000;
+
 
 template <class Callback>
 void call_annotations(const std::string &file,
@@ -66,7 +68,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace(
                         "processed {} variants, last was annotated as <{}>, {} sec",
                         total_seqs, fmt::join(labels, "><"), timer.elapsed());
@@ -85,7 +87,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace("processed {} sequences, annotated as <{}>, {} sec",
                                   total_seqs, fmt::join(labels, "><"), timer.elapsed());
                 }
@@ -136,7 +138,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                   total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                 }
@@ -210,7 +212,7 @@ void add_kmer_counts(const std::string &file,
             total_seqs++;
 
             if (logger->level() <= spdlog::level::level_enum::trace
-                                            && total_seqs % 10000 == 0) {
+                                            && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                 logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                               total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
             }
