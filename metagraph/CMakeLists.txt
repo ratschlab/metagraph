@@ -275,8 +275,11 @@ ExternalProject_Add(SDSL
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
              -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
              -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
-  INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
-          COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
+)
+# Delete gtest headers after install
+ExternalProject_Add_Step(SDSL remove_gtest
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
+  DEPENDEES install
 )
 
 
