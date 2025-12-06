@@ -240,8 +240,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     Timer timer;
 
     // not too small, not too large
-    const size_t batch_size = 1'000;
-    const size_t batch_length = 100'000;
+    const size_t BATCH_SIZE = 5'000;
+    const size_t BATCH_LENGTH = 100'000;
 
     if (config.coordinates) {
         #pragma omp parallel num_threads(get_num_threads())
@@ -257,7 +257,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         anno_graph->annotate_kmer_coords(*data_ptr);
                     }
                 },
-                batch_size, batch_length, batch_size
+                BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
             );
 
             logger->trace("Annotating k-mer coordinates for file {}", file);
@@ -318,7 +318,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     anno_graph->annotate_sequences(*data_ptr);
                 }
             },
-            batch_size, batch_length, batch_size
+            BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
         );
         call_annotations(
             file,
@@ -361,7 +361,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         }
                     }
                 },
-                batch_size, batch_length, batch_size
+                BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
             );
 
             const std::string &counts_fname
