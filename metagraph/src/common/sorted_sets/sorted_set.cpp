@@ -41,7 +41,8 @@ void SortedSet<T, Container>::clear() {
 template <typename T, class Container>
 void SortedSet<T, Container>::sort_and_remove_duplicates() {
     ips4o::parallel::sort(data_.begin(), data_.end(),
-                          std::less<value_type>(), num_threads_);
+                          std::less<value_type>(),
+                          ips4o::StdThreadPool(num_threads_));
     // remove duplicates
     auto unique_end = std::unique(data_.begin(), data_.end());
     data_.erase(unique_end, data_.end());
