@@ -76,7 +76,7 @@ class SortedVector {
     template <class Callback>
     void for_each(const Callback &callback) {
         if (tmp_dir_.empty()) {
-            ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), ips4o::StdThreadPool(num_threads_));
+            ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), num_threads_);
             for (const auto &v : buffer_) {
                 callback(v);
             }
@@ -107,7 +107,7 @@ class SortedVector {
     void flush(bool release_buffer = false) {
         if (tmp_dir_.empty() || (buffer_.empty() && num_chunks_))
             return;
-        ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), ips4o::StdThreadPool(num_threads_));
+        ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), num_threads_);
         elias_fano::EliasFanoEncoderBuffered<T>::append_block(buffer_, tmp_file(num_chunks_++));
         if (release_buffer) {
             buffer_ = std::vector<T>();

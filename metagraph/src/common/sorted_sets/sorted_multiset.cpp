@@ -60,7 +60,7 @@ void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
         [](const value_type &first, const value_type &second) {
             return first.first < second.first;
         },
-        ips4o::StdThreadPool(num_threads_)
+        num_threads_
     );
 
     auto first = data_.begin();

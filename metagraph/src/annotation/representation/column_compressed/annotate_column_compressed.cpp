@@ -289,8 +289,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         if (!swap_dir_.size()) {
             // sort pairs <rank, coord>
             auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j].get_buffer();
-            ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(),
-                                  ips4o::StdThreadPool(get_num_threads()));
+            ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
             if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
                 logger->error("Found repeated coordinates. If flag --anno-header is passed,"
                               " make sure sequence headers don't repeat.");
