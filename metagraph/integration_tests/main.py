@@ -21,23 +21,22 @@ def matches_filter(test, filter_pattern):
     return (fnmatch.fnmatchcase(test_str, filter_pattern) or
             fnmatch.fnmatchcase(method_name, filter_pattern))
 
+def load_tests_from_module(module_name, filter_pattern="*"):
+    all_tests = []
+    for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
+        for test in suite:
+            if matches_filter(test, filter_pattern):
+                all_tests.append(test)
+    return all_tests
 
 def create_test_suite(filter_pattern="*"):
     """Create a test suite with filtered tests"""
     test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
     module_names = [os.path.basename(f)[:-3] for f in test_files]
-
-    test_suite = unittest.TestSuite()
+    all_tests = []
     for module_name in module_names:
-        try:
-            for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
-                for test in suite:
-                    if matches_filter(test, filter_pattern):
-                        test_suite.addTest(test)
-        except Exception as e:
-            print(f"Warning: Failed to load tests from {module_name}: {e}")
-
-    return test_suite
+        all_tests += load_tests_from_module(module_name, filter_pattern)
+    return unittest.TestSuite(all_tests)
 
 
 def run_test_parallel(test_info, filter_pattern="*"):
@@ -52,21 +51,12 @@ def run_test_parallel(test_info, filter_pattern="*"):
         start_idx, end_idx = test_info['start_idx'], test_info['end_idx']
     else:
         test_name = module_name
-        start_idx = end_idx = None
 
     # Load and filter tests
-    try:
-        all_tests = []
-        for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
-            for test in suite:
-                if matches_filter(test, filter_pattern):
-                    all_tests.append(test)
-
-        # Add tests (slice if chunk, all if file)
-        tests_to_run = all_tests[start_idx:end_idx] if is_chunk else all_tests
-        test_suite = unittest.TestSuite(tests_to_run)
-    except Exception as e:
-        return {'test': test_name, 'success': False, 'error': str(e), 'duration': 0}
+    all_tests = load_tests_from_module(module_name, filter_pattern)
+    # Add tests (slice if chunk, all if file)
+    tests_to_run = all_tests[start_idx:end_idx] if is_chunk else all_tests
+    test_suite = unittest.TestSuite(tests_to_run)
 
     # Run with real-time output
     start_time = time.time()
@@ -99,7 +89,7 @@ def run_test_parallel(test_info, filter_pattern="*"):
         'output': output_text
     }
 
-def run_tests_parallel(filter_pattern="*", max_workers=4):
+def run_tests_parallel(max_workers, filter_pattern="*"):
     """Run test files in parallel with chunking"""
     # Find all test files
     test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
@@ -148,25 +138,15 @@ def run_tests_parallel(filter_pattern="*", max_workers=4):
             count = end_idx - start_idx
             class_info.append((class_name, start_idx, count))
 
-        # Create chunks by class
+        # Split large classes into chunks
         for class_name, start_idx, count in class_info:
-            # If class has <= 10 tests, run it as one chunk
-            if count <= 10:
+            for i in range(0, count, chunk_size):
                 all_chunks.append({
                     'file': test_file,
-                    'start_idx': start_idx,
-                    'end_idx': start_idx + count,
+                    'start_idx': start_idx + i,
+                    'end_idx': min(start_idx + i + chunk_size, start_idx + count),
                     'chunk_id': len(all_chunks)
                 })
-            else:
-                # Split large class into chunks
-                for i in range(0, count, chunk_size):
-                    all_chunks.append({
-                        'file': test_file,
-                        'start_idx': start_idx + i,
-                        'end_idx': min(start_idx + i + chunk_size, start_idx + count),
-                        'chunk_id': len(all_chunks)
-                    })
 
     print(f"Running {len(all_chunks)} test chunks in parallel (num_workers={max_workers})")
     print(f"Filter pattern: {filter_pattern}")
@@ -256,7 +236,7 @@ if __name__ == '__main__':
 
         if args.num_workers > 1:
             # Run tests in parallel
-            success = run_tests_parallel(args.filter, args.num_workers)
+            success = run_tests_parallel(args.num_workers, args.filter)
             exit(0 if success else 1)
         else:
             # Run tests sequentially (original behavior)
