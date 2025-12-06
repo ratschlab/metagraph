@@ -108,9 +108,7 @@ Json::Value process_search_request(const Json::Value &json,
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
 
-    // dummy pool doing everything in the caller thread
-    ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
+    QueryExecutor engine(config, anno_graph, std::move(aligner_config));
 
     // Query sequences and callback by appending result to vector with mutex for thread safety
     engine.query_fasta(tf.name(),

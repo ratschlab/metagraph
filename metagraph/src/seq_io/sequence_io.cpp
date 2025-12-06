@@ -1,7 +1,6 @@
 #include "sequence_io.hpp"
 
 #include <algorithm>
-#include <thread>
 #include <sstream>
 
 #include <unistd.h>

@@ -104,10 +104,10 @@ class TestDNAAlign(TestingBase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         if representation != 'succinct':
             self.assertNotEqual(res.returncode, 0)
-            return;
+            return
 
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().rstrip().split('\n')

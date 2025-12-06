@@ -59,7 +59,8 @@ class TestAPIBase(TestingBase):
         construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
                                             --port {self.port} --address {self.host} -p 2'
 
-        return subprocess.Popen(shlex.split(construct_command))
+        return subprocess.Popen(shlex.split(construct_command),
+                                shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 # No canonical mode for Protein alphabets
@@ -412,7 +413,7 @@ class TestAPIClientMultiple(TestingBase):
             cls.server_process = subprocess.Popen(shlex.split(
                 f'{METAGRAPH} server_query {graphs_file} \
                 --port {cls.port} --address {cls.host} -p 2 --threads-each {cls.threads_each}'
-            ))
+            ), shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 cls.server_process.wait(timeout=1)
             except subprocess.TimeoutExpired:

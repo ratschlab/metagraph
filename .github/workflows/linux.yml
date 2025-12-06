@@ -32,7 +32,6 @@ jobs:
     env: &linux-build-env
       CCACHE_DEFAULT_DIR: ~/.cache/ccache
       LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
-      INTEGRATION_TEST_ATTEMPTS: 5
       DESCRIPTOR: >-
         ${{ inputs.build_type }}-${{ inputs.alphabet }}-${{ inputs.compiler }}-${{ inputs.build_static == 'ON' && 'static' || 'dynamic' }}-${{ inputs.with_avx == 'ON' && 'AVX' || 'noAVX' }}
       CMAKE_ARGS: >-
@@ -170,12 +169,8 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 120
-          max_attempts: 1
-          retry_on: error
-          command: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+        run: |
+          cd metagraph/build && chmod +x unit_tests && ./unit_tests
 
 
   integration-tests:
@@ -210,15 +205,10 @@ jobs:
 
       - &run-integration-tests
         name: Run integration tests
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 1000
-          max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
-          retry_on: error
-          command: |
-            cd metagraph/build
-            chmod +x test_venv/bin/python
-            ./test_venv/bin/python ../integration_tests/main.py
+        run: |
+          cd metagraph/build
+          chmod +x test_venv/bin/python
+          ./test_venv/bin/python ../integration_tests/main.py
 
 
   examples:

@@ -551,10 +551,10 @@ void relax_BRWT(BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
         BRWTOptimizer::relax(annotation, relax_max_arity, num_threads);
 }
 
-using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
+using CallColumn = BRWTBottomUpBuilder::CallColumn;
 
 std::vector<uint64_t>
-get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
+get_row_classes(const std::function<void(const CallColumn &, size_t)> &call_columns,
                 size_t num_columns) {
     std::vector<uint64_t> row_classes;
     uint64_t max_class = 0;
@@ -564,7 +564,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
 
     tsl::hopscotch_map<uint64_t, uint64_t> new_class;
 
-    call_columns([&](const auto &col_ptr) {
+    call_columns([&](uint64_t, const auto &col_ptr) {
         new_class.clear();
 
         if (row_classes.empty())
@@ -603,20 +603,20 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
         }
 
         ++progress_bar;
-    });
+    }, 0);
 
     return row_classes;
 }
 
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &, size_t)> &call_columns,
                        size_t max_brwt_arity = 1) {
     uint64_t num_columns = 0;
     uint64_t num_ones = 0;
-    call_columns([&](const auto &col_ptr) {
+    call_columns([&](uint64_t, const auto &col_ptr) {
         num_columns++;
         num_ones += col_ptr->num_set_bits();
-    });
+    }, 0);
 
     if (!num_columns)
         return std::make_unique<Rainbow<BRWT>>();
@@ -687,19 +687,14 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
                              std::cerr, !common::get_verbose());
 
     std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
-    size_t j = 0;
-    ThreadPool thread_pool(get_num_threads());
-    call_columns([&](auto &&col_ptr) {
-        thread_pool.enqueue([&](size_t j, const auto &col_ptr) {
-            sdsl::bit_vector reduced_column(row_pointers.size(), false);
-            for (size_t r = 0; r < row_pointers.size(); ++r) {
-                reduced_column[r] = (*col_ptr)[row_pointers[r]];
-            }
-            columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
-            ++progress_bar;
-        }, j++, std::move(col_ptr));
-    });
-    thread_pool.join();
+    call_columns([&](uint64_t j, auto &&col_ptr) {
+        sdsl::bit_vector reduced_column(row_pointers.size(), false);
+        for (size_t r = 0; r < row_pointers.size(); ++r) {
+            reduced_column[r] = (*col_ptr)[row_pointers[r]];
+        }
+        columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
+        ++progress_bar;
+    }, get_num_threads());
 
     logger->trace("Start compressing the assignment vector");
 
@@ -752,18 +747,18 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
                                    size_t max_brwt_arity) {
     LEncoder label_encoder;
 
-    auto call_columns = [&](const CallColumn &call_column) {
+    auto call_columns = [&](const CallColumn &call_column, size_t num_threads) {
         label_encoder.clear();
 
         bool success = ColumnCompressed<>::merge_load(
             annotation_files,
-            [&](uint64_t /*j*/,
+            [&](uint64_t j,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                call_column(std::move(column));
+                call_column(j, std::move(column));
                 label_encoder.insert_and_encode(label);
             },
-            0
+            num_threads
         );
         if (!success) {
             logger->error("Can't load annotation columns");
@@ -1358,9 +1353,10 @@ convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator)
         annotator.get_matrix().data()
     );
     auto matrix = convert_to_RainbowBRWT(
-        [&](const auto &callback) {
-            for (auto &column : columns) {
-                callback(std::move(column));
+        [&](const auto &callback, size_t num_threads) {
+            #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
+            for (size_t j = 0; j < columns.size(); ++j) {
+                callback(j, std::move(columns[j]));
             }
         }
     );
