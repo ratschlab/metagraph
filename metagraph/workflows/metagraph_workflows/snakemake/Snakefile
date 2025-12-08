@@ -307,7 +307,7 @@ rule annotate_row_diff_brwt:
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
-        """
+        r"""
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt \

@@ -44,6 +44,7 @@ class GraphClientJson:
                abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
+               graphs: Union[None, List[str]] = None,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
@@ -80,6 +81,8 @@ class GraphClientJson:
                       "abundance_sum": abundance_sum,
                       "query_counts": query_counts,
                       "query_coords": query_coords}
+        if graphs is not None:
+            param_dict["graphs"] = graphs
 
         search_results = self._json_seq_query(sequence, param_dict, "search")
 
@@ -178,6 +181,7 @@ class GraphClient:
                abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
+               graphs: Union[None, List[str]] = None,
                align: bool = False,
                **align_params) -> pd.DataFrame:
         """
@@ -195,6 +199,8 @@ class GraphClient:
         :type       query_counts:         bool
         :param      query_coords:         Query k-mer coordinates
         :type       query_coords:         bool
+        :param      graphs:               List of graph names to search. If None, search all graphs
+        :type       graphs:               Union[None, List[str]]
         :param      align:                Align the query sequence to the joint graph and query labels for that alignment instead of the original sequence
         :type       align:                bool
         :param      align_params:         The parameters for alignment (see method align())
@@ -207,7 +213,7 @@ class GraphClient:
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
-                                            align, **align_params)
+                                            graphs, align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
 
@@ -272,6 +278,7 @@ class MultiGraphClient:
                abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
+               graphs: Union[None, List[str]] = None,
                align: bool = False,
                **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
         """
@@ -290,7 +297,7 @@ class MultiGraphClient:
                 result[name] = graph_client.search(sequence, top_labels,
                                                    discovery_fraction, with_signature,
                                                    abundance_sum, query_counts, query_coords,
-                                                   align, **align_params)
+                                                   graphs, align, **align_params)
 
             return result
 
@@ -305,7 +312,7 @@ class MultiGraphClient:
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_fraction, with_signature,
                                             abundance_sum, query_counts, query_coords,
-                                            align, **align_params)
+                                            graphs, align, **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 

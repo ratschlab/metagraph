@@ -43,7 +43,7 @@ void push_sequences(const std::vector<std::string> &files,
             1'000'000
         );
         parse_sequences_and_log(files[i], config, config.k,
-            [&](std::string_view seq, uint32_t count) {
+            [&](std::string_view seq, auto count) {
                 batcher.push_and_pay(seq.size(), seq, count);
             }
         );
@@ -304,7 +304,7 @@ int build_graph(Config *config) {
 
         for (const auto &file : files) {
             parse_sequences_and_log(file, *config, graph->get_k(),
-                [&graph](std::string_view seq, uint32_t) { graph->add_sequence(seq); }
+                [&graph](std::string_view seq, auto) { graph->add_sequence(seq); }
             );
         }
 
@@ -320,7 +320,7 @@ int build_graph(Config *config) {
 
             for (const auto &file : files) {
                 parse_sequences_and_log(file, *config, graph->get_k(),
-                    [&graph,&node_weights](std::string_view seq, uint32_t count) {
+                    [&graph,&node_weights](std::string_view seq, auto count) {
                         graph->map_to_nodes_sequentially(seq,
                             [&](auto node) { node_weights->add_weight(node, count); }
                         );
