@@ -1397,7 +1397,7 @@ class TestAccessions(TestingBase):
         if anno_type == 'header':
             expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
         elif anno_type == 'filename':
-            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-22:0-1-5:1-18-21\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-6-9:0-10-13:0-14-17\n'
+            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
         else:
             raise ValueError(f'Invalid annotation type: {anno_type}')
 
@@ -1462,7 +1462,7 @@ class TestAccessions(TestingBase):
         if anno_type == 'header':
             expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
         elif anno_type == 'filename':
-            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-22:0-1-5:1-18-21\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-6-9:0-10-13:0-14-17\n'
+            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
         else:
             raise ValueError(f'Invalid annotation type: {anno_type}')
 
