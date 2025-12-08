@@ -159,7 +159,7 @@ class TestingBase(unittest.TestCase):
         if with_counts:
             command += ' --count-kmers'
 
-        res = subprocess.run([command], shell=True)
+        res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
         assert(res.returncode == 0)
 
         if target_anno == anno_repr:
@@ -183,7 +183,7 @@ class TestingBase(unittest.TestCase):
         if not no_fork_opt:
             if target_anno.startswith('row_diff'):
                 print('-- Building RowDiff without fork optimization...')
-            res = subprocess.run([command + other_args], shell=True)
+            res = subprocess.run([command + other_args], shell=True, stdout=PIPE, stderr=PIPE)
             assert(res.returncode == 0)
 
         if target_anno == 'row_diff':
@@ -193,24 +193,28 @@ class TestingBase(unittest.TestCase):
             if not no_anchor_opt:
                 if separate:
                     print('-- Building RowDiff succ/pred...')
-                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True)
+                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'],
+                                         shell=True, stdout=PIPE, stderr=PIPE)
                     assert(res.returncode == 0)
-                res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True)
+                res = subprocess.run([command + ' --row-diff-stage 1' + other_args],
+                                     shell=True, stdout=PIPE, stderr=PIPE)
                 assert(res.returncode == 0)
-                subprocess.run([f'rm -f {output}.row_count'], shell=True)
+                subprocess.run([f'rm -f {output}.row_count'], shell=True, stdout=PIPE, stderr=PIPE)
             if separate:
                 print('-- Assigning anchors...')
-                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
+                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'],
+                                     shell=True, stdout=PIPE, stderr=PIPE)
                 assert(res.returncode == 0)
-            res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True)
+            res = subprocess.run([command + ' --row-diff-stage 2' + other_args],
+                                 shell=True, stdout=PIPE, stderr=PIPE)
             assert(res.returncode == 0)
-            subprocess.run([f'rm -f {output}.row_reduction'], shell=True)
+            subprocess.run([f'rm -f {output}.row_reduction'], shell=True, stdout=PIPE, stderr=PIPE)
 
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg' + MMAP_FLAG
-                res = subprocess.run([command], shell=True)
+                res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
                 assert (res.returncode == 0)
                 subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
             else:
@@ -218,5 +222,5 @@ class TestingBase(unittest.TestCase):
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
-            res = subprocess.run([command], shell=True)
+            res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
             assert (res.returncode == 0)
