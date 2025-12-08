@@ -419,16 +419,17 @@ int annotate_graph(Config *config) {
 
     const auto &files = config->fnames;
 
-    if (config->accessions) {
-        common::logger->trace("Constructing sequence accession map");
-        mtg::graph::RowTuplesToId accessions(files);
-        accessions.serialize(config->outfbase);
-        return 0;
-    }
-
     assert(config->infbase_annotators.size() <= 1);
 
     const auto graph = load_critical_dbg(config->infbase);
+
+    if (config->accessions) {
+        common::logger->info("Constructing sequence accession map");
+        graph::RowTuplesToId accessions(files, graph->get_k());
+        accessions.serialize(config->outfbase);
+        common::logger->info("Sequence accession map constructed");
+        return 0;
+    }
 
     if (!config->separately) {
         annotate_data(graph, *config, files, config->outfbase);

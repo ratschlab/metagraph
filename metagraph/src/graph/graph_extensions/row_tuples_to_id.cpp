@@ -11,8 +11,8 @@
 namespace mtg::graph {
 
 
-RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles)
-      : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()) {
+RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t k)
+      : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()), k_(k) {
     size_t num_labels = fai_infiles.size();
 
     #pragma omp parallel for schedule(dynamic)
@@ -26,7 +26,9 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles)
         while (std::getline(fin, line)) {
             std::istringstream sin(line);
             sin >> seq_id >> len;
-            cur_coord += len;
+            if (len < k_)
+                continue;
+            cur_coord += len - k_ + 1;
             seq_id_labels_[i].emplace_back(std::move(seq_id));
             delims.emplace_back(cur_coord);
         }
@@ -52,11 +54,11 @@ std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>>
             const auto &labels = seq_id_labels_[col];
             const auto &delims = seq_delims_[col];
             for (uint64_t coord : tuple) {
-                uint64_t seq_id = delims.rank1(coord);
-                uint64_t conv_coord = seq_id > 0 ? coord - delims.select1(seq_id) : coord;
+                uint64_t seq_id = coord ? delims.rank1(coord - 1) : 0;
+                uint64_t conv_coord = seq_id > 0 ? coord - delims.select1(seq_id) - 1 : coord;
                 auto it = conv_coords.find(seq_id);
                 if (it == conv_coords.end()) {
-                    it = conv_coords.try_emplace(seq_id, std::make_tuple(labels[col], size_t(0), KmerCoords())).first;
+                    it = conv_coords.try_emplace(seq_id, std::make_tuple(labels[seq_id], size_t(0), KmerCoords())).first;
                     std::get<2>(it.value()).resize(rows_tuples.size());
                 }
                 auto &[label, count, cur_tuples] = it.value();
@@ -95,6 +97,8 @@ bool RowTuplesToId::load(const std::string &filename_base) {
             seq_delims_[i].load(*in);
         }
 
+        k_ = load_number(*in);
+
         return true;
 
     } catch (...) {
@@ -113,11 +117,29 @@ void RowTuplesToId::serialize(const std::string &filename_base) const {
         serialize_string_vector(out, seq_id_labels_[i]);
         seq_delims_[i].serialize(out);
     }
+    serialize_number(out, k_);
 }
 
-bool RowTuplesToId::is_compatible(const SequenceGraph &, bool) const {
-    return seq_id_labels_.size() == seq_delims_.size();
+bool RowTuplesToId::is_compatible(const SequenceGraph &graph, bool verbose) const {
+    const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph);
+    if (!dbg) {
+        if (verbose)
+            std::cerr << "Incompatible: graph is not a DeBruijnGraph" << std::endl;
+        return false;
+    }
+    if (dbg->get_k() != k_) {
+        if (verbose)
+            std::cerr << "Incompatible: graph k=" << dbg->get_k()
+                      << " != extension k=" << k_ << std::endl;
+        return false;
+    }
+    if (seq_id_labels_.size() != seq_delims_.size()) {
+        if (verbose)
+            std::cerr << "Incompatible: mapping corrupted -- different number of label sets and delimiter sets"
+                      << std::endl;
+        return false;
+    }
+    return true;
 }
-
 
 } // namespace mtg::graph

@@ -555,7 +555,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == ANNOTATE && infbase.empty() && !accessions)
+    if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == ANNOTATE || identity == EXTEND) && infbase_annotators.size() > 1) {
@@ -1228,6 +1228,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
+            fprintf(stderr, "\t   --accessions \tgenerate a coordinate-to-accession map from FASTA index files [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
