@@ -1316,5 +1316,156 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(len(res.stdout), 137093)
 
 
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(
+        [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
+        [anno for anno in ANNO_TYPES if anno.endswith('_coord')],
+    ),
+    class_name_func=get_test_class_name
+)
+class TestAccessions(TestingBase):
+    def setUp(self):
+        self.tempdir = TemporaryDirectory()
+
+        # Create test FASTA file with multiple sequences
+        self.test_fasta = self.tempdir.name + '/test_sequences.fa'
+        with open(self.test_fasta, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>short\n')
+            f.write('AAA\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTT\n')
+
+        self.query_fasta = self.tempdir.name + '/query.fa'
+        with open(self.query_fasta, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCG\n')
+            f.write('>query2\n')
+            f.write('GCTAGCTA\n')
+
+    def _create_fai_file(self, fasta_file, fai_file):
+        #"""Create a FASTA index file (.fai) from a FASTA file"""
+        # Manual creation of .fai file
+        # Format: seq_name\tlength\toffset\tlinebases\tlinewidth
+        with open(fasta_file, 'rb') as f_in, open(fai_file, 'w') as f_out:
+            offset = 0
+            seq_name = None
+            seq_length = 0
+            line_length = None
+            linebases = None
+            current_offset = 0
+
+            for line_bytes in f_in:
+                line = line_bytes.decode('utf-8')
+                if line.startswith('>'):
+                    # Write previous sequence if exists
+                    if seq_name is not None:
+                        f_out.write(f'{seq_name}\t{seq_length}\t{offset}\t{linebases}\t{line_length}\n')
+
+                    # Start new sequence
+                    seq_name = line[1:].strip().split()[0]  # Get first word after >
+                    seq_length = 0
+                    offset = current_offset
+                    line_length = None
+                    linebases = None
+                else:
+                    seq_line = line.rstrip('\n\r')
+                    if seq_line:
+                        seq_length += len(seq_line)
+                        if line_length is None:
+                            line_length = len(line.rstrip('\n\r'))
+                            linebases = line_length
+
+                # Track current file position
+                current_offset = f_in.tell()
+
+            # Write last sequence
+            if seq_name is not None:
+                f_out.write(f'{seq_name}\t{seq_length}\t{offset}\t{linebases}\t{line_length}\n')
+
+    @parameterized.expand(['header', 'filename'])
+    def test_query_coords(self, anno_type):
+        #"""Test coordinate queries when indexed sequence headers"""
+        self._build_graph(self.test_fasta, self.tempdir.name + '/graph', k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(self.test_fasta, self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+                             self.tempdir.name + '/annotation', self.anno_repr, anno_type=anno_type)
+        if anno_type == 'header':
+            expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
+        elif anno_type == 'filename':
+            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-22:0-1-5:1-18-21\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-6-9:0-10-13:0-14-17\n'
+        else:
+            raise ValueError(f'Invalid annotation type: {anno_type}')
+
+        # Query with coordinates mode - this should map coordinates to sequence headers
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
+                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                         --min-kmers-fraction-label 0.0 \
+                         {self.query_fasta}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(expected_output, res.stdout.decode())
+
+        query_command += ' --accessions'
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertTrue(res.returncode != 0)
+
+    @parameterized.expand(['filename'])
+    def test_query_coords_with_accessions(self, anno_type):
+        #"""Test that --accessions creates mapping and query maps coordinates to sequence headers"""
+        graph_base = self.tempdir.name + '/graph'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno = self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr]
+        self._build_graph(self.test_fasta, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(self.test_fasta, graph_base + graph_file_extension[self.graph_repr],
+                             self.tempdir.name + '/annotation', self.anno_repr, anno_type=anno_type)
+
+        expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
+
+        # Create FASTA index file
+        test_fai = self.tempdir.name + '/test_sequences.fa.fai'
+        self._create_fai_file(self.test_fasta, test_fai)
+        # Verify .fai file was created
+        self.assertTrue(os.path.exists(test_fai))
+
+        # Create accessions mapping from .fai file
+        res = subprocess.run([f'{METAGRAPH} annotate --accessions -i {graph} -o {graph_base} {test_fai}'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        # Verify accessions file was created (it will be at graph.seqs)
+        self.assertTrue(os.path.exists(graph_base + '.seqs'))
+
+        # Query with coordinates mode - this should map coordinates to sequence headers
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
+                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
+                         {self.query_fasta}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(expected_output, res.stdout.decode())
+
+        # Query with coordinates mode - this should map coordinates to sequence headers
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
+                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
+                         {self.query_fasta}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        # Test if the query without accessions works normally
+        if anno_type == 'header':
+            expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
+        elif anno_type == 'filename':
+            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-22:0-1-5:1-18-21\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-6-9:0-10-13:0-14-17\n'
+        else:
+            raise ValueError(f'Invalid annotation type: {anno_type}')
+
+        self.assertEqual(expected_output, res.stdout.decode())
+
+
 if __name__ == '__main__':
     unittest.main()
