@@ -1327,6 +1327,7 @@ if (advanced) {
             fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
                             "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                \t\t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t   --accessions \t\t\tmap labels to accessions using a precomputed mapping (requires coord annotation) [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }
@@ -1395,6 +1396,7 @@ if (advanced) {
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
             fprintf(stderr, "\t   --address \t\tinterface for incoming connections (default: all)\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            fprintf(stderr, "\t   --accessions \tmap labels to accessions using a precomputed mapping (requires coord annotation) [off]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
