@@ -1334,6 +1334,8 @@ class TestAccessions(TestingBase):
             f.write('GTATCGATCG\n')
             f.write('>short\n')
             f.write('AAA\n')
+            f.write('>bad\n')
+            f.write('!A2AA\n')
             f.write('>seq2\n')
             f.write('GCTAGCTAGCTAGCTA\n')
             f.write('>seq3\n')
