@@ -110,17 +110,18 @@ def run_tests_parallel(max_workers, filter_pattern="*"):
         module_tests = load_tests_from_module(module_name, filter_pattern)
         # Split large classes into chunks
         for i, test in enumerate(module_tests):
-            if (i > 0 and
-                    module_tests[i - 1].__class__.__name__ == test.__class__.__name__ and
-                    i < all_chunks[-1]['start_idx'] + chunk_size):
-                all_chunks[-1]['end_idx'] += 1
-            else:
+            if (i == 0 or
+                    test.__class__.__name__ != module_tests[i - 1].__class__.__name__ or
+                    i == all_chunks[-1]['start_idx'] + chunk_size):
                 all_chunks.append({
                     'file': test_file,
                     'start_idx': i,
                     'end_idx': i + 1,
                     'chunk_id': len(all_chunks)
                 })
+            else:
+                all_chunks[-1]['end_idx'] += 1
+                assert all_chunks[-1]['end_idx'] == i + 1
 
     print(f"Running {len(all_chunks)} test chunks in parallel (num_workers={max_workers})")
     print(f"Filter pattern: {filter_pattern}")
