@@ -22,12 +22,12 @@ def matches_filter(test, filter_pattern):
             fnmatch.fnmatchcase(method_name, filter_pattern))
 
 def load_tests_from_module(module_name, filter_pattern="*"):
-    all_tests = []
+    module_tests = []
     for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
         for test in suite:
             if matches_filter(test, filter_pattern):
-                all_tests.append(test)
-    return all_tests
+                module_tests.append(test)
+    return module_tests
 
 def create_test_suite(filter_pattern="*"):
     """Create a test suite with filtered tests"""
@@ -53,9 +53,9 @@ def run_test_parallel(test_info, filter_pattern="*"):
         test_name = module_name
 
     # Load and filter tests
-    all_tests = load_tests_from_module(module_name, filter_pattern)
+    module_tests = load_tests_from_module(module_name, filter_pattern)
     # Add tests (slice if chunk, all if file)
-    tests_to_run = all_tests[start_idx:end_idx] if is_chunk else all_tests
+    tests_to_run = module_tests[start_idx:end_idx] if is_chunk else module_tests
     test_suite = unittest.TestSuite(tests_to_run)
 
     # Run with real-time output
@@ -94,10 +94,6 @@ def run_tests_parallel(max_workers, filter_pattern="*"):
     # Find all test files
     test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
 
-    if not test_files:
-        print("No test files found!")
-        return False
-
     # Create chunks from test files, respecting class boundaries
     # Note: test_api uses server ports, so don't chunk it to avoid port collisions
     chunk_size = 20
@@ -111,40 +107,18 @@ def run_tests_parallel(max_workers, filter_pattern="*"):
             all_chunks.append(test_file)
             continue
 
-        # Load all tests and group by class
-        all_tests = []
-        class_ranges = {}
-        try:
-            for suite in unittest.defaultTestLoader.loadTestsFromName(module_name):
-                for test in suite:
-                    if matches_filter(test, filter_pattern):
-                        class_name = test.__class__.__name__
-                        if class_name not in class_ranges:
-                            class_ranges[class_name] = len(all_tests)
-                        all_tests.append(test)
-        except Exception as e:
-            print(f"Warning: Failed to load tests from {module_name}: {e}")
-            continue
-
-        if not all_tests:
-            continue
-
-        # Convert class_ranges to (start, count) format
-        class_info = []
-        class_names = list(class_ranges.keys())
-        for i, class_name in enumerate(class_names):
-            start_idx = class_ranges[class_name]
-            end_idx = class_ranges[class_names[i + 1]] if i + 1 < len(class_names) else len(all_tests)
-            count = end_idx - start_idx
-            class_info.append((class_name, start_idx, count))
-
+        module_tests = load_tests_from_module(module_name, filter_pattern)
         # Split large classes into chunks
-        for class_name, start_idx, count in class_info:
-            for i in range(0, count, chunk_size):
+        for i, test in enumerate(module_tests):
+            if (i > 0 and
+                    module_tests[i - 1].__class__.__name__ == test.__class__.__name__ and
+                    i < all_chunks[-1]['start_idx'] + chunk_size):
+                all_chunks[-1]['end_idx'] += 1
+            else:
                 all_chunks.append({
                     'file': test_file,
-                    'start_idx': start_idx + i,
-                    'end_idx': min(start_idx + i + chunk_size, start_idx + count),
+                    'start_idx': i,
+                    'end_idx': i + 1,
                     'chunk_id': len(all_chunks)
                 })
 

@@ -161,10 +161,7 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        run: |
-          cd metagraph/build
-          chmod +x unit_tests
-          arch -${{ inputs.target_arch }} ./unit_tests
+        run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
 
 
   integration-tests:
@@ -205,7 +202,7 @@ jobs:
         run: |
           cd metagraph/build
           chmod +x test_venv/bin/python
-          arch -${{ inputs.target_arch }} ./test_venv/bin/python ../integration_tests/main.py
+          ./test_venv/bin/python ../integration_tests/main.py
 
       - name: check metagraph workflows
         run: |
