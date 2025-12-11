@@ -16,8 +16,6 @@
 #include "common/vector.hpp"
 #include "graph/alignment/alignment.hpp"
 
-class ThreadPool;
-
 namespace mtg {
 
 namespace seq_io {
@@ -186,11 +184,9 @@ class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
-                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
-                  ThreadPool &thread_pool)
+                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config)
       : config_(config), anno_graph_(anno_graph),
-        aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) {}
+        aligner_config_(std::move(aligner_config)) {}
 
     /**
      * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
@@ -217,7 +213,6 @@ class QueryExecutor {
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
-    ThreadPool &thread_pool_;
 
     size_t batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                                const std::function<void(const SeqSearchResult &)> &callback);

@@ -3,6 +3,7 @@
 #include <mutex>
 #include <sstream>
 
+#include <omp.h>
 #include <ips4o.hpp>
 
 #include "common/logger.hpp"
@@ -1109,8 +1110,6 @@ int query_graph(Config *config) {
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
@@ -1121,7 +1120,7 @@ int query_graph(Config *config) {
         ));
     }
 
-    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
+    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config));
 
     // iterate over input files
     for (const auto &file : files) {
@@ -1146,7 +1145,7 @@ int query_graph(Config *config) {
         };
         size_t num_bp = executor.query_fasta(file, query_callback);
         auto time = curr_timer.elapsed();
-        logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
+        logger->trace("File '{}' with {} base pairs was processed in {:.3f} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
     }
 
@@ -1262,17 +1261,17 @@ size_t QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
+    ThreadPool thread_pool(get_num_threads(), 1000);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](QuerySequence &sequence) {
+        thread_pool.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
             callback(query_sequence(std::move(sequence), anno_graph_,
                                     config_, aligner_config_.get()));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
-
     // wait while all threads finish processing the current file
-    thread_pool_.join();
+    thread_pool.join();
 
     return num_bp;
 }
@@ -1288,33 +1287,40 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    ThreadPool thread_pool(config_.parallel_each);
-    size_t threads_per_batch = get_num_threads() / config_.parallel_each;
+    size_t parallel_each = std::max<size_t>(1, config_.parallel_each);
+    size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / parallel_each);
+    omp_set_max_active_levels(2);
+    #pragma omp parallel num_threads(parallel_each)
+    #pragma omp single
     while (it != end) {
         uint64_t num_bytes_read = 0;
 
         // A generator that can be called multiple times until all sequences
         // are called
-        std::vector<QuerySequence> seq_batch;
+        auto seq_batch = std::make_unique<std::vector<QuerySequence>>();
 
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
-            seq_batch.push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
+            seq_batch->push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
             num_bytes_read += it->seq.l;
         }
 
-        thread_pool.enqueue([&](std::vector<QuerySequence> seq_batch, uint64_t num_bytes_read) {
+        auto *seq_batch_p = seq_batch.release();
+
+        #pragma omp task firstprivate(seq_batch_p, num_bytes_read) shared(callback)
+        {
+            std::unique_ptr<std::vector<QuerySequence>> seq_batch(seq_batch_p);
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
             if (aligner_config_ && !config_.batch_align) {
-                alignments_batch.resize(seq_batch.size());
+                alignments_batch.resize(seq_batch->size());
                 logger->trace("Aligning sequences from batch against the full graph...");
                 batch_timer.reset();
 
                 #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
-                for (size_t i = 0; i < seq_batch.size(); ++i) {
+                for (size_t i = 0; i < seq_batch->size(); ++i) {
                     // Set alignment for this seq_batch
-                    alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
+                    alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
                                                          anno_graph_, *aligner_config_);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
@@ -1324,8 +1330,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
                 anno_graph_,
-                [&](auto callback) {
-                    for (const auto &seq : seq_batch) {
+                [&seq_batch](auto callback) {
+                    for (const auto &seq : *seq_batch) {
                         callback(seq.sequence);
                     }
                 },
@@ -1337,9 +1343,9 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             batch_timer.reset();
 
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
-            for (size_t i = 0; i < seq_batch.size(); ++i) {
+            for (size_t i = 0; i < seq_batch->size(); ++i) {
                 SeqSearchResult search_result
-                    = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
+                    = query_sequence(std::move((*seq_batch)[i]), *query_graph, config_,
                                      config_.batch_align ? aligner_config_.get() : NULL);
 
                 if (alignments_batch.size())
@@ -1347,17 +1353,19 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
                 callback(search_result);
             }
+            auto query_time = batch_timer.elapsed();
 
-            logger->trace("Query graph constructed for batch of sequences"
-                          " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+            logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
+                          " redundancy: {:.2f} bp/kmer,"
+                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
-                          batch_timer.elapsed());
-        }, std::move(seq_batch), num_bytes_read);
+                          query_time, query_graph_construction + query_time,
+                          num_bytes_read / (query_graph_construction + query_time));
+        }
 
         num_bp += num_bytes_read;
     }
-    thread_pool.join();
 
     return num_bp;
 }
