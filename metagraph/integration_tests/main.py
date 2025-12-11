@@ -43,8 +43,7 @@ def run_test_parallel(test_info, filter_pattern="*"):
     """Run a test file or chunk in parallel"""
     # Parse test info (either file path or chunk dict with indices)
     is_chunk = isinstance(test_info, dict)
-    test_file = test_info['file'] if is_chunk else test_info
-    module_name = os.path.basename(test_file)[:-3]
+    module_name = test_info['module'] if is_chunk else test_info
 
     if is_chunk:
         test_name = f"{module_name}_chunk_{test_info['chunk_id']}"
@@ -104,7 +103,7 @@ def run_tests_parallel(max_workers, filter_pattern="*"):
 
         # Don't chunk test_api to avoid port collisions
         if module_name == 'test_api':
-            all_chunks.append(test_file)
+            all_chunks.append(module_name)
             continue
 
         module_tests = load_tests_from_module(module_name, filter_pattern)
@@ -114,7 +113,7 @@ def run_tests_parallel(max_workers, filter_pattern="*"):
                     test.__class__.__name__ != module_tests[i - 1].__class__.__name__ or
                     i == all_chunks[-1]['start_idx'] + chunk_size):
                 all_chunks.append({
-                    'file': test_file,
+                    'module': module_name,
                     'start_idx': i,
                     'end_idx': i + 1,
                     'chunk_id': len(all_chunks)
