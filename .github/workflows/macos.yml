@@ -23,7 +23,6 @@ jobs:
 
     env: &macos-build-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
-      INTEGRATION_TEST_ATTEMPTS: 1
       DESCRIPTOR: >-
         ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}-${{ inputs.target_arch }}
       CMAKE_ARGS: >-
@@ -162,15 +161,7 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 120
-          max_attempts: 1
-          retry_on: error
-          command: |
-            cd metagraph/build
-            chmod +x unit_tests
-            arch -${{ inputs.target_arch }} ./unit_tests
+        run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
 
 
   integration-tests:
@@ -194,7 +185,6 @@ jobs:
       - *install-openssl-cross-compile
 
       - name: install dependencies for integration tests
-        shell: bash
         run: pip3 install parameterized --break-system-packages --user
 
       - *download-build-artifacts
@@ -209,15 +199,10 @@ jobs:
 
       - &run-integration-tests
         name: Run integration tests
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 1000
-          max_attempts: ${{ env.INTEGRATION_TEST_ATTEMPTS }}
-          retry_on: error
-          command: |
-            cd metagraph/build
-            chmod +x test_venv/bin/python
-            arch -${{ inputs.target_arch }} ./test_venv/bin/python ../integration_tests/main.py
+        run: |
+          cd metagraph/build
+          chmod +x test_venv/bin/python
+          ./test_venv/bin/python ../integration_tests/main.py
 
       - name: check metagraph workflows
         run: |
