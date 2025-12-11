@@ -29,9 +29,8 @@ def load_tests_from_module(module_name, filter_pattern="*"):
                 module_tests.append(test)
     return module_tests
 
-def create_test_suite(filter_pattern="*"):
+def create_test_suite(test_files, filter_pattern="*"):
     """Create a test suite with filtered tests"""
-    test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
     module_names = [os.path.basename(f)[:-3] for f in test_files]
     all_tests = []
     for module_name in module_names:
@@ -88,16 +87,11 @@ def run_test_parallel(test_info, filter_pattern="*"):
         'output': output_text
     }
 
-def run_tests_parallel(max_workers, filter_pattern="*"):
+def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size = 20):
     """Run test files in parallel with chunking"""
-    # Find all test files
-    test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
-
     # Create chunks from test files, respecting class boundaries
     # Note: test_api uses server ports, so don't chunk it to avoid port collisions
-    chunk_size = 20
     all_chunks = []
-
     for test_file in test_files:
         module_name = os.path.basename(test_file)[:-3]
 
@@ -208,15 +202,17 @@ if __name__ == '__main__':
         if args.use_gdb:
             update_prefix('gdb -ex run -ex bt -ex quit --args ')
 
+        test_files = glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/test_*.py')
+
         if args.num_workers > 1:
             # Run tests in parallel
-            success = run_tests_parallel(args.num_workers, args.filter)
+            success = run_tests_parallel(args.num_workers, test_files, args.filter)
             exit(0 if success else 1)
         else:
             # Run tests sequentially (original behavior)
             result = unittest.TextTestRunner(
                 resultclass=TimeLoggingTestResult
-            ).run(create_test_suite(args.filter))
+            ).run(create_test_suite(test_files, args.filter))
             exit(0 if result.wasSuccessful() else 1)
 
     except KeyboardInterrupt:
