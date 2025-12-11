@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-
 namespace mtg {
 namespace kmer {
 namespace alphabets {

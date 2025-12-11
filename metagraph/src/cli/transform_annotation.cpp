@@ -429,21 +429,44 @@ int transform_annotation(Config *config) {
 
         const bool filter_values = config->min_value > 1
                                     || config->max_value
-                                        < std::numeric_limits<unsigned int>::max();
-        const uint64_t min_cols
-            = std::max((uint64_t)std::ceil(num_columns * config->min_fraction),
-                       (uint64_t)config->min_count);
-        const uint64_t max_cols
-            = std::min((uint64_t)std::floor(num_columns * config->max_fraction),
-                       (uint64_t)config->max_count);
-
-        // TODO: set width to log2(max_cols + 1) but make sure atomic
-        //       increments don't overflow
-        sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
+                                        < std::numeric_limits<decltype(config->max_value)>::max();
+        
+        uint64_t min_threshold = config->min_count;
+        uint64_t max_threshold = config->max_count;
+        if (config->min_fraction > 0.0 || config->max_fraction < 1.0) {
+            if (config->count_kmers) {
+                logger->error("--min-fraction and --max-fraction are ignored when --count-kmers is used. "
+                              "Use --min-count and --max-count to filter by aggregated k-mer counts.");
+                exit(1);
+            }
+            min_threshold = std::max<uint64_t>(std::ceil(num_columns * config->min_fraction),
+                                               min_threshold);
+            max_threshold = std::min<uint64_t>(std::floor(num_columns * config->max_fraction),
+                                               max_threshold);
+        }
+        const bool upper_bounded = config->max_fraction < 1.0
+                                     || config->max_count < std::numeric_limits<decltype(config->max_count)>::max();
+        uint64_t max_sum = max_threshold + upper_bounded;
+        if (config->count_kmers) {
+            uint64_t max_representable = sdsl::bits::lo_set[config->count_width];
+            if (upper_bounded) {
+                if (max_representable < max_sum) {
+                    logger->error("Max representable value with count width {} is {}, "
+                                  "which is smaller than {} required to filter by aggregated counts",
+                                  config->count_width, max_representable, max_sum);
+                    exit(1);
+                }
+            } else {
+                max_sum = max_representable;
+            }
+        } else {
+            max_sum = std::min(max_sum, num_columns);
+        }
+        sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(max_sum) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns", std::cerr, !get_verbose());
         std::mutex mu;
 
-        if (filter_values) {
+        if (config->count_kmers || filter_values) {
             auto on_column = [&](uint64_t, const std::string &,
                                  std::unique_ptr<bit_vector>&& col,
                                  sdsl::int_vector<>&& values) {
@@ -460,8 +483,14 @@ int transform_annotation(Config *config) {
 
                 assert(col->num_set_bits() == values.size());
                 for (uint64_t r = 0; r < values.size(); ++r) {
-                    if (values[r] >= config->min_value && values[r] <= config->max_value)
-                        ++sum[col->select1(r + 1)];
+                    if (values[r] >= config->min_value && values[r] <= config->max_value) {
+                        uint64_t pos = col->select1(r + 1);
+                        if (config->count_kmers) {
+                            sum[pos] = std::min(max_sum, sum[pos] + values[r]);
+                        } else {
+                            sum[pos] = std::min(max_sum, sum[pos] + 1);
+                        }
+                    }
                 }
                 ++progress_bar;
             };
@@ -481,7 +510,7 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
 
-                col->call_ones([&](uint64_t i) { ++sum[i]; });
+                col->call_ones([&](uint64_t i) { sum[i] = std::min(max_sum, sum[i] + 1); });
                 ++progress_bar;
             };
 
@@ -493,13 +522,18 @@ int transform_annotation(Config *config) {
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
-                      min_cols, max_cols, num_columns);
+        if (config->count_kmers) {
+            logger->trace("Selecting k-mers with aggregated counts {} <= * <= {}",
+                          min_threshold, max_threshold);
+        } else {
+            logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
+                          min_threshold, max_threshold, num_columns);
+        }
 
         size_t j = 0;
         sdsl::bit_vector mask(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
-            if (sum[i] >= min_cols && sum[i] <= max_cols) {
+            if (sum[i] >= min_threshold && sum[i] <= max_threshold) {
                 mask[i] = true;
                 sum[j++] = sum[i];
             }
