@@ -34,19 +34,16 @@ TEST(LabelEncoderBackwardCompatibility, LoadOldFormatEmpty) {
     serialize_label_encoder_old_format(stream, empty_labels);
     stream.seekg(0);
 
-    size_t total_labels_loaded = 0;
-    for (int _ : {0, 1}) {
-        // Load it
-        LabelEncoder<std::string> encoder;
-        ASSERT_TRUE(encoder.load(stream));
+    // Load it
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
+    // Verify it's empty
+    EXPECT_EQ(0u, encoder.size());
 
-        // Verify it's empty
-        EXPECT_EQ(0u, encoder.size());
+    ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
 
-        ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
-        total_labels_loaded += encoder.size();
-    }
-    ASSERT_EQ(0u, total_labels_loaded); // 0 labels loaded twice
+    ASSERT_TRUE(encoder.load(stream));
+    ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
 }
 
 TEST(LabelEncoderBackwardCompatibility, LoadOldFormat) {
@@ -57,31 +54,29 @@ TEST(LabelEncoderBackwardCompatibility, LoadOldFormat) {
     serialize_label_encoder_old_format(stream, labels);
     stream.seekg(0);
 
-    size_t total_labels_loaded = 0;
-    for (int _ : {0, 1}) {
-        // Load it
-        LabelEncoder<std::string> encoder;
-        ASSERT_TRUE(encoder.load(stream));
+    // Load it
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
 
-        // Verify the labels
-        EXPECT_EQ(3u, encoder.size());
-        EXPECT_TRUE(encoder.label_exists("label1"));
-        EXPECT_TRUE(encoder.label_exists("label2"));
-        EXPECT_TRUE(encoder.label_exists("label3"));
+    // Verify the labels
+    EXPECT_EQ(3u, encoder.size());
+    EXPECT_TRUE(encoder.label_exists("label1"));
+    EXPECT_TRUE(encoder.label_exists("label2"));
+    EXPECT_TRUE(encoder.label_exists("label3"));
 
-        // Verify encoding/decoding
-        EXPECT_EQ(0u, encoder.encode("label1"));
-        EXPECT_EQ(1u, encoder.encode("label2"));
-        EXPECT_EQ(2u, encoder.encode("label3"));
+    // Verify encoding/decoding
+    EXPECT_EQ(0u, encoder.encode("label1"));
+    EXPECT_EQ(1u, encoder.encode("label2"));
+    EXPECT_EQ(2u, encoder.encode("label3"));
 
-        EXPECT_EQ("label1", encoder.decode(0));
-        EXPECT_EQ("label2", encoder.decode(1));
-        EXPECT_EQ("label3", encoder.decode(2));
+    EXPECT_EQ("label1", encoder.decode(0));
+    EXPECT_EQ("label2", encoder.decode(1));
+    EXPECT_EQ("label3", encoder.decode(2));
 
-        ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
-        total_labels_loaded += encoder.size();
-    }
-    ASSERT_EQ(6u, total_labels_loaded); // 3 labels loaded twice
+    ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
+
+    ASSERT_TRUE(encoder.load(stream));
+    ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
 }
 
 TEST(LabelEncoderBackwardCompatibility, LoadNewFormatEmpty) {
@@ -92,19 +87,16 @@ TEST(LabelEncoderBackwardCompatibility, LoadNewFormatEmpty) {
     empty_encoder.serialize(stream);
     stream.seekg(0);
 
-    size_t total_labels_loaded = 0;
-    for (int _ : {0, 1}) {
-        // Load it
-        LabelEncoder<std::string> encoder;
-        ASSERT_TRUE(encoder.load(stream));
+    // Load it
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
+    // Verify it's empty
+    EXPECT_EQ(0u, encoder.size());
 
-        // Verify it's empty
-        EXPECT_EQ(0u, encoder.size());
+    ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
 
-        ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
-        total_labels_loaded += encoder.size();
-    }
-    ASSERT_EQ(0u, total_labels_loaded); // 0 labels loaded twice
+    ASSERT_TRUE(encoder.load(stream));
+    ASSERT_EQ(std::vector<std::string>(), encoder.get_labels());
 }
 
 TEST(LabelEncoderBackwardCompatibility, LoadNewFormat) {
@@ -118,31 +110,29 @@ TEST(LabelEncoderBackwardCompatibility, LoadNewFormat) {
     original_encoder.serialize(stream);
     stream.seekg(0);
 
-    size_t total_labels_loaded = 0;
-    for (int _ : {0, 1}) {
-        // Load it
-        LabelEncoder<std::string> encoder;
-        ASSERT_TRUE(encoder.load(stream));
+    // Load it
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
 
-        // Verify the labels
-        EXPECT_EQ(3u, encoder.size());
-        EXPECT_TRUE(encoder.label_exists("label1"));
-        EXPECT_TRUE(encoder.label_exists("label2"));
-        EXPECT_TRUE(encoder.label_exists("label3"));
+    // Verify the labels
+    EXPECT_EQ(3u, encoder.size());
+    EXPECT_TRUE(encoder.label_exists("label1"));
+    EXPECT_TRUE(encoder.label_exists("label2"));
+    EXPECT_TRUE(encoder.label_exists("label3"));
 
-        // Verify encoding/decoding
-        EXPECT_EQ(0u, encoder.encode("label1"));
-        EXPECT_EQ(1u, encoder.encode("label2"));
-        EXPECT_EQ(2u, encoder.encode("label3"));
+    // Verify encoding/decoding
+    EXPECT_EQ(0u, encoder.encode("label1"));
+    EXPECT_EQ(1u, encoder.encode("label2"));
+    EXPECT_EQ(2u, encoder.encode("label3"));
 
-        EXPECT_EQ("label1", encoder.decode(0));
-        EXPECT_EQ("label2", encoder.decode(1));
-        EXPECT_EQ("label3", encoder.decode(2));
+    EXPECT_EQ("label1", encoder.decode(0));
+    EXPECT_EQ("label2", encoder.decode(1));
+    EXPECT_EQ("label3", encoder.decode(2));
 
-        ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
-        total_labels_loaded += encoder.size();
-    }
-    ASSERT_EQ(6u, total_labels_loaded); // 3 labels loaded twice
+    ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
+
+    ASSERT_TRUE(encoder.load(stream));
+    ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
 }
 
 } // namespace
