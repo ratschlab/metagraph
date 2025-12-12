@@ -52,18 +52,22 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         }
         // backward compatibility
         instream.seekg(pos);
-
-        std::vector<std::string> labels;
-        if (!load_string_vector(instream, &labels))
-            return false;
-        labels.clear();
-        std::vector<uint64_t> values;
-        if (!load_number_vector(instream, &values))
-            return false;
-        values.clear();
-        if (!load_string_vector(instream, &labels))
-            return false;
-        encode_label_ = VectorSet<std::string>(labels.begin(), labels.end());
+        {
+            std::vector<std::string> labels;
+            if (!load_string_vector(instream, &labels))
+                return false;
+            std::vector<uint64_t> values;
+            if (!load_number_vector(instream, &values))
+                return false;
+        }
+        uint64_t s = load_number(instream);
+        encode_label_ = VectorSet<std::string>(s);
+        std::string label;
+        for (uint64_t i = 0; i < s; ++i) {
+            if (!load_string(instream, &label))
+                return false;
+            encode_label_.insert(label);
+        }
         return instream.good();
     } catch (...) {
         return false;
