@@ -54,12 +54,15 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         instream.seekg(pos);
 
         std::vector<std::string> labels;
-        std::vector<uint64_t> values;
-        if (!load_string_vector(instream, &labels)
-                || !load_number_vector(instream, &values)
-                || !load_string_vector(instream, &labels))
+        if (!load_string_vector(instream, &labels))
             return false;
-
+        labels.clear();
+        std::vector<uint64_t> values;
+        if (!load_number_vector(instream, &values))
+            return false;
+        values.clear();
+        if (!load_string_vector(instream, &labels))
+            return false;
         encode_label_ = VectorSet<std::string>(labels.begin(), labels.end());
         return instream.good();
     } catch (...) {
