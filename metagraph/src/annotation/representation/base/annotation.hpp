@@ -10,7 +10,6 @@
 
 #include <tsl/hopscotch_map.h>
 
-#include "common/vector.hpp"
 #include "common/vector_set.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
