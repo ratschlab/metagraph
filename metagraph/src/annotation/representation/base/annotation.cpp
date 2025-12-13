@@ -60,15 +60,10 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
             if (!load_number_vector(instream, &values))
                 return false;
         }
-        uint64_t s = load_number(instream);
-        encode_label_ = VectorSet<std::string>();
-        encode_label_.reserve(s);
-        std::string label;
-        for (uint64_t i = 0; i < s; ++i) {
-            if (!load_string(instream, &label))
-                return false;
-            encode_label_.insert(label);
-        }
+        std::vector<std::string> labels;
+        if (!load_string_vector(instream, &labels))
+            return false;
+        encode_label_ = VectorSet<std::string>(labels.begin(), labels.end());
         return instream.good();
     } catch (...) {
         return false;
