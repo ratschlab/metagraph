@@ -61,7 +61,8 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
                 return false;
         }
         uint64_t s = load_number(instream);
-        encode_label_ = VectorSet<std::string>(s);
+        encode_label_ = VectorSet<std::string>();
+        encode_label_.reserve(s);
         std::string label;
         for (uint64_t i = 0; i < s; ++i) {
             if (!load_string(instream, &label))
