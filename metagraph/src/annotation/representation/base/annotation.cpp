@@ -51,7 +51,10 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
             return instream.good();
         }
         // backward compatibility
-        instream.seekg(pos);
+        if (!instream.seekg(pos)) {
+            logger->error("Couldn't seek in the input stream when reading label encoder");
+            return false;
+        }
         {
             std::vector<std::string> labels;
             if (!load_string_vector(instream, &labels))
