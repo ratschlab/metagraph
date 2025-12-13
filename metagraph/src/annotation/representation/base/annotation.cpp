@@ -66,7 +66,8 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         std::vector<std::string> labels;
         if (!load_string_vector(instream, &labels))
             return false;
-        encode_label_ = VectorSet<std::string>(labels.begin(), labels.end());
+        encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
+                                               std::make_move_iterator(labels.end()));
         return instream.good();
     } catch (...) {
         return false;
