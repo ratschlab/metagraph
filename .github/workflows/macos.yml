@@ -126,8 +126,6 @@ jobs:
           path: |
             metagraph/build/metagraph_${{ inputs.alphabet }}
             metagraph/build/unit_tests
-            metagraph/build/integration_tests
-            metagraph/build/test_venv/
           include-hidden-files: true
           retention-days: 1
 
@@ -200,6 +198,7 @@ jobs:
       - &run-integration-tests
         name: Run integration tests
         run: |
+          ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
           cd metagraph/build
           chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
