@@ -200,7 +200,6 @@ jobs:
         run: |
           ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
           cd metagraph/build
-          chmod +x test_venv/bin/python
           ./test_venv/bin/python ../integration_tests/main.py
 
       - name: check metagraph workflows
