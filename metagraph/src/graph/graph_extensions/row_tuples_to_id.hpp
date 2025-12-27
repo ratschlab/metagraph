@@ -30,7 +30,7 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
     std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>>
     rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuple) const;
 
-    uint64_t num_labels() const { return seq_delims_.size(); }
+    uint64_t num_columns() const { return seq_delims_.size(); }
 
   private:
     std::vector<std::vector<std::string>> seq_id_labels_;
