@@ -7,7 +7,6 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
-#include "common/vector.hpp"
 
 
 namespace mtg::graph {
@@ -27,7 +26,7 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
-    std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>>
+    std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
     rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuple) const;
 
     uint64_t num_columns() const { return seq_delims_.size(); }

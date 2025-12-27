@@ -10,12 +10,13 @@
 
 namespace mtg::graph {
 
+using Tuple = RowTuplesToId::Tuple;
 
 RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t k)
       : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()), k_(k) {
     size_t num_labels = fai_infiles.size();
 
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < num_labels; ++i) {
         std::vector<uint64_t> delims;
         std::ifstream fin(fai_infiles[i]);
@@ -42,10 +43,11 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t
     }
 }
 
-std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>> RowTuplesToId
+std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> RowTuplesToId
 ::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
-    using KmerCoords = std::vector<SmallVector<uint64_t>>;
-    tsl::hopscotch_map<std::uint64_t, std::tuple<std::string, size_t, KmerCoords>> conv_coords(seq_id_labels_.size());
+    // RowTuples = Vector<std::pair<Column, Tuple>>
+    using KmerCoords = std::vector<Tuple>;
+    tsl::hopscotch_map<uint64_t, std::tuple<std::string, size_t, KmerCoords>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
         const auto &row_tuples = rows_tuples[i];
         for (const auto &[col, tuple] : row_tuples) {
@@ -67,7 +69,7 @@ std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>>
         }
     }
 
-    std::vector<std::tuple<std::string, size_t, std::vector<SmallVector<uint64_t>>>> result;
+    std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> result;
     result.reserve(conv_coords.size());
     for (auto it = conv_coords.begin(); it != conv_coords.end(); ++it) {
         auto &[label, count, cur_tuples] = it.value();
