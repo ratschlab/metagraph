@@ -13,7 +13,7 @@ namespace mtg::graph {
 using Tuple = RowTuplesToId::Tuple;
 
 RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t k)
-      : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()), k_(k) {
+      : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()) {
     size_t num_labels = fai_infiles.size();
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -27,9 +27,9 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t
         while (std::getline(fin, line)) {
             std::istringstream sin(line);
             sin >> seq_id >> len;
-            if (len < k_)
+            if (len < k)
                 continue;
-            cur_coord += len - k_ + 1;
+            cur_coord += len - k + 1;
             seq_id_labels_[i].emplace_back(std::move(seq_id));
             delims.emplace_back(cur_coord);
         }
@@ -99,8 +99,6 @@ bool RowTuplesToId::load(const std::string &filename_base) {
             seq_delims_[i].load(*in);
         }
 
-        k_ = load_number(*in);
-
         return true;
 
     } catch (...) {
@@ -119,7 +117,6 @@ void RowTuplesToId::serialize(const std::string &filename_base) const {
         serialize_string_vector(out, seq_id_labels_[i]);
         seq_delims_[i].serialize(out);
     }
-    serialize_number(out, k_);
 }
 
 bool RowTuplesToId::is_compatible(const SequenceGraph &graph, bool verbose) const {
@@ -127,12 +124,6 @@ bool RowTuplesToId::is_compatible(const SequenceGraph &graph, bool verbose) cons
     if (!dbg) {
         if (verbose)
             std::cerr << "Incompatible: graph is not a DeBruijnGraph" << std::endl;
-        return false;
-    }
-    if (dbg->get_k() != k_) {
-        if (verbose)
-            std::cerr << "Incompatible: graph k=" << dbg->get_k()
-                      << " != extension k=" << k_ << std::endl;
         return false;
     }
     if (seq_id_labels_.size() != seq_delims_.size()) {
