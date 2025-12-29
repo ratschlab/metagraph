@@ -147,7 +147,7 @@ void rename_or_move_file(const std::string &old_fname, const std::string &fname)
         return;
     // if cross-device, fallback to copy + remove
     if (ec.value() == EXDEV) {
-        fs::copy_file(old_fname, fname);
+        fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
         fs::remove(old_fname);
         return;
     }
