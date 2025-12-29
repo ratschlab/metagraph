@@ -64,7 +64,6 @@ void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,
     const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
     const std::string old_fname = weights.filename();
     weights.close(false); // close without removing the file
-    std::error_code ec;
     utils::rename_file(old_fname, fname);
 }
 
