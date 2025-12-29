@@ -19,6 +19,7 @@
 namespace utils {
 
 using mtg::common::logger;
+namespace fs = std::filesystem;
 
 std::filesystem::path SWAP_PATH;
 std::vector<std::string> TMP_DIRS;
@@ -135,6 +136,23 @@ bool check_if_writable(const std::string &filename) {
         std::remove(filename.c_str());
 
     return true;
+}
+
+
+void rename_file(const std::string &old_fname, const std::string &fname) {
+    std::error_code ec;
+    fs::rename(old_fname, fname, ec);
+    if (!ec)
+        return;  // return if rename was successful
+
+    if (ec.value() == EXDEV) {
+        // can't rename for cross-device, fallback to copy + remove
+        fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
+        fs::remove(old_fname);
+    } else {
+        // Other rename error
+        throw fs::filesystem_error("rename failed", old_fname, fname, ec);
+    }
 }
 
 
