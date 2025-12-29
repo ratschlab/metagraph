@@ -64,7 +64,18 @@ void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,
     const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
     const std::string old_fname = weights.filename();
     weights.close(false); // close without removing the file
-    fs::rename(old_fname, fname);
+    std::error_code ec;
+    fs::rename(old_fname, fname, ec);
+    if (!ec)
+        return;  // return if rename was successful
+    if (ec.value() == EXDEV) {
+        // can't rename for cross-device, fallback to copy + remove
+        fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
+        fs::remove(old_fname);
+    } else {
+        // Other rename error
+        throw fs::filesystem_error("rename failed", old_fname, fname, ec);
+    }
 }
 
 bool NodeWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {
