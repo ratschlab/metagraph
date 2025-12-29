@@ -142,17 +142,17 @@ bool check_if_writable(const std::string &filename) {
 void rename_file(const std::string &old_fname, const std::string &fname) {
     std::error_code ec;
     fs::rename(old_fname, fname, ec);
+    // check if rename was successful
     if (!ec)
-        return;  // return if rename was successful
-
+        return;
+    // if cross-device, fallback to copy + remove
     if (ec.value() == EXDEV) {
-        // can't rename for cross-device, fallback to copy + remove
-        fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
+        fs::copy_file(old_fname, fname);
         fs::remove(old_fname);
-    } else {
-        // Other rename error
-        throw fs::filesystem_error("rename failed", old_fname, fname, ec);
+        return;
     }
+    // other errors
+    throw fs::filesystem_error("rename failed", old_fname, fname, ec);
 }
 
 

@@ -22,7 +22,7 @@ void remove_temp_dir(std::filesystem::path dir_name);
 
 bool check_if_writable(const std::string &filename);
 
-// Rename a file, overwriting the target if it exists. Also works for cross-device renames (moves).
+// Rename a file, overwriting the target if exists. Also works for cross-device moves.
 void rename_file(const std::string &old_name, const std::string &new_name);
 
 // Call with_mmap() to check and with_mmap(true) to set. Off by default.
