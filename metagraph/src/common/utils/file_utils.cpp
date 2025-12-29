@@ -139,7 +139,7 @@ bool check_if_writable(const std::string &filename) {
 }
 
 
-void rename_file(const std::string &old_fname, const std::string &fname) {
+void rename_or_move_file(const std::string &old_fname, const std::string &fname) {
     std::error_code ec;
     fs::rename(old_fname, fname, ec);
     // check if rename was successful
