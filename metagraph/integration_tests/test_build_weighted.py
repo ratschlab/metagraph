@@ -25,6 +25,11 @@ build_params = {'succinct': ('succinct', '""'),
                 'hashfast': ('hashfast', '""'),
                 'hashstr': ('hashstr', '""')}
 
+# Also test with swap in shm but only if it exists (Linux but not MacOS)
+# (shm has a different filesystem, hence we're testing cross-device moves here)
+if os.path.isdir("/dev/shm"):
+    build_params['succinct_shm'] = ('succinct', '/dev/shm/')
+
 BUILDS = [name for name, _ in build_params.items()]
 
 
