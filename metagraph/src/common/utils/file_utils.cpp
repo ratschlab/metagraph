@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
+#include <system_error>
 
 #if defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
@@ -146,7 +147,7 @@ void rename_or_move_file(const std::string &old_fname, const std::string &fname)
     if (!ec)
         return;
     // if cross-device, fallback to copy + remove
-    if (ec.value() == EXDEV) {
+    if (ec == std::errc::cross_device_link) {
         fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
         fs::remove(old_fname);
         return;
