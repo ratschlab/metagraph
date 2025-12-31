@@ -1488,7 +1488,11 @@ class TestAccessions(TestingBase):
         file2 = self.tempdir.name + '/file2.fa'
         with open(file2, 'w') as f:
             f.write('>seq3\n')
-            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTT\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTTGCTAGC\n')
+            f.write('>short\n')
+            f.write('AAA\n')
+            f.write('>bad\n')
+            f.write('!A2AA\n')
             f.write('>seq4\n')
             f.write('TATCGATCGATCGATCG\n')
 
@@ -1509,6 +1513,8 @@ class TestAccessions(TestingBase):
         all_files = f'{file1} {file2}'
         self._build_graph(all_files, graph_base, k=5, repr=self.graph_repr, mode='basic')
         self._annotate_graph(all_files, graph, anno_base, self.anno_repr, anno_type=anno_type)
+
+        # The order of the columns may be arbitrary, so we run stats to get the final order
         stats_command = f"{METAGRAPH} stats {anno} --print-col-names"
         res = subprocess.run([stats_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Stats failed: {res.stderr.decode()}")
@@ -1541,17 +1547,14 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
 
         output = res.stdout.decode()
-        # Verify that output contains sequence headers (seq1, seq2, etc.) instead of just coordinates
-        # query1 matches seq1 (from file1) - TATCGATCG appears in seq1 (GTATCGATCG)
-        # query2 matches seq2 (from file1) - GCTAGCTA appears in seq2 (GCTAGCTAGCTAGCTA)
-        self.assertIn('seq1', output, "Output should contain seq1")
-        self.assertIn('seq2', output, "Output should contain seq2")
-        self.assertTrue(
-            output == "0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\t<seq4>:0-0-4:1-5-8:1-9-12\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n"
-            or
-            output == "0\tquery1\t<seq1>:0-1-5\t<seq4>:0-0-4:1-5-8:1-9-12\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n"
-        )
-
+        # self.assertIn('seq2', output, "Output should contain seq2")
+        output = output.split('\n')
+        self.assertEqual(len(output), 3, "Output should contain two query results")
+        self.assertEqual(output[-1], "", "Output should contain two query results")
+        self.assertEqual(output[0].split('\t')[:2], ["0", "query1"])
+        self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>:0-1-5", "<seq3>:1-4:1-0-3", "<seq4>:0-0-4:1-5-8:1-9-12"})
+        self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
+        self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
 
 if __name__ == '__main__':
     unittest.main()
