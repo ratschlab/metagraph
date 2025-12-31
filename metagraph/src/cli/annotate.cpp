@@ -289,10 +289,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-        graph::RowTuplesToId accessions(column_accessions, col_names);
+        graph::CoordToAccession accessions(column_accessions, col_names);
         accessions.serialize(annotator_filename);
         logger->trace("Coord-to-accession map serialized to {}",
-                      annotator_filename + graph::RowTuplesToId::kRowTuplesExtension);
+                      annotator_filename + graph::CoordToAccession::kExtension);
         return;
     }
 
@@ -527,15 +527,15 @@ int annotate_graph(Config *config) {
             annotate_data(graph, *config, { files[i] }, outbase[i], 2000 / num_threads);
         }
 
-        // If --accessions was used, merge all RowTuplesToId objects from separate files
+        // If --accessions was used, merge all CoordToAccession objects from separate files
         if (config->accessions) {
-            logger->trace("Merging RowTuplesToId mappings from separate files");
-            graph::RowTuplesToId merged(outbase);
+            logger->trace("Merging CoordToAccession mappings from separate files");
+            graph::CoordToAccession merged(outbase);
             // Write merged result next to the graph file
             std::string graph_base = utils::remove_suffix(config->infbase, graph->file_extension());
             merged.serialize(graph_base);
-            logger->trace("Merged {} RowTuplesToId mappings and serialized to {}",
-                          outbase.size(), graph_base + graph::RowTuplesToId::kRowTuplesExtension);
+            logger->trace("Merged {} CoordToAccession mappings and serialized to {}",
+                          outbase.size(), graph_base + graph::CoordToAccession::kExtension);
         }
     }
 

@@ -1431,7 +1431,7 @@ class TestAccessions(TestingBase):
 
     @parameterized.expand(['', '--separately'])
     def test_multiple_files_with_accessions_separately(self, extra_flags):
-        """Test that `annotate --accessions` creates and merges RowTuplesToId correctly"""
+        """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
         # Create multiple test FASTA files (simulating different annotation columns)
         anno_type = 'filename'
         file1 = self.tempdir.name + '/file1.fa'
@@ -1478,13 +1478,13 @@ class TestAccessions(TestingBase):
                             -p {NUM_THREADS} -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
-        # Verify that merged RowTuplesToId file was created next to the graph
+        # Verify that merged CoordToAccession file was created next to the graph
         seqs_file = graph_base + '.seqs'
-        self.assertTrue(os.path.exists(seqs_file), f"RowTuplesToId file {seqs_file} not found")
+        self.assertTrue(os.path.exists(seqs_file), f"CoordToAccession file {seqs_file} not found")
 
         # Query with --accessions flag
         # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
+        query_command = f'{METAGRAPH} query --query-mode coords --accessions \
                          -i {graph} -a {anno} \
                          --min-kmers-fraction-label 0.0 \
                          {query_fasta}' + MMAP_FLAG

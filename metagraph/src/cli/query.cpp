@@ -870,7 +870,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
-    const auto *seq_ids = full_dbg.get_extension_threadsafe<RowTuplesToId>();
+    const auto *seq_ids = full_dbg.get_extension_threadsafe<CoordToAccession>();
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
@@ -1089,9 +1089,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     if (seq_ids) {
-        graph->add_extension(std::shared_ptr<RowTuplesToId>(
-            std::shared_ptr<RowTuplesToId>{},
-            const_cast<RowTuplesToId*>(seq_ids)
+        graph->add_extension(std::shared_ptr<CoordToAccession>(
+            std::shared_ptr<CoordToAccession>{},
+            const_cast<CoordToAccession*>(seq_ids)
         ));
     }
 

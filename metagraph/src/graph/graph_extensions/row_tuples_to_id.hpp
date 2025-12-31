@@ -1,5 +1,5 @@
-#ifndef __NODE_WEIGHTS_HPP__
-#define __NODE_WEIGHTS_HPP__
+#ifndef __COORD_TO_ACCESSION_HPP__
+#define __COORD_TO_ACCESSION_HPP__
 
 #include <string>
 #include <vector>
@@ -11,20 +11,25 @@
 
 namespace mtg::graph {
 
-// Rename to CoordToAccession?
-class RowTuplesToId : public SequenceGraph::GraphExtension {
+// A mapping from k-mer coordinates in columns to sequence accessions (headers).
+// Maps k-mer coordinates within annotation columns to sequence accessions (sequence headers).
+// When querying with flag `--accessions`, this mapping is used to transform coordinates and labels
+// in query results to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
+// based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying coordinate annotations
+// but displaying results as if sequences were annotated by their headers instead of source files.
+class CoordToAccession : public SequenceGraph::GraphExtension {
   public:
     using Column = mtg::annot::matrix::BinaryMatrix::Column;
     using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
-    RowTuplesToId() {}
+    CoordToAccession() {}
     // Constructor from vector of (sequence_header, num_kmers) pairs per annotation column.
     // The column names are stored in col_names.
-    RowTuplesToId(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
-                  const std::vector<std::string> &col_names);
-    // Merge multiple serialized RowTuplesToId objects into one and remove them once merged.
-    RowTuplesToId(const std::vector<std::string> &fnames);
+    CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
+                     const std::vector<std::string> &col_names);
+    // Merge multiple serialized CoordToAccession objects into one and remove them once merged.
+    CoordToAccession(const std::vector<std::string> &fnames);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -36,7 +41,7 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
 
     uint64_t num_columns() const { return seq_delims_.size(); }
 
-    static constexpr auto kRowTuplesExtension = ".seqs";
+    static constexpr auto kExtension = ".seqs";
 
   private:
     std::vector<std::vector<std::string>> seq_id_labels_;
@@ -45,4 +50,4 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
 
 } // namespace mtg::graph
 
-#endif // __NODE_WEIGHTS_HPP__
+#endif // __COORD_TO_ACCESSION_HPP__

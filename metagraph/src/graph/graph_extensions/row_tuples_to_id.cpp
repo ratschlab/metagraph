@@ -10,10 +10,10 @@
 
 namespace mtg::graph {
 
-using Tuple = RowTuplesToId::Tuple;
+using Tuple = CoordToAccession::Tuple;
 
-RowTuplesToId::RowTuplesToId(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
-                             const std::vector<std::string> &col_names)
+CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
+                                   const std::vector<std::string> &col_names)
       : seq_id_labels_(col_names.size()), seq_delims_(col_names.size()) {
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < col_names.size(); ++i) {
@@ -35,9 +35,9 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::vector<std::pair<std::string
     }
 }
 
-RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fnames) {
+CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames) {
     for (size_t i = 0; i < fnames.size(); ++i) {
-        RowTuplesToId rt;
+        CoordToAccession rt;
         rt.load(fnames[i]);
         seq_id_labels_.insert(seq_id_labels_.end(),
                               std::make_move_iterator(rt.seq_id_labels_.begin()),
@@ -48,11 +48,11 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fnames) {
     }
     // remove the files
     for (size_t i = 0; i < fnames.size(); ++i) {
-        std::filesystem::remove(utils::make_suffix(fnames[i], kRowTuplesExtension));
+        std::filesystem::remove(utils::make_suffix(fnames[i], kExtension));
     }
 }
 
-std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> RowTuplesToId
+std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> CoordToAccession
 ::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
     tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
@@ -82,9 +82,9 @@ std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> RowTuplesToId
     return result;
 }
 
-bool RowTuplesToId::load(const std::string &filename_base) {
+bool CoordToAccession::load(const std::string &filename_base) {
     const auto rowtuples_filename
-            = utils::make_suffix(filename_base, kRowTuplesExtension);
+            = utils::make_suffix(filename_base, kExtension);
     try {
         std::unique_ptr<std::ifstream> in = utils::open_ifstream(rowtuples_filename);
         if (!in->good())
@@ -109,8 +109,8 @@ bool RowTuplesToId::load(const std::string &filename_base) {
     }
 }
 
-void RowTuplesToId::serialize(const std::string &filename_base) const {
-    const auto fname = utils::make_suffix(filename_base, kRowTuplesExtension);
+void CoordToAccession::serialize(const std::string &filename_base) const {
+    const auto fname = utils::make_suffix(filename_base, kExtension);
 
     std::ofstream out = utils::open_new_ofstream(fname);
     serialize_number(out, seq_id_labels_.size());
@@ -120,7 +120,7 @@ void RowTuplesToId::serialize(const std::string &filename_base) const {
     }
 }
 
-bool RowTuplesToId::is_compatible(const SequenceGraph &graph, bool verbose) const {
+bool CoordToAccession::is_compatible(const SequenceGraph &graph, bool verbose) const {
     const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph);
     if (!dbg) {
         if (verbose)

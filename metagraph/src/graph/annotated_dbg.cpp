@@ -233,7 +233,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    if (dbg_.get_extension_threadsafe<RowTuplesToId>()) {
+    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
         auto nodes = map_to_nodes(*graph_, sequence);
         size_t num_kmers = nodes.size();
         size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
@@ -336,7 +336,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     index_counts.reserve(num_kmers);
 
-    if (dbg_.get_extension_threadsafe<RowTuplesToId>()) {
+    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
         auto nodes = map_to_nodes(*graph_, sequence);
         size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
                                                              DeBruijnGraph::npos);
@@ -434,7 +434,7 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
     if (!nodes.size())
         return {};
 
-    if (dbg_.get_extension_threadsafe<RowTuplesToId>()) {
+    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
         auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
                                                    discovery_fraction, presence_fraction);
         std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
@@ -566,7 +566,7 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 
     auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
-    if (const auto *seq_ids = dbg_.get_extension_threadsafe<RowTuplesToId>()) {
+    if (const auto *seq_ids = dbg_.get_extension_threadsafe<CoordToAccession>()) {
         if (tuple_matrix->get_binary_matrix().num_columns() != seq_ids->num_columns()) {
             logger->error("Incompatible number of columns in coord-to-accession mapping and annotation matrix: {} != {}",
                           seq_ids->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
@@ -658,7 +658,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     std::vector<std::pair<Label, sdsl::bit_vector>> result;
-    if (dbg_.get_extension_threadsafe<RowTuplesToId>()) {
+    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
         auto nodes = map_to_nodes(*graph_, sequence);
         auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
                                                    discovery_fraction, presence_fraction);

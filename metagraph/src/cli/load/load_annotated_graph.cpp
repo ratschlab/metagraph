@@ -26,10 +26,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                        const Config &config,
                                                        size_t max_chunks_open) {
     if (config.accessions && config.identity != Config::ANNOTATE) {
-        auto accessions = std::make_shared<RowTuplesToId>();
+        auto accessions = std::make_shared<CoordToAccession>();
         graph->add_extension(accessions);
         auto coord_to_acc_fname = utils::remove_suffix(config.infbase, graph->file_extension())
-                                                        + graph::RowTuplesToId::kRowTuplesExtension;
+                                                        + graph::CoordToAccession::kExtension;
         if (!accessions->load(coord_to_acc_fname))
             logger->error("Failed loading coord-to-accession map from {}", coord_to_acc_fname);
     }
