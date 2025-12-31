@@ -674,63 +674,63 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         }
 
         return result;
-    } else {
-        // kmers and their positions in the query sequence
-        std::vector<row_index> row_indices;
-        row_indices.reserve(num_kmers);
+    }
 
-        std::vector<size_t> kmer_positions;
-        kmer_positions.reserve(num_kmers);
+    // kmers and their positions in the query sequence
+    std::vector<row_index> row_indices;
+    row_indices.reserve(num_kmers);
 
-        size_t j = 0;
-        graph_->map_to_nodes(sequence, [&](node_index i) {
-            if (i > 0) {
-                kmer_positions.push_back(j);
-                row_indices.push_back(graph_to_anno_index(i));
-            }
-            j++;
-        });
-        assert(j == num_kmers);
+    std::vector<size_t> kmer_positions;
+    kmer_positions.reserve(num_kmers);
 
-        uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
-        if (kmer_positions.size() < min_count)
-            return {};
-
-        min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
-        if (kmer_positions.size() < min_count)
-            return {};
-
-        auto rows = annotator_->get_matrix().get_rows(row_indices);
-
-        // FYI: one could use tsl::hopscotch_map for counting but it is slower
-        // than std::vector unless the number of columns is ~1M or higher
-        Vector<size_t> col_counts(annotator_->num_labels(), 0);
-        for (const auto &row : rows) {
-            for (auto j : row) {
-                col_counts[j]++;
-            }
+    size_t j = 0;
+    graph_->map_to_nodes(sequence, [&](node_index i) {
+        if (i > 0) {
+            kmer_positions.push_back(j);
+            row_indices.push_back(graph_to_anno_index(i));
         }
+        j++;
+    });
+    assert(j == num_kmers);
 
-        Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
-        result.resize(code_counts.size());
+    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
+    if (kmer_positions.size() < min_count)
+        return {};
 
-        col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
+    min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
+    if (kmer_positions.size() < min_count)
+        return {};
 
-        for (size_t i = 0; i < code_counts.size(); ++i) {
-            auto &[label, mask] = result[i];
+    auto rows = annotator_->get_matrix().get_rows(row_indices);
 
-            // TODO: remove the decoding step?
-            label = annotator_->get_label_encoder().decode(code_counts[i].first);
-            mask = sdsl::bit_vector(num_kmers, 0);
-
-            col_counts[code_counts[i].first] = i + 1;
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(annotator_->num_labels(), 0);
+    for (const auto &row : rows) {
+        for (auto j : row) {
+            col_counts[j]++;
         }
+    }
 
-        for (size_t i = 0; i < rows.size(); ++i) {
-            for (auto j : rows[i]) {
-                if (col_counts[j])
-                    result[col_counts[j] - 1].second[kmer_positions[i]] = true;
-            }
+    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+    result.resize(code_counts.size());
+
+    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
+
+    for (size_t i = 0; i < code_counts.size(); ++i) {
+        auto &[label, mask] = result[i];
+
+        // TODO: remove the decoding step?
+        label = annotator_->get_label_encoder().decode(code_counts[i].first);
+        mask = sdsl::bit_vector(num_kmers, 0);
+
+        col_counts[code_counts[i].first] = i + 1;
+    }
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        for (auto j : rows[i]) {
+            if (col_counts[j])
+                result[col_counts[j] - 1].second[kmer_positions[i]] = true;
         }
     }
 

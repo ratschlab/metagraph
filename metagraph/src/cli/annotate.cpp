@@ -484,7 +484,7 @@ int annotate_graph(Config *config) {
 
     if (config->accessions) {
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
-            logger->error("A coords-to-headers mapping (annotating with `--accessions`) can only be"
+            logger->error("A coords-to-headers mapping (annotation with `--accessions`) can only be"
                           " constructed for annotated filenames (use flag `--anno-filename`)");
             exit(1);
         }
