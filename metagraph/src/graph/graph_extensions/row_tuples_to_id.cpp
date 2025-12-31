@@ -46,36 +46,28 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> RowTuplesToId
 ::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
-    using KmerCoords = std::vector<Tuple>;
-    tsl::hopscotch_map<uint64_t, std::tuple<std::string, size_t, KmerCoords>> conv_coords;
+    tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
         const auto &row_tuples = rows_tuples[i];
         for (const auto &[col, tuple] : row_tuples) {
-            assert(col < seq_id_labels_.size());
-            assert(col < seq_delims_.size());
-            const auto &labels = seq_id_labels_[col];
             const auto &delims = seq_delims_[col];
             for (uint64_t coord : tuple) {
                 uint64_t seq_id = coord ? delims.rank1(coord - 1) : 0;
                 uint64_t conv_coord = seq_id > 0 ? coord - delims.select1(seq_id) - 1 : coord;
-                auto it = conv_coords.find(seq_id);
-                if (it == conv_coords.end()) {
-                    it = conv_coords.try_emplace(seq_id, std::make_tuple(labels[seq_id], size_t(0), KmerCoords())).first;
-                    std::get<2>(it.value()).resize(rows_tuples.size());
-                }
-                auto &[label, count, cur_tuples] = it.value();
-                cur_tuples[i].emplace_back(conv_coord);
+                auto &tuple = conv_coords[std::make_pair(col, seq_id)];
+                tuple.resize(rows_tuples.size());
+                tuple[i].emplace_back(conv_coord);
             }
         }
     }
 
     std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> result;
     result.reserve(conv_coords.size());
-    for (auto it = conv_coords.begin(); it != conv_coords.end(); ++it) {
-        auto &[label, count, cur_tuples] = it.value();
-        count = std::count_if(cur_tuples.begin(), cur_tuples.end(),
-                              [](const auto &a) { return !a.empty(); });
-        result.emplace_back(std::move(it.value()));
+    for (auto &[key, tuples] : conv_coords) {
+        auto [col, seq_id] = key;
+        size_t count = std::count_if(tuples.begin(), tuples.end(),
+                                     [](const auto &a) { return !a.empty(); });
+        result.emplace_back(seq_id_labels_[col][seq_id], count, std::move(tuples));
     }
 
     return result;

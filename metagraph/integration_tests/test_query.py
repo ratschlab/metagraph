@@ -1474,6 +1474,84 @@ class TestAccessions(TestingBase):
 
         self.assertEqual(expected_output, res.stdout.decode())
 
+    def test_multiple_files_with_accessions(self):
+        """Test that `annotate --accessions` creates and merges RowTuplesToId correctly"""
+        # Create multiple test FASTA files (simulating different annotation columns)
+        anno_type = 'filename'
+        file1 = self.tempdir.name + '/file1.fa'
+        with open(file1, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+
+        file2 = self.tempdir.name + '/file2.fa'
+        with open(file2, 'w') as f:
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTT\n')
+            f.write('>seq4\n')
+            f.write('TATCGATCGATCGATCG\n')
+
+        # Query file that matches sequences from both files
+        query_fasta = self.tempdir.name + '/query_multi.fa'
+        with open(query_fasta, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCG\n')  # Matches seq1 from file1 and seq4 from file2
+            f.write('>query2\n')
+            f.write('GCTAGCTA\n')   # Matches seq2 from file1
+
+        graph_base = self.tempdir.name + '/graph_multi'
+        graph = self.tempdir.name + '/graph_multi' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Build graph from all files
+        all_files = f'{file1} {file2}'
+        self._build_graph(all_files, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(all_files, graph, anno_base, self.anno_repr, anno_type=anno_type)
+        stats_command = f"{METAGRAPH} stats {anno} --print-col-names"
+        res = subprocess.run([stats_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Stats failed: {res.stderr.decode()}")
+        columns = res.stdout.decode().split('\n')[2:4]
+
+        # Create FASTA index files
+        test_fais = [fname + '.fai' for fname in columns]
+        self._create_fai_file(columns[0], test_fais[0])
+        self._create_fai_file(columns[1], test_fais[1])
+        # Verify .fai file was created
+        self.assertTrue(os.path.exists(test_fais[0]))
+        self.assertTrue(os.path.exists(test_fais[1]))
+
+        index_accessions = f'{METAGRAPH} annotate --anno-filename --accessions \
+                            -p {NUM_THREADS} -v -i {graph} -o {graph_base} {' '.join(test_fais)}' + MMAP_FLAG
+        res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
+        # Verify that merged RowTuplesToId file was created next to the graph
+        seqs_file = graph_base + '.seqs'
+        self.assertTrue(os.path.exists(seqs_file), f"RowTuplesToId file {seqs_file} not found")
+
+        # Query with --accessions flag
+        # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
+                         -i {graph} -a {anno} \
+                         --min-kmers-fraction-label 0.0 \
+                         {query_fasta}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
+
+        output = res.stdout.decode()
+        # Verify that output contains sequence headers (seq1, seq2, etc.) instead of just coordinates
+        # query1 matches seq1 (from file1) - TATCGATCG appears in seq1 (GTATCGATCG)
+        # query2 matches seq2 (from file1) - GCTAGCTA appears in seq2 (GCTAGCTAGCTAGCTA)
+        self.assertIn('seq1', output, "Output should contain seq1")
+        self.assertIn('seq2', output, "Output should contain seq2")
+        self.assertTrue(
+            output == "0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\t<seq4>:0-0-4:1-5-8:1-9-12\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n"
+            or
+            output == "0\tquery1\t<seq1>:0-1-5\t<seq4>:0-0-4:1-5-8:1-9-12\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n"
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
