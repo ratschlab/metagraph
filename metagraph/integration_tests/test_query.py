@@ -1510,13 +1510,11 @@ class TestAccessions(TestingBase):
         anno = anno_base + anno_file_extension[self.anno_repr]
 
         # Build graph from all files
-        all_files = f'{file1} {file2}'
-        self._build_graph(all_files, graph_base, k=5, repr=self.graph_repr, mode='basic')
-        self._annotate_graph(all_files, graph, anno_base, self.anno_repr, anno_type=anno_type)
+        self._build_graph(f'{file1} {file2}', graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(f'{file1} {file2}', graph, anno_base, self.anno_repr, anno_type=anno_type)
 
         # The order of the columns may be arbitrary, so we run stats to get the final order
-        stats_command = f"{METAGRAPH} stats {anno} --print-col-names"
-        res = subprocess.run([stats_command], shell=True, stdout=PIPE, stderr=PIPE)
+        res = subprocess.run([f"{METAGRAPH} stats {anno} --print-col-names"], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Stats failed: {res.stderr.decode()}")
         columns = res.stdout.decode().split('\n')[2:4]
 
@@ -1547,7 +1545,6 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
 
         output = res.stdout.decode()
-        # self.assertIn('seq2', output, "Output should contain seq2")
         output = output.split('\n')
         self.assertEqual(len(output), 3, "Output should contain two query results")
         self.assertEqual(output[-1], "", "Output should contain two query results")
