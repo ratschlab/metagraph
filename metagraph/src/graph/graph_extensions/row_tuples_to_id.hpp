@@ -11,6 +11,7 @@
 
 namespace mtg::graph {
 
+// Rename to CoordToAccession?
 class RowTuplesToId : public SequenceGraph::GraphExtension {
   public:
     using Column = mtg::annot::matrix::BinaryMatrix::Column;
@@ -31,10 +32,11 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
 
     uint64_t num_columns() const { return seq_delims_.size(); }
 
+    static constexpr auto kRowTuplesExtension = ".seqs";
+
   private:
     std::vector<std::vector<std::string>> seq_id_labels_;
     std::vector<bit_vector_sd> seq_delims_;
-    static constexpr auto kRowTuplesExtension = ".seqs";
 };
 
 } // namespace mtg::graph

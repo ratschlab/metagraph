@@ -434,7 +434,8 @@ int annotate_graph(Config *config) {
         common::logger->info("Constructing sequence accession map");
         graph::RowTuplesToId accessions(files, graph->get_k());
         accessions.serialize(config->outfbase);
-        common::logger->info("Sequence accession map constructed");
+        common::logger->info("Sequence accession map constructed for {} files and serialized to {}",
+                             files.size(), config->outfbase + graph::RowTuplesToId::kRowTuplesExtension);
         return 0;
     }
 

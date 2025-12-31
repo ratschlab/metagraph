@@ -1427,9 +1427,9 @@ class TestAccessions(TestingBase):
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertTrue(res.returncode != 0)
 
-    @parameterized.expand(['filename'])
-    def test_query_coords_with_accessions(self, anno_type):
+    def test_query_coords_with_accessions(self):
         #"""Test that --accessions creates mapping and query maps coordinates to sequence headers"""
+        anno_type = 'filename'
         graph_base = self.tempdir.name + '/graph'
         graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
         anno = self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr]
@@ -1470,12 +1470,7 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0)
 
         # Test if the query without accessions works normally
-        if anno_type == 'header':
-            expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
-        elif anno_type == 'filename':
-            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
-        else:
-            raise ValueError(f'Invalid annotation type: {anno_type}')
+        expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
 
         self.assertEqual(expected_output, res.stdout.decode())
 

@@ -25,12 +25,13 @@ using mtg::common::logger;
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config,
                                                        size_t max_chunks_open) {
-    if (config.accessions) {
-        common::logger->trace("Loading sequence accession map");
+    if (config.accessions && config.identity != Config::ANNOTATE) {
         auto accessions = std::make_shared<RowTuplesToId>();
-        auto filename_base = utils::remove_suffix(config.infbase, graph->file_extension());
-        accessions->load(filename_base);
         graph->add_extension(accessions);
+        auto coord_to_acc_fname = utils::remove_suffix(config.infbase, graph->file_extension())
+                                                        + graph::RowTuplesToId::kRowTuplesExtension;
+        if (!accessions->load(coord_to_acc_fname))
+            logger->error("Failed loading coord-to-accession map from {}", coord_to_acc_fname);
     }
 
     uint64_t max_index = graph->max_index();
