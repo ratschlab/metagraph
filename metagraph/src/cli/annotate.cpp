@@ -11,7 +11,6 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
-#include "graph/graph_extensions/row_tuples_to_id.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "seq_io/kmc_parser.hpp"
@@ -19,6 +18,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/coord_to_accession.hpp"
 
 
 namespace mtg {

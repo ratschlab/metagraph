@@ -5,14 +5,14 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/graph_extensions/coord_to_accession.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
-#include "graph/graph_extensions/row_tuples_to_id.hpp"
-#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {

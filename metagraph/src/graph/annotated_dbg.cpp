@@ -6,11 +6,11 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/coord_to_accession.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
-#include "graph/graph_extensions/row_tuples_to_id.hpp"
 
 
 namespace mtg {

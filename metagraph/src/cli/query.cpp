@@ -14,6 +14,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/graph_extensions/coord_to_accession.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -22,7 +23,6 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "cli/align.hpp"
-#include "graph/graph_extensions/row_tuples_to_id.hpp"
 
 
 namespace mtg {
