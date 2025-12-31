@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "graph/representation/base/sequence_graph.hpp"
-#include "common/vectors/bit_vector_sd.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 
 
 namespace mtg::graph {

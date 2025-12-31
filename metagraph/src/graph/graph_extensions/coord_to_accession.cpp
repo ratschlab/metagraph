@@ -15,6 +15,7 @@ using Tuple = CoordToAccession::Tuple;
 CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
                                    const std::vector<std::string> &col_names)
       : seq_id_labels_(col_names.size()), seq_delims_(col_names.size()) {
+    assert(accessions.size() == col_names.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < col_names.size(); ++i) {
         std::vector<uint64_t> delims;
@@ -38,7 +39,9 @@ CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::
 CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames) {
     for (size_t i = 0; i < fnames.size(); ++i) {
         CoordToAccession rt;
-        rt.load(fnames[i]);
+        if (!rt.load(fnames[i]))
+            throw std::runtime_error("Cannot load CoordToAccession mapping from file "
+                                     + utils::make_suffix(fnames[i], kExtension));
         seq_id_labels_.insert(seq_id_labels_.end(),
                               std::make_move_iterator(rt.seq_id_labels_.begin()),
                               std::make_move_iterator(rt.seq_id_labels_.end()));
@@ -52,8 +55,8 @@ CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames) {
     }
 }
 
-std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> CoordToAccession
-::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
+std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
+CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
     tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
@@ -83,36 +86,29 @@ std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>> CoordToAccessio
 }
 
 bool CoordToAccession::load(const std::string &filename_base) {
-    const auto rowtuples_filename
-            = utils::make_suffix(filename_base, kExtension);
     try {
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rowtuples_filename);
+        std::unique_ptr<std::ifstream> in
+            = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
         if (!in->good())
             return false;
 
-        uint64_t num_labels = load_number(*in);
+        uint64_t num_columns = load_number(*in);
+        seq_id_labels_.resize(num_columns);
+        seq_delims_.resize(num_columns);
 
-        seq_id_labels_.resize(num_labels);
-        seq_delims_.resize(num_labels);
-
-        for (uint64_t i = 0; i < num_labels; ++i) {
+        for (uint64_t i = 0; i < num_columns; ++i) {
             load_string_vector(*in, &seq_id_labels_[i]);
             seq_delims_[i].load(*in);
         }
-
         return true;
 
     } catch (...) {
-        std::cerr << "ERROR: Cannot load sequence delimiters from file "
-                  << rowtuples_filename << std::endl;
         return false;
     }
 }
 
 void CoordToAccession::serialize(const std::string &filename_base) const {
-    const auto fname = utils::make_suffix(filename_base, kExtension);
-
-    std::ofstream out = utils::open_new_ofstream(fname);
+    std::ofstream out = utils::open_new_ofstream(utils::make_suffix(filename_base, kExtension));
     serialize_number(out, seq_id_labels_.size());
     for (size_t i = 0; i < seq_id_labels_.size(); ++i) {
         serialize_string_vector(out, seq_id_labels_[i]);
@@ -121,16 +117,11 @@ void CoordToAccession::serialize(const std::string &filename_base) const {
 }
 
 bool CoordToAccession::is_compatible(const SequenceGraph &graph, bool verbose) const {
+    assert(seq_id_labels_.size() == seq_delims_.size());
     const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph);
     if (!dbg) {
         if (verbose)
             std::cerr << "Incompatible: graph is not a DeBruijnGraph" << std::endl;
-        return false;
-    }
-    if (seq_id_labels_.size() != seq_delims_.size()) {
-        if (verbose)
-            std::cerr << "Incompatible: mapping corrupted -- different number of label sets and delimiter sets"
-                      << std::endl;
         return false;
     }
     return true;
