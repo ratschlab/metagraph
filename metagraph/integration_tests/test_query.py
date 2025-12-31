@@ -1522,8 +1522,8 @@ class TestAccessions(TestingBase):
         self.assertTrue(os.path.exists(test_fais[0]))
         self.assertTrue(os.path.exists(test_fais[1]))
 
-        index_accessions = f'{METAGRAPH} annotate --anno-filename --accessions \
-                            -p {NUM_THREADS} -v -i {graph} -o {graph_base} {' '.join(test_fais)}' + MMAP_FLAG
+        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions \
+                            -p {NUM_THREADS} -v -i {graph} -o {graph_base} {' '.join(test_fais)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
         # Verify that merged RowTuplesToId file was created next to the graph
