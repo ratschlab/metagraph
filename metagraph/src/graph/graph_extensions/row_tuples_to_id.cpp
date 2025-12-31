@@ -12,26 +12,18 @@ namespace mtg::graph {
 
 using Tuple = RowTuplesToId::Tuple;
 
-RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t k)
-      : seq_id_labels_(fai_infiles.size()), seq_delims_(fai_infiles.size()) {
-    size_t num_labels = fai_infiles.size();
-
+RowTuplesToId::RowTuplesToId(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
+                             const std::vector<std::string> &col_names)
+      : seq_id_labels_(col_names.size()), seq_delims_(col_names.size()) {
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < num_labels; ++i) {
+    for (size_t i = 0; i < col_names.size(); ++i) {
         std::vector<uint64_t> delims;
-        std::ifstream fin(fai_infiles[i]);
-        std::string line;
-        std::string seq_id;
-        uint64_t len;
         uint64_t cur_coord = 0;
-        while (std::getline(fin, line)) {
-            std::istringstream sin(line);
-            sin >> seq_id >> len;
-            if (len < k)
-                continue;
-            cur_coord += len - k + 1;
-            seq_id_labels_[i].emplace_back(std::move(seq_id));
+        for (const auto &[seq_id, num_kmers] : accessions[i]) {
+            assert(num_kmers);
+            cur_coord += num_kmers;
             delims.emplace_back(cur_coord);
+            seq_id_labels_[i].emplace_back(seq_id);
         }
         if (delims.size()) {
             seq_delims_[i] = bit_vector_sd([&](const auto &callback) {
@@ -40,6 +32,23 @@ RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t
                 }
             }, delims.back(), delims.size());
         }
+    }
+}
+
+RowTuplesToId::RowTuplesToId(const std::vector<std::string> &fnames) {
+    for (size_t i = 0; i < fnames.size(); ++i) {
+        RowTuplesToId rt;
+        rt.load(fnames[i]);
+        seq_id_labels_.insert(seq_id_labels_.end(),
+                              std::make_move_iterator(rt.seq_id_labels_.begin()),
+                              std::make_move_iterator(rt.seq_id_labels_.end()));
+        seq_delims_.insert(seq_delims_.end(),
+                           std::make_move_iterator(rt.seq_delims_.begin()),
+                           std::make_move_iterator(rt.seq_delims_.end()));
+    }
+    // remove the files
+    for (size_t i = 0; i < fnames.size(); ++i) {
+        std::filesystem::remove(utils::make_suffix(fnames[i], kRowTuplesExtension));
     }
 }
 

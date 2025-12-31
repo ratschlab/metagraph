@@ -1359,46 +1359,6 @@ class TestAccessions(TestingBase):
             f.write('>query2\n')
             f.write('GCTAGCTA\n')
 
-    def _create_fai_file(self, fasta_file, fai_file):
-        #"""Create a FASTA index file (.fai) from a FASTA file"""
-        # Manual creation of .fai file
-        # Format: seq_name\tlength\toffset\tlinebases\tlinewidth
-        with open(fasta_file, 'rb') as f_in, open(fai_file, 'w') as f_out:
-            offset = 0
-            seq_name = None
-            seq_length = 0
-            line_length = None
-            linebases = None
-            current_offset = 0
-
-            for line_bytes in f_in:
-                line = line_bytes.decode('utf-8')
-                if line.startswith('>'):
-                    # Write previous sequence if exists
-                    if seq_name is not None:
-                        f_out.write(f'{seq_name}\t{seq_length}\t{offset}\t{linebases}\t{line_length}\n')
-
-                    # Start new sequence
-                    seq_name = line[1:].strip().split()[0]  # Get first word after >
-                    seq_length = 0
-                    offset = current_offset
-                    line_length = None
-                    linebases = None
-                else:
-                    seq_line = line.rstrip('\n\r')
-                    if seq_line:
-                        seq_length += len(seq_line)
-                        if line_length is None:
-                            line_length = len(line.rstrip('\n\r'))
-                            linebases = line_length
-
-                # Track current file position
-                current_offset = f_in.tell()
-
-            # Write last sequence
-            if seq_name is not None:
-                f_out.write(f'{seq_name}\t{seq_length}\t{offset}\t{linebases}\t{line_length}\n')
-
     @parameterized.expand(['header', 'filename'])
     def test_query_coords(self, anno_type):
         #"""Test coordinate queries when indexed sequence headers"""
@@ -1439,14 +1399,9 @@ class TestAccessions(TestingBase):
 
         expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
 
-        # Create FASTA index file
-        test_fai = self.tempdir.name + '/test_sequences.fa.fai'
-        self._create_fai_file(self.test_fasta, test_fai)
-        # Verify .fai file was created
-        self.assertTrue(os.path.exists(test_fai))
-
         # Create accessions mapping from .fai file
-        res = subprocess.run([f'{METAGRAPH} annotate --accessions -i {graph} -o {graph_base} {test_fai}'],
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --accessions \
+                                -i {graph} -o {graph_base} {self.test_fasta}'],
                              shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         # Verify accessions file was created (it will be at graph.seqs)
@@ -1474,7 +1429,8 @@ class TestAccessions(TestingBase):
 
         self.assertEqual(expected_output, res.stdout.decode())
 
-    def test_multiple_files_with_accessions(self):
+    @parameterized.expand(['', '--separately'])
+    def test_multiple_files_with_accessions_separately(self, extra_flags):
         """Test that `annotate --accessions` creates and merges RowTuplesToId correctly"""
         # Create multiple test FASTA files (simulating different annotation columns)
         anno_type = 'filename'
@@ -1516,18 +1472,10 @@ class TestAccessions(TestingBase):
         # The order of the columns may be arbitrary, so we run stats to get the final order
         res = subprocess.run([f"{METAGRAPH} stats {anno} --print-col-names"], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Stats failed: {res.stderr.decode()}")
-        columns = res.stdout.decode().split('\n')[2:4]
+        columns = res.stdout.decode().split('\n')[2:]
 
-        # Create FASTA index files
-        test_fais = [fname + '.fai' for fname in columns]
-        self._create_fai_file(columns[0], test_fais[0])
-        self._create_fai_file(columns[1], test_fais[1])
-        # Verify .fai file was created
-        self.assertTrue(os.path.exists(test_fais[0]))
-        self.assertTrue(os.path.exists(test_fais[1]))
-
-        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions \
-                            -p {NUM_THREADS} -v -i {graph} -o {graph_base} {' '.join(test_fais)}" + MMAP_FLAG
+        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions {extra_flags} \
+                            -p {NUM_THREADS} -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
         # Verify that merged RowTuplesToId file was created next to the graph

@@ -8,6 +8,8 @@
 #include "common/unix_tools.hpp"
 #include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "graph/graph_extensions/row_tuples_to_id.hpp"
 #include "seq_io/formats.hpp"
@@ -244,6 +246,56 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t BATCH_SIZE = 5'000;
     const size_t BATCH_LENGTH = 100'000;
 
+    if (config.accessions) {
+        // Accumulate sequence headers and k-mer counts across all files
+        std::vector<std::vector<std::pair<std::string, uint64_t>>> column_accessions;
+        std::vector<std::string> col_names;
+        for (const auto &file : files) {
+            logger->info("Computing coordinate offsets for file {}", file);
+            column_accessions.emplace_back();
+            auto &num_kmers_in_seq = column_accessions.back();
+            col_names.push_back(file);
+            call_annotations(
+                file,
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                false, // config.filename_anno
+                true, // config.annotate_sequence_headers
+                false, // parse_counts_from_headers
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence, auto labels, uint64_t) {
+                    if (config.num_kmers_in_seq
+                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
+                        logger->error("All input sequences must have the same"
+                                      " length when flag --const-length is on");
+                        exit(1);
+                    }
+                    if (labels.size() != 1) {
+                        logger->error("Something went wrong. When flag --accessions is on, "
+                                      "each sequence must have exactly one label -- sequence header");
+                        exit(1);
+                    }
+
+                    if (sequence.size() >= k) {
+                        if (!num_kmers_in_seq.size() || num_kmers_in_seq.back().first != labels[0])
+                            num_kmers_in_seq.emplace_back(labels[0], 0);
+                        num_kmers_in_seq.back().second += sequence.size() - k + 1;
+                    }
+                }
+            );
+        }
+        graph::RowTuplesToId accessions(column_accessions, col_names);
+        accessions.serialize(annotator_filename);
+        logger->trace("Coord-to-accession map serialized to {}",
+                      annotator_filename + graph::RowTuplesToId::kRowTuplesExtension);
+        return;
+    }
+
     if (config.coordinates) {
         #pragma omp parallel num_threads(get_num_threads())
         #pragma omp single
@@ -431,17 +483,20 @@ int annotate_graph(Config *config) {
     const auto graph = load_critical_dbg(config->infbase);
 
     if (config->accessions) {
-        common::logger->info("Constructing sequence accession map");
-        graph::RowTuplesToId accessions(files, graph->get_k());
-        accessions.serialize(config->outfbase);
-        common::logger->info("Sequence accession map constructed for {} files and serialized to {}",
-                             files.size(), config->outfbase + graph::RowTuplesToId::kRowTuplesExtension);
-        return 0;
+        if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
+            logger->error("A coords-to-headers mapping (annotating with `--accessions`) can only be"
+                          " constructed for annotated filenames (use flag `--anno-filename`)");
+            exit(1);
+        }
+        logger->info("Parsing headers and computing coordinate offsets for {} files. Note: It is essential that the files are"
+                     " passed in the same order as in the graph annotation", files.size());
     }
 
     if (!config->separately) {
         omp_set_max_active_levels(2);
-        annotate_data(graph, *config, files, config->outfbase);
+        annotate_data(graph, *config, files, config->accessions
+            ? utils::remove_suffix(config->infbase, graph->file_extension())
+            : config->outfbase);
 
     } else {
         // |config->separately| is true
@@ -460,13 +515,27 @@ int annotate_graph(Config *config) {
             }
         }
 
+        std::vector<std::string> outbase;
+        for (size_t i = 0; i < files.size(); ++i) {
+            outbase.push_back(config->outfbase.size()
+                    ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
+                    : files[i]);
+        }
+
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
         for (size_t i = 0; i < files.size(); ++i) {
-            annotate_data(graph, *config, { files[i] },
-                config->outfbase.size()
-                    ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
-                    : files[i],
-                2000 / num_threads);
+            annotate_data(graph, *config, { files[i] }, outbase[i], 2000 / num_threads);
+        }
+
+        // If --accessions was used, merge all RowTuplesToId objects from separate files
+        if (config->accessions) {
+            logger->trace("Merging RowTuplesToId mappings from separate files");
+            graph::RowTuplesToId merged(outbase);
+            // Write merged result next to the graph file
+            std::string graph_base = utils::remove_suffix(config->infbase, graph->file_extension());
+            merged.serialize(graph_base);
+            logger->trace("Merged {} RowTuplesToId mappings and serialized to {}",
+                          outbase.size(), graph_base + graph::RowTuplesToId::kRowTuplesExtension);
         }
     }
 

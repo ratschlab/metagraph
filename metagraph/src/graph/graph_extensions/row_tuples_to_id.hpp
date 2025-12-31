@@ -19,8 +19,12 @@ class RowTuplesToId : public SequenceGraph::GraphExtension {
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
     RowTuplesToId() {}
-
-    RowTuplesToId(const std::vector<std::string> &fai_infiles, size_t k);
+    // Constructor from vector of (sequence_header, num_kmers) pairs per annotation column.
+    // The column names are stored in col_names.
+    RowTuplesToId(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
+                  const std::vector<std::string> &col_names);
+    // Merge multiple serialized RowTuplesToId objects into one and remove them once merged.
+    RowTuplesToId(const std::vector<std::string> &fnames);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
