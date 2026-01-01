@@ -486,8 +486,9 @@ int annotate_graph(Config *config) {
                           " constructed for annotated filenames (use flag `--anno-filename`)");
             exit(1);
         }
-        logger->info("Parsing headers and computing coordinate offsets for {} files. Note: It is essential that the files are"
-                     " passed in the same order as in the graph annotation", files.size());
+        logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
+        logger->info("Note: It is essential that the files are passed in the order of the columns "
+                     "in the graph annotation (check with `metagraph stats --print-col-names ...`)");
         if (get_num_threads() > 1 && files.size() > 1) {
             logger->trace("Switching on `--separately` to read the files in parallel, each with a single thread");
             config->separately = true;
