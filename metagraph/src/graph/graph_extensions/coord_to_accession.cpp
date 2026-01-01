@@ -37,12 +37,16 @@ CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::
 }
 
 CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames, size_t num_threads) {
+    std::string error;
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < fnames.size(); ++i) {
         CoordToAccession rt;
-        if (!rt.load(fnames[i]))
-            throw std::runtime_error("Cannot load CoordToAccession mapping from file "
-                                     + utils::make_suffix(fnames[i], kExtension));
+        auto fname = utils::make_suffix(fnames[i], kExtension);
+        if (!rt.load(fname)) {
+            #pragma omp critical
+            error = "Cannot load CoordToAccession mapping from file " + fname;
+            continue;
+        }
         #pragma omp ordered
         {
             seq_id_labels_.insert(seq_id_labels_.end(),
@@ -53,10 +57,8 @@ CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames, size_
                                std::make_move_iterator(rt.seq_delims_.end()));
         }
     }
-    // remove the files
-    for (size_t i = 0; i < fnames.size(); ++i) {
-        std::filesystem::remove(utils::make_suffix(fnames[i], kExtension));
-    }
+    if (!error.empty())
+        throw std::runtime_error(error);
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>

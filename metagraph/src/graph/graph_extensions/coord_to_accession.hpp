@@ -28,7 +28,7 @@ class CoordToAccession : public SequenceGraph::GraphExtension {
     // The column names are stored in col_names.
     CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
                      const std::vector<std::string> &col_names);
-    // Merge multiple serialized CoordToAccession objects into one and remove them once merged.
+    // Merge multiple serialized CoordToAccession objects into one
     CoordToAccession(const std::vector<std::string> &fnames, size_t num_threads);
 
     bool load(const std::string &filename_base);

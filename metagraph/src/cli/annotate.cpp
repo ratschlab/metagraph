@@ -540,6 +540,7 @@ int annotate_graph(Config *config) {
             merged.serialize(graph_base);
             logger->trace("Merged {} CoordToAccession mappings and serialized to {}",
                           outbase.size(), graph_base + graph::CoordToAccession::kExtension);
+            fs::remove_all(config->outfbase);
         }
     }
 
