@@ -36,18 +36,22 @@ CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::
     }
 }
 
-CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames) {
+CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames, size_t num_threads) {
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < fnames.size(); ++i) {
         CoordToAccession rt;
         if (!rt.load(fnames[i]))
             throw std::runtime_error("Cannot load CoordToAccession mapping from file "
                                      + utils::make_suffix(fnames[i], kExtension));
-        seq_id_labels_.insert(seq_id_labels_.end(),
-                              std::make_move_iterator(rt.seq_id_labels_.begin()),
-                              std::make_move_iterator(rt.seq_id_labels_.end()));
-        seq_delims_.insert(seq_delims_.end(),
-                           std::make_move_iterator(rt.seq_delims_.begin()),
-                           std::make_move_iterator(rt.seq_delims_.end()));
+        #pragma omp ordered
+        {
+            seq_id_labels_.insert(seq_id_labels_.end(),
+                                  std::make_move_iterator(rt.seq_id_labels_.begin()),
+                                  std::make_move_iterator(rt.seq_id_labels_.end()));
+            seq_delims_.insert(seq_delims_.end(),
+                               std::make_move_iterator(rt.seq_delims_.begin()),
+                               std::make_move_iterator(rt.seq_delims_.end()));
+        }
     }
     // remove the files
     for (size_t i = 0; i < fnames.size(); ++i) {
@@ -108,7 +112,10 @@ bool CoordToAccession::load(const std::string &filename_base) {
 }
 
 void CoordToAccession::serialize(const std::string &filename_base) const {
-    std::ofstream out = utils::open_new_ofstream(utils::make_suffix(filename_base, kExtension));
+    auto fname = utils::make_suffix(filename_base, kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out)
+        throw std::ios_base::failure("Couldn't open file " + fname + " for writing");
     serialize_number(out, seq_id_labels_.size());
     for (size_t i = 0; i < seq_id_labels_.size(); ++i) {
         serialize_string_vector(out, seq_id_labels_[i]);

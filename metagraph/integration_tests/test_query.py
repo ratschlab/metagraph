@@ -1429,7 +1429,7 @@ class TestAccessions(TestingBase):
 
         self.assertEqual(expected_output, res.stdout.decode())
 
-    @parameterized.expand(['', '--separately'])
+    @parameterized.expand(['', '-p 4'])
     def test_multiple_files_with_accessions_separately(self, extra_flags):
         """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
         # Create multiple test FASTA files (simulating different annotation columns)
@@ -1475,7 +1475,7 @@ class TestAccessions(TestingBase):
         columns = res.stdout.decode().split('\n')[2:]
 
         index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions {extra_flags} \
-                            -p {NUM_THREADS} -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
+                            -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
         # Verify that merged CoordToAccession file was created next to the graph

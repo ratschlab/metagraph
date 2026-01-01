@@ -480,8 +480,6 @@ int annotate_graph(Config *config) {
 
     assert(config->infbase_annotators.size() <= 1);
 
-    const auto graph = load_critical_dbg(config->infbase);
-
     if (config->accessions) {
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
             logger->error("A coords-to-headers mapping (annotation with `--accessions`) can only be"
@@ -490,7 +488,13 @@ int annotate_graph(Config *config) {
         }
         logger->info("Parsing headers and computing coordinate offsets for {} files. Note: It is essential that the files are"
                      " passed in the same order as in the graph annotation", files.size());
+        if (get_num_threads() > 1 && files.size() > 1) {
+            logger->trace("Switching on `--separately` to read the files in parallel, each with a single thread");
+            config->separately = true;
+        }
     }
+
+    const auto graph = load_critical_dbg(config->infbase);
 
     if (!config->separately) {
         omp_set_max_active_levels(2);
