@@ -534,7 +534,7 @@ int annotate_graph(Config *config) {
         // If --accessions was used, merge all CoordToAccession objects from separate files
         if (config->accessions) {
             logger->trace("Merging CoordToAccession mappings from separate files");
-            graph::CoordToAccession merged(outbase);
+            graph::CoordToAccession merged(outbase, num_threads);
             // Write merged result next to the graph file
             std::string graph_base = utils::remove_suffix(config->infbase, graph->file_extension());
             merged.serialize(graph_base);
