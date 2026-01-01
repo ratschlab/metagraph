@@ -248,15 +248,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     if (config.accessions) {
         // Accumulate sequence headers and k-mer counts across all files
-        std::vector<std::vector<std::pair<std::string, uint64_t>>> column_accessions;
-        std::vector<std::string> col_names;
-        for (const auto &file : files) {
-            logger->info("Computing coordinate offsets for file {}", file);
-            column_accessions.emplace_back();
-            auto &num_kmers_in_seq = column_accessions.back();
-            col_names.push_back(file);
+        std::vector<std::vector<std::pair<std::string, uint64_t>>> column_accessions(files.size());
+        #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
+        for (size_t i = 0; i < files.size(); ++i) {
+            logger->info("Computing coordinate offsets for file {}", files[i]);
+            auto &num_kmers_in_seq = column_accessions[i];
             call_annotations(
-                file,
+                files[i],
                 config.refpath,
                 anno_graph->get_graph(),
                 forward_and_reverse,
@@ -269,18 +267,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.fasta_header_delimiter,
                 config.anno_labels,
                 [&](std::string sequence, auto labels, uint64_t) {
-                    if (config.num_kmers_in_seq
-                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
-                        logger->error("All input sequences must have the same"
-                                      " length when flag --const-length is on");
-                        exit(1);
-                    }
                     if (labels.size() != 1) {
                         logger->error("Something went wrong. When flag --accessions is on, "
                                       "each sequence must have exactly one label -- sequence header");
                         exit(1);
                     }
-
                     if (sequence.size() >= k) {
                         if (!num_kmers_in_seq.size() || num_kmers_in_seq.back().first != labels[0])
                             num_kmers_in_seq.emplace_back(labels[0], 0);
@@ -289,9 +280,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-        graph::CoordToAccession accessions(column_accessions, col_names);
+        graph::CoordToAccession accessions(column_accessions);
         accessions.serialize(annotator_filename);
-        logger->trace("Coord-to-accession map serialized to {}",
+        logger->trace("Coord-to-accession mapping serialized to {}",
                       annotator_filename + graph::CoordToAccession::kExtension);
         return;
     }
@@ -340,7 +331,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
                         logger->error("All input sequences must have the same"
-                                      " length when flag --const-length is on");
+                                      " length when flag --num-kmers-in-seq is on");
                         exit(1);
                     }
                     if (sequence.size() >= k) {
@@ -487,21 +478,16 @@ int annotate_graph(Config *config) {
             exit(1);
         }
         logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
-        logger->info("Note: It is essential that the files are passed in the order of the columns "
+        logger->info("Note: It's essential that the files are passed in the order of the columns "
                      "in the graph annotation (check with `metagraph stats --print-col-names ...`)");
-        if (get_num_threads() > 1 && files.size() > 1) {
-            logger->trace("Switching on `--separately` to read the files in parallel, each with a single thread");
-            config->separately = true;
-        }
+        config->separately = false;
     }
 
     const auto graph = load_critical_dbg(config->infbase);
 
     if (!config->separately) {
         omp_set_max_active_levels(2);
-        annotate_data(graph, *config, files, config->accessions
-            ? utils::remove_suffix(config->infbase, graph->file_extension())
-            : config->outfbase);
+        annotate_data(graph, *config, files, config->outfbase);
 
     } else {
         // |config->separately| is true
@@ -520,28 +506,13 @@ int annotate_graph(Config *config) {
             }
         }
 
-        std::vector<std::string> outbase;
-        for (size_t i = 0; i < files.size(); ++i) {
-            outbase.push_back(config->outfbase.size()
-                    ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
-                    : files[i]);
-        }
-
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
         for (size_t i = 0; i < files.size(); ++i) {
-            annotate_data(graph, *config, { files[i] }, outbase[i], 2000 / num_threads);
-        }
-
-        // If --accessions was used, merge all CoordToAccession objects from separate files
-        if (config->accessions) {
-            logger->trace("Merging CoordToAccession mappings from separate files");
-            graph::CoordToAccession merged(outbase, num_threads);
-            // Write merged result next to the graph file
-            std::string graph_base = utils::remove_suffix(config->infbase, graph->file_extension());
-            merged.serialize(graph_base);
-            logger->trace("Merged {} CoordToAccession mappings and serialized to {}",
-                          outbase.size(), graph_base + graph::CoordToAccession::kExtension);
-            fs::remove_all(config->outfbase);
+            annotate_data(graph, *config, { files[i] },
+                config->outfbase.size()
+                    ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
+                    : files[i],
+                2000 / num_threads);
         }
     }
 

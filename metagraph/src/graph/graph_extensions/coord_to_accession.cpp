@@ -12,12 +12,10 @@ namespace mtg::graph {
 
 using Tuple = CoordToAccession::Tuple;
 
-CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
-                                   const std::vector<std::string> &col_names)
-      : seq_id_labels_(col_names.size()), seq_delims_(col_names.size()) {
-    assert(accessions.size() == col_names.size());
+CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions)
+      : seq_id_labels_(accessions.size()), seq_delims_(accessions.size()) {
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < col_names.size(); ++i) {
+    for (size_t i = 0; i < accessions.size(); ++i) {
         std::vector<uint64_t> delims;
         uint64_t cur_coord = 0;
         for (const auto &[seq_id, num_kmers] : accessions[i]) {
@@ -34,31 +32,6 @@ CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::
             }, delims.back(), delims.size());
         }
     }
-}
-
-CoordToAccession::CoordToAccession(const std::vector<std::string> &fnames, size_t num_threads) {
-    std::string error;
-    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-    for (size_t i = 0; i < fnames.size(); ++i) {
-        CoordToAccession rt;
-        auto fname = utils::make_suffix(fnames[i], kExtension);
-        if (!rt.load(fname)) {
-            #pragma omp critical
-            error = "Cannot load CoordToAccession mapping from file " + fname;
-            continue;
-        }
-        #pragma omp ordered
-        {
-            seq_id_labels_.insert(seq_id_labels_.end(),
-                                  std::make_move_iterator(rt.seq_id_labels_.begin()),
-                                  std::make_move_iterator(rt.seq_id_labels_.end()));
-            seq_delims_.insert(seq_delims_.end(),
-                               std::make_move_iterator(rt.seq_delims_.begin()),
-                               std::make_move_iterator(rt.seq_delims_.end()));
-        }
-    }
-    if (!error.empty())
-        throw std::runtime_error(error);
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>

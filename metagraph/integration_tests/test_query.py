@@ -1429,12 +1429,11 @@ class TestAccessions(TestingBase):
 
         self.assertEqual(expected_output, res.stdout.decode())
 
-    @parameterized.expand([(True,), (False,)])
-    def test_multiple_files_with_accessions_separately(self, parallel):
+    @parameterized.expand(['', '-p 4', '--separately', '-p 4 --separately'])
+    def test_multiple_files_with_accessions(self, extra_flags):
         """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
         # Create multiple test FASTA files (simulating different annotation columns)
         anno_type = 'filename'
-        extra_flags = '-p 4' if parallel else ''
         file1 = self.tempdir.name + '/file1.fa'
         with open(file1, 'w') as f:
             f.write('>seq1\n')
@@ -1476,11 +1475,9 @@ class TestAccessions(TestingBase):
         columns = res.stdout.decode().split('\n')[2:]
 
         index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions {extra_flags} \
-                            -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
+                            -v -i {graph} -o {graph_base} {' '.join(columns)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
-        # Check that in parallel mode, it automatically turns `--separately` on and notifies about it
-        self.assertEqual('--separately' in res.stderr.decode(), parallel)
         # Verify that merged CoordToAccession file was created next to the graph
         seqs_file = graph_base + '.seqs'
         self.assertTrue(os.path.exists(seqs_file), f"CoordToAccession file {seqs_file} not found")

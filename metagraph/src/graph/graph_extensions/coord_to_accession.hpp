@@ -25,11 +25,8 @@ class CoordToAccession : public SequenceGraph::GraphExtension {
 
     CoordToAccession() {}
     // Constructor from vector of (sequence_header, num_kmers) pairs per annotation column.
-    // The column names are stored in col_names.
-    CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions,
-                     const std::vector<std::string> &col_names);
-    // Merge multiple serialized CoordToAccession objects into one
-    CoordToAccession(const std::vector<std::string> &fnames, size_t num_threads);
+    // accessions.size() must be equal to the number of columns in the annotation matrix.
+    CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
