@@ -566,13 +566,13 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 
     auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
-    if (const auto *seq_ids = dbg_.get_extension_threadsafe<CoordToAccession>()) {
-        if (tuple_matrix->get_binary_matrix().num_columns() != seq_ids->num_columns()) {
+    if (const auto *coord_to_accession = dbg_.get_extension_threadsafe<CoordToAccession>()) {
+        if (tuple_matrix->get_binary_matrix().num_columns() != coord_to_accession->num_columns()) {
             logger->error("Incompatible number of columns in coord-to-accession mapping and annotation matrix: {} != {}",
-                          seq_ids->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
+                          coord_to_accession->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
             exit(1);
         }
-        auto conv_results = seq_ids->rows_tuples_to_label_tuples(rows_tuples);
+        auto conv_results = coord_to_accession->rows_tuples_to_label_tuples(rows_tuples);
         if (num_top_labels < conv_results.size() || min_count > 1) {
             std::sort(conv_results.begin(), conv_results.end(),
                       [](const auto &a, const auto &b) {
