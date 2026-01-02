@@ -35,17 +35,10 @@ class CoordToAccession {
     rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuple) const;
 
     uint64_t num_columns() const { return seq_delims_.size(); }
-    // Get number of sequences in a specific column
-    uint64_t num_sequences(Column column) const {
-        assert(column < seq_id_labels_.size());
-        return seq_id_labels_[column].size();
-    }
+    uint64_t num_sequences(Column column) const { return seq_id_labels_[column].size(); }
     // Get number of k-mers/coordinates in a specific column
-    uint64_t num_kmers(Column column) const {
-        assert(column < seq_delims_.size());
-        return seq_delims_[column].size();
-    }
-    const auto& get_accessions() const { return seq_id_labels_; }
+    uint64_t num_kmers(Column column) const { return seq_delims_[column].size(); }
+    const auto& get_accessions(Column column) const { return seq_id_labels_[column]; }
 
     static constexpr auto kExtension = ".seqs";
 

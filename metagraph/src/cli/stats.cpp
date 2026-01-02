@@ -392,7 +392,7 @@ void print_coord_to_accession_stats(const std::string &fname) {
     if (get_verbose()) {
         std::cout << "=================== PER-COLUMN STATS ===================" << '\n';
         auto first_accessions = [&](size_t col, size_t num_first = 3) {
-            const auto &labels = coord_to_accession.get_accessions()[col];
+            const auto &labels = coord_to_accession.get_accessions(col);
             auto first_labels = std::vector<std::string>(labels.begin(),
                                                          std::min(labels.begin() + num_first, labels.end()));
             if (first_labels.size() < labels.size())
