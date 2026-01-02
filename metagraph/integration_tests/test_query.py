@@ -1546,7 +1546,7 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.exists(graph_base + '.seqs'))
 
-        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords'):
+        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords', extra_split_by = None):
             query_command = f'{METAGRAPH} query --batch-size 0 --query-mode {mode} --accessions \
                              -i {graph} -a {anno} {filter_flags} \
                              {query_fasta}' + MMAP_FLAG
@@ -1555,7 +1555,10 @@ class TestAccessions(TestingBase):
             if isinstance(expected_output, str):
                 self.assertEqual(res.stdout.decode().strip(), expected_output)
             else:
-                self.assertEqual(set(res.stdout.decode().strip().split('\t')), expected_output)
+                out = res.stdout.decode().strip().split('\t')
+                if extra_split_by:
+                    out = sum((part.split(extra_split_by) for part in out), [])
+                self.assertEqual(set(out), expected_output)
 
         # Test 1: --num-top-labels limits the number of results
         # Query without limit should return multiple labels
@@ -1574,10 +1577,10 @@ class TestAccessions(TestingBase):
             {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
 
         # --num-top-labels is not used in the labels mode
-        test_stdout('--num-top-labels 1', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
-        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
+        test_stdout('--num-top-labels 1', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
         test_stdout('--min-kmers-fraction-label 1.0', {'0', 'query1', 'seq2'}, mode='labels')
-        test_stdout('', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
+        test_stdout('', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
 
         test_stdout('--num-top-labels 1', '0\tquery1\t<seq2>:13', mode='matches')
         test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
