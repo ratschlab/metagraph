@@ -1313,7 +1313,9 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(LABELS).c_str());
             fprintf(stderr, "\t       Available modes:\n");
+if (advanced) {
             fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
+}
             fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
 if (advanced) {
             fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
