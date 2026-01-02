@@ -6,7 +6,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/graph_extensions/coord_to_accession.hpp"
+#include "annotation/coord_to_accession.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
@@ -37,8 +37,10 @@ AnnotatedSequenceGraph
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
-                           bool force_fast)
-      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
+                           bool force_fast,
+                           std::unique_ptr<annot::CoordToAccession> coord_to_accession)
+      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg),
+        coord_to_accession_(std::move(coord_to_accession)) {}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
@@ -233,7 +235,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
+    if (coord_to_accession_) {
         auto nodes = map_to_nodes(*graph_, sequence);
         size_t num_kmers = nodes.size();
         size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
@@ -336,7 +338,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     index_counts.reserve(num_kmers);
 
-    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
+    if (coord_to_accession_) {
         auto nodes = map_to_nodes(*graph_, sequence);
         size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
                                                              DeBruijnGraph::npos);
@@ -434,7 +436,7 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
     if (!nodes.size())
         return {};
 
-    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
+    if (coord_to_accession_) {
         auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
                                                    discovery_fraction, presence_fraction);
         std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
@@ -566,13 +568,13 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 
     auto rows_tuples = tuple_matrix->get_row_tuples(rows);
 
-    if (const auto *coord_to_accession = dbg_.get_extension_threadsafe<CoordToAccession>()) {
-        if (tuple_matrix->get_binary_matrix().num_columns() != coord_to_accession->num_columns()) {
+    if (coord_to_accession_) {
+        if (tuple_matrix->get_binary_matrix().num_columns() != coord_to_accession_->num_columns()) {
             logger->error("Incompatible number of columns in coord-to-accession mapping and annotation matrix: {} != {}",
-                          coord_to_accession->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
+                          coord_to_accession_->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
             exit(1);
         }
-        auto conv_results = coord_to_accession->rows_tuples_to_label_tuples(rows_tuples);
+        auto conv_results = coord_to_accession_->rows_tuples_to_label_tuples(rows_tuples);
         if (num_top_labels < conv_results.size() || min_count > 1) {
             std::sort(conv_results.begin(), conv_results.end(),
                       [](const auto &a, const auto &b) {
@@ -657,7 +659,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         return presence_vectors;
     }
 
-    if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
+    if (coord_to_accession_) {
         auto nodes = map_to_nodes(*graph_, sequence);
         auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
                                                    discovery_fraction, presence_fraction);

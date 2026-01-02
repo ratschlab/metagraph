@@ -18,7 +18,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/graph_extensions/coord_to_accession.hpp"
+#include "annotation/coord_to_accession.hpp"
 
 
 namespace mtg {
@@ -275,10 +275,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-        graph::CoordToAccession accessions(std::move(headers), std::move(num_kmers));
+        annot::CoordToAccession accessions(std::move(headers), std::move(num_kmers));
         accessions.serialize(annotator_filename);
         logger->trace("Coord-to-accession mapping serialized to {}",
-                      annotator_filename + graph::CoordToAccession::kExtension);
+                      annotator_filename + annot::CoordToAccession::kExtension);
         return;
     }
 

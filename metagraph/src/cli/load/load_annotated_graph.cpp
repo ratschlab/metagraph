@@ -5,7 +5,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "graph/graph_extensions/coord_to_accession.hpp"
+#include "annotation/coord_to_accession.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -25,15 +25,6 @@ using mtg::common::logger;
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config,
                                                        size_t max_chunks_open) {
-    if (config.accessions && config.identity != Config::ANNOTATE) {
-        auto accessions = std::make_shared<CoordToAccession>();
-        graph->add_extension(accessions);
-        auto coord_to_acc_fname = utils::remove_suffix(config.infbase, graph->file_extension())
-                                                        + graph::CoordToAccession::kExtension;
-        if (!accessions->load(coord_to_acc_fname))
-            logger->error("Failed loading coord-to-accession map from {}", coord_to_acc_fname);
-    }
-
     uint64_t max_index = graph->max_index();
 
     auto base_graph = graph;
@@ -45,6 +36,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
             : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
+
+    std::unique_ptr<annot::CoordToAccession> coord_to_accession;
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
@@ -74,11 +67,26 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
         }
+
+        // Load coord-to-accession mapping if needed
+        if (config.accessions && config.identity != Config::ANNOTATE) {
+            if (config.infbase_annotators.size() > 1) {
+                logger->error("Cannot merge multiple CoordToAccession mappings."
+                              " Query a single annotation at a time.");
+                exit(1);
+            }
+            coord_to_accession = std::make_unique<annot::CoordToAccession>();
+            auto coord_to_acc_fname = utils::remove_suffix(config.infbase_annotators.at(0),
+                                                           annotation_temp->file_extension())
+                                                    + annot::CoordToAccession::kExtension;
+            if (!coord_to_accession->load(coord_to_acc_fname))
+                logger->error("Failed loading coord-to-accession map from {}", coord_to_acc_fname);
+        }
     }
 
     // load graph
-    auto anno_graph
-            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp),
+                                                     false, std::move(coord_to_accession));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

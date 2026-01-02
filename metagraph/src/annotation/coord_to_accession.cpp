@@ -1,4 +1,4 @@
-#include "coord_to_accession.hpp"
+#include "annotation/coord_to_accession.hpp"
 
 #include <sstream>
 
@@ -7,8 +7,10 @@
 #include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
-namespace mtg::graph {
+namespace mtg {
+namespace annot {
 
 using Tuple = CoordToAccession::Tuple;
 
@@ -95,15 +97,6 @@ void CoordToAccession::serialize(const std::string &filename_base) const {
     }
 }
 
-bool CoordToAccession::is_compatible(const SequenceGraph &graph, bool verbose) const {
-    assert(seq_id_labels_.size() == seq_delims_.size());
-    const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph);
-    if (!dbg) {
-        if (verbose)
-            std::cerr << "Incompatible: graph is not a DeBruijnGraph" << std::endl;
-        return false;
-    }
-    return true;
-}
+} // namespace annot
+} // namespace mtg
 
-} // namespace mtg::graph

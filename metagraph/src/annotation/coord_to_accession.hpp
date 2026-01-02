@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "graph/representation/base/sequence_graph.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 
 
-namespace mtg::graph {
+namespace mtg {
+namespace annot {
 
 // A mapping from k-mer coordinates in columns to sequence accessions (headers).
 // Maps k-mer coordinates within annotation columns to sequence accessions (sequence headers).
@@ -17,7 +17,7 @@ namespace mtg::graph {
 // in query results to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
 // based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying coordinate annotations
 // but displaying results as if sequences were annotated by their headers instead of source files.
-class CoordToAccession : public SequenceGraph::GraphExtension {
+class CoordToAccession {
   public:
     using Column = mtg::annot::matrix::BinaryMatrix::Column;
     using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
@@ -31,8 +31,6 @@ class CoordToAccession : public SequenceGraph::GraphExtension {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
-
     std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
     rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuple) const;
 
@@ -45,6 +43,7 @@ class CoordToAccession : public SequenceGraph::GraphExtension {
     std::vector<bit_vector_sd> seq_delims_;
 };
 
-} // namespace mtg::graph
+} // namespace annot
+} // namespace mtg
 
 #endif // __COORD_TO_ACCESSION_HPP__

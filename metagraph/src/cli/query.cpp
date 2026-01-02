@@ -14,7 +14,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/graph_extensions/coord_to_accession.hpp"
+#include "annotation/coord_to_accession.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -599,8 +599,7 @@ std::unique_ptr<AnnotatedDBG::Annotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
-                 size_t num_threads,
-                 bool reencode = true) {
+                 size_t num_threads) {
     if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
         // don't break the topological order for row-diff annotation
         if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
@@ -617,9 +616,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         auto slice = mat->get_row_values(row_indexes);
 
-        auto label_encoder = reencode
-            ? reencode_labels(full_annotation.get_label_encoder(), &slice)
-            : full_annotation.get_label_encoder();
+        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
@@ -870,7 +867,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
-    const auto *coord_to_accession = full_dbg.get_extension_threadsafe<CoordToAccession>();
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
@@ -1080,20 +1076,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
-                                       num_threads,
-                                       !coord_to_accession);
+                                       num_threads);
 
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
-
-    if (coord_to_accession) {
-        graph->add_extension(std::shared_ptr<CoordToAccession>(
-            std::shared_ptr<CoordToAccession>{},
-            const_cast<CoordToAccession*>(coord_to_accession)
-        ));
-    }
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
