@@ -713,8 +713,8 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
-    std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
 
+    std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
     col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
     for (size_t i = 0; i < code_counts.size(); ++i) {
