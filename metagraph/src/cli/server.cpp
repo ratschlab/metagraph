@@ -485,7 +485,14 @@ int run_server(Config *config) {
                 uint64_t num_labels = 0;
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
-                        num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
+                        const auto &anno_dbg = *graphs_cache[{ graph_fname, anno_fname }];
+                        if (const auto *coord_to_accession = anno_dbg.get_coord_to_accession()) {
+                            for (uint64_t col = 0; col < coord_to_accession->num_columns(); ++col) {
+                                num_labels += coord_to_accession->num_sequences(col);
+                            }
+                        } else {
+                            num_labels += anno_dbg.get_annotator().num_labels();
+                        }
                     }
                 }
                 root["annotation"]["labels"] = num_labels;
@@ -497,7 +504,15 @@ int run_server(Config *config) {
                                                         == graph::DeBruijnGraph::CANONICAL);
                 const auto &annotation = anno_graph.get()->get_annotator();
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
-                root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
+                uint64_t num_labels = 0;
+                if (const auto *coord_to_accession = anno_graph.get()->get_coord_to_accession()) {
+                    for (uint64_t col = 0; col < coord_to_accession->num_columns(); ++col) {
+                        num_labels += coord_to_accession->num_sequences(col);
+                    }
+                } else {
+                    num_labels = annotation.num_labels();
+                }
+                root["annotation"]["labels"] = num_labels;
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
             }
             return root;
