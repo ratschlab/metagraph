@@ -1512,5 +1512,80 @@ class TestAccessions(TestingBase):
         self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
         self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
 
+    def test_query_coords_with_accessions_filters(self):
+        """Test that --num-top-labels and --min-kmers-fraction-label work correctly with coordinates and accessions"""
+        anno_type = 'filename'
+        graph_base = self.tempdir.name + '/graph'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno = self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr]
+
+        # Create test FASTA with sequences that will have different numbers of k-mer matches
+        test_fasta = self.tempdir.name + '/test_filter.fa'
+        with open(test_fasta, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCGATCGATCG\n')
+            f.write('>seq2\n')
+            f.write('TATCGATC\n')
+            f.write('>seq3\n')
+            f.write('ATCGATCG\n')
+
+        # Query that matches multiple sequences with different overlap amounts
+        query_fasta = self.tempdir.name + '/query_filter.fa'
+        with open(query_fasta, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCGATCGATCG\n')  # Matches seq1 and seq4 well, seq3 poorly
+
+        self._build_graph(test_fasta, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(test_fasta, graph_base + graph_file_extension[self.graph_repr],
+                             self.tempdir.name + '/annotation', self.anno_repr, anno_type=anno_type)
+
+        # Create accessions mapping
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --accessions \
+                                -i {graph} -o {graph_base} {test_fasta}'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(os.path.exists(graph_base + '.seqs'))
+
+        # Helper function to count labels in output
+        def count_labels(output_str):
+            """Count the number of labels in the query output"""
+            lines = output_str.strip().split('\n')
+            if not lines or not lines[0]:
+                return 0
+            # First line contains the query result
+            parts = lines[0].split('\t')
+            if len(parts) < 3:
+                return 0
+            # Parts[0] is query ID, parts[1] is query name, parts[2:] are labels
+            return len([l for l in parts[2:] if l.strip()])
+
+        # Helper function to get labels from output
+        def get_labels(output_str):
+            """Get the labels from the query output"""
+            lines = output_str.strip().split('\n')
+            if not lines or not lines[0]:
+                return []
+            parts = lines[0].split('\t')
+            if len(parts) < 3:
+                return []
+            return [l.strip() for l in parts[2:] if l.strip()]
+
+        def test_out(filter_flags: str, expected_output: str):
+            query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
+                             -i {graph} -a {anno} {filter_flags} \
+                             {query_fasta}' + MMAP_FLAG
+            res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
+            self.assertEqual(res.stdout.decode().strip(), expected_output)
+
+        # Test 1: --num-top-labels limits the number of results
+        # Query without limit should return multiple labels
+        test_out('--num-top-labels 1', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        test_out('--num-top-labels 2', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
+        test_out('--min-kmers-fraction-label 0.5', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq2>:0-0-3:5-1-3:9-1-3')
+        test_out('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        test_out('--min-kmers-fraction-label 0.0', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq2>:0-0-3:5-1-3:9-1-3\t<seq3>:1-0-3:5-0-3:9-0-3')
+        test_out('', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq2>:0-0-3:5-1-3:9-1-3')
+
 if __name__ == '__main__':
     unittest.main()
