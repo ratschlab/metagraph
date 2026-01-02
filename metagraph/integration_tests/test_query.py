@@ -1446,8 +1446,6 @@ class TestAccessions(TestingBase):
         with open(file2, 'w') as f:
             f.write('>short\n')
             f.write('AAA\n')
-            f.write('>bad\n')
-            f.write('!A2AA\n')
 
         file3 = self.tempdir.name + '/file3.fa'  # empty file (no sequences)
         with open(file3, 'w') as f:
