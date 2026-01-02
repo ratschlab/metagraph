@@ -240,8 +240,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         forward_and_reverse = false;
     }
 
-    Timer timer;
-
     // not too small, not too large
     const size_t BATCH_SIZE = 5'000;
     const size_t BATCH_LENGTH = 100'000;
@@ -273,8 +271,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                     if (sequence.size() >= k) {
                         if (headers[i].empty() || headers[i].back() != labels[0]) {
-                            headers[i].emplace_back(labels[0]);
-                            num_kmers[i].emplace_back(0);
+                            headers[i].push_back(labels[0]);
+                            num_kmers[i].push_back(0);
                         }
                         num_kmers[i].back() += sequence.size() - k + 1;
                     }
