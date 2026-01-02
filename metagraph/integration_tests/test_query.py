@@ -1493,6 +1493,43 @@ class TestAccessions(TestingBase):
         # Verify that merged CoordToAccession file was created
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
 
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[2], "columns: 2")
+        self.assertEqual(lines[3], "total sequences: 5")  # bad is also included (even though it has no valid k-mers)
+        self.assertEqual(lines[4], "total k-mers: 62")
+
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs -v" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[1], '=============== COORD-TO-ACCESSION STATS ===============')
+        self.assertEqual(lines[2], 'columns: 2')
+        self.assertEqual(lines[3], 'total sequences: 5')
+        self.assertEqual(lines[4], 'total k-mers: 62')
+        self.assertEqual(lines[5], '=================== PER-COLUMN STATS ===================')
+        # the order of the columns may be arbitra
+        if columns[0].endswith('file1.fa'):
+            self.assertEqual(lines[6], 'column 0:')
+            self.assertEqual(lines[7], '  sequences: 2 (seq1\tseq2)')
+            self.assertEqual(lines[8], '  k-mers: 18')
+            self.assertEqual(lines[9], '  k-mers per sequence: 9.0')
+            self.assertEqual(lines[10], 'column 1:')
+            self.assertEqual(lines[11], '  sequences: 3 (seq3\tbad\tseq4)')
+            self.assertEqual(lines[12], '  k-mers: 44')
+            self.assertEqual(lines[13], '  k-mers per sequence: 14.7')
+            self.assertEqual(lines[14], '========================================================')
+        else:
+            self.assertEqual(lines[6], 'column 0:')
+            self.assertEqual(lines[7], '  sequences: 3 (seq3\tbad\tseq4)')
+            self.assertEqual(lines[8], '  k-mers: 44')
+            self.assertEqual(lines[9], '  k-mers per sequence: 14.7')
+            self.assertEqual(lines[10], 'column 1:')
+            self.assertEqual(lines[11], '  sequences: 2 (seq1\tseq2)')
+            self.assertEqual(lines[12], '  k-mers: 18')
+            self.assertEqual(lines[13], '  k-mers per sequence: 9.0')
+            self.assertEqual(lines[14], '========================================================')
+
         # Query with --accessions flag
         # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
         query_command = f'{METAGRAPH} query --query-mode coords --accessions \
