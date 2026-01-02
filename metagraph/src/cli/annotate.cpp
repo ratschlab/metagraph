@@ -262,13 +262,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 false, // parse_counts_from_headers
                 config.fasta_anno_comment_delim,
                 config.fasta_header_delimiter,
-                config.anno_labels,
+                {}, // config.anno_labels
                 [&](std::string sequence, auto labels, uint64_t) {
-                    if (labels.size() != 1) {
-                        logger->error("Something went wrong. When flag --accessions is on, "
-                                      "each sequence must have exactly one label -- sequence header");
-                        exit(1);
-                    }
+                    assert(labels.size() == 1 && "each sequence has a single label (header)");
                     if (sequence.size() >= k) {
                         if (headers[i].empty() || headers[i].back() != labels[0]) {
                             headers[i].push_back(labels[0]);
