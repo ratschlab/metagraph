@@ -1523,9 +1523,9 @@ class TestAccessions(TestingBase):
         test_fasta = self.tempdir.name + '/test_filter.fa'
         with open(test_fasta, 'w') as f:
             f.write('>seq1\n')
-            f.write('GTATCGATCGATCGATCG\n')
-            f.write('>seq2\n')
             f.write('TATCGATC\n')
+            f.write('>seq2\n')
+            f.write('GTATCGATCGATCGATCG\n')
             f.write('>seq3\n')
             f.write('ATCGATCG\n')
 
@@ -1546,46 +1546,66 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.exists(graph_base + '.seqs'))
 
-        # Helper function to count labels in output
-        def count_labels(output_str):
-            """Count the number of labels in the query output"""
-            lines = output_str.strip().split('\n')
-            if not lines or not lines[0]:
-                return 0
-            # First line contains the query result
-            parts = lines[0].split('\t')
-            if len(parts) < 3:
-                return 0
-            # Parts[0] is query ID, parts[1] is query name, parts[2:] are labels
-            return len([l for l in parts[2:] if l.strip()])
-
-        # Helper function to get labels from output
-        def get_labels(output_str):
-            """Get the labels from the query output"""
-            lines = output_str.strip().split('\n')
-            if not lines or not lines[0]:
-                return []
-            parts = lines[0].split('\t')
-            if len(parts) < 3:
-                return []
-            return [l.strip() for l in parts[2:] if l.strip()]
-
-        def test_out(filter_flags: str, expected_output: str):
-            query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
+        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords'):
+            query_command = f'{METAGRAPH} query --batch-size 0 --query-mode {mode} --accessions \
                              -i {graph} -a {anno} {filter_flags} \
                              {query_fasta}' + MMAP_FLAG
             res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
-            self.assertEqual(res.stdout.decode().strip(), expected_output)
+            if isinstance(expected_output, str):
+                self.assertEqual(res.stdout.decode().strip(), expected_output)
+            else:
+                self.assertEqual(set(res.stdout.decode().strip().split('\t')), expected_output)
 
         # Test 1: --num-top-labels limits the number of results
         # Query without limit should return multiple labels
-        test_out('--num-top-labels 1', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
-        test_out('--num-top-labels 2', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
-        test_out('--min-kmers-fraction-label 0.5', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq2>:0-0-3:5-1-3:9-1-3')
-        test_out('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
-        test_out('--min-kmers-fraction-label 0.0', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq2>:0-0-3:5-1-3:9-1-3\t<seq3>:1-0-3:5-0-3:9-0-3')
-        test_out('', '0\tquery1\t<seq1>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq2>:0-0-3:5-1-3:9-1-3')
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
+        test_stdout('--min-kmers-fraction-label 0.5',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq1>:0-0-3:5-1-3:9-1-3')
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        # Without filters the matches are not sorted
+        test_stdout('--min-kmers-fraction-label 0.0',
+            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+        test_stdout('',
+            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+
+        # --num-top-labels is not used in the labels mode
+        test_stdout('--num-top-labels 1', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
+        test_stdout('--min-kmers-fraction-label 1.0', {'0', 'query1', 'seq2'}, mode='labels')
+        test_stdout('', {'0', 'query1', 'seq2:seq3:seq1'}, mode='labels')
+
+        test_stdout('--num-top-labels 1', '0\tquery1\t<seq2>:13', mode='matches')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
+        test_stdout('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq2>:13', mode='matches')
+        test_stdout('', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
+        test_stdout('--num-top-labels 3', '0\tquery1\t<seq2>:13\t<seq3>:12\t<seq1>:10', mode='matches')
+
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
+        test_stdout('--min-kmers-fraction-label 0.5',
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
+        test_stdout('',
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+        test_stdout('--num-top-labels 3',
+            '0\tquery1\t<seq2>:0=1:1-12=3\t<seq3>:1-12=1\t<seq1>:0-3=1:5-7=1:9-11=1', mode='counts')
+
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+        test_stdout('--min-kmers-fraction-label 0.5',
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+        test_stdout('',
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+        test_stdout('--num-top-labels 3',
+            '0\tquery1\t<seq2>:13:1111111111111:17\t<seq3>:12:0111111111111:16\t<seq1>:10:1111011101110:15', mode='signature')
 
 if __name__ == '__main__':
     unittest.main()
