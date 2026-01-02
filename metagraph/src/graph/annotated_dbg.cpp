@@ -657,11 +657,11 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         return presence_vectors;
     }
 
-    std::vector<std::pair<Label, sdsl::bit_vector>> result;
     if (dbg_.get_extension_threadsafe<CoordToAccession>()) {
         auto nodes = map_to_nodes(*graph_, sequence);
         auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
                                                    discovery_fraction, presence_fraction);
+        std::vector<std::pair<Label, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
             result.emplace_back(std::move(label), sdsl::bit_vector(nodes.size()));
@@ -713,7 +713,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
-    result.resize(code_counts.size());
+    std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
 
     col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
