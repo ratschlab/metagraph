@@ -1490,7 +1490,7 @@ class TestAccessions(TestingBase):
                             -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
         res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
-        # Verify that merged CoordToAccession file was created next to the graph
+        # Verify that merged CoordToAccession file was created
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
 
         # Query with --accessions flag
