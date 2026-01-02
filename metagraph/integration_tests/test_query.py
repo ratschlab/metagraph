@@ -1441,8 +1441,19 @@ class TestAccessions(TestingBase):
             f.write('>seq2\n')
             f.write('GCTAGCTAGCTAGCTA\n')
 
-        file2 = self.tempdir.name + '/file2.fa'
+        file2 = self.tempdir.name + '/file2.fa'  # file with no valid k-mers
         with open(file2, 'w') as f:
+            f.write('>short\n')
+            f.write('AAA\n')
+            f.write('>bad\n')
+            f.write('!A2AA\n')
+
+        file3 = self.tempdir.name + '/file3.fa'  # empty file (no sequences)
+        with open(file3, 'w') as f:
+            f.write('\n')
+
+        file4 = self.tempdir.name + '/file4.fa'
+        with open(file4, 'w') as f:
             f.write('>seq3\n')
             f.write('ATCGATCGAAAAACCCCCGGGGGTTTTTGCTAGC\n')
             f.write('>short\n')
@@ -1456,7 +1467,7 @@ class TestAccessions(TestingBase):
         query_fasta = self.tempdir.name + '/query_multi.fa'
         with open(query_fasta, 'w') as f:
             f.write('>query1\n')
-            f.write('TATCGATCG\n')  # Matches seq1 from file1 and seq4 from file2
+            f.write('TATCGATCG\n')  # Matches seq1 from file1 and seq4 from file4
             f.write('>query2\n')
             f.write('GCTAGCTA\n')   # Matches seq2 from file1
 
@@ -1466,8 +1477,8 @@ class TestAccessions(TestingBase):
         anno = anno_base + anno_file_extension[self.anno_repr]
 
         # Build graph from all files
-        self._build_graph(f'{file1} {file2}', graph_base, k=5, repr=self.graph_repr, mode='basic')
-        self._annotate_graph(f'{file1} {file2}', graph, anno_base, self.anno_repr, anno_type=anno_type)
+        self._build_graph(f'{file1} {file2} {file3} {file4}', graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(f'{file1} {file2} {file3} {file4}', graph, anno_base, self.anno_repr, anno_type=anno_type)
 
         # The order of the columns may be arbitrary, so we run stats to get the final order
         res = subprocess.run([f"{METAGRAPH} stats {anno} --print-col-names"], shell=True, stdout=PIPE, stderr=PIPE)

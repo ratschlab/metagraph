@@ -12,25 +12,22 @@ namespace mtg::graph {
 
 using Tuple = CoordToAccession::Tuple;
 
-CoordToAccession::CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions)
-      : seq_id_labels_(accessions.size()), seq_delims_(accessions.size()) {
+CoordToAccession::CoordToAccession(std::vector<std::vector<std::string>> &&headers,
+                                   std::vector<std::vector<uint64_t>> &&num_kmers)
+      : seq_id_labels_(std::move(headers)), seq_delims_(num_kmers.size()) {
+    assert(seq_id_labels_.size() == num_kmers.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < accessions.size(); ++i) {
-        std::vector<uint64_t> delims;
-        uint64_t cur_coord = 0;
-        for (const auto &[seq_id, num_kmers] : accessions[i]) {
-            assert(num_kmers);
-            cur_coord += num_kmers;
-            delims.emplace_back(cur_coord);
-            seq_id_labels_[i].emplace_back(seq_id);
-        }
-        if (delims.size()) {
-            seq_delims_[i] = bit_vector_sd([&](const auto &callback) {
-                for (uint64_t cur_coord : delims) {
-                    callback(cur_coord - 1);
-                }
-            }, delims.back(), delims.size());
-        }
+    for (size_t i = 0; i < num_kmers.size(); ++i) {
+        if (num_kmers[i].empty())
+            continue;
+        auto &offsets = num_kmers[i];
+        assert(std::find(offsets.begin(), offsets.end(), 0) == offsets.end());
+        std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+        seq_delims_[i] = bit_vector_sd([&](const auto &callback) {
+            for (uint64_t cur_coord : offsets) {
+                callback(cur_coord - 1);
+            }
+        }, offsets.back(), offsets.size());
     }
 }
 

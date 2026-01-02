@@ -248,11 +248,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     if (config.accessions) {
         // Accumulate sequence headers and k-mer counts across all files
-        std::vector<std::vector<std::pair<std::string, uint64_t>>> column_accessions(files.size());
+        std::vector<std::vector<std::string>> headers(files.size());
+        std::vector<std::vector<uint64_t>> num_kmers(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
-            logger->info("Computing coordinate offsets for file {}", files[i]);
-            auto &num_kmers_in_seq = column_accessions[i];
             call_annotations(
                 files[i],
                 config.refpath,
@@ -273,14 +272,16 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         exit(1);
                     }
                     if (sequence.size() >= k) {
-                        if (!num_kmers_in_seq.size() || num_kmers_in_seq.back().first != labels[0])
-                            num_kmers_in_seq.emplace_back(labels[0], 0);
-                        num_kmers_in_seq.back().second += sequence.size() - k + 1;
+                        if (headers[i].empty() || headers[i].back() != labels[0]) {
+                            headers[i].emplace_back(labels[0]);
+                            num_kmers[i].emplace_back(0);
+                        }
+                        num_kmers[i].back() += sequence.size() - k + 1;
                     }
                 }
             );
         }
-        graph::CoordToAccession accessions(column_accessions);
+        graph::CoordToAccession accessions(std::move(headers), std::move(num_kmers));
         accessions.serialize(annotator_filename);
         logger->trace("Coord-to-accession mapping serialized to {}",
                       annotator_filename + graph::CoordToAccession::kExtension);

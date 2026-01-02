@@ -24,9 +24,9 @@ class CoordToAccession : public SequenceGraph::GraphExtension {
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
     CoordToAccession() {}
-    // Constructor from vector of (sequence_header, num_kmers) pairs per annotation column.
-    // accessions.size() must be equal to the number of columns in the annotation matrix.
-    CoordToAccession(const std::vector<std::vector<std::pair<std::string, uint64_t>>> &accessions);
+    // Constructor from sequence names and number of k-mers in them, per annotation column.
+    CoordToAccession(std::vector<std::vector<std::string>> &&headers,
+                     std::vector<std::vector<uint64_t>> &&num_kmers);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
