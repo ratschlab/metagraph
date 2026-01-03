@@ -1506,7 +1506,7 @@ class TestAccessions(TestingBase):
         self.assertEqual(lines[3], 'total sequences: 5')
         self.assertEqual(lines[4], 'total k-mers: 62')
         self.assertEqual(lines[5], '=================== PER-COLUMN STATS ===================')
-        # the order of the columns may be arbitra
+        # the order of the columns may be arbitrary
         if columns[0].endswith('file1.fa'):
             self.assertEqual(lines[6], 'column 0:')
             self.assertEqual(lines[7], '  sequences: 2 (seq1\tseq2)')
@@ -1546,6 +1546,52 @@ class TestAccessions(TestingBase):
         self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>:0-1-5", "<seq3>:1-4:1-0-3", "<seq4>:0-0-4:1-5-8:1-9-12"})
         self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
         self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
+
+    def test_multiple_files_with_accessions_bad(self):
+        """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
+        # Create multiple test FASTA files (simulating different annotation columns)
+        anno_type = 'filename'
+        file1 = self.tempdir.name + '/file1.fa'
+        with open(file1, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+
+        file2 = self.tempdir.name + '/file2.fa'
+        with open(file2, 'w') as f:
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTTGCTAGC\n')
+            f.write('>seq4\n')
+            f.write('TATCGATCGATCGATCG\n')
+
+        graph_base = self.tempdir.name + '/graph_multi'
+        graph = self.tempdir.name + '/graph_multi' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Build graph from all files
+        self._build_graph(f'{file1} {file2}', graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(f'{file1} {file2}', graph, anno_base, self.anno_repr, anno_type=anno_type)
+        # Index headers only in the first file
+        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions \
+                            -v -i {graph} -o {anno_base} {file1}" + MMAP_FLAG
+        res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
+        # Verify that merged CoordToAccession file was created
+        self.assertTrue(os.path.exists(anno_base + '.seqs'))
+
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[2], "columns: 1")
+        # Query with --accessions flag
+        # The query is expected to fail because the mapping file is incompatible with the annotation
+        query_command = f'{METAGRAPH} query --query-mode coords --accessions -i {graph} -a {anno} \
+                         --min-kmers-fraction-label 0.0 {file1}' + MMAP_FLAG
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0, f"Query with incompatible .seq mapping must fail")
+        self.assertIn("[error] Incompatible number of columns", res.stderr.decode())
 
     def test_query_coords_with_accessions_filters(self):
         """Test that --num-top-labels and --min-kmers-fraction-label work correctly with coordinates and accessions"""
@@ -1603,7 +1649,7 @@ class TestAccessions(TestingBase):
         test_stdout('--num-top-labels 2',
             '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
         test_stdout('--min-kmers-fraction-label 0.5',
-            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3\t<seq1>:0-0-3:5-1-3:9-1-3')
+            {'0', 'query1', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3', '<seq1>:0-0-3:5-1-3:9-1-3'})
         test_stdout('--min-kmers-fraction-label 1.0',
             '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
         # Without filters the matches are not sorted
@@ -1622,7 +1668,8 @@ class TestAccessions(TestingBase):
         test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
         test_stdout('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq2>:13', mode='matches')
         test_stdout('', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
-        test_stdout('--num-top-labels 3', '0\tquery1\t<seq2>:13\t<seq3>:12\t<seq1>:10', mode='matches')
+        test_stdout('--num-top-labels 2', '0\tquery1\t<seq2>:13\t<seq3>:12', mode='matches')
+        test_stdout('--num-top-labels 3', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
 
         test_stdout('--num-top-labels 1',
             '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
@@ -1632,8 +1679,10 @@ class TestAccessions(TestingBase):
             '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
         test_stdout('',
             {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:0=1:1-12=3\t<seq3>:1-12=1', mode='counts')
         test_stdout('--num-top-labels 3',
-            '0\tquery1\t<seq2>:0=1:1-12=3\t<seq3>:1-12=1\t<seq1>:0-3=1:5-7=1:9-11=1', mode='counts')
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
 
         test_stdout('--num-top-labels 1',
             '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
@@ -1643,8 +1692,10 @@ class TestAccessions(TestingBase):
             '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
         test_stdout('',
             {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:13:1111111111111:17\t<seq3>:12:0111111111111:16', mode='signature')
         test_stdout('--num-top-labels 3',
-            '0\tquery1\t<seq2>:13:1111111111111:17\t<seq3>:12:0111111111111:16\t<seq1>:10:1111011101110:15', mode='signature')
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
 
 if __name__ == '__main__':
     unittest.main()

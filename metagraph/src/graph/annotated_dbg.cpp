@@ -11,6 +11,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -410,14 +411,21 @@ Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
     }
 
     if (code_counts.size() > num_top_labels) {
+        std::nth_element(code_counts.begin(),
+                         code_counts.begin() + num_top_labels,
+                         code_counts.end(),
+                         [](const auto &x, const auto &y) {
+                             return std::make_pair(y.second, x.first)
+                                   < std::make_pair(x.second, y.first);
+                         });
+        // leave only the first |num_top_labels| top labels
+        code_counts.resize(num_top_labels);
         // sort by the number of matched k-mers
         std::sort(code_counts.begin(), code_counts.end(),
                   [](const auto &x, const auto &y) {
                       return std::make_pair(y.second, x.first)
                             < std::make_pair(x.second, y.first);
                   });
-        // keep only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
     }
     return code_counts;
 }
@@ -574,22 +582,12 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                           coord_to_accession_->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
             exit(1);
         }
-        auto conv_results = coord_to_accession_->rows_tuples_to_label_tuples(rows_tuples);
-        if (num_top_labels < conv_results.size() || min_count > 1) {
-            std::sort(conv_results.begin(), conv_results.end(),
-                      [](const auto &a, const auto &b) {
-                          return std::get<1>(a) > std::get<1>(b);
-                      });
-            if (num_top_labels < conv_results.size())
-                conv_results.resize(num_top_labels);
-
-            if (min_count > 1) {
-                auto it = std::find_if(
-                    conv_results.begin(), conv_results.end(),
-                    [min_count](const auto &a) { return std::get<1>(a) < min_count; }
-                );
-                conv_results.erase(it, conv_results.end());
-            }
+        auto conv_results = coord_to_accession_->rows_tuples_to_label_tuples(rows_tuples, min_count);
+        if (num_top_labels < conv_results.size()) {
+            std::nth_element(conv_results.begin(), conv_results.begin() + num_top_labels,
+                             conv_results.end(), utils::GreaterSecond());
+            conv_results.resize(num_top_labels);
+            std::sort(conv_results.begin(), conv_results.end(), utils::GreaterSecond());
         }
         return conv_results;
     }
@@ -766,14 +764,21 @@ std::vector<StringCountPair> top_labels(Container&& code_counts,
     std::ignore = min_count;
 
     if (code_counts.size() > num_top_labels) {
-        // sort labels by counts to get the top |num_top_labels|
+        std::nth_element(code_counts.begin(),
+                         code_counts.begin() + num_top_labels,
+                         code_counts.end(),
+                         [](const auto &x, const auto &y) {
+                             return std::make_pair(y.second, x.first)
+                                   < std::make_pair(x.second, y.first);
+                         });
+        // leave only the first |num_top_labels| top labels
+        code_counts.resize(num_top_labels);
+        // sort the top labels by counts
         std::sort(code_counts.begin(), code_counts.end(),
                   [](const auto &x, const auto &y) {
                       return std::make_pair(y.second, x.first)
                             < std::make_pair(x.second, y.first);
                   });
-        // leave only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
     }
 
     // TODO: remove this step?

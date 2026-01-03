@@ -34,7 +34,7 @@ CoordToAccession::CoordToAccession(std::vector<std::vector<std::string>> &&heade
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
-CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples) const {
+CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
     tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
@@ -42,11 +42,10 @@ CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows
         for (const auto &[col, tuple] : row_tuples) {
             const auto &delims = seq_delims_[col];
             for (uint64_t coord : tuple) {
-                uint64_t seq_id = coord ? delims.rank1(coord - 1) : 0;
+                size_t seq_id = coord ? delims.rank1(coord - 1) : 0;
                 uint64_t conv_coord = seq_id > 0 ? coord - delims.select1(seq_id) - 1 : coord;
-                auto &tuple = conv_coords[std::make_pair(col, seq_id)];
-                tuple.resize(rows_tuples.size());
-                tuple[i].emplace_back(conv_coord);
+                auto it = conv_coords.try_emplace(std::make_pair(col, seq_id), rows_tuples.size()).first;
+                it.value()[i].emplace_back(conv_coord);
             }
         }
     }
@@ -57,7 +56,8 @@ CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows
         auto [col, seq_id] = key;
         size_t count = std::count_if(tuples.begin(), tuples.end(),
                                      [](const auto &a) { return !a.empty(); });
-        result.emplace_back(seq_id_labels_[col][seq_id], count, std::move(tuples));
+        if (count >= min_count)
+            result.emplace_back(seq_id_labels_[col][seq_id], count, std::move(tuples));
     }
 
     return result;
