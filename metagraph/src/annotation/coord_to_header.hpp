@@ -13,11 +13,10 @@ namespace annot {
 
 /**
  * An index mapping k-mer coordinates in annotation columns to sequence headers.
- * This mapping can be used to transform coordinates and labels in query results
- * to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
- * based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying
- * coordinate annotations constructed with `--anno-filename` but showing results
- * as if sequences were annotated by their headers instead of source files.
+ * This mapping can be used to transform coordinates and labels in query results to show
+ * sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-based coordinates
+ * (e.g., "<file.fa>:0-0-3:0-23-27"). This allows showing results of querying coordinate
+ * annotations as if sequences were annotated by their headers instead of source files.
  */
 class CoordToHeader {
   public:
