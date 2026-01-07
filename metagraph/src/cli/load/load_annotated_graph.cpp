@@ -77,8 +77,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             if (std::filesystem::exists(coord_to_header_fname)) {
                 logger->trace("Detected a CoordToHeader mapping index. Loading from {}", coord_to_header_fname);
                 coord_to_header = std::make_unique<annot::CoordToHeader>();
-                if (!coord_to_header->load(coord_to_header_fname))
+                if (!coord_to_header->load(coord_to_header_fname)) {
                     logger->error("Failed loading the CoordToHeader mapping from {}", coord_to_header_fname);
+                    exit(1);
+                }
             }
         }
     }

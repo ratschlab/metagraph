@@ -33,26 +33,24 @@ class CoordToHeader {
     void serialize(const std::string &filename_base) const;
 
     // Transforms global coords to sequence-based coords and outputs them as a list of tuples
-    // (header, num_matches, coords). `coords` contains all coordinates from `rows_tuple`
+    // (header, num_matches, coords). `coords` contains all coordinates from `rows_tuples`
     // corresponding to that sequence/header and mapped to the sequence-based positions and
     // `num_matches` is the number of rows with matches for that sequence/header (the number of
     // non-zero tuples in `coords`). Also applies filtering (`num_matches` must be >= `min_count`).
     std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
-    rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuple, size_t min_count) const;
+    rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const;
 
-    uint64_t num_columns() const { return seq_delims_.size(); }
-    uint64_t num_sequences(Column column) const { return seq_id_labels_[column].size(); }
+    uint64_t num_columns() const { return coord_offsets_.size(); }
+    uint64_t num_sequences(Column column) const { return headers_[column].size(); }
     // Get number of k-mers/coordinates in a specific column
-    uint64_t num_kmers(Column column) const { return seq_delims_[column].size(); }
-    const std::vector<std::string>& get_headers(Column column) const {
-        return seq_id_labels_[column];
-    }
+    uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
+    const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
 
     static constexpr auto kExtension = ".seqs";
 
   private:
-    std::vector<std::vector<std::string>> seq_id_labels_;
-    std::vector<bit_vector_sd> seq_delims_;
+    std::vector<std::vector<std::string>> headers_;
+    std::vector<bit_vector_sd> coord_offsets_;
 };
 
 } // namespace annot

@@ -1,7 +1,5 @@
 #include "annotation/coord_to_header.hpp"
 
-#include <sstream>
-
 #include <tsl/hopscotch_map.h>
 
 #include "common/serialization.hpp"
@@ -16,16 +14,18 @@ using Tuple = CoordToHeader::Tuple;
 
 CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                              std::vector<std::vector<uint64_t>> &&num_kmers)
-      : seq_id_labels_(std::move(headers)), seq_delims_(num_kmers.size()) {
-    assert(seq_id_labels_.size() == num_kmers.size());
+      : headers_(std::move(headers)), coord_offsets_(num_kmers.size()) {
+    assert(headers_.size() == num_kmers.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < num_kmers.size(); ++i) {
+        assert(num_kmers[i].size() == headers_[i].size());
         if (num_kmers[i].empty())
             continue;
         auto &offsets = num_kmers[i];
+        // Ensure no zero k-mer counts (each sequence must have at least one k-mer)
         assert(std::find(offsets.begin(), offsets.end(), 0) == offsets.end());
         std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
-        seq_delims_[i] = bit_vector_sd([&](const auto &callback) {
+        coord_offsets_[i] = bit_vector_sd([&](const auto &callback) {
             for (uint64_t cur_coord : offsets) {
                 callback(cur_coord - 1);
             }
@@ -40,10 +40,16 @@ CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tu
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
         const auto &row_tuples = rows_tuples[i];
         for (const auto &[col, tuple] : row_tuples) {
-            const auto &delims = seq_delims_[col];
+            const auto &offsets = coord_offsets_.at(col);
             for (uint64_t coord : tuple) {
-                size_t seq_id = coord ? delims.rank1(coord - 1) : 0;
-                uint64_t conv_coord = seq_id > 0 ? coord - delims.select1(seq_id) - 1 : coord;
+                if (coord >= offsets.size()) {
+                    throw std::runtime_error("Querying coordinate " + std::to_string(coord) + " for"
+                            + " column " + std::to_string(col) + " while CoordToHeader has only "
+                            + std::to_string(offsets.size()) + " coordinates for that column");
+                }
+                size_t seq_id = coord ? offsets.rank1(coord - 1) : 0;
+                // Convert global coordinate to sequence-relative coordinate
+                uint64_t conv_coord = seq_id > 0 ? coord - offsets.select1(seq_id) - 1 : coord;
                 auto it = conv_coords.try_emplace(std::make_pair(col, seq_id), rows_tuples.size()).first;
                 it.value()[i].emplace_back(conv_coord);
             }
@@ -57,26 +63,26 @@ CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tu
         size_t count = std::count_if(tuples.begin(), tuples.end(),
                                      [](const auto &a) { return !a.empty(); });
         if (count >= min_count)
-            result.emplace_back(seq_id_labels_[col][seq_id], count, std::move(tuples));
+            result.emplace_back(headers_[col][seq_id], count, std::move(tuples));
     }
 
     return result;
 }
 
 bool CoordToHeader::load(const std::string &filename_base) {
-    try {
-        std::unique_ptr<std::ifstream> in
-            = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
-        if (!in->good())
-            return false;
+    std::unique_ptr<std::ifstream> in
+        = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
+    if (!in)
+        return false;
 
+    try {
         uint64_t num_columns = load_number(*in);
-        seq_id_labels_.resize(num_columns);
-        seq_delims_.resize(num_columns);
+        headers_.resize(num_columns);
+        coord_offsets_.resize(num_columns);
 
         for (uint64_t i = 0; i < num_columns; ++i) {
-            load_string_vector(*in, &seq_id_labels_[i]);
-            seq_delims_[i].load(*in);
+            load_string_vector(*in, &headers_[i]);
+            coord_offsets_[i].load(*in);
         }
         return true;
 
@@ -90,10 +96,10 @@ void CoordToHeader::serialize(const std::string &filename_base) const {
     std::ofstream out = utils::open_new_ofstream(fname);
     if (!out)
         throw std::ios_base::failure("Couldn't open file " + fname + " for writing");
-    serialize_number(out, seq_id_labels_.size());
-    for (size_t i = 0; i < seq_id_labels_.size(); ++i) {
-        serialize_string_vector(out, seq_id_labels_[i]);
-        seq_delims_[i].serialize(out);
+    serialize_number(out, headers_.size());
+    for (size_t i = 0; i < headers_.size(); ++i) {
+        serialize_string_vector(out, headers_[i]);
+        coord_offsets_[i].serialize(out);
     }
 }
 

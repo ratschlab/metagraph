@@ -78,6 +78,9 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
+    // Returns pointer to the coordinate-to-header mapping if available, nullptr otherwise.
+    // This mapping transforms file-based coordinates to sequence-header-based coordinates
+    // for query results. The returned pointer is valid for the lifetime of this object.
     const annot::CoordToHeader* get_coord_to_header() const { return coord_to_header_.get(); }
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
