@@ -1334,7 +1334,7 @@ class TestQueryPrimary(TestingBase):
     ),
     class_name_func=get_test_class_name
 )
-class TestAccessions(TestingBase):
+class TestCoordToHeader(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
@@ -1360,7 +1360,7 @@ class TestAccessions(TestingBase):
             f.write('GCTAGCTA\n')
 
     @parameterized.expand(['header', 'filename'])
-    def test_query_coords(self, anno_type):
+    def test_query_coords_without_mapping(self, anno_type):
         #"""Test coordinate queries when indexed sequence headers"""
         self._build_graph(self.test_fasta, self.tempdir.name + '/graph', k=5, repr=self.graph_repr, mode='basic')
         self._annotate_graph(self.test_fasta, self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -1368,7 +1368,10 @@ class TestAccessions(TestingBase):
         if anno_type == 'header':
             expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
         elif anno_type == 'filename':
-            expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+            expected_output = (
+                f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n'
+                f'1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+            )
         else:
             raise ValueError(f'Invalid annotation type: {anno_type}')
 
@@ -1380,15 +1383,10 @@ class TestAccessions(TestingBase):
                          {self.query_fasta}' + MMAP_FLAG
 
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
         self.assertEqual(expected_output, res.stdout.decode())
 
-        query_command += ' --accessions'
-        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertTrue(res.returncode != 0)
-
-    def test_query_coords_with_accessions(self):
-        #"""Test that --accessions creates mapping and query maps coordinates to sequence headers"""
+    def test_query_coords(self):
         anno_type = 'filename'
         graph_base = self.tempdir.name + '/graph'
         graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
@@ -1400,22 +1398,12 @@ class TestAccessions(TestingBase):
 
         expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
 
-        # Create accessions mapping from .fai file
-        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --accessions \
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --index-header-coords \
                                 -i {graph} -o {anno_base} {self.test_fasta}'],
                              shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
-        # Verify accessions file was created (it will be at graph.seqs)
+        # Verify the mapping file was created (it will be at graph.seqs)
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
-
-        # Query with coordinates mode - this should map coordinates to sequence headers
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --accessions \
-                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
-                         {self.query_fasta}' + MMAP_FLAG
-
-        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(expected_output, res.stdout.decode())
 
         # Query with coordinates mode - this should map coordinates to sequence headers
         query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
@@ -1424,15 +1412,26 @@ class TestAccessions(TestingBase):
 
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
+        self.assertEqual(expected_output, res.stdout.decode())
 
-        # Test if the query without accessions works normally
-        expected_output = f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+        # Query in the basic mode, without mapping to headers
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --no-coord-mapping \
+                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
+                         {self.query_fasta}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        # Test if the basic query (without the mapping) works normally
+        expected_output = (
+            f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n'
+            f'1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+        )
 
         self.assertEqual(expected_output, res.stdout.decode())
 
     @parameterized.expand(['', '-p 4', '--separately', '-p 4 --separately'])
-    def test_multiple_files_with_accessions(self, extra_flags):
-        """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
+    def test_multiple_files(self, extra_flags):
         # Create multiple test FASTA files (simulating different annotation columns)
         anno_type = 'filename'
         file1 = self.tempdir.name + '/file1.fa'
@@ -1484,11 +1483,11 @@ class TestAccessions(TestingBase):
         self.assertEqual(res.returncode, 0, f"Stats failed: {res.stderr.decode()}")
         columns = res.stdout.decode().split('\n')[2:]
 
-        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions {extra_flags} \
-                            -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG
-        res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
-        # Verify that merged CoordToAccession file was created
+        res = subprocess.run([f"{METAGRAPH} annotate --anno-filename --index-header-coords {extra_flags} \
+                            -v -i {graph} -o {anno_base} {' '.join(columns)}" + MMAP_FLAG],
+                            shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"The mapping construction failed: {res.stderr.decode()}")
+        # Verify that merged CoordToHeader file was created
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
 
         res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
@@ -1501,7 +1500,7 @@ class TestAccessions(TestingBase):
         res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs -v" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         lines = res.stdout.decode().strip().split('\n')
-        self.assertEqual(lines[1], '=============== COORD-TO-ACCESSION STATS ===============')
+        self.assertEqual(lines[1], '================ COORD-TO-HEADER STATS =================')
         self.assertEqual(lines[2], 'columns: 2')
         self.assertEqual(lines[3], 'total sequences: 5')
         self.assertEqual(lines[4], 'total k-mers: 62')
@@ -1528,12 +1527,9 @@ class TestAccessions(TestingBase):
             self.assertEqual(lines[13], '  k-mers per sequence: 9.0')
             self.assertEqual(lines[14], '========================================================')
 
-        # Query with --accessions flag
         # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
-        query_command = f'{METAGRAPH} query --query-mode coords --accessions \
-                         -i {graph} -a {anno} \
-                         --min-kmers-fraction-label 0.0 \
-                         {query_fasta}' + MMAP_FLAG
+        query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
+                         --min-kmers-fraction-label 0.0 {query_fasta}' + MMAP_FLAG
 
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
@@ -1547,8 +1543,7 @@ class TestAccessions(TestingBase):
         self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
         self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
 
-    def test_multiple_files_with_accessions_bad(self):
-        """Test that `annotate --accessions` creates and merges CoordToAccession correctly"""
+    def test_multiple_files_bad(self):
         # Create multiple test FASTA files (simulating different annotation columns)
         anno_type = 'filename'
         file1 = self.tempdir.name + '/file1.fa'
@@ -1574,27 +1569,26 @@ class TestAccessions(TestingBase):
         self._build_graph(f'{file1} {file2}', graph_base, k=5, repr=self.graph_repr, mode='basic')
         self._annotate_graph(f'{file1} {file2}', graph, anno_base, self.anno_repr, anno_type=anno_type)
         # Index headers only in the first file
-        index_accessions = f"{METAGRAPH} annotate --anno-filename --accessions \
-                            -v -i {graph} -o {anno_base} {file1}" + MMAP_FLAG
-        res = subprocess.run([index_accessions], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res.returncode, 0, f"Accessions mapping construction failed: {res.stderr.decode()}")
-        # Verify that merged CoordToAccession file was created
+        res = subprocess.run([f"{METAGRAPH} annotate --anno-filename --index-header-coords \
+                            -v -i {graph} -o {anno_base} {file1}" + MMAP_FLAG], 
+                            shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"The mapping construction failed: {res.stderr.decode()}")
+        # Verify that merged CoordToHeader file was created
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
 
         res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         lines = res.stdout.decode().strip().split('\n')
         self.assertEqual(lines[2], "columns: 1")
-        # Query with --accessions flag
         # The query is expected to fail because the mapping file is incompatible with the annotation
-        query_command = f'{METAGRAPH} query --query-mode coords --accessions -i {graph} -a {anno} \
+        query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
                          --min-kmers-fraction-label 0.0 {file1}' + MMAP_FLAG
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertNotEqual(res.returncode, 0, f"Query with incompatible .seq mapping must fail")
         self.assertIn("[error] Incompatible number of columns", res.stderr.decode())
 
-    def test_query_coords_with_accessions_filters(self):
-        """Test that --num-top-labels and --min-kmers-fraction-label work correctly with coordinates and accessions"""
+    def test_query_with_filters(self):
+        """Test that --num-top-labels and --min-kmers-fraction-label work correctly with mapping"""
         anno_type = 'filename'
         graph_base = self.tempdir.name + '/graph'
         graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
@@ -1621,17 +1615,19 @@ class TestAccessions(TestingBase):
         self._annotate_graph(test_fasta, graph_base + graph_file_extension[self.graph_repr],
                              self.tempdir.name + '/annotation', self.anno_repr, anno_type=anno_type)
 
-        # Create accessions mapping
-        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --accessions \
+        res = subprocess.run([f'{METAGRAPH} annotate --anno-filename --index-header-coords \
                                 -i {graph} -o {anno_base} {test_fasta}'],
                              shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
 
-        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords', extra_split_by = None):
-            query_command = f'{METAGRAPH} query --batch-size 0 --query-mode {mode} --accessions \
+        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords',
+                        extra_split_by = None, without_mapping: bool = False):
+            query_command = f'{METAGRAPH} query --batch-size 0 --query-mode {mode} \
                              -i {graph} -a {anno} {filter_flags} \
                              {query_fasta}' + MMAP_FLAG
+            if without_mapping:
+                query_command += ' --no-coord-mapping'
             res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
             if isinstance(expected_output, str):

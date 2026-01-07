@@ -1,4 +1,4 @@
-#include "annotation/coord_to_accession.hpp"
+#include "annotation/coord_to_header.hpp"
 
 #include <sstream>
 
@@ -12,10 +12,10 @@
 namespace mtg {
 namespace annot {
 
-using Tuple = CoordToAccession::Tuple;
+using Tuple = CoordToHeader::Tuple;
 
-CoordToAccession::CoordToAccession(std::vector<std::vector<std::string>> &&headers,
-                                   std::vector<std::vector<uint64_t>> &&num_kmers)
+CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
+                             std::vector<std::vector<uint64_t>> &&num_kmers)
       : seq_id_labels_(std::move(headers)), seq_delims_(num_kmers.size()) {
     assert(seq_id_labels_.size() == num_kmers.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -34,7 +34,7 @@ CoordToAccession::CoordToAccession(std::vector<std::vector<std::string>> &&heade
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
-CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const {
+CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
     tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
@@ -63,7 +63,7 @@ CoordToAccession::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows
     return result;
 }
 
-bool CoordToAccession::load(const std::string &filename_base) {
+bool CoordToHeader::load(const std::string &filename_base) {
     try {
         std::unique_ptr<std::ifstream> in
             = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
@@ -85,7 +85,7 @@ bool CoordToAccession::load(const std::string &filename_base) {
     }
 }
 
-void CoordToAccession::serialize(const std::string &filename_base) const {
+void CoordToHeader::serialize(const std::string &filename_base) const {
     auto fname = utils::make_suffix(filename_base, kExtension);
     std::ofstream out = utils::open_new_ofstream(fname);
     if (!out)

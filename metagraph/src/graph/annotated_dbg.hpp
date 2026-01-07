@@ -10,7 +10,7 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
-#include "annotation/coord_to_accession.hpp"
+#include "annotation/coord_to_header.hpp"
 
 
 namespace mtg {
@@ -72,13 +72,13 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                  std::unique_ptr<Annotator>&& annotation,
                  bool force_fast = false,
-                 std::unique_ptr<annot::CoordToAccession> coord_to_accession = {});
+                 std::unique_ptr<annot::CoordToHeader> coord_to_header = {});
 
     using AnnotatedSequenceGraph::get_labels;
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
-    const annot::CoordToAccession* get_coord_to_accession() const { return coord_to_accession_.get(); }
+    const annot::CoordToHeader* get_coord_to_header() const { return coord_to_header_.get(); }
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
@@ -167,7 +167,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
   private:
     DeBruijnGraph &dbg_;
-    std::unique_ptr<annot::CoordToAccession> coord_to_accession_;
+    std::unique_ptr<annot::CoordToHeader> coord_to_header_;
 };
 
 } // namespace graph

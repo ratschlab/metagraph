@@ -131,8 +131,10 @@ Config::Config(int argc, char *argv[]) {
             print_counts_hist = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
-        } else if (!strcmp(argv[i], "--accessions")) {
-            accessions = true;
+        } else if (!strcmp(argv[i], "--index-header-coords")) {
+            index_header_coords = true;
+        } else if (!strcmp(argv[i], "--no-coord-mapping")) {
+            no_coord_mapping = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
             std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
@@ -1228,7 +1230,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
-            fprintf(stderr, "\t   --accessions \tgenerate a coordinate-to-accession map from FASTA index files [off]\n");
+            fprintf(stderr, "\t   --index-header-coords \tgenerate a CoordToHeader mapping from input FASTA files [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -1329,13 +1331,13 @@ if (advanced) {
             fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
                             "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                \t\t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --accessions \t\t\tmap labels to accessions using a precomputed mapping (requires coord annotation) [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }
             fprintf(stderr, "\t   --num-top-labels [INT] \t\tmaximum number of top labels to output [inf]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-graph [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
+            fprintf(stderr, "\t   --no-coord-mapping \t\t\tquery without mapping coords to sequence headers even if the .seq index exists [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
@@ -1397,13 +1399,15 @@ if (advanced) {
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
             fprintf(stderr, "\t   --address \t\tinterface for incoming connections (default: all)\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
-            fprintf(stderr, "\t   --accessions \tmap labels to accessions using a precomputed mapping (requires coord annotation) [off]\n");
+}
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
+            fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seq index exists [off]\n");
         } break;
     }
 

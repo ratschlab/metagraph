@@ -5,7 +5,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "annotation/coord_to_accession.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -37,7 +37,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
             : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
 
-    std::unique_ptr<annot::CoordToAccession> coord_to_accession;
+    std::unique_ptr<annot::CoordToHeader> coord_to_header;
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
@@ -68,25 +68,24 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             }
         }
 
-        // Load coord-to-accession mapping if needed
-        if (config.accessions && config.identity != Config::ANNOTATE) {
-            if (config.infbase_annotators.size() > 1) {
-                logger->error("Cannot merge multiple CoordToAccession mappings."
-                              " Query a single annotation at a time.");
-                exit(1);
-            }
-            coord_to_accession = std::make_unique<annot::CoordToAccession>();
-            auto coord_to_acc_fname = utils::remove_suffix(config.infbase_annotators.at(0),
+        if (dynamic_cast<const MultiIntMatrix *>(&annotation_temp->get_matrix())
+                && !config.no_coord_mapping && config.identity != Config::ANNOTATE) {
+            // Load CoordToHeader mapping if exists
+            auto coord_to_header_fname = utils::remove_suffix(config.infbase_annotators.at(0),
                                                            annotation_temp->file_extension())
-                                                    + annot::CoordToAccession::kExtension;
-            if (!coord_to_accession->load(coord_to_acc_fname))
-                logger->error("Failed loading coord-to-accession map from {}", coord_to_acc_fname);
+                                                    + annot::CoordToHeader::kExtension;
+            if (std::filesystem::exists(coord_to_header_fname)) {
+                logger->trace("Detected a CoordToHeader mapping index. Loading from {}", coord_to_header_fname);
+                coord_to_header = std::make_unique<annot::CoordToHeader>();
+                if (!coord_to_header->load(coord_to_header_fname))
+                    logger->error("Failed loading the CoordToHeader mapping from {}", coord_to_header_fname);
+            }
         }
     }
 
     // load graph
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp),
-                                                     false, std::move(coord_to_accession));
+                                                     false, std::move(coord_to_header));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

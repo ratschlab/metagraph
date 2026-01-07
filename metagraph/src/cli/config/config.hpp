@@ -60,7 +60,8 @@ class Config {
     bool output_json = false;
     bool aggregate_columns = false;
     bool coordinates = false;
-    bool accessions = false;
+    bool index_header_coords = false;
+    bool no_coord_mapping = false;
     bool advanced = false;
 
     unsigned int k = 3;

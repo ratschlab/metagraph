@@ -18,7 +18,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "annotation/coord_to_accession.hpp"
+#include "annotation/coord_to_header.hpp"
 
 
 namespace mtg {
@@ -244,7 +244,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t BATCH_SIZE = 5'000;
     const size_t BATCH_LENGTH = 100'000;
 
-    if (config.accessions) {
+    if (config.index_header_coords) {
         // Accumulate sequence headers and k-mer counts across all files
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
@@ -275,10 +275,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-        annot::CoordToAccession accessions(std::move(headers), std::move(num_kmers));
-        accessions.serialize(annotator_filename);
-        logger->trace("Coord-to-accession mapping serialized to {}",
-                      annotator_filename + annot::CoordToAccession::kExtension);
+        annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
+        headers_map.serialize(annotator_filename);
+        logger->trace("CoordToHeader mapping serialized to {}",
+                      annotator_filename + annot::CoordToHeader::kExtension);
         return;
     }
 
@@ -466,10 +466,10 @@ int annotate_graph(Config *config) {
 
     assert(config->infbase_annotators.size() <= 1);
 
-    if (config->accessions) {
+    if (config->index_header_coords) {
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
-            logger->error("A coords-to-headers mapping (annotation with `--accessions`) can only be"
-                          " constructed for annotated filenames (use flag `--anno-filename`)");
+            logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
+                          "only be constructed for annotated filenames (use flag `--anno-filename`)");
             exit(1);
         }
         logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());

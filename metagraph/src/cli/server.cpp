@@ -486,9 +486,9 @@ int run_server(Config *config) {
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
                         const auto &anno_dbg = *graphs_cache[{ graph_fname, anno_fname }];
-                        if (const auto *coord_to_accession = anno_dbg.get_coord_to_accession()) {
-                            for (uint64_t col = 0; col < coord_to_accession->num_columns(); ++col) {
-                                num_labels += coord_to_accession->num_sequences(col);
+                        if (const auto *coord_to_header = anno_dbg.get_coord_to_header()) {
+                            for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+                                num_labels += coord_to_header->num_sequences(col);
                             }
                         } else {
                             num_labels += anno_dbg.get_annotator().num_labels();
@@ -505,9 +505,9 @@ int run_server(Config *config) {
                 const auto &annotation = anno_graph.get()->get_annotator();
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
                 uint64_t num_labels = 0;
-                if (const auto *coord_to_accession = anno_graph.get()->get_coord_to_accession()) {
-                    for (uint64_t col = 0; col < coord_to_accession->num_columns(); ++col) {
-                        num_labels += coord_to_accession->num_sequences(col);
+                if (const auto *coord_to_header = anno_graph.get()->get_coord_to_header()) {
+                    for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+                        num_labels += coord_to_header->num_sequences(col);
                     }
                 } else {
                     num_labels = annotation.num_labels();

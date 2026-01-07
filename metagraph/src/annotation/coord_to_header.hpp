@@ -1,5 +1,5 @@
-#ifndef __COORD_TO_ACCESSION_HPP__
-#define __COORD_TO_ACCESSION_HPP__
+#ifndef __COORD_TO_HEADER_HPP__
+#define __COORD_TO_HEADER_HPP__
 
 #include <string>
 #include <vector>
@@ -11,22 +11,22 @@
 namespace mtg {
 namespace annot {
 
-// A mapping from k-mer coordinates in columns to sequence accessions (headers).
-// Maps k-mer coordinates within annotation columns to sequence accessions (sequence headers).
-// When querying with flag `--accessions`, this mapping is used to transform coordinates and labels
+// A mapping from k-mer coordinates in columns to sequence headers.
+// Maps k-mer coordinates within annotation columns to sequence headers.
+// When querying with flag `--headers-as-labels`, this mapping is used to transform coordinates and labels
 // in query results to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
 // based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying coordinate annotations
 // but displaying results as if sequences were annotated by their headers instead of source files.
-class CoordToAccession {
+class CoordToHeader {
   public:
     using Column = mtg::annot::matrix::BinaryMatrix::Column;
     using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
-    CoordToAccession() {}
+    CoordToHeader() {}
     // Constructor from sequence names and number of k-mers in them, per annotation column.
-    CoordToAccession(std::vector<std::vector<std::string>> &&headers,
-                     std::vector<std::vector<uint64_t>> &&num_kmers);
+    CoordToHeader(std::vector<std::vector<std::string>> &&headers,
+                  std::vector<std::vector<uint64_t>> &&num_kmers);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -43,7 +43,7 @@ class CoordToAccession {
     uint64_t num_sequences(Column column) const { return seq_id_labels_[column].size(); }
     // Get number of k-mers/coordinates in a specific column
     uint64_t num_kmers(Column column) const { return seq_delims_[column].size(); }
-    const std::vector<std::string>& get_accessions(Column column) const {
+    const std::vector<std::string>& get_headers(Column column) const {
         return seq_id_labels_[column];
     }
 
@@ -57,4 +57,4 @@ class CoordToAccession {
 } // namespace annot
 } // namespace mtg
 
-#endif // __COORD_TO_ACCESSION_HPP__
+#endif // __COORD_TO_HEADER_HPP__
