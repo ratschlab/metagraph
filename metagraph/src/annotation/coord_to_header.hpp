@@ -11,12 +11,14 @@
 namespace mtg {
 namespace annot {
 
-// A mapping from k-mer coordinates in columns to sequence headers.
-// Maps k-mer coordinates within annotation columns to sequence headers.
-// When querying with flag `--headers-as-labels`, this mapping is used to transform coordinates and labels
-// in query results to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
-// based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying coordinate annotations
-// but displaying results as if sequences were annotated by their headers instead of source files.
+/**
+ * An index mapping k-mer coordinates in annotation columns to sequence headers.
+ * This mapping can be used to transform coordinates and labels in query results
+ * to show sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-
+ * based coordinates (e.g., "<file.fa>:0-0-3:0-23-27"). This allows querying
+ * coordinate annotations constructed with `--anno-filename` but showing results
+ * as if sequences were annotated by their headers instead of source files.
+ */
 class CoordToHeader {
   public:
     using Column = mtg::annot::matrix::BinaryMatrix::Column;
