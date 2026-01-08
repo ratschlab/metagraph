@@ -75,12 +75,22 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                   annotation->file_extension())
                                             + annot::CoordToHeader::kExtension;
             if (std::filesystem::exists(cth_fname)) {
-                logger->trace("Detected a CoordToHeader mapping index. Loading from {}", cth_fname);
                 coord_to_header = std::make_unique<annot::CoordToHeader>();
                 if (!coord_to_header->load(cth_fname)) {
                     logger->error("Failed loading the CoordToHeader mapping from {}", cth_fname);
                     exit(1);
                 }
+                logger->trace("CoordToHeader mapping loaded successfully from {}. "
+                              "All queries will be performed against individual sequences.",
+                              cth_fname);
+            } else {
+                logger->warn("CoordToHeader mapping file not found at {}. Querying will be done "
+                             "against original labels indexed in annotation {}. Results will show "
+                             "file-based coordinates (e.g., '<file_37.fa>:0-1086-1090') instead of "
+                             "sequence-based coordinates (e.g., '<seq_9>:0-1-5'). For sequence-"
+                             "based queries, create a mapping with '--index-header-coords' during "
+                             "annotation, or pass '--no-coord-mapping' to suppress this warning.",
+                             cth_fname, config.infbase_annotators.at(0));
             }
         }
     }
