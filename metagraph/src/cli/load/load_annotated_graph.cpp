@@ -71,14 +71,14 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         if (dynamic_cast<const MultiIntMatrix *>(&annotation_temp->get_matrix())
                 && !config.no_coord_mapping && config.identity != Config::ANNOTATE) {
             // Load CoordToHeader mapping if exists
-            auto coord_to_header_fname = utils::remove_suffix(config.infbase_annotators.at(0),
-                                                           annotation_temp->file_extension())
-                                                    + annot::CoordToHeader::kExtension;
-            if (std::filesystem::exists(coord_to_header_fname)) {
-                logger->trace("Detected a CoordToHeader mapping index. Loading from {}", coord_to_header_fname);
+            auto cth_fname = utils::remove_suffix(config.infbase_annotators.at(0),
+                                                  annotation_temp->file_extension())
+                                            + annot::CoordToHeader::kExtension;
+            if (std::filesystem::exists(cth_fname)) {
+                logger->trace("Detected a CoordToHeader mapping index. Loading from {}", cth_fname);
                 coord_to_header = std::make_unique<annot::CoordToHeader>();
-                if (!coord_to_header->load(coord_to_header_fname)) {
-                    logger->error("Failed loading the CoordToHeader mapping from {}", coord_to_header_fname);
+                if (!coord_to_header->load(cth_fname)) {
+                    logger->error("Failed loading the CoordToHeader mapping from {}", cth_fname);
                     exit(1);
                 }
             }
