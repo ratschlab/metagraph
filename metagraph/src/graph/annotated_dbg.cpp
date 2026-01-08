@@ -240,20 +240,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
         return {};
 
     if (coord_to_header_) {
-        auto nodes = map_to_nodes(*graph_, sequence);
-        size_t num_kmers = nodes.size();
-        size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
-                                                             DeBruijnGraph::npos);
-
-        uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
-        if (num_present_kmers < min_count)
-            return {};
-
-        min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
-        if (num_present_kmers < min_count)
-            return {};
-
-        auto kmer_coord_res = get_kmer_coordinates(nodes, std::numeric_limits<size_t>::max(),
+        auto kmer_coord_res = get_kmer_coordinates(sequence, std::numeric_limits<size_t>::max(),
                                                    discovery_fraction, presence_fraction);
         std::vector<Label> result;
         result.reserve(kmer_coord_res.size());
@@ -343,19 +330,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     index_counts.reserve(num_kmers);
 
     if (coord_to_header_) {
-        auto nodes = map_to_nodes(*graph_, sequence);
-        size_t num_present_kmers = nodes.size() - std::count(nodes.begin(), nodes.end(),
-                                                             DeBruijnGraph::npos);
-
-        uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
-        if (num_present_kmers < min_count)
-            return {};
-
-        min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
-        if (num_present_kmers < min_count)
-            return {};
-
-        auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
+        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
                                                    discovery_fraction, presence_fraction);
         std::vector<StringCountPair> result;
         result.reserve(kmer_coord_res.size());
@@ -450,7 +425,7 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
         std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
-            result.emplace_back(std::move(label), count, std::vector<size_t>(coords.size()));
+            result.emplace_back(std::move(label), count, coords.size());
             for (size_t i = 0; i < coords.size(); ++i) {
                 std::get<2>(result.back())[i] = coords[i].size();
             }
@@ -614,8 +589,8 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                      counts.end());
 
         // keep only top-n headers
-        bool needs_sorting = num_top_labels < counts.size();
-        if (num_top_labels < counts.size()) {
+        bool needs_sorting = counts.size() > num_top_labels;
+        if (counts.size() > num_top_labels) {
             std::nth_element(counts.begin(), counts.begin() + num_top_labels,
                              counts.end(), utils::GreaterSecond());
             counts.resize(num_top_labels);
@@ -725,13 +700,12 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     if (coord_to_header_) {
-        auto nodes = map_to_nodes(*graph_, sequence);
-        auto kmer_coord_res = get_kmer_coordinates(nodes, num_top_labels,
+        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
                                                    discovery_fraction, presence_fraction);
         std::vector<std::pair<Label, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
-            result.emplace_back(std::move(label), sdsl::bit_vector(nodes.size()));
+            result.emplace_back(std::move(label), sequence.size() - dbg_.get_k() + 1);
             auto &mask = result.back().second;
             assert(coords.size() == mask.size());
             for (size_t i = 0; i < coords.size(); ++i) {
