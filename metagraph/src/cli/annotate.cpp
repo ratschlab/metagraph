@@ -276,9 +276,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             );
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
-        headers_map.serialize(annotator_filename);
-        logger->trace("CoordToHeader mapping serialized to {}",
-                      annotator_filename + annot::CoordToHeader::kExtension);
+        auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
+        headers_map.serialize(fname);
+        logger->trace("CoordToHeader mapping serialized to {}", fname);
         return;
     }
 
