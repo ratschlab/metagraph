@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdlib>
 
+#include <tsl/hopscotch_set.h>
+
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -21,6 +23,7 @@ using mtg::common::logger;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
 using Column = mtg::annot::matrix::BinaryMatrix::Column;
+using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -579,14 +582,81 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                           coord_to_header_->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
             exit(1);
         }
-        auto conv_results = coord_to_header_->rows_tuples_to_label_tuples(rows_tuples, min_count);
-        if (num_top_labels < conv_results.size()) {
-            std::nth_element(conv_results.begin(), conv_results.begin() + num_top_labels,
-                             conv_results.end(), utils::GreaterSecond());
-            conv_results.resize(num_top_labels);
-            std::sort(conv_results.begin(), conv_results.end(), utils::GreaterSecond());
+
+        coord_to_header_->map_to_local_coords(&rows_tuples);
+        // Now each coord in `rows_tuples` is `coord = local_coord * num_headers[j] + header_id`
+
+        // Before splitting coords across headers, filter them by the number of k-mer matches
+        using Header = std::pair<Column, size_t>; // global header id
+        using Count = size_t;
+        std::vector<std::pair<Header, Count>> counts;
+        {
+            VectorMap<Header, Count> counts_map;
+            tsl::hopscotch_set<Header> matches;
+            for (const auto &row : rows_tuples) {
+                matches.clear();
+                for (auto &[col, coords] : row) {
+                    for (uint64_t coord : coords) {
+                        size_t header = coord % coord_to_header_->num_headers(col);
+                        matches.emplace(col, header);
+                    }
+                }
+                for (const Header &h : matches) {
+                    counts_map[h]++;
+                }
+            }
+            counts = to_vector(std::move(counts_map));
         }
-        return conv_results;
+
+        // remove headers with insufficient number of k-mer matches
+        counts.erase(std::remove_if(counts.begin(), counts.end(),
+                                    [&](const auto &pair) { return pair.second < min_count; }),
+                     counts.end());
+
+        // keep only top-n headers
+        bool needs_sorting = num_top_labels < counts.size();
+        if (num_top_labels < counts.size()) {
+            std::nth_element(counts.begin(), counts.begin() + num_top_labels,
+                             counts.end(), utils::GreaterSecond());
+            counts.resize(num_top_labels);
+        }
+
+        // split coordinates across headers
+        VectorMap<Header, std::pair<Count, std::vector<Tuple>>> final;
+        final.reserve(counts.size());
+        for (const auto &[h, count] : counts) {
+            final.try_emplace(h, std::piecewise_construct,
+                                 std::forward_as_tuple(count),
+                                 std::forward_as_tuple(rows_tuples.size()));
+        }
+        for (size_t i = 0; i < rows_tuples.size(); ++i) {
+            for (auto &[col, coords] : rows_tuples[i]) {
+                for (uint64_t coord : coords) {
+                    size_t header = coord % coord_to_header_->num_headers(col);
+                    uint64_t local_coord = coord / coord_to_header_->num_headers(col);
+                    auto it = final.find({col, header});
+                    if (it != final.end())
+                        it.value().second[i].push_back(local_coord);
+                }
+                coords.clear();
+            }
+            rows_tuples[i].clear();
+        }
+        rows_tuples.clear();
+
+        std::vector<std::tuple<std::string, Count, std::vector<Tuple>>> result;
+        result.reserve(final.size());
+        for (auto &[h, v] : final) {
+            const auto &[col, header] = h;
+            auto &[count, coords] = v;
+            result.emplace_back(coord_to_header_->get_headers(col)[header],
+                                count, std::move(coords));
+        }
+
+        if (needs_sorting)
+            std::sort(result.begin(), result.end(), utils::GreaterSecond());
+
+        return result;
     }
 
     // FYI: one could use tsl::hopscotch_map for counting but it is slower

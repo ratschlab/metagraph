@@ -32,19 +32,29 @@ class CoordToHeader {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    // Transforms global coords to sequence-based coords and outputs them as a list of tuples
-    // (header, num_matches, coords). `coords` contains all coordinates from `rows_tuples`
-    // corresponding to that sequence/header and mapped to the sequence-based positions and
-    // `num_matches` is the number of rows with matches for that sequence/header (the number of
-    // non-zero tuples in `coords`). Also applies filtering (`num_matches` must be >= `min_count`).
-    std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
-    rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const;
+    /**
+     * Transforms global coordinates to local (sequence-based) coordinates in-place.
+     *
+     * For each coordinate in `rows_tuples`, this function:
+     *   1. Determines which sequence (header) the coordinate belongs to within its column
+     *   2. Converts the global coordinate to a local coordinate within that sequence
+     *   3. Encodes both the local coordinate and header index into a single value
+     *
+     * Encoding scheme: For a coordinate in column `j`, the transformed value is:
+     *   `encoded_coord = local_coord * num_headers[j] + header_id`
+     *
+     * Decoding: To extract the header index and local coordinate from an encoded value:
+     *   `header_id = encoded_coord % num_headers[j]`
+     *   `local_coord = encoded_coord / num_headers[j]`
+     */
+    void map_to_local_coords(std::vector<RowTuples> *rows_tuples) const;
 
     uint64_t num_columns() const { return coord_offsets_.size(); }
     uint64_t num_sequences(Column column) const { return headers_[column].size(); }
     // Get number of k-mers/coordinates in a specific column
     uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
+    size_t num_headers(Column column) const { return headers_[column].size(); }
 
     static constexpr auto kExtension = ".seqs";
 
