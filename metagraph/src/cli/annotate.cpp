@@ -245,7 +245,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t BATCH_LENGTH = 100'000;
 
     if (config.index_header_coords) {
-        // Accumulate sequence headers and k-mer counts across all files
+        // Collect sequence headers and compute k-mer counts
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)

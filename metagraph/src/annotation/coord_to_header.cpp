@@ -34,7 +34,8 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<Tuple>>>
-CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples, size_t min_count) const {
+CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tuples,
+                                           size_t min_count) const {
     // RowTuples = Vector<std::pair<Column, Tuple>>
     tsl::hopscotch_map<std::pair<Column, size_t>, std::vector<Tuple>> conv_coords;
     for (size_t i = 0; i < rows_tuples.size(); ++i) {
@@ -50,7 +51,7 @@ CoordToHeader::rows_tuples_to_label_tuples(const std::vector<RowTuples> &rows_tu
                 size_t seq_id = coord ? offsets.rank1(coord - 1) : 0;
                 // Convert global coordinate to sequence-relative coordinate
                 uint64_t conv_coord = seq_id > 0 ? coord - offsets.select1(seq_id) - 1 : coord;
-                auto it = conv_coords.try_emplace(std::make_pair(col, seq_id), rows_tuples.size()).first;
+                auto it = conv_coords.try_emplace({ col, seq_id }, rows_tuples.size()).first;
                 it.value()[i].emplace_back(conv_coord);
             }
         }
