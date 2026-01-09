@@ -1671,7 +1671,6 @@ class TestCoordToHeader(TestingBase):
             {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
 
     @parameterized.expand(['labels', 'matches', 'counts', 'counts-sum', 'coords', 'signature'])
-    # @parameterized.expand(['matches', 'counts'])
     def test_five_files_single_sequence_each_unsorted(self, query_mode):
         anno_type = 'filename'
         graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
