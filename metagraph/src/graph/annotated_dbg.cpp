@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -13,7 +14,6 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
-#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
