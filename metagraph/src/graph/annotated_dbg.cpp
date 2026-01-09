@@ -247,7 +247,6 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
         for (auto &[label, count, coords] : kmer_coord_res) {
             result.emplace_back(std::move(label));
         }
-
         return result;
     }
 
@@ -343,7 +342,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
             }
             result.emplace_back(std::move(label), count);
         }
-
         return result;
     }
 
@@ -432,11 +430,11 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
             result.emplace_back(std::move(label), count, coords.size());
+            auto &counts = std::get<2>(result.back());
             for (size_t i = 0; i < coords.size(); ++i) {
-                std::get<2>(result.back())[i] = coords[i].size();
+                counts[i] = coords[i].size();
             }
         }
-
         return result;
     }
 
@@ -595,29 +593,30 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                      counts.end());
 
         // keep only top-n headers
-        bool needs_sorting = counts.size() > num_top_labels;
         if (counts.size() > num_top_labels) {
-            std::nth_element(counts.begin(), counts.begin() + num_top_labels,
-                             counts.end(), utils::GreaterSecond());
+            auto comp = [](const auto &x, const auto &y) {
+                return std::make_pair(y.second, x.first)
+                      < std::make_pair(x.second, y.first);
+            };
+            std::nth_element(counts.begin(), counts.begin() + num_top_labels, counts.end(), comp);
             counts.resize(num_top_labels);
+            std::sort(counts.begin(), counts.end(), comp);
         }
 
         // split coordinates across headers
-        VectorMap<Header, std::pair<Count, std::vector<Tuple>>> final;
-        final.reserve(counts.size());
+        tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
+        coords_map.reserve(counts.size());
         for (const auto &[h, count] : counts) {
-            final.try_emplace(h, std::piecewise_construct,
-                                 std::forward_as_tuple(count),
-                                 std::forward_as_tuple(nodes.size()));
+            coords_map.emplace(h, nodes.size());
         }
         for (size_t i = 0; i < rows_tuples.size(); ++i) {
             for (auto &[col, coords] : rows_tuples[i]) {
                 for (uint64_t coord : coords) {
                     size_t header = coord % coord_to_header_->num_headers(col);
                     uint64_t local_coord = coord / coord_to_header_->num_headers(col);
-                    auto it = final.find({col, header});
-                    if (it != final.end())
-                        it.value().second[kmer_positions[i]].push_back(local_coord);
+                    auto it = coords_map.find({col, header});
+                    if (it != coords_map.end())
+                        it.value()[kmer_positions[i]].push_back(local_coord);
                 }
                 coords.clear();
             }
@@ -626,16 +625,13 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
         rows_tuples.clear();
 
         std::vector<std::tuple<std::string, Count, std::vector<Tuple>>> result;
-        result.reserve(final.size());
-        for (auto &[h, v] : final) {
+        result.reserve(counts.size());
+        for (const auto &[h, count] : counts) {
             const auto &[col, header] = h;
-            auto &[count, coords] = v;
+            auto &coords = coords_map[h];
             result.emplace_back(coord_to_header_->get_headers(col)[header],
                                 count, std::move(coords));
         }
-
-        if (needs_sorting)
-            std::sort(result.begin(), result.end(), utils::GreaterSecond());
 
         return result;
     }
@@ -711,15 +707,14 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         std::vector<std::pair<Label, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
-            result.emplace_back(std::move(label), sequence.size() - dbg_.get_k() + 1);
+            assert(coords.size() == sequence.size() - dbg_.get_k() + 1);
+            result.emplace_back(std::move(label), coords.size());
             auto &mask = result.back().second;
-            assert(coords.size() == mask.size());
             for (size_t i = 0; i < coords.size(); ++i) {
                 if (coords[i].size())
                     mask[i] = true;
             }
         }
-
         return result;
     }
 

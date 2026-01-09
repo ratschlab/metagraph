@@ -92,4 +92,3 @@ void CoordToHeader::serialize(const std::string &filename_base) const {
 
 } // namespace annot
 } // namespace mtg
-

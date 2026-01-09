@@ -1500,26 +1500,17 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(lines[4], 'total k-mers: 62')
         self.assertEqual(lines[5], '=================== PER-COLUMN STATS ===================')
         # The order of the columns may be arbitrary
-        if columns[0].endswith('file1.fa'):
-            self.assertEqual(lines[6], 'column 0:')
-            self.assertEqual(lines[7], '  sequences: 2 (seq1\tseq2)')
-            self.assertEqual(lines[8], '  k-mers: 18')
-            self.assertEqual(lines[9], '  k-mers per sequence: 9.0')
-            self.assertEqual(lines[10], 'column 1:')
-            self.assertEqual(lines[11], '  sequences: 3 (seq3\tbad\tseq4)')
-            self.assertEqual(lines[12], '  k-mers: 44')
-            self.assertEqual(lines[13], '  k-mers per sequence: 14.7')
-            self.assertEqual(lines[14], '========================================================')
-        else:
-            self.assertEqual(lines[6], 'column 0:')
-            self.assertEqual(lines[7], '  sequences: 3 (seq3\tbad\tseq4)')
-            self.assertEqual(lines[8], '  k-mers: 44')
-            self.assertEqual(lines[9], '  k-mers per sequence: 14.7')
-            self.assertEqual(lines[10], 'column 1:')
-            self.assertEqual(lines[11], '  sequences: 2 (seq1\tseq2)')
-            self.assertEqual(lines[12], '  k-mers: 18')
-            self.assertEqual(lines[13], '  k-mers per sequence: 9.0')
-            self.assertEqual(lines[14], '========================================================')
+        if not columns[0].endswith('file1.fa'):
+            lines[7:10], lines[11:14] = lines[11:14], lines[7:10]
+        self.assertEqual(lines[6], 'column 0:')
+        self.assertEqual(lines[7], '  sequences: 2 (seq1\tseq2)')
+        self.assertEqual(lines[8], '  k-mers: 18')
+        self.assertEqual(lines[9], '  k-mers per sequence: 9.0')
+        self.assertEqual(lines[10], 'column 1:')
+        self.assertEqual(lines[11], '  sequences: 3 (seq3\tbad\tseq4)')
+        self.assertEqual(lines[12], '  k-mers: 44')
+        self.assertEqual(lines[13], '  k-mers per sequence: 14.7')
+        self.assertEqual(lines[14], '========================================================')
 
         # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
         query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
@@ -1657,6 +1648,13 @@ class TestCoordToHeader(TestingBase):
         test_stdout('--num-top-labels 3',
             {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
 
+        test_stdout('--num-top-labels 1', '0\tquery1\t<seq2>:37', mode='counts-sum')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+        test_stdout('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq2>:37', mode='counts-sum')
+        test_stdout('', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+        test_stdout('--num-top-labels 2', '0\tquery1\t<seq2>:37\t<seq3>:12', mode='counts-sum')
+        test_stdout('--num-top-labels 3', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+
         test_stdout('--num-top-labels 1',
             '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
         test_stdout('--min-kmers-fraction-label 0.5',
@@ -1698,7 +1696,7 @@ class TestCoordToHeader(TestingBase):
         query_fa = self.tempdir.name + '/query.fa'
         with open(query_fa, 'w') as f:
             f.write('>query\n')
-            f.write('GTATCGATTGATCGATCG\n')
+            f.write('GTATCGATTGATCGATCGGTATCGATTGATCGATCG\n')
 
         # Build graph and annotate
         all_files = ' '.join(files)
@@ -1763,7 +1761,7 @@ class TestCoordToHeader(TestingBase):
         query_fa = self.tempdir.name + '/query.fa'
         with open(query_fa, 'w') as f:
             f.write('>query\n')
-            f.write('GTATCGATTGATCGATCG\n')
+            f.write('GTATCGATTGATCGATCGGTATCGATTGATCGATCG\n')
 
         # Build graph and annotate
         all_files = ' '.join(files)
