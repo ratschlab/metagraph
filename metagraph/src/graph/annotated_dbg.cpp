@@ -324,10 +324,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    VectorMap<row_index, size_t> index_counts;
-    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
-    index_counts.reserve(num_kmers);
-
     if (coord_to_header_) {
         auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
                                                    discovery_fraction, presence_fraction);
@@ -344,6 +340,10 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         }
         return result;
     }
+
+    VectorMap<row_index, size_t> index_counts;
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+    index_counts.reserve(num_kmers);
 
     size_t num_present_kmers = 0;
 

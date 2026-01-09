@@ -1706,32 +1706,33 @@ class TestCoordToHeader(TestingBase):
         self.index_headers(graph, anno_base)
 
         for discovery_fraction in [0.0, 0.2, 1.0]:
-            # Query with header mapping
-            query_cmd_with = f'{METAGRAPH} query --batch-size 0 --query-mode {query_mode} \
-                              -i {graph} -a {anno} --min-kmers-fraction-label {discovery_fraction} \
-                              {query_fa}' + MMAP_FLAG
-            res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
-            self.assertEqual(res_with.returncode, 0)
-            output_with = res_with.stdout.decode().strip()
+            for batch_size in [0, 100000000]:
+                # Query with header mapping
+                query_cmd_with = f'{METAGRAPH} query --batch-size {batch_size} --query-mode {query_mode} \
+                                  -i {graph} -a {anno} --min-kmers-fraction-label {discovery_fraction} \
+                                  {query_fa}' + MMAP_FLAG
+                res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
+                self.assertEqual(res_with.returncode, 0)
+                output_with = res_with.stdout.decode().strip()
 
-            # Query without header mapping
-            res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
-                                         shell=True, stdout=PIPE, stderr=PIPE)
-            self.assertEqual(res_without.returncode, 0)
-            output_without = res_without.stdout.decode().strip()
+                # Query without header mapping
+                res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
+                                             shell=True, stdout=PIPE, stderr=PIPE)
+                self.assertEqual(res_without.returncode, 0)
+                output_without = res_without.stdout.decode().strip()
 
-            # Replace the file labels with the corresponding headers
-            for i, (header, _) in enumerate(sequences, 1):
-                output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
+                # Replace the file labels with the corresponding headers
+                for i, (header, _) in enumerate(sequences, 1):
+                    output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
 
-            if query_mode == 'labels':
-                output_with = output_with.split('\t')[-1].split(':')
-                output_without = output_without.split('\t')[-1].split(':')
-            else:
-                output_with = output_with.split('\t')
-                output_without = output_without.split('\t')
+                if query_mode == 'labels':
+                    output_with = output_with.split('\t')[-1].split(':')
+                    output_without = output_without.split('\t')[-1].split(':')
+                else:
+                    output_with = output_with.split('\t')
+                    output_without = output_without.split('\t')
 
-            self.assertEqual(set(output_with), set(output_without))
+                self.assertEqual(set(output_with), set(output_without))
 
     @parameterized.expand(['matches', 'counts', 'counts-sum', 'coords', 'signature'])
     def test_five_files_single_sequence_each_sorted(self, query_mode):
