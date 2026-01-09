@@ -393,18 +393,14 @@ Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
     }
 
     if (code_counts.size() > num_top_labels) {
-        auto comp = [](const auto &x, const auto &y) {
-            return std::make_pair(y.second, x.first)
-                  < std::make_pair(x.second, y.first);
-        };
-        std::nth_element(code_counts.begin(),
-                         code_counts.begin() + num_top_labels,
-                         code_counts.end(),
-                         comp);
-        // leave only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
         // sort by the number of matched k-mers
-        std::sort(code_counts.begin(), code_counts.end(), comp);
+        std::sort(code_counts.begin(), code_counts.end(),
+                  [](const auto &x, const auto &y) {
+                      return std::make_pair(y.second, x.first)
+                            < std::make_pair(x.second, y.first);
+                  });
+        // keep only the first |num_top_labels| top labels
+        code_counts.resize(num_top_labels);
     }
     return code_counts;
 }
@@ -806,18 +802,14 @@ std::vector<StringCountPair> top_labels(Container&& code_counts,
     std::ignore = min_count;
 
     if (code_counts.size() > num_top_labels) {
-        auto comp = [](const auto &x, const auto &y) {
-            return std::make_pair(y.second, x.first)
-                  < std::make_pair(x.second, y.first);
-        };
-        std::nth_element(code_counts.begin(),
-                         code_counts.begin() + num_top_labels,
-                         code_counts.end(),
-                         comp);
+        // sort labels by counts to get the top |num_top_labels|
+        std::sort(code_counts.begin(), code_counts.end(),
+                  [](const auto &x, const auto &y) {
+                      return std::make_pair(y.second, x.first)
+                            < std::make_pair(x.second, y.first);
+                  });
         // leave only the first |num_top_labels| top labels
         code_counts.resize(num_top_labels);
-        // sort the top labels by counts
-        std::sort(code_counts.begin(), code_counts.end(), comp);
     }
 
     // TODO: remove this step?
