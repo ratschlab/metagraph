@@ -1360,6 +1360,7 @@ class TestCoordToHeader(TestingBase):
             f.write('GCTAGCTA\n')
 
     def index_headers(self, graph, anno_base, input = None, extra_flags = ''):
+        columns = None
         if input is None:
             # The order of the columns may be arbitrary, thus we run stats to get the final order
             anno = anno_base + anno_file_extension[self.anno_repr]
@@ -1374,6 +1375,7 @@ class TestCoordToHeader(TestingBase):
                               shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Indexing headers failed: {res.stderr.decode()}")
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
+        return columns
 
     @parameterized.expand(['header', 'filename'])
     def test_query_coords_without_mapping(self, anno_type):
@@ -1480,7 +1482,7 @@ class TestCoordToHeader(TestingBase):
         self._build_graph(f'{file1} {file2} {file3} {file4}', graph_base, k=5, repr=self.graph_repr, mode='basic')
         self._annotate_graph(f'{file1} {file2} {file3} {file4}', graph, anno_base, self.anno_repr, anno_type=anno_type)
 
-        self.index_headers(graph, anno_base, extra_flags=extra_flags)
+        columns = self.index_headers(graph, anno_base, extra_flags=extra_flags)
 
         res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
