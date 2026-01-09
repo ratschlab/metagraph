@@ -335,6 +335,12 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         std::vector<StringCountPair> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
+            if (with_kmer_counts) {
+                count = 0;
+                for (const auto &tuple : coords) {
+                    count += tuple.size();
+                }
+            }
             result.emplace_back(std::move(label), count);
         }
 
@@ -602,7 +608,7 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
         for (const auto &[h, count] : counts) {
             final.try_emplace(h, std::piecewise_construct,
                                  std::forward_as_tuple(count),
-                                 std::forward_as_tuple(rows_tuples.size()));
+                                 std::forward_as_tuple(nodes.size()));
         }
         for (size_t i = 0; i < rows_tuples.size(); ++i) {
             for (auto &[col, coords] : rows_tuples[i]) {
@@ -611,7 +617,7 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                     uint64_t local_coord = coord / coord_to_header_->num_headers(col);
                     auto it = final.find({col, header});
                     if (it != final.end())
-                        it.value().second[i].push_back(local_coord);
+                        it.value().second[kmer_positions[i]].push_back(local_coord);
                 }
                 coords.clear();
             }
