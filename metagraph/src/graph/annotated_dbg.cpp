@@ -309,6 +309,23 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
+// Container `code_counts` must have pairs (index, count)
+template <class Container>
+void top_n_sorted(Container& code_counts, size_t num_top_labels) {
+    auto comp = [](const auto &x, const auto &y) {
+        return std::make_pair(y.second, x.first)
+              < std::make_pair(x.second, y.first);
+    };
+    std::nth_element(code_counts.begin(),
+                     code_counts.begin() + num_top_labels,
+                     code_counts.end(),
+                     comp);
+    // leave only the first |num_top_labels| top labels
+    code_counts.resize(num_top_labels);
+    // sort the top labels by counts
+    std::sort(code_counts.begin(), code_counts.end(), comp);
+}
+
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
@@ -381,6 +398,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     return get_kmer_counts(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
+template <class Container>
 Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
                                          size_t min_count,
                                          size_t num_top_labels) {
@@ -392,16 +410,9 @@ Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
             code_counts.emplace_back(j, col_counts[j]);
     }
 
-    if (code_counts.size() > num_top_labels) {
-        // sort by the number of matched k-mers
-        std::sort(code_counts.begin(), code_counts.end(),
-                  [](const auto &x, const auto &y) {
-                      return std::make_pair(y.second, x.first)
-                            < std::make_pair(x.second, y.first);
-                  });
-        // keep only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
-    }
+    if (code_counts.size() > num_top_labels)
+        top_n_sorted(code_counts, num_top_labels);
+
     return code_counts;
 }
 
@@ -589,15 +600,8 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                      counts.end());
 
         // keep only top-n headers
-        if (counts.size() > num_top_labels) {
-            auto comp = [](const auto &x, const auto &y) {
-                return std::make_pair(y.second, x.first)
-                      < std::make_pair(x.second, y.first);
-            };
-            std::nth_element(counts.begin(), counts.begin() + num_top_labels, counts.end(), comp);
-            counts.resize(num_top_labels);
-            std::sort(counts.begin(), counts.end(), comp);
-        }
+        if (counts.size() > num_top_labels)
+            top_n_sorted(counts, num_top_labels);
 
         // split coordinates across headers
         tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
@@ -793,30 +797,15 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 template <class Container>
 std::vector<StringCountPair> top_labels(Container&& code_counts,
                                         const annot::LabelEncoder<> &label_encoder,
-                                        size_t num_top_labels,
-                                        size_t min_count) {
-    assert(std::all_of(
-        code_counts.begin(), code_counts.end(),
-        [&](const auto &code_count) { return code_count.second >= min_count; }
-    ));
-    std::ignore = min_count;
-
-    if (code_counts.size() > num_top_labels) {
-        // sort labels by counts to get the top |num_top_labels|
-        std::sort(code_counts.begin(), code_counts.end(),
-                  [](const auto &x, const auto &y) {
-                      return std::make_pair(y.second, x.first)
-                            < std::make_pair(x.second, y.first);
-                  });
-        // leave only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
-    }
+                                        size_t num_top_labels) {
+    if (code_counts.size() > num_top_labels)
+        top_n_sorted(code_counts, num_top_labels);
 
     // TODO: remove this step?
-    std::vector<StringCountPair> label_counts(code_counts.size());
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        label_counts[i].first = label_encoder.decode(code_counts[i].first);
-        label_counts[i].second = code_counts[i].second;
+    std::vector<StringCountPair> label_counts;
+    label_counts.reserve(code_counts.size());
+    for (const auto &[j, count] : code_counts) {
+        label_counts.emplace_back(label_encoder.decode(j), count);
     }
 
     return label_counts;
@@ -832,12 +821,10 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     if (with_kmer_counts) {
         return top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                                   .sum_row_values(index_counts, min_count),
-                          annotator_->get_label_encoder(),
-                          num_top_labels, min_count);
+                          annotator_->get_label_encoder(), num_top_labels);
     } else {
         return top_labels(annotator_->get_matrix().sum_rows(index_counts, min_count),
-                          annotator_->get_label_encoder(),
-                          num_top_labels, min_count);
+                          annotator_->get_label_encoder(), num_top_labels);
     }
 }
 
