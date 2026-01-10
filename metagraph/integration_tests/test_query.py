@@ -1771,26 +1771,27 @@ class TestCoordToHeader(TestingBase):
 
         self.index_headers(graph, anno_base)
 
-        # Query with header mapping
-        query_cmd_with = f'{METAGRAPH} query --batch-size 0 --query-mode {query_mode} \
-                          -i {graph} -a {anno} --min-kmers-fraction-label 0.0 --num-top-labels 4 \
-                          {query_fa}' + MMAP_FLAG
-        res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res_with.returncode, 0)
-        output_with = res_with.stdout.decode().strip()
+        for batch_size in [0, 100000000]:
+            # Query with header mapping
+            query_cmd_with = f'{METAGRAPH} query --batch-size {batch_size} --query-mode {query_mode} \
+                              -i {graph} -a {anno} --min-kmers-fraction-label 0.0 --num-top-labels 4 \
+                              {query_fa}' + MMAP_FLAG
+            res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res_with.returncode, 0)
+            output_with = res_with.stdout.decode().strip()
 
-        # Query without header mapping
-        res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
-                                     shell=True, stdout=PIPE, stderr=PIPE)
-        self.assertEqual(res_without.returncode, 0)
-        output_without = res_without.stdout.decode().strip()
+            # Query without header mapping
+            res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
+                                         shell=True, stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res_without.returncode, 0)
+            output_without = res_without.stdout.decode().strip()
 
-        # Replace the file labels with the corresponding headers
-        for i, (header, _) in enumerate(sequences, 1):
-            output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
+            # Replace the file labels with the corresponding headers
+            for i, (header, _) in enumerate(sequences, 1):
+                output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
 
-        # Should have same results
-        self.assertEqual(output_with, output_without)
+            # Should have same results
+            self.assertEqual(output_with, output_without)
 
 
 if __name__ == '__main__':
