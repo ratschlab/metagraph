@@ -11,6 +11,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/aligned_vector.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
@@ -399,9 +400,19 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
 }
 
 template <class Container>
-Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
+Vector<std::pair<Column, size_t>> filter(const Container &rows,
+                                         size_t num_columns,
                                          size_t min_count,
                                          size_t num_top_labels) {
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(num_columns, 0);
+    for (const auto &row : rows) {
+        for (const auto &j : row) {
+            col_counts[utils::get_first(j)]++;
+        }
+    }
+
     Vector<std::pair<Column, size_t>> code_counts;
     code_counts.reserve(col_counts.size());
 
@@ -474,19 +485,11 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
 
     auto row_values = int_matrix->get_row_values(rows);
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row_values : row_values) {
-        for (const auto &[j, count] : row_values) {
-            col_counts[j]++;
-        }
-    }
-
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+    Vector<std::pair<Column, size_t>> code_counts = filter(row_values, annotator_->num_labels(),
+                                                           min_count, num_top_labels);
 
     std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
+    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
     for (size_t i = 0; i < code_counts.size(); ++i) {
         auto &[label, num_kmer_matches, counts] = result[i];
@@ -636,19 +639,11 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
         return result;
     }
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row_tuples : rows_tuples) {
-        for (const auto &[j, tuple] : row_tuples) {
-            col_counts[j]++;
-        }
-    }
-
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+    Vector<std::pair<Column, size_t>> code_counts = filter(rows_tuples, annotator_->num_labels(),
+                                                           min_count, num_top_labels);
 
     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
+    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
     for (size_t i = 0; i < code_counts.size(); ++i) {
         auto &[label, count, coords] = result[i];
@@ -745,19 +740,11 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     auto rows = annotator_->get_matrix().get_rows(row_indices);
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row : rows) {
-        for (auto j : row) {
-            col_counts[j]++;
-        }
-    }
-
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+    Vector<std::pair<Column, size_t>> code_counts = filter(rows, annotator_->num_labels(),
+                                                           min_count, num_top_labels);
 
     std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
+    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
 
     for (size_t i = 0; i < code_counts.size(); ++i) {
         auto &[label, mask] = result[i];
