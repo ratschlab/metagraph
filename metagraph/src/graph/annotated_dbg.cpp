@@ -318,9 +318,9 @@ void top_n_sorted(Container& code_counts, size_t num_top_labels) {
 }
 
 template <class Container>
-std::vector<StringCountPair> top_labels(Container&& code_counts,
-                                        const annot::LabelEncoder<> &label_encoder,
-                                        size_t num_top_labels) {
+std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
+                                               const annot::LabelEncoder<> &label_encoder,
+                                               size_t num_top_labels) {
     if (code_counts.size() > num_top_labels)
         top_n_sorted(code_counts, num_top_labels);
 
@@ -387,13 +387,13 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     std::vector<StringCountPair> result;
     if (with_kmer_counts) {
-        result = top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
-                                    .sum_row_values(index_counts.values_container(), min_count),
-                            annotator_->get_label_encoder(), num_top_labels);
+        result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
+                                        .sum_row_values(index_counts.values_container(), min_count),
+                                   annotator_->get_label_encoder(), num_top_labels);
     } else {
-        result = top_labels(annotator_->get_matrix()
-                                    .sum_rows(index_counts.values_container(), min_count),
-                            annotator_->get_label_encoder(), num_top_labels);
+        result = filter_and_decode(annotator_->get_matrix()
+                                        .sum_rows(index_counts.values_container(), min_count),
+                                   annotator_->get_label_encoder(), num_top_labels);
     }
 
     assert(std::all_of(result.begin(), result.end(),
@@ -403,14 +403,21 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     return result;
 }
 
-template <class Container>
-Vector<std::pair<Column, size_t>> filter(const Container &rows,
-                                         size_t num_columns,
-                                         size_t min_count,
-                                         size_t num_top_labels) {
+template <class Result, class Container>
+Result filter_and_aggregate(const Container &rows,
+                            const annot::LabelEncoder<Label> &label_encoder,
+                            size_t min_count,
+                            size_t num_top_labels,
+                            const std::vector<size_t> &kmer_positions,
+                            size_t num_kmers) {
+    static_assert(utils::is_one_of_v<Result,
+                    std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
+                    std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
+                    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
+    using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     // FYI: one could use tsl::hopscotch_map for counting but it is slower
     // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(num_columns, 0);
+    Vector<size_t> col_counts(label_encoder.size(), 0);
     for (const auto &row : rows) {
         for (const auto &j : row) {
             col_counts[utils::get_first(j)]++;
@@ -428,7 +435,34 @@ Vector<std::pair<Column, size_t>> filter(const Container &rows,
     if (code_counts.size() > num_top_labels)
         top_n_sorted(code_counts, num_top_labels);
 
-    return code_counts;
+    // Aggregate results (group by labels)
+    Result result;
+    result.reserve(code_counts.size());
+    col_counts.assign(label_encoder.size(), 0); // will map columns to indexes in `result`
+
+    for (size_t i = 0; i < code_counts.size(); ++i) {
+        result.emplace_back(label_encoder.decode(code_counts[i].first),
+                            code_counts[i].second,
+                            num_kmers);
+        col_counts[code_counts[i].first] = i + 1;
+    }
+
+    // set the counts
+    for (size_t i = 0; i < rows.size(); ++i) {
+        // set the non-empty tuples
+        for (auto &item : rows[i]) {
+            auto j = utils::get_first(item);
+            if (col_counts[j]) {
+                if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
+                    std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = true;
+                } else {
+                    std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = std::move(item.second);
+                }
+            }
+        }
+    }
+
+    return result;
 }
 
 void map_to_rows(const DeBruijnGraph &graph, std::string_view sequence,
@@ -499,32 +533,8 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
 
     auto row_values = int_matrix->get_row_values(row_indices);
 
-    Vector<std::pair<Column, size_t>> code_counts = filter(row_values, annotator_->num_labels(),
-                                                           min_count, num_top_labels);
-
-    std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result(code_counts.size());
-    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, num_kmer_matches, counts] = result[i];
-
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        num_kmer_matches = code_counts[i].second;
-        counts.resize(num_kmers, 0);
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    // set the counts
-    for (size_t i = 0; i < row_values.size(); ++i) {
-        // set the non-empty tuples
-        for (auto &[j, count] : row_values[i]) {
-            if (col_counts[j])
-                std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = count;
-        }
-    }
-
-    return result;
+    return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
+        row_values, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 }
 
 std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
@@ -562,9 +572,9 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
     if (coord_to_header_) {
-        if (tuple_matrix->get_binary_matrix().num_columns() != coord_to_header_->num_columns()) {
-            logger->error("Incompatible number of columns in CoordToHeader mapping and annotation matrix: {} != {}",
-                          coord_to_header_->num_columns(), tuple_matrix->get_binary_matrix().num_columns());
+        if (annotator_->num_labels() != coord_to_header_->num_columns()) {
+            logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
+                          "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
             exit(1);
         }
 
@@ -635,39 +645,17 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
-    Vector<std::pair<Column, size_t>> code_counts = filter(rows_tuples, annotator_->num_labels(),
-                                                           min_count, num_top_labels);
-
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> result(code_counts.size());
-    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, count, coords] = result[i];
-
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        count = code_counts[i].second;
-        coords.resize(num_kmers);
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    for (size_t i = 0; i < rows_tuples.size(); ++i) {
-        // set the non-empty tuples
-        for (auto &[j, tuple] : rows_tuples[i]) {
-            if (col_counts[j])
-                std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = std::move(tuple);
-        }
-    }
-
-    return result;
+    return filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
+        rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 }
 
 // A sanity check to ensure the same matches are for get_top_label_signatures and get_top_labels
-bool same_results(const std::vector<std::pair<Label, sdsl::bit_vector>> &result,
+bool same_results(const std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> &result,
                   const std::vector<StringCountPair> &top_labels) {
     assert(top_labels.size() == result.size());
     std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
-    for (const auto &[label, mask] : result) {
+    for (const auto &[label, count, mask] : result) {
+        assert(count == sdsl::util::cnt_one_bits(mask));
         auto find = check.find(label);
         assert(find != check.end());
         assert(find->second == sdsl::util::cnt_one_bits(mask));
@@ -676,7 +664,7 @@ bool same_results(const std::vector<std::pair<Label, sdsl::bit_vector>> &result,
     return check.empty();
 }
 
-std::vector<std::pair<Label, sdsl::bit_vector>>
+std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
@@ -693,13 +681,13 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     if (discovery_fraction == 1.) {
-        std::vector<std::pair<Label, sdsl::bit_vector>> presence_vectors;
-
         auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
+        std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
         for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(
                 std::move(label),
+                count,
                 sdsl::bit_vector(num_kmers, true)
             );
         }
@@ -709,12 +697,12 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     if (coord_to_header_) {
         auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
                                                    discovery_fraction, presence_fraction);
-        std::vector<std::pair<Label, sdsl::bit_vector>> result;
+        std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords] : kmer_coord_res) {
             assert(coords.size() == sequence.size() - dbg_.get_k() + 1);
-            result.emplace_back(std::move(label), coords.size());
-            auto &mask = result.back().second;
+            result.emplace_back(std::move(label), count, coords.size());
+            auto &mask = std::get<2>(result.back());
             for (size_t i = 0; i < coords.size(); ++i) {
                 if (coords[i].size())
                     mask[i] = true;
@@ -736,28 +724,8 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     auto rows = annotator_->get_matrix().get_rows(row_indices);
 
-    Vector<std::pair<Column, size_t>> code_counts = filter(rows, annotator_->num_labels(),
-                                                           min_count, num_top_labels);
-
-    std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
-    Vector<size_t> col_counts(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, mask] = result[i];
-
-        // TODO: remove the decoding step?
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        mask = sdsl::bit_vector(num_kmers, 0);
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        for (auto j : rows[i]) {
-            if (col_counts[j])
-                result[col_counts[j] - 1].second[kmer_positions[i]] = true;
-        }
-    }
+    auto result = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
+        rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 
     assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 

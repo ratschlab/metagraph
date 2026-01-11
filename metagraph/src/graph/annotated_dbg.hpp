@@ -133,7 +133,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
-    std::vector<std::pair<Label, sdsl::bit_vector>>
+    std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
