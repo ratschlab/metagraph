@@ -341,6 +341,7 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
 add_subdirectory(external-libraries/sshash SYSTEM)
+target_include_directories(sshash_static PRIVATE external-libraries/zlib)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
