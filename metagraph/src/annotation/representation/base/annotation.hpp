@@ -104,26 +104,41 @@ class LabelEncoder {
     /**
      * Check if the label has been added to encoder.
      */
-    bool label_exists(const Label &label) const { return encode_label_.count(label); }
+    bool label_exists(const Label &label) const { return data().count(label); }
 
     /**
      * Throws an exception if a bad code is passed.
      */
-    const Label& decode(size_t code) const { return *encode_label_.nth(code); }
+    const Label& decode(size_t code) const { return *data().nth(code); }
 
-    const std::vector<Label>& get_labels() const { return encode_label_.values_container(); }
+    const std::vector<Label>& get_labels() const { return data().values_container(); }
 
     void merge(const LabelEncoder<Label> &other);
 
-    size_t size() const { return encode_label_.size(); }
+    size_t size() const { return data().size(); }
 
-    void clear() { encode_label_.clear(); }
+    void clear() { encode_label_.clear(); remote_data_ = nullptr; }
 
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
 
+    /**
+     * Creates a new label encoder that holds a pointer to the same data as in this encoder.
+     * When altered, the new encoder creates a copy of the data, nullifies the pointer, and makes
+     * the new encoder independent of this encoder.
+     *
+     * The new encoder `new_encoder` is valid as long as at least one of the following is true:
+     *   1. `new_encoder.clear()` was called at any point
+     *   2. This label encoder is still valid
+     *   3. Any non-const method was called on `new_encoder` while this encoder was still valid
+     */
+    LabelEncoder<Label> make_static_copy() const;
+
   private:
+    const VectorSet<Label>& data() const { return remote_data_ ? *remote_data_ : encode_label_; }
+
     VectorSet<Label> encode_label_;
+    const VectorSet<Label> *remote_data_ = nullptr;
 };
 
 } // namespace annot

@@ -201,14 +201,14 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
         }
     } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : *v) {
+        for (const auto &[label, count, kmer_presence_mask] : *v) {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
             sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
-            label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
@@ -302,9 +302,9 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         }
     } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : *v) {
+        for (const auto &[label, count, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
-                                  sdsl::util::cnt_one_bits(kmer_presence_mask),
+                                  count,
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
@@ -562,26 +562,6 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     }
 }
 
-template <typename T>
-annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
-                                      std::vector<T> *rows) {
-    assert(rows);
-    annot::LabelEncoder<std::string> new_encoder;
-    tsl::hopscotch_map<size_t, size_t> old_to_new;
-    for (auto &row : *rows) {
-        for (auto &v : row) {
-            auto &j = utils::get_first(v);
-            auto [it, inserted] = old_to_new.emplace(j, new_encoder.size());
-            if (inserted)
-                new_encoder.insert_and_encode(encoder.decode(j));
-
-            assert(encoder.decode(j) == new_encoder.decode(it->second));
-            j = it->second;
-        }
-    }
-    return new_encoder;
-}
-
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
  *             from the full annotation matrix
@@ -615,8 +595,6 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         auto slice = mat->get_row_values(row_indexes);
 
-        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
-
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
         for (uint64_t i = 0; i < slice.size(); ++i) {
@@ -625,8 +603,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::IntRowAnnotator>(
-            std::make_unique<CSRMatrix>(std::move(rows), label_encoder.size()),
-            std::move(label_encoder)
+            std::make_unique<CSRMatrix>(std::move(rows), full_annotation.num_labels()),
+            full_annotation.get_label_encoder().make_static_copy()
         );
     }
 
@@ -651,14 +629,12 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_ids[full_to_small[i].second] = row_indexes[i];
     }
 
-    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
-
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                           std::move(row_ids),
-                                          label_encoder.size()),
-        std::move(label_encoder)
+                                          full_annotation.num_labels()),
+        full_annotation.get_label_encoder().make_static_copy()
     );
 }
 

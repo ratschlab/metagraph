@@ -222,7 +222,7 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     DEBUG_LOG("Reconstructed annotations for {} rows", rows->size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
-    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
+    return to_vector(std::move(unique_rows));
 }
 
 
