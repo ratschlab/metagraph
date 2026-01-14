@@ -123,7 +123,7 @@ size_t get_max_files_open() {
 }
 
 int get_num_fds() {
-    FILE *p = popen(fmt::format("lsof -p {} | tail -n +2 | wc -l", getpid()).c_str(), "r");
+    FILE *p = popen(fmt::format("set -o pipefail; lsof -p {} | tail -n +2 | wc -l", getpid()).c_str(), "r");
     if (!p) {
         logger->error("Can't open pipe to check the number of file descriptors with `lsof`");
         exit(1);
@@ -131,7 +131,12 @@ int get_num_fds() {
 
     char buffer[1024];
     char *ret = fgets(buffer, sizeof(buffer), p);
-    pclose(p);
+    if (pclose(p) != 0) {
+        logger->warn("Couldn't call `lsof` to get the list of open file descriptors. Will assume 0."
+                     " Thus, the process might fail because of the mistakes in estimating how many"
+                     " extra files can be opened. To avoid such errors, install `lsof`.");
+        return 0;
+    }
     if (!ret) {
         logger->error("Can't parse output of `lsof` from pipe");
         exit(1);
