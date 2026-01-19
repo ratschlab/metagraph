@@ -10,6 +10,7 @@
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
+#include "common/algorithms.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -403,8 +404,9 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     return result;
 }
 
+
 template <class Result, class Container>
-Result filter_and_aggregate(const Container &rows,
+Result filter_and_aggregate(Container&& rows,
                             const annot::LabelEncoder<Label> &label_encoder,
                             size_t min_count,
                             size_t num_top_labels,
@@ -415,51 +417,47 @@ Result filter_and_aggregate(const Container &rows,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(label_encoder.size(), 0);
-    for (const auto &row : rows) {
-        for (const auto &j : row) {
-            col_counts[utils::get_first(j)]++;
+
+    auto call_bits = [&](const std::function<void(Column, size_t)> &callback) {
+        for (const auto &row : rows) {
+            for (const auto &j : row) {
+                callback(utils::get_first(j), 1);
+            }
         }
-    }
+    };
+    std::vector<std::pair<Column, size_t>> counts
+            = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
 
-    Vector<std::pair<Column, size_t>> code_counts;
-    code_counts.reserve(col_counts.size());
-
-    for (size_t j = 0; j < col_counts.size(); ++j) {
-        if (col_counts[j] >= min_count)
-            code_counts.emplace_back(j, col_counts[j]);
-    }
-
-    if (code_counts.size() > num_top_labels)
-        top_n_sorted(code_counts, num_top_labels);
+    if (counts.size() > num_top_labels)
+        top_n_sorted(counts, num_top_labels);
 
     // Aggregate results (group by labels)
-    Result result;
-    result.reserve(code_counts.size());
-    col_counts.assign(label_encoder.size(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        result.emplace_back(label_encoder.decode(code_counts[i].first),
-                            code_counts[i].second,
-                            num_kmers);
-        col_counts[code_counts[i].first] = i + 1;
+    tsl::hopscotch_map<Column, ValueType> values;
+    values.reserve(counts.size());
+    for (const auto &[j, count] : counts) {
+        values.emplace(j, num_kmers);
     }
 
-    // set the counts
     for (size_t i = 0; i < rows.size(); ++i) {
-        // set the non-empty tuples
         for (auto &item : rows[i]) {
             auto j = utils::get_first(item);
-            if (col_counts[j]) {
+            auto it = values.find(j);
+            if (it != values.end()) {
                 if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
-                    std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = true;
+                    it.value()[kmer_positions[i]] = true;
                 } else {
-                    std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = std::move(item.second);
+                    it.value()[kmer_positions[i]] = std::move(item.second);
                 }
             }
         }
+        rows[i].clear();
+    }
+    rows.clear();
+
+    Result result;
+    result.reserve(counts.size());
+    for (const auto &[j, count] : counts) {
+        result.emplace_back(label_encoder.decode(j), count, std::move(values[j]));
     }
 
     return result;

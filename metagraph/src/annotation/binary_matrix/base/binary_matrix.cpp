@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 
+#include "common/algorithms.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
@@ -15,6 +16,7 @@ namespace annot {
 namespace matrix {
 
 const size_t kRowBatchSize = 10'000;
+using Column = RainbowMatrix::Column;
 
 
 std::vector<BinaryMatrix::SetBitPositions>
@@ -72,42 +74,32 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
     auto ic = index_counts;
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(num_columns(), 0);
-
     // don't break the topological order for row-diff annotation
     if (!dynamic_cast<const IRowDiff *>(this))
         std::sort(ic.begin(), ic.end(), utils::LessFirst());
 
-    // limit the RAM usage by avoiding querying all the rows at once
-    for (uint64_t begin = 0; begin < ic.size(); begin += kRowBatchSize) {
-        const uint64_t end = std::min(begin + kRowBatchSize,
-                                      static_cast<uint64_t>(ic.size()));
+    auto call_bits = [&](const auto &callback) {
+        // limit the RAM usage by avoiding querying all the rows at once
+        for (uint64_t begin = 0; begin < ic.size(); begin += kRowBatchSize) {
+            const uint64_t end = std::min(begin + kRowBatchSize,
+                                          static_cast<uint64_t>(ic.size()));
 
-        std::vector<Row> ids(end - begin);
-        for (uint64_t i = begin; i < end; ++i) {
-            ids[i - begin] = ic[i].first;
-        }
+            std::vector<Row> ids(end - begin);
+            for (uint64_t i = begin; i < end; ++i) {
+                ids[i - begin] = ic[i].first;
+            }
 
-        const auto &rows = get_rows(ids);
+            const auto &rows = get_rows(ids);
 
-        for (uint64_t i = begin; i < end; ++i) {
-            for (size_t j : rows[i - begin]) {
-                col_counts[j] += ic[i].second;
+            for (uint64_t i = begin; i < end; ++i) {
+                for (size_t j : rows[i - begin]) {
+                    callback(j, ic[i].second);
+                }
             }
         }
-    }
+    };
 
-    std::vector<std::pair<Column, size_t>> result;
-    result.reserve(col_counts.size());
-
-    for (Column j = 0; j < col_counts.size(); ++j) {
-        if (col_counts[j] >= min_count)
-            result.emplace_back(j, col_counts[j]);
-    }
-
-    return result;
+    return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
 
@@ -191,29 +183,19 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
     auto distinct_rows = get_rows_dict(&row_ids);
 
-    Vector<size_t> counts(distinct_rows.size(), 0);
+    Vector<size_t> weights(distinct_rows.size(), 0);
     for (size_t i = 0; i < index_counts.size(); ++i) {
-        counts[row_ids[i]] += index_counts[i].second;
+        weights[row_ids[i]] += index_counts[i].second;
     }
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(num_columns(), 0);
-    for (size_t i = 0; i < counts.size(); ++i) {
-        for (size_t j : distinct_rows[i]) {
-            col_counts[j] += counts[i];
+    auto call_bits = [&](const std::function<void(Column, size_t)> &callback) {
+        for (size_t i = 0; i < distinct_rows.size(); ++i) {
+            for (Column j : distinct_rows[i]) {
+                callback(j, weights[i]);
+            }
         }
-    }
-
-    std::vector<std::pair<Column, size_t>> result;
-    result.reserve(col_counts.size());
-
-    for (Column j = 0; j < col_counts.size(); ++j) {
-        if (col_counts[j] >= min_count)
-            result.emplace_back(j, col_counts[j]);
-    }
-
-    return result;
+    };
+    return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
 
