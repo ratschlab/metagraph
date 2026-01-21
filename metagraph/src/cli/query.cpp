@@ -1032,7 +1032,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 100)
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const std::vector<node_index> &nodes_in_full = contigs[i].second;
