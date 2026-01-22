@@ -571,6 +571,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
  * @param[in]  full_to_small    The mapping between the rows in the full matrix
  *                              and its submatrix.
  * @param[in]  num_threads      The number of threads used.
+ * @param[in]  query_mode       The query mode (determines the output annotation type)
  *
  * @return     Annotation submatrix
  */
@@ -580,7 +581,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
                  size_t num_threads,
                  QueryMode query_mode) {
-    if (query_mode == COUNTS || query_mode == COORDS || query_mode == COUNTS_SUM) {
+    if (query_mode == COUNTS || query_mode == COUNTS_SUM) {
         const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
 
         // don't break the topological order for row-diff annotation
