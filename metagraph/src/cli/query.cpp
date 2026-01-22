@@ -578,8 +578,11 @@ std::unique_ptr<AnnotatedDBG::Annotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
-                 size_t num_threads) {
-    if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+                 size_t num_threads,
+                 QueryMode query_mode) {
+    if (query_mode == COUNTS || query_mode == COORDS || query_mode == COUNTS_SUM) {
+        const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
+
         // don't break the topological order for row-diff annotation
         if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
             ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
@@ -593,7 +596,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_indexes.push_back(in_full);
         }
 
-        auto slice = mat->get_row_values(row_indexes);
+        auto slice = mat.get_row_values(row_indexes);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
@@ -838,7 +841,7 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      const Config *config) {
+                      const Config &config) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
@@ -851,25 +854,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     size_t max_hull_depth = 0;
     size_t max_num_nodes_per_suffix = 1;
     double max_hull_depth_per_seq_char = 0.0;
-    if (config) {
-        if (config->alignment_min_seed_length > full_dbg.get_k()) {
+    if (config.align_sequences && config.batch_align) {
+        if (config.alignment_min_seed_length > full_dbg.get_k()) {
             logger->warn("Can't match suffixes longer than k={}."
                          " The value of k={} will be used.",
                          full_dbg.get_k(), full_dbg.get_k());
         }
-        if (config->alignment_min_seed_length
-                && config->alignment_min_seed_length < full_dbg.get_k()) {
+        if (config.alignment_min_seed_length
+                && config.alignment_min_seed_length < full_dbg.get_k()) {
             if (!dbg_succ) {
                 logger->error("Matching suffixes of k-mers only supported for DBGSuccinct");
                 exit(1);
             }
-            sub_k = config->alignment_min_seed_length;
+            sub_k = config.alignment_min_seed_length;
         }
 
-        max_hull_forks = config->max_hull_forks;
-        max_hull_depth = config->max_hull_depth;
-        max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
-        max_num_nodes_per_suffix = config->alignment_max_num_seeds_per_locus;
+        max_hull_forks = config.max_hull_forks;
+        max_hull_depth = config.max_hull_depth;
+        max_hull_depth_per_seq_char = config.alignment_max_nodes_per_seq_char;
+        max_num_nodes_per_suffix = config.alignment_max_num_seeds_per_locus;
     }
 
     Timer timer;
@@ -1051,7 +1054,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
-                                       num_threads);
+                                       num_threads,
+                                       config.query_mode);
 
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
@@ -1299,7 +1303,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     }
                 },
                 threads_per_batch,
-                aligner_config_ && config_.batch_align ? &config_ : NULL
+                config_
             );
 
             auto query_graph_construction = batch_timer.elapsed();

@@ -61,7 +61,7 @@ std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      const Config *config = nullptr);
+                      const Config &config);
 
 
 // Simple struct to wrap a query sequence
