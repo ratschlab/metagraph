@@ -184,30 +184,33 @@ class TestQuery(TestingBase):
 
         assert(cls.anno_repr == stats_annotation['representation'])
 
-    def test_query(self):
-        query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+    @parameterized.expand(['0', '100', '100000000'])
+    def test_query(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-
         self._run_and_check_stdoutlen(query_command, 137140)
 
-        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         ) + MMAP_FLAG
-
         self._run_and_check_stdoutlen(query_command, 136959)
 
+    @parameterized.expand(['0', '100000000'])
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_query_both(self):
+    def test_query_both(self, batch_size):
         """query graph (fwd and reverse)"""
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -215,8 +218,9 @@ class TestQuery(TestingBase):
 
         self._run_and_check_stdoutlen(query_command, 261390)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -224,54 +228,62 @@ class TestQuery(TestingBase):
 
         self._run_and_check_stdoutlen(query_command, 260215)
 
-    def test_query_parallel(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_query_parallel(self, batch_size):
         """query graph (multi-threaded)"""
-        query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 137140)
 
-        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 136959)
 
+    @parameterized.expand(['0', '100000000'])
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_query_both_parallel(self):
+    def test_query_both_parallel(self, batch_size):
         """query graph (fwd and reverse, multi-threaded)"""
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 261390)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 260215)
 
-    def test_query_with_align(self):
-        query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+    @parameterized.expand(['0', '100000000'])
+    def test_query_with_align(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -280,8 +292,9 @@ class TestQuery(TestingBase):
         expected_len = 12249 if DNA_MODE else 12244
         self._run_and_check_stdoutlen(query_command, expected_len)
 
-        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -291,229 +304,62 @@ class TestQuery(TestingBase):
         self._run_and_check_stdoutlen(query_command, expected_len)
 
         # align to graph (multi-threaded)
-        query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         expected_len = 12249 if DNA_MODE else 12244
         self._run_and_check_stdoutlen(query_command, expected_len)
 
-        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         expected_len = 12355 if DNA_MODE else 12350
         self._run_and_check_stdoutlen(query_command, expected_len)
 
+    @parameterized.expand(['0', '100000000'])
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_query_with_align_both(self):
+    def test_query_with_align_both(self, batch_size):
         """align to graph (fwd and reverse multi-threaded)"""
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --align --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 24567)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
+            num_threads=NUM_THREADS
         ) + MMAP_FLAG
 
         self._run_and_check_stdoutlen(query_command, 24779)
 
-    def test_batch_query(self):
-        query_command = '{exe} query --batch-size 100000000 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 137140)
-
-        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 136959)
-
-    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_batch_query_both(self):
-        """query graph (fwd and reverse)"""
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 261390)
-
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 260215)
-
-    def test_batch_query_parallel(self):
-        """query graph (multi-threaded)"""
-        query_command = '{exe} query --batch-size 100000000 -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_threads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 137140)
-
-        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_threads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 136959)
-
-    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_batch_query_both_parallel(self):
-        """query graph (fwd and reverse, multi-threaded)"""
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 261390)
-
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa',
-            num_theads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 260215)
-
-    def test_batch_query_with_align(self):
-        query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-
-        expected_len = 12249 if DNA_MODE else 12244
-        self._run_and_check_stdoutlen(query_command, expected_len)
-
-        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-
-        expected_len = 12355 if DNA_MODE else 12350
-        self._run_and_check_stdoutlen(query_command, expected_len)
-
-        # align to graph (multi-threaded)
-        query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_threads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        expected_len = 12249 if DNA_MODE else 12244
-        self._run_and_check_stdoutlen(query_command, expected_len)
-
-        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_threads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        expected_len = 12355 if DNA_MODE else 12350
-        self._run_and_check_stdoutlen(query_command, expected_len)
-
-    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_batch_query_with_align_both(self):
-        """align to graph (fwd and reverse multi-threaded)"""
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 24567)
-
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
-            num_theads=NUM_THREADS
-        ) + MMAP_FLAG
-
-        self._run_and_check_stdoutlen(query_command, 24779)
-
-    def test_batch_query_with_tiny_batch(self):
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137140)
-
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 136959)
-
-    def test_query_coordinates(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_query_coordinates(self, batch_size):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -522,7 +368,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 139268)
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -531,11 +377,12 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 31522)
 
-    def test_query_coordinates_expanded(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_query_coordinates_expanded(self, batch_size):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -544,7 +391,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 1619883)
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -612,11 +459,12 @@ class TestQueryTinyLinear(TestingBase):
 
         assert(cls.anno_repr == stats_annotation['representation'])
 
-    def test_query_coordinates(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_query_coordinates(self, batch_size):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords  --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords  --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 0.05 {self.fasta_graph}' + MMAP_FLAG
@@ -707,7 +555,7 @@ class TestQuery1Column(TestingBase):
         assert(cls.anno_repr == stats_annotation['representation'])
 
     def test_query(self):
-        query_command = f'{METAGRAPH} query --batch-size 0 \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode labels \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label 1.0 \
@@ -898,7 +746,8 @@ class TestQueryCounts(TestingBase):
         for output_line, expected_line in zip(output_lines, expected_lines):
             self.assertCountEqual(output_line.split('\t'), expected_line.split('\t'))
 
-    def test_abundance_sum_query(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_abundance_sum_query(self, batch_size):
         query_file = self.tempdir.name + '/query.fa'
         for discovery_rate in np.linspace(0, 1, 5):
             expected_output = ''
@@ -927,7 +776,7 @@ class TestQueryCounts(TestingBase):
 
                     expected_output += '\n'
 
-            query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts-sum \
+            query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode counts-sum \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label {discovery_rate} {query_file}' + MMAP_FLAG
@@ -936,7 +785,8 @@ class TestQueryCounts(TestingBase):
             self.assertEqual(res.returncode, 0)
             self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
-    def test_count_query(self):
+    @parameterized.expand(['0', '100000000'])
+    def test_count_query(self, batch_size):
         query_file = self.tempdir.name + '/query.fa'
         for discovery_rate in np.linspace(0, 1, 5):
             expected_output = ''
@@ -966,7 +816,7 @@ class TestQueryCounts(TestingBase):
 
                     expected_output += '\n'
 
-            query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts --verbose-output \
+            query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode counts --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --min-kmers-fraction-label {discovery_rate} {query_file}' + MMAP_FLAG
@@ -975,7 +825,7 @@ class TestQueryCounts(TestingBase):
             self.assertEqual(res.returncode, 0)
             self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
-        query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts \
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode counts \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                         --min-kmers-fraction-label {discovery_rate} {query_file}' + MMAP_FLAG
@@ -1056,9 +906,11 @@ class TestQueryCanonical(TestingBase):
 
         assert(cls.anno_repr == stats_annotation['representation'])
 
-    def test_query(self):
-        query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+    @parameterized.expand(['0', '100', '100000000'])
+    def test_query(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -1067,8 +919,9 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -1077,9 +930,11 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
 
-    def test_query_with_align(self):
-        query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+    @parameterized.expand(['0', '100000000'])
+    def test_query_with_align(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -1088,8 +943,9 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -1097,69 +953,6 @@ class TestQueryCanonical(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
-
-    def test_batch_query(self):
-        query_command = '{exe} query --batch-size 100000000 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137269)
-
-        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137093)
-
-    def test_batch_query_with_align(self):
-        query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12840)
-
-        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12970)
-
-    def test_batch_query_with_tiny_batch(self):
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137269)
-
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137093)
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
@@ -1221,9 +1014,11 @@ class TestQueryPrimary(TestingBase):
 
         assert(cls.anno_repr == stats_annotation['representation'])
 
-    def test_query(self):
-        query_command = '{exe} query --batch-size 0 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+    @parameterized.expand(['0', '100', '100000000'])
+    def test_query(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -1232,8 +1027,9 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
@@ -1242,9 +1038,11 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
 
-    def test_query_with_align(self):
-        query_command = '{exe} query --batch-size 0 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+    @parameterized.expand(['0', '100000000'])
+    def test_query_with_align(self, batch_size):
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -1253,8 +1051,9 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
+            batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
@@ -1263,68 +1062,473 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
 
-    def test_batch_query(self):
-        query_command = '{exe} query --batch-size 100000000 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137093)
 
-    def test_batch_query_with_align(self):
-        query_command = '{exe} query --batch-size 100000000 --align -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12840)
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(
+        [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
+        [anno for anno in ANNO_TYPES if anno.endswith('_coord')],
+    ),
+    class_name_func=get_test_class_name
+)
+class TestCoordToHeader(TestingBase):
+    def setUp(self):
+        self.tempdir = TemporaryDirectory()
 
-        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12970)
+        # Create test FASTA file with multiple sequences
+        self.test_fa = self.tempdir.name + '/test_sequences.fa'
+        with open(self.test_fa, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>short\n')
+            f.write('AAA\n')
+            f.write('>bad\n')
+            f.write('!A2AA\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTT\n')
 
-    def test_batch_query_with_tiny_batch(self):
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137269)
+        self.query_fa = self.tempdir.name + '/query.fa'
+        with open(self.query_fa, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCG\n')
+            f.write('>query2\n')
+            f.write('GCTAGCTA\n')
 
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        ) + MMAP_FLAG
-        res = subprocess.run(query_command.split(), stdout=PIPE)
+    def index_headers(self, graph, anno_base, input = None, extra_flags = ''):
+        columns = None
+        if input is None:
+            # The order of the columns may be arbitrary, thus we run stats to get the final order
+            anno = anno_base + anno_file_extension[self.anno_repr]
+            res = subprocess.run([f"{METAGRAPH} stats {anno} --print-col-names"],
+                                 shell=True, stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0)
+            columns = [line.strip() for line in res.stdout.decode().split('\n')[2:] if line.strip()]
+            input = ' '.join(columns)
+
+        res = subprocess.run([f"{METAGRAPH} annotate --anno-filename --index-header-coords \
+                                    -v -i {graph} -o {anno_base} {input} {extra_flags}" + MMAP_FLAG],
+                              shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Indexing headers failed: {res.stderr.decode()}")
+        self.assertTrue(os.path.exists(anno_base + '.seqs'))
+        return columns
+
+    @parameterized.expand(['header', 'filename'])
+    def test_query_coords_without_mapping(self, anno_type):
+        # Construct graph and annotation without CoordToHeader
+        self._build_graph(self.test_fa, self.tempdir.name + '/graph', k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(self.test_fa, self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+                             self.tempdir.name + '/annotation', self.anno_repr, anno_type=anno_type)
+        if anno_type == 'header':
+            expected_output = '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n'
+        elif anno_type == 'filename':
+            expected_output = (
+                f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n'
+                f'1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+            )
+        else:
+            raise ValueError(f'Invalid annotation type: {anno_type}')
+
+        # Query with coordinates mode - this should map coordinates to sequence headers
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
+                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                         --min-kmers-fraction-label 0.0 \
+                         {self.query_fa}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        self.assertEqual(res.stdout.decode(), expected_output)
+
+    @parameterized.expand(['0', '100000000'])
+    def test_query_coords(self, batch_size):
+        anno_type = 'filename'
+        graph_base = self.tempdir.name + '/graph'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+        self._build_graph(self.test_fa, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(self.test_fa, graph, anno_base, self.anno_repr, anno_type=anno_type)
+        self.index_headers(graph, anno_base, self.test_fa)
+
+        # Query coordinates
+        # The mapping index was created, hence coords must be mapped to the headers
+        query_command = f'{METAGRAPH} query --batch-size {batch_size} --query-mode coords \
+                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
+                         {self.query_fa}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 137093)
+        self.assertEqual(res.stdout.decode(),
+                         '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n')
+
+        # Query in the basic mode, without mapping to headers
+        res = subprocess.run([query_command + ' --no-coord-mapping'], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        expected_output = (
+            f'0\tquery1\t<{self.tempdir.name}/test_sequences.fa>:1-23:0-1-5:1-19-22\n'
+            f'1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
+        )
+        self.assertEqual(res.stdout.decode(), expected_output)
+
+    @parameterized.expand(['', '-p 4', '--separately', '-p 4 --separately'])
+    def test_multiple_files(self, extra_flags):
+        # Create multiple test FASTA files (simulating different annotation columns)
+        anno_type = 'filename'
+        file1 = self.tempdir.name + '/file1.fa'
+        with open(file1, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+
+        file2 = self.tempdir.name + '/file2.fa'  # file with no valid k-mers
+        with open(file2, 'w') as f:
+            f.write('>short\n')
+            f.write('AAA\n')
+
+        file3 = self.tempdir.name + '/file3.fa'  # empty file (no sequences)
+        with open(file3, 'w') as f:
+            f.write('\n')
+
+        file4 = self.tempdir.name + '/file4.fa'
+        with open(file4, 'w') as f:
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTTGCTAGC\n')
+            f.write('>short\n')
+            f.write('AAA\n')
+            f.write('>bad\n')
+            f.write('!A2AA\n')
+            f.write('>seq4\n')
+            f.write('TATCGATCGATCGATCG\n')
+
+        # Query file that matches sequences from multiple files
+        query_fa = self.tempdir.name + '/query_multi.fa'
+        with open(query_fa, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCG\n')  # Matches seq1 from file1 and seq4 from file4
+            f.write('>query2\n')
+            f.write('GCTAGCTA\n')   # Matches seq2 from file1
+
+        graph_base = self.tempdir.name + '/graph_multi'
+        graph = self.tempdir.name + '/graph_multi' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Index all files
+        self._build_graph(f'{file1} {file2} {file3} {file4}', graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(f'{file1} {file2} {file3} {file4}', graph, anno_base, self.anno_repr, anno_type=anno_type)
+
+        columns = self.index_headers(graph, anno_base, extra_flags=extra_flags)
+
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[2], "columns: 2")
+        self.assertEqual(lines[3], "total sequences: 5")  # file3 is included, even though has no valid k-mers
+        self.assertEqual(lines[4], "total k-mers: 62")
+
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs -v" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[1], '================ COORD-TO-HEADER STATS =================')
+        self.assertEqual(lines[2], 'columns: 2')
+        self.assertEqual(lines[3], 'total sequences: 5')
+        self.assertEqual(lines[4], 'total k-mers: 62')
+        self.assertEqual(lines[5], '=================== PER-COLUMN STATS ===================')
+        # The order of the columns may be arbitrary
+        if not columns[0].endswith('file1.fa'):
+            lines[7:10], lines[11:14] = lines[11:14], lines[7:10]
+        self.assertEqual(lines[6], 'column 0:')
+        self.assertEqual(lines[7], '  sequences: 2 (seq1\tseq2)')
+        self.assertEqual(lines[8], '  k-mers: 18')
+        self.assertEqual(lines[9], '  k-mers per sequence: 9.0')
+        self.assertEqual(lines[10], 'column 1:')
+        self.assertEqual(lines[11], '  sequences: 3 (seq3\tbad\tseq4)')
+        self.assertEqual(lines[12], '  k-mers: 44')
+        self.assertEqual(lines[13], '  k-mers per sequence: 14.7')
+        self.assertEqual(lines[14], '========================================================')
+
+        # Expected: coordinates should map to sequence headers (seq1, seq2, seq3, seq4)
+        query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
+                         --min-kmers-fraction-label 0.0 {query_fa}' + MMAP_FLAG
+
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
+
+        output = res.stdout.decode()
+        output = output.split('\n')
+        self.assertEqual(len(output), 3, "Output should contain two query results")
+        self.assertEqual(output[-1], "", "Output should contain two query results")
+        self.assertEqual(output[0].split('\t')[:2], ["0", "query1"])
+        self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>:0-1-5", "<seq3>:1-4:1-0-3", "<seq4>:0-0-4:1-5-8:1-9-12"})
+        self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
+        self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
+
+    def test_multiple_files_bad(self):
+        # Check that query fails when Annotation and CoordToHeaders are incompatible
+        anno_type = 'filename'
+        file1 = self.tempdir.name + '/file1.fa'
+        with open(file1, 'w') as f:
+            f.write('>seq1\n')
+            f.write('GTATCGATCG\n')
+            f.write('>seq2\n')
+            f.write('GCTAGCTAGCTAGCTA\n')
+
+        file2 = self.tempdir.name + '/file2.fa'
+        with open(file2, 'w') as f:
+            f.write('>seq3\n')
+            f.write('ATCGATCGAAAAACCCCCGGGGGTTTTTGCTAGC\n')
+            f.write('>seq4\n')
+            f.write('TATCGATCGATCGATCG\n')
+
+        graph_base = self.tempdir.name + '/graph_multi'
+        graph = self.tempdir.name + '/graph_multi' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Build graph from all files
+        self._build_graph(f'{file1} {file2}', graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(f'{file1} {file2}', graph, anno_base, self.anno_repr, anno_type=anno_type)
+        # Index only the headers from the first file
+        self.index_headers(graph, anno_base, file1)
+
+        res = subprocess.run([f"{METAGRAPH} stats {anno_base}.seqs" + MMAP_FLAG], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(lines[2], "columns: 1")
+        # The query is expected to fail because the mapping file is incompatible with the annotation
+        query_command = f'{METAGRAPH} query --query-mode coords -i {graph} -a {anno} \
+                         --min-kmers-fraction-label 0.0 {file1}' + MMAP_FLAG
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertNotEqual(res.returncode, 0, f"Query with incompatible .seq mapping must fail")
+        self.assertIn("[error] Incompatible number of columns", res.stderr.decode())
+
+    def test_query_with_filters(self):
+        """Test that --num-top-labels and --min-kmers-fraction-label work correctly with mapping"""
+        anno_type = 'filename'
+        graph_base = self.tempdir.name + '/graph'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Create test FASTA with sequences that will have different numbers of k-mer matches
+        test_fa = self.tempdir.name + '/test_filter.fa'
+        with open(test_fa, 'w') as f:
+            f.write('>seq1\n')
+            f.write('TATCGATC\n')
+            f.write('>seq2\n')
+            f.write('GTATCGATCGATCGATCG\n')
+            f.write('>seq3\n')
+            f.write('ATCGATCG\n')
+
+        query_fa = self.tempdir.name + '/query_filter.fa'
+        with open(query_fa, 'w') as f:
+            f.write('>query1\n')
+            f.write('TATCGATCGATCGATCG\n')
+
+        self._build_graph(test_fa, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(test_fa, graph, anno_base, self.anno_repr, anno_type=anno_type)
+
+        self.index_headers(graph, anno_base, test_fa)
+
+        def test_stdout(filter_flags: str, expected_output: str | set[str], mode: str = 'coords', extra_split_by = None):
+            res = subprocess.run([f'{METAGRAPH} query --batch-size 0 --query-mode {mode} \
+                                    -i {graph} -a {anno} {filter_flags} {query_fa}' + MMAP_FLAG],
+                                 shell=True, stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0, f"Query failed: {res.stderr.decode()}")
+            if isinstance(expected_output, str):
+                self.assertEqual(res.stdout.decode().strip(), expected_output)
+            else:
+                out = res.stdout.decode().strip().split('\t')
+                if extra_split_by:
+                    out = sum((part.split(extra_split_by) for part in out), [])
+                self.assertEqual(set(out), expected_output)
+
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
+        # Without filtering by --num-top-labels, the matches are not sorted
+        test_stdout('--min-kmers-fraction-label 0.5',
+            {'0', 'query1', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3', '<seq1>:0-0-3:5-1-3:9-1-3'})
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+        test_stdout('--min-kmers-fraction-label 0.0',
+            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+        test_stdout('',
+            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+
+        # --num-top-labels is not used in the labels mode
+        test_stdout('--num-top-labels 1', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
+        test_stdout('--min-kmers-fraction-label 1.0', {'0', 'query1', 'seq2'}, mode='labels')
+        test_stdout('', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
+
+        test_stdout('--num-top-labels 1', '0\tquery1\t<seq2>:13', mode='matches')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
+        test_stdout('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq2>:13', mode='matches')
+        test_stdout('', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
+        test_stdout('--num-top-labels 2', '0\tquery1\t<seq2>:13\t<seq3>:12', mode='matches')
+        test_stdout('--num-top-labels 3', {'0', 'query1', '<seq2>:13', '<seq3>:12', '<seq1>:10'}, mode='matches')
+
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
+        test_stdout('--min-kmers-fraction-label 0.5',
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:0=1:1-12=3', mode='counts')
+        test_stdout('',
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:0=1:1-12=3\t<seq3>:1-12=1', mode='counts')
+        test_stdout('--num-top-labels 3',
+            {'0', 'query1', '<seq2>:0=1:1-12=3', '<seq3>:1-12=1', '<seq1>:0-3=1:5-7=1:9-11=1'}, mode='counts')
+
+        test_stdout('--num-top-labels 1', '0\tquery1\t<seq2>:37', mode='counts-sum')
+        test_stdout('--min-kmers-fraction-label 0.5', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+        test_stdout('--min-kmers-fraction-label 1.0', '0\tquery1\t<seq2>:37', mode='counts-sum')
+        test_stdout('', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+        test_stdout('--num-top-labels 2', '0\tquery1\t<seq2>:37\t<seq3>:12', mode='counts-sum')
+        test_stdout('--num-top-labels 3', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
+
+        test_stdout('--num-top-labels 1',
+            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+        test_stdout('--min-kmers-fraction-label 0.5',
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+        test_stdout('--min-kmers-fraction-label 1.0',
+            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+        test_stdout('',
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+        test_stdout('--num-top-labels 2',
+            '0\tquery1\t<seq2>:13:1111111111111:17\t<seq3>:12:0111111111111:16', mode='signature')
+        test_stdout('--num-top-labels 3',
+            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+
+    @parameterized.expand(['labels', 'matches', 'counts', 'counts-sum', 'coords', 'signature'])
+    def test_five_files_single_sequence_each_unsorted(self, query_mode):
+        anno_type = 'filename'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Create 5 files, each with a single sequence
+        files = []
+        sequences = [
+            ('seq1', 'GTATCGATCGATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGTATCGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCC'),
+            ('seq4', 'TATCGATCGATCGATCG'),
+            ('seq5', 'CGCGCGCGCGCGCGCGCGGTATC'),
+        ]
+
+        for i, (header, seq) in enumerate(sequences, 1):
+            file_path = self.tempdir.name + f'/file_{i}.fa'
+            files.append(file_path)
+            with open(file_path, 'w') as f:
+                f.write(f'>{header}\n')
+                f.write(f'{seq}\n')
+
+        # Create a query file that matches sequences from multiple files
+        query_fa = self.tempdir.name + '/query.fa'
+        with open(query_fa, 'w') as f:
+            f.write('>query\n')
+            f.write('GTATCGATTGATCGATCGGTATCGATTGATCGATCG\n')
+
+        # Build graph and annotate
+        all_files = ' '.join(files)
+        self._build_graph(all_files, graph, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(all_files, graph, anno_base, self.anno_repr, anno_type=anno_type)
+
+        self.index_headers(graph, anno_base)
+
+        for discovery_fraction in [0.0, 0.2, 1.0]:
+            for batch_size in [0, 100000000]:
+                # Query with header mapping
+                query_cmd_with = f'{METAGRAPH} query --batch-size {batch_size} --query-mode {query_mode} \
+                                  -i {graph} -a {anno} --min-kmers-fraction-label {discovery_fraction} \
+                                  {query_fa}' + MMAP_FLAG
+                res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
+                self.assertEqual(res_with.returncode, 0)
+                output_with = res_with.stdout.decode().strip()
+
+                # Query without header mapping
+                res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
+                                             shell=True, stdout=PIPE, stderr=PIPE)
+                self.assertEqual(res_without.returncode, 0)
+                output_without = res_without.stdout.decode().strip()
+
+                # Replace the file labels with the corresponding headers
+                for i, (header, _) in enumerate(sequences, 1):
+                    output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
+
+                if query_mode == 'labels':
+                    output_with = output_with.split('\t')[-1].split(':')
+                    output_without = output_without.split('\t')[-1].split(':')
+                else:
+                    output_with = output_with.split('\t')
+                    output_without = output_without.split('\t')
+
+                self.assertEqual(set(output_with), set(output_without))
+
+    @parameterized.expand(['matches', 'counts', 'counts-sum', 'coords', 'signature'])
+    def test_five_files_single_sequence_each_sorted(self, query_mode):
+        anno_type = 'filename'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+
+        # Create 5 files, each with a single sequence
+        files = []
+        sequences = [
+            ('seq1', 'GTATCGATCGATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGTATCGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCC'),
+            ('seq4', 'TATCGATCGATCGATCG'),
+            ('seq5', 'CGCGCGCGCGCGCGCGCGGTATC'),
+        ]
+
+        for i, (header, seq) in enumerate(sequences, 1):
+            file_path = self.tempdir.name + f'/file_{i}.fa'
+            files.append(file_path)
+            with open(file_path, 'w') as f:
+                f.write(f'>{header}\n')
+                f.write(f'{seq}\n')
+
+        # Create a query file that matches sequences from multiple files
+        query_fa = self.tempdir.name + '/query.fa'
+        with open(query_fa, 'w') as f:
+            f.write('>query\n')
+            f.write('GTATCGATTGATCGATCGGTATCGATTGATCGATCG\n')
+
+        # Build graph and annotate
+        all_files = ' '.join(files)
+        self._build_graph(all_files, graph, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(all_files, graph, anno_base, self.anno_repr, anno_type=anno_type)
+
+        self.index_headers(graph, anno_base)
+
+        # Query with header mapping
+        query_cmd_with = f'{METAGRAPH} query --batch-size 0 --query-mode {query_mode} \
+                          -i {graph} -a {anno} --min-kmers-fraction-label 0.0 --num-top-labels 4 \
+                          {query_fa}' + MMAP_FLAG
+        res_with = subprocess.run([query_cmd_with], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res_with.returncode, 0)
+        output_with = res_with.stdout.decode().strip()
+
+        # Query without header mapping
+        res_without = subprocess.run([query_cmd_with + ' --no-coord-mapping'],
+                                     shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res_without.returncode, 0)
+        output_without = res_without.stdout.decode().strip()
+
+        # Replace the file labels with the corresponding headers
+        for i, (header, _) in enumerate(sequences, 1):
+            output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
+
+        # Should have same results
+        self.assertEqual(output_with, output_without)
 
 
 if __name__ == '__main__':

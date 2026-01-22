@@ -956,7 +956,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 100)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
@@ -1235,7 +1235,7 @@ size_t QueryExecutor::query_fasta(const string &file,
     }
 
     if (config_.query_batch_size) {
-        if (config_.query_mode != COORDS) {
+        if (config_.query_mode != COORDS && !anno_graph_.get_coord_to_header()) {
             // Construct a query graph and query against it
             return batched_query_fasta(fasta_parser, callback);
         } else {

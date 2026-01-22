@@ -10,6 +10,7 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
+#include "annotation/coord_to_header.hpp"
 
 
 namespace mtg {
@@ -70,11 +71,17 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                  std::unique_ptr<Annotator>&& annotation,
-                 bool force_fast = false);
+                 bool force_fast = false,
+                 std::unique_ptr<annot::CoordToHeader> coord_to_header = {});
 
     using AnnotatedSequenceGraph::get_labels;
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
+
+    // Returns pointer to the coordinate-to-header mapping if available, nullptr otherwise.
+    // This mapping transforms file-based coordinates to sequence-header-based coordinates
+    // for query results. The returned pointer is valid for the lifetime of this object.
+    const annot::CoordToHeader* get_coord_to_header() const { return coord_to_header_.get(); }
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
@@ -163,6 +170,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
   private:
     DeBruijnGraph &dbg_;
+    std::unique_ptr<annot::CoordToHeader> coord_to_header_;
 };
 
 } // namespace graph

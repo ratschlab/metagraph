@@ -240,19 +240,11 @@ jobs:
           echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           echo "VER=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: read current version
-        id: read_version
-        run: |
-          content=`cat package.json`
-          content="${content//'%'/'%25'}"
-          content="${content//$'\n'/'%0A'}"
-          content="${content//$'\r'/'%0D'}"
-          echo "packageJson=$content" >> $GITHUB_OUTPUT
-
       - name: build source archive including submodules
         run: |
-          [[ v${{fromJson(steps.read_version.outputs.packageJson).version}} == ${{ steps.tag_name.outputs.TAG }} ]] \
-            || (echo "::error file=package.json::Version in package.json (v${{fromJson(steps.read_version.outputs.packageJson).version}}) does not match tag ${{ steps.tag_name.outputs.TAG }}. Update package.json and set the tag again."; \
+          version="v$(jq -r .version package.json)"
+          [[ "$version" == "${{ steps.tag_name.outputs.TAG }}" ]] \
+            || (echo "::error file=package.json::Version in package.json ($version) does not match tag ${{ steps.tag_name.outputs.TAG }}. Update package.json and set the tag again."; \
                 exit 1)
           mkdir -p artifacts/sources
           tag=${{ steps.tag_name.outputs.TAG }}

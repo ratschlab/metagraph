@@ -8,6 +8,8 @@
 #include "common/unix_tools.hpp"
 #include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -16,6 +18,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
 
 
 namespace mtg {
@@ -237,11 +240,47 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         forward_and_reverse = false;
     }
 
-    Timer timer;
-
     // not too small, not too large
     const size_t BATCH_SIZE = 5'000;
     const size_t BATCH_LENGTH = 100'000;
+
+    if (config.index_header_coords) {
+        // Collect sequence headers and compute k-mer counts
+        std::vector<std::vector<std::string>> headers(files.size());
+        std::vector<std::vector<uint64_t>> num_kmers(files.size());
+        #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
+        for (size_t i = 0; i < files.size(); ++i) {
+            call_annotations(
+                files[i],
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                false, // config.filename_anno
+                true, // config.annotate_sequence_headers
+                false, // parse_counts_from_headers
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                {}, // config.anno_labels
+                [&](std::string sequence, auto labels, uint64_t) {
+                    assert(labels.size() == 1 && "each sequence has a single label (header)");
+                    if (sequence.size() >= k) {
+                        if (headers[i].empty() || headers[i].back() != labels[0]) {
+                            headers[i].push_back(labels[0]);
+                            num_kmers[i].push_back(0);
+                        }
+                        num_kmers[i].back() += sequence.size() - k + 1;
+                    }
+                }
+            );
+        }
+        annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
+        auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
+        headers_map.serialize(fname);
+        logger->trace("CoordToHeader mapping serialized to {}", fname);
+        return;
+    }
 
     if (config.coordinates) {
         #pragma omp parallel num_threads(get_num_threads())
@@ -287,7 +326,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
                         logger->error("All input sequences must have the same"
-                                      " length when flag --const-length is on");
+                                      " length when flag --num-kmers-in-seq is on");
                         exit(1);
                     }
                     if (sequence.size() >= k) {
@@ -426,6 +465,18 @@ int annotate_graph(Config *config) {
     const auto &files = config->fnames;
 
     assert(config->infbase_annotators.size() <= 1);
+
+    if (config->index_header_coords) {
+        if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
+            logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
+                          "only be constructed for annotated filenames (use flag `--anno-filename`)");
+            exit(1);
+        }
+        logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
+        logger->info("Note: It's essential that the files are passed in the order of the columns "
+                     "in the graph annotation (check with `metagraph stats --print-col-names ...`)");
+        config->separately = false;
+    }
 
     const auto graph = load_critical_dbg(config->infbase);
 

@@ -30,6 +30,31 @@ At the same time, the provided workflows and their careful implementation, combi
 ## Documentation
 Online documentation is available at https://metagraph.ethz.ch/static/docs/index.html. Offline sources are [here](metagraph/docs/source).
 
+## Citation
+
+If you are using MetaGraph or the index resources for your work, please cite:
+
+> Karasikov M, Mustafa H, Danciu D, Kulkov O, Zimmermann M, Barber C, Rätsch G, Kahles A. Efficient and accurate search in petabase-scale sequence repositories. *Nature*. 2025;647: 1036–1044.  
+> https://www.nature.com/articles/s41586-025-09603-w
+
+<details>
+<summary>BibTeX</summary>
+
+```bibtex
+@article{karasikov2025metagraph,
+  title={Efficient and accurate search in petabase-scale sequence repositories},
+  author={Karasikov, Mikhail and Mustafa, Harun and Danciu, Daniel and Kulkov, Oleksandr and Zimmermann, Marc and Barber, Christopher and R{\"a}tsch, Gunnar and Kahles, Andr{\'e}},
+  journal={Nature},
+  volume={647},
+  number={8091},
+  pages={1036--1044},
+  year={2025},
+  publisher={Nature Publishing Group},
+  doi={10.1038/s41586-025-09603-w}
+}
+```
+</details>
+
 ## Install
 
 ### Conda

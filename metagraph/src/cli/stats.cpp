@@ -13,6 +13,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
@@ -367,6 +368,51 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     std::cout << "========================================================" << std::endl;
 }
 
+void print_coord_to_header_stats(const std::string &fname) {
+    logger->info("Statistics for CoordToHeader mapping '{}'", fname);
+
+    annot::CoordToHeader coord_to_header;
+    if (!coord_to_header.load(fname)) {
+        logger->error("Cannot load CoordToHeader mapping from file '{}'", fname);
+        exit(1);
+    }
+
+    size_t total_num_kmers = 0;
+    size_t total_num_sequences = 0;
+    for (uint64_t col = 0; col < coord_to_header.num_columns(); ++col) {
+        total_num_kmers += coord_to_header.num_kmers(col);
+        total_num_sequences += coord_to_header.num_sequences(col);
+    }
+
+    std::cout << "================ COORD-TO-HEADER STATS =================" << '\n';
+    std::cout << "columns: " << coord_to_header.num_columns() << '\n';
+    std::cout << "total sequences: " << total_num_sequences << '\n';
+    std::cout << "total k-mers: " << total_num_kmers << '\n';
+
+    if (get_verbose()) {
+        std::cout << "=================== PER-COLUMN STATS ===================" << '\n';
+        auto first_headers = [&](size_t col, size_t num_first = 3) {
+            const auto &labels = coord_to_header.get_headers(col);
+            auto first_labels = std::vector<std::string>(labels.begin(),
+                                                         std::min(labels.begin() + num_first, labels.end()));
+            if (first_labels.size() < labels.size())
+                first_labels.push_back("...");
+            return fmt::format(" ({})", fmt::join(first_labels, "\t"));
+        };
+        for (uint64_t col = 0; col < coord_to_header.num_columns(); ++col) {
+            std::cout << "column " << col << ":\n";
+            std::cout << "  sequences: " << coord_to_header.num_sequences(col) << first_headers(col) << '\n';
+            std::cout << "  k-mers: " << coord_to_header.num_kmers(col) << '\n';
+            std::cout << "  k-mers per sequence: " << (coord_to_header.num_sequences(col)
+                ? fmt::format("{:.1f}", static_cast<double>(coord_to_header.num_kmers(col))
+                                            / coord_to_header.num_sequences(col))
+                : "NA") << '\n';
+        }
+    }
+
+    std::cout << "========================================================" << std::endl;
+}
+
 int print_stats(Config *config) {
     assert(config);
 
@@ -375,6 +421,11 @@ int print_stats(Config *config) {
     for (const auto &file : files) {
         if (utils::ends_with(file, ".annodbg")) {
             print_annotation_stats(file, *config);
+            continue;
+        }
+
+        if (utils::ends_with(file, annot::CoordToHeader::kExtension)) {
+            print_coord_to_header_stats(file);
             continue;
         }
 
