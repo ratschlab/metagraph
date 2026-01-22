@@ -1316,7 +1316,7 @@ if (advanced) {
             fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(MATCHES).c_str());
             fprintf(stderr, "\t       Available modes:\n");
             fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
-            fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
+            fprintf(stderr, "\t                %s \tprint labels and the number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
             fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
 if (advanced) {
             fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
