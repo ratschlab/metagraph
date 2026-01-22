@@ -21,21 +21,15 @@ class TestAugment(TestingBase):
 
     def _augment_graph(self, input_graph, output_base, new_sequences, representation, use_mmap=True):
         """Augment a graph with new sequences"""
-        mmap_flag = MMAP_FLAG if use_mmap else ''
-        augment_command = '{exe} extend -i {input_graph} -o {outfile} {new_sequences}{mmap}'.format(
-            exe=METAGRAPH,
-            input_graph=input_graph,
-            outfile=output_base,
-            new_sequences=new_sequences,
-            mmap=mmap_flag
-        )
+        augment_command = f'{METAGRAPH} extend -i {input_graph} -o {output_base} {new_sequences}'
+        if use_mmap:
+            augment_command += MMAP_FLAG
 
         res = subprocess.run([augment_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Augment failed: {res.stderr.decode()}")
         return output_base + graph_file_extension[representation]
 
-    def _verify_graph_stats(self, graph_path, expected_k='20', expected_mode=None,
-                           expect_weights=False):
+    def _verify_graph_stats(self, graph_path, expected_k='20', expected_mode=None, expect_weights=False):
         """Verify graph statistics"""
         stats = self._get_stats(graph_path)
         self.assertEqual(stats['returncode'], 0)
@@ -67,21 +61,21 @@ class TestAugment(TestingBase):
         initial_nodes = int(stats_initial['nodes (k)'])
         self.assertGreater(initial_nodes, 0)
         self.assertFalse(os.path.exists(initial_graph + '.weights'),
-                        f"Weights file {initial_graph}.weights should not exist")
+                         f"Weights file {initial_graph}.weights should not exist")
 
         # Augment the graph
         augmented_graph = self._augment_graph(initial_graph,
-                                             self.tempdir.name + '/graph_augmented',
-                                             TEST_DATA_DIR + '/transcripts_1000.fa',
-                                             representation, use_mmap=True)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/genome.MT.fa',
+                                              representation, use_mmap=True)
 
         # Verify augmented graph
         stats_augmented = self._verify_graph_stats(augmented_graph)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes,
-                          "Augmented graph should have more nodes than initial graph")
+                           "Augmented graph should have more nodes than initial graph")
         self.assertFalse(os.path.exists(augmented_graph + '.weights'),
-                        f"Weights file {augmented_graph}.weights should not exist")
+                         f"Weights file {augmented_graph}.weights should not exist")
 
     @parameterized.expand([repr for repr in GRAPH_TYPES if repr != 'hashstr'])
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -99,9 +93,9 @@ class TestAugment(TestingBase):
 
         # Augment the graph
         augmented_graph = self._augment_graph(initial_graph,
-                                            self.tempdir.name + '/graph_augmented',
-                                            TEST_DATA_DIR + '/transcripts_1000.fa',
-                                            representation, use_mmap=True)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/genome.MT.fa',
+                                              representation, use_mmap=True)
 
         # Verify augmented canonical graph
         stats_augmented = self._verify_graph_stats(augmented_graph, expected_mode='canonical')
@@ -122,16 +116,16 @@ class TestAugment(TestingBase):
 
         # Augment the graph (still no weights)
         augmented_graph = self._augment_graph(initial_graph,
-                                             self.tempdir.name + '/graph_augmented',
-                                             TEST_DATA_DIR + '/transcripts_1000.fa',
-                                             representation, use_mmap=True)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/genome.MT.fa',
+                                              representation, use_mmap=True)
 
         # Verify augmented graph still has no weights
         stats_augmented = self._verify_graph_stats(augmented_graph)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes)
         self.assertFalse(os.path.exists(augmented_graph + '.weights'),
-                        f"Weights file {augmented_graph}.weights should not exist")
+                         f"Weights file {augmented_graph}.weights should not exist")
 
     @parameterized.expand(GRAPH_TYPES)
     def test_augment_with_node_weights(self, representation):
@@ -152,21 +146,21 @@ class TestAugment(TestingBase):
 
         # Augment the graph (without --mmap due to node weights issue)
         augmented_graph = self._augment_graph(initial_graph,
-                                             self.tempdir.name + '/graph_augmented',
-                                             TEST_DATA_DIR + '/transcripts_1000.fa',
-                                             representation, use_mmap=False)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/genome.MT.fa',
+                                              representation, use_mmap=False)
 
         # Verify augmented graph
         stats_augmented = self._verify_graph_stats(augmented_graph, expect_weights=True)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes,
-                          "Augmented graph should have more nodes than initial graph")
+                           "Augmented graph should have more nodes than initial graph")
 
         augmented_nnz_weights = int(stats_augmented['nnz weights'])
         self.assertGreaterEqual(augmented_nnz_weights, initial_nnz_weights,
-                               "Augmented graph should have at least as many weighted nodes")
+                                "Augmented graph should have at least as many weighted nodes")
         self.assertTrue(os.path.exists(augmented_graph + '.weights'),
-                       f"Weights file {augmented_graph}.weights should exist")
+                        f"Weights file {augmented_graph}.weights should exist")
 
     @parameterized.expand(GRAPH_TYPES)
     def test_augment_preserves_existing_weights(self, representation):
@@ -183,9 +177,9 @@ class TestAugment(TestingBase):
         # Augment with overlapping sequences (should increase weights of existing nodes)
         # Note: --mmap flag causes issues with node weights, so we don't use it here
         augmented_graph = self._augment_graph(initial_graph,
-                                            self.tempdir.name + '/graph_augmented',
-                                            TEST_DATA_DIR + '/transcripts_100.fa',  # Same file
-                                            representation, use_mmap=False)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/transcripts_100.fa',  # Same file
+                                              representation, use_mmap=False)
 
         # Verify weights were updated
         stats_augmented = self._verify_graph_stats(augmented_graph, expect_weights=True)
@@ -193,7 +187,7 @@ class TestAugment(TestingBase):
         # Note: weights are additive, so adding the same sequences should increase average weight
         # However, new nodes might have lower weights, so we just check that weights exist
         self.assertGreater(augmented_avg_weight, 0,
-                          "Augmented graph should have positive average weight")
+                           "Augmented graph should have positive average weight")
 
     @parameterized.expand([repr for repr in GRAPH_TYPES if repr != 'hashstr'])
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -206,18 +200,18 @@ class TestAugment(TestingBase):
         initial_graph = initial_graph_base + graph_file_extension[representation]
 
         stats_initial = self._verify_graph_stats(initial_graph, expected_mode='canonical',
-                                                expect_weights=True)
+                                                 expect_weights=True)
         initial_nodes = int(stats_initial['nodes (k)'])
 
         # Augment the canonical graph (without --mmap due to node weights issue)
         augmented_graph = self._augment_graph(initial_graph,
-                                            self.tempdir.name + '/graph_augmented',
-                                            TEST_DATA_DIR + '/transcripts_1000.fa',
-                                            representation, use_mmap=False)
+                                              self.tempdir.name + '/graph_augmented',
+                                              TEST_DATA_DIR + '/genome.MT.fa',
+                                              representation, use_mmap=False)
 
         # Verify augmented canonical graph
         stats_augmented = self._verify_graph_stats(augmented_graph, expected_mode='canonical',
-                                                  expect_weights=True)
+                                                   expect_weights=True)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes)
 
