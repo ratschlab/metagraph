@@ -1,6 +1,6 @@
 #include "int_matrix.hpp"
 
-#include "common/vector_map.hpp"
+#include <tsl/hopscotch_map.h>
 
 
 namespace mtg {
@@ -30,10 +30,6 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 
     auto row_values = get_row_values(rows);
 
-    size_t num_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
-
-    RowValues result;
-
     auto sum_rows = [&](auto &counts) {
         for (size_t t = 0; t < index_counts.size(); ++t) {
             auto [i, count] = index_counts[t];
@@ -44,33 +40,35 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
         }
     };
 
+    size_t num_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
     if (num_cols < 300'000) {
+        // For few columns, counting with a dense vector is faster than a hash table
         Vector<std::pair<size_t, size_t>> counts(num_cols);
         sum_rows(counts);
 
-        result.reserve(counts.size());
+        RowValues result;
+        result.reserve(std::min<size_t>(num_cols, 1024));
 
         for (size_t j = 0; j < num_cols; ++j) {
             if (counts[j].first >= min_count) {
                 result.emplace_back(j, counts[j].second);
             }
         }
-
-    } else {
-        // When there are ~300k or more columns, counting with std::vector gets slower,
-        // so we're using a hash table
-        VectorMap<Column, std::pair<size_t, size_t>> counts_map;
-        sum_rows(counts_map);
-
-        result.reserve(counts_map.size());
-
-        for (const auto &[j, pair] : counts_map) {
-            if (pair.first >= min_count) {
-                result.emplace_back(j, pair.second);
-            }
-        }
+        return result;
     }
 
+    tsl::hopscotch_map<Column, std::pair<size_t, size_t>> counts;
+    counts.reserve(std::min<size_t>(num_cols, 1024));
+    sum_rows(counts);
+
+    RowValues result;
+    result.reserve(std::min<size_t>(num_cols, 1024));
+
+    for (const auto &[j, pair] : counts) {
+        if (pair.first >= min_count) {
+            result.emplace_back(j, pair.second);
+        }
+    }
     return result;
 }
 

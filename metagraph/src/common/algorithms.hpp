@@ -465,7 +465,7 @@ namespace utils {
             });
 
             std::vector<std::pair<T, size_t>> item_counts;
-            item_counts.reserve(std::min<size_t>(counts.size(), 1024));
+            item_counts.reserve(std::min<size_t>(universe_size, 1024));
 
             for (size_t i = 0; i < counts.size(); ++i) {
                 // take only the items with counts >= min_count
@@ -473,10 +473,10 @@ namespace utils {
                     item_counts.emplace_back(static_cast<T>(i), counts[i]);
             }
             return item_counts;
-
         }
 
         VectorMap<T, size_t> counts;
+        counts.reserve(std::min<size_t>(universe_size, 1024));
         enumerate_weighted_items([&](T item, size_t weight) { counts[item] += weight; });
 
         std::vector<std::pair<T, size_t>> item_counts = to_vector(std::move(counts));

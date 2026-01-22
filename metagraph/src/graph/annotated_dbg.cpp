@@ -232,7 +232,7 @@ void AnnotatedDBG::annotate_kmer_coords(
 size_t get_min_count(double discovery_fraction, double presence_fraction,
                      size_t num_kmers, size_t num_present) {
     if (num_present < std::max(1.0, std::ceil(presence_fraction * num_kmers)))
-        return num_kmers + 1;  // too few k-mers are in the graph -> set the threshold too high
+        return num_kmers + 1;  // not enough k-mers in the graph -> return an unattainable threshold
     return std::max(1.0, std::ceil(discovery_fraction * num_kmers));
 }
 
