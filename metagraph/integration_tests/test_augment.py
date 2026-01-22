@@ -5,7 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import os
 import gzip
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, MMAP_FLAG
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, MMAP_FLAG, PROTEIN_MODE
 
 
 """Test graph augmentation with and without node weights"""
@@ -85,7 +85,7 @@ class TestAugment(TestingBase):
         augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
         self.assertGreater(augmented_kmers, initial_kmers,
                            "Augmented graph should have more k-mers in contigs")
-        self.assertEqual(augmented_kmers, 59955)
+        self.assertEqual(augmented_kmers, 59975 if PROTEIN_MODE else 59955)
 
     @parameterized.expand([graph_type for graph_type in GRAPH_TYPES if graph_type != 'hashstr'])
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -122,7 +122,7 @@ class TestAugment(TestingBase):
         augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
         self.assertGreater(augmented_kmers, initial_kmers,
                            "Augmented graph should have more k-mers in contigs")
-        self.assertEqual(augmented_kmers, 59955)
+        self.assertEqual(augmented_kmers, 59975 if PROTEIN_MODE else 59955)
 
     @parameterized.expand(GRAPH_TYPES)
     def test_augment_with_node_weights(self, representation):
@@ -140,7 +140,7 @@ class TestAugment(TestingBase):
         augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
         self.assertGreater(augmented_kmers, initial_kmers,
                            "Augmented graph should have more k-mers in contigs")
-        self.assertEqual(augmented_kmers, 59955)
+        self.assertEqual(augmented_kmers, 59975 if PROTEIN_MODE else 59955)
 
     @parameterized.expand(GRAPH_TYPES)
     def test_augment_preserves_existing_weights(self, representation):
