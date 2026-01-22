@@ -4,6 +4,7 @@ import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import os
+import gzip
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, MMAP_FLAG
 
 
@@ -47,6 +48,42 @@ class TestAugment(TestingBase):
 
         return stats
 
+    def _count_kmers_in_fasta(self, fasta_path, k):
+        total = 0
+        current = []
+        with gzip.open(fasta_path, 'rt') as handle:
+            for line in handle:
+                if line.startswith('>'):
+                    if current:
+                        seq_len = len(''.join(current))
+                        if seq_len >= k:
+                            total += seq_len - k + 1
+                        current = []
+                else:
+                    current.append(line.strip())
+        if current:
+            seq_len = len(''.join(current))
+            if seq_len >= k:
+                total += seq_len - k + 1
+        return total
+
+    def _count_graph_kmers_from_contigs(self, graph_path, k):
+        output_base = f'{self.tempdir.name}/contigs_{os.path.basename(graph_path)}'
+        transform_command = f'{METAGRAPH} transform --to-fasta -o {output_base} {graph_path}' + MMAP_FLAG
+        res = subprocess.run([transform_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Transform failed: {res.stderr.decode()}")
+
+        fasta_gz = output_base + '.fasta.gz'
+        fasta_zst = output_base + '.fasta.zst'
+        if os.path.exists(fasta_gz):
+            fasta_path = fasta_gz
+        elif os.path.exists(fasta_zst):
+            fasta_path = fasta_zst
+        else:
+            self.fail(f"Missing contigs fasta for {output_base}")
+
+        return self._count_kmers_in_fasta(fasta_path, k)
+
     @parameterized.expand(GRAPH_TYPES)
     def test_augment(self, representation):
         """Test that graph augmentation works correctly"""
@@ -62,6 +99,7 @@ class TestAugment(TestingBase):
         self.assertGreater(initial_nodes, 0)
         self.assertFalse(os.path.exists(initial_graph + '.weights'),
                          f"Weights file {initial_graph}.weights should not exist")
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
 
         # Augment the graph
         augmented_graph = self._augment_graph(initial_graph,
@@ -74,6 +112,10 @@ class TestAugment(TestingBase):
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes,
                            "Augmented graph should have more nodes than initial graph")
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertGreater(augmented_kmers, initial_kmers,
+                           "Augmented graph should have more k-mers in contigs")
+        self.assertEqual(augmented_kmers, 59955)
         self.assertFalse(os.path.exists(augmented_graph + '.weights'),
                          f"Weights file {augmented_graph}.weights should not exist")
 
@@ -90,6 +132,7 @@ class TestAugment(TestingBase):
         # Verify initial graph
         stats_initial = self._verify_graph_stats(initial_graph, expected_mode='canonical')
         initial_nodes = int(stats_initial['nodes (k)'])
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
 
         # Augment the graph
         augmented_graph = self._augment_graph(initial_graph,
@@ -101,6 +144,10 @@ class TestAugment(TestingBase):
         stats_augmented = self._verify_graph_stats(augmented_graph, expected_mode='canonical')
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes)
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertGreater(augmented_kmers, initial_kmers,
+                           "Augmented canonical graph should have more k-mers in contigs")
+        self.assertEqual(augmented_kmers, 58787)
 
     @parameterized.expand(GRAPH_TYPES)
     def test_augment_unweighted_to_weighted(self, representation):
@@ -113,6 +160,7 @@ class TestAugment(TestingBase):
 
         stats_initial = self._verify_graph_stats(initial_graph)
         initial_nodes = int(stats_initial['nodes (k)'])
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
 
         # Augment the graph (still no weights)
         augmented_graph = self._augment_graph(initial_graph,
@@ -124,6 +172,10 @@ class TestAugment(TestingBase):
         stats_augmented = self._verify_graph_stats(augmented_graph)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes)
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertGreater(augmented_kmers, initial_kmers,
+                           "Augmented graph should have more k-mers in contigs")
+        self.assertEqual(augmented_kmers, 59955)
         self.assertFalse(os.path.exists(augmented_graph + '.weights'),
                          f"Weights file {augmented_graph}.weights should not exist")
 
@@ -141,6 +193,7 @@ class TestAugment(TestingBase):
         initial_nodes = int(stats_initial['nodes (k)'])
         self.assertGreater(initial_nodes, 0)
         initial_nnz_weights = int(stats_initial['nnz weights'])
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
         self.assertTrue(os.path.exists(initial_graph + '.weights'),
                         f"Weights file {initial_graph}.weights should exist")
 
@@ -155,6 +208,10 @@ class TestAugment(TestingBase):
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes,
                            "Augmented graph should have more nodes than initial graph")
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertGreater(augmented_kmers, initial_kmers,
+                           "Augmented graph should have more k-mers in contigs")
+        self.assertEqual(augmented_kmers, 59955)
 
         augmented_nnz_weights = int(stats_augmented['nnz weights'])
         self.assertGreaterEqual(augmented_nnz_weights, initial_nnz_weights,
@@ -173,6 +230,7 @@ class TestAugment(TestingBase):
 
         stats_initial = self._verify_graph_stats(initial_graph, expect_weights=True)
         initial_avg_weight = float(stats_initial['avg weight'])
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
 
         # Augment with overlapping sequences (should increase weights of existing nodes)
         # Note: --mmap flag causes issues with node weights, so we don't use it here
@@ -184,6 +242,9 @@ class TestAugment(TestingBase):
         # Verify weights were updated
         stats_augmented = self._verify_graph_stats(augmented_graph, expect_weights=True)
         augmented_avg_weight = float(stats_augmented['avg weight'])
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertEqual(augmented_kmers, initial_kmers,
+                         "Augmenting with identical sequences should not change contig k-mers")
         # Note: weights are additive, so adding the same sequences should increase average weight
         # However, new nodes might have lower weights, so we just check that weights exist
         self.assertGreater(augmented_avg_weight, 0,
@@ -202,6 +263,7 @@ class TestAugment(TestingBase):
         stats_initial = self._verify_graph_stats(initial_graph, expected_mode='canonical',
                                                  expect_weights=True)
         initial_nodes = int(stats_initial['nodes (k)'])
+        initial_kmers = self._count_graph_kmers_from_contigs(initial_graph, 20)
 
         # Augment the canonical graph (without --mmap due to node weights issue)
         augmented_graph = self._augment_graph(initial_graph,
@@ -214,6 +276,10 @@ class TestAugment(TestingBase):
                                                    expect_weights=True)
         augmented_nodes = int(stats_augmented['nodes (k)'])
         self.assertGreater(augmented_nodes, initial_nodes)
+        augmented_kmers = self._count_graph_kmers_from_contigs(augmented_graph, 20)
+        self.assertGreater(augmented_kmers, initial_kmers,
+                           "Augmented canonical graph should have more k-mers in contigs")
+        self.assertEqual(augmented_kmers, 58787)
 
 
 if __name__ == '__main__':
