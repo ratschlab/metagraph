@@ -5,7 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import os
 import gzip
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, MMAP_FLAG, PROTEIN_MODE
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, MMAP_FLAG
 
 
 """Test graph augmentation with and without node weights"""
