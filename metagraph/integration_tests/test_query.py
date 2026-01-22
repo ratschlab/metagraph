@@ -907,7 +907,7 @@ class TestQueryCanonical(TestingBase):
         assert(cls.anno_repr == stats_annotation['representation'])
 
     @parameterized.expand(['0', '100', '100000000'])
-    def test_batch_query(self, batch_size):
+    def test_query(self, batch_size):
         query_command = '{exe} query --batch-size {batch_size} --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 1.0 {input}'.format(
             exe=METAGRAPH,
             batch_size=batch_size,
