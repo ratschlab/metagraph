@@ -1,6 +1,7 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
+#include <ostream>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -76,7 +77,7 @@ class BOSS {
      * to speed up the search in the BOSS table.
      */
     bool load_suffix_ranges(std::ifstream &instream);
-    void serialize_suffix_ranges(std::ofstream &outstream) const;
+    void serialize_suffix_ranges(std::ostream &outstream) const;
     // Estimate the size of the compressed index in bits
     uint64_t get_suffix_ranges_index_size() const {
         return indexed_suffix_ranges_.size()
