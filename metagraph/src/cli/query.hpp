@@ -61,7 +61,7 @@ std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      const Config *config = nullptr);
+                      const Config &config);
 
 
 // Simple struct to wrap a query sequence
@@ -93,7 +93,7 @@ class SeqSearchResult {
     typedef std::string Label;
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
-    typedef std::vector<std::pair<Label, sdsl::bit_vector>> LabelSigVec;
+    typedef std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> LabelSigVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> LabelCountCoordsVec;
 

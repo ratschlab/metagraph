@@ -7,6 +7,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/annotation_converters.hpp"
+#include "cli/config/config.hpp"
 #include "cli/query.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -58,6 +59,8 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
 
 std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                                                 const std::string &query_filename) {
+    const char* argv[] = {"metagraph", "query", "-i", "-.dbg", "-a", "-.annodbg", "-.fa" };
+    mtg::cli::Config config(sizeof(argv) / sizeof(argv[0]), const_cast<char**>(argv));
     return cli::construct_query_graph(
         anno_graph,
         [&](std::function<void(const std::string&)> call_sequence) {
@@ -66,7 +69,8 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                 [&](kseq_t *stream) { call_sequence(stream->seq.s); }
             );
         },
-        1
+        1,
+        config
     );
 }
 

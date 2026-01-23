@@ -11,23 +11,28 @@ using mtg::common::logger;
 
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
+    // if it's a static encoder, copy the data to a local mutable object
+    if (remote_data_) {
+        encode_label_ = *remote_data_;
+        remote_data_ = nullptr;
+    }
     auto it = encode_label_.emplace(label).first;
     return it - encode_label_.begin();
 }
 
 template <typename Label>
 size_t LabelEncoder<Label>::encode(const Label &label) const {
-    auto it = encode_label_.find(label);
-    if (it == encode_label_.end())
+    auto it = data().find(label);
+    if (it == data().end())
         throw std::out_of_range("Label not found");
-    return it - encode_label_.begin();
+    return it - data().begin();
 }
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
     outstream.write("LE-v2.0", 7);
     Serializer serializer(outstream);
-    encode_label_.serialize(serializer);
+    data().serialize(serializer);
 }
 
 template<typename Label>
@@ -39,6 +44,8 @@ void LabelEncoder<Label>::merge(const LabelEncoder<Label> &other) {
 
 template<>
 bool LabelEncoder<std::string>::load(std::istream &instream) {
+    clear();
+
     if (!instream.good())
         return false;
 
@@ -72,6 +79,13 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     } catch (...) {
         return false;
     }
+}
+
+template<typename Label>
+LabelEncoder<Label> LabelEncoder<Label>::make_static_copy() const {
+    LabelEncoder<Label> static_copy;
+    static_copy.remote_data_ = &data();
+    return static_copy;
 }
 
 
