@@ -1182,6 +1182,12 @@ void BOSS::add_sequence(std::string_view seq,
     if (get_state() != State::DYN)
         throw std::runtime_error("representation must be dynamic");
 
+    if (indexed_suffix_length_) {
+        // the index of suffix ranges is invalid after dynamic updates
+        indexed_suffix_length_ = 0;
+        indexed_suffix_ranges_ = decltype(indexed_suffix_ranges_)();
+    }
+
     // prepend k buffer characters, in case we need to start with dummy node
     std::vector<TAlphabet> sequence(seq.size() + k_);
     std::transform(seq.begin(), seq.end(), sequence.begin() + k_,
