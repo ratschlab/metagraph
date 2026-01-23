@@ -829,6 +829,33 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     }
 }
 
+void DBGSuccinct::serialize_suffix_ranges_inplace(const std::string &filename) const {
+    const std::string &prefix = utils::remove_suffix(filename, kExtension);
+    const std::string out_filename = prefix + kExtension;
+
+    std::fstream io(out_filename, std::ios::binary | std::ios::in | std::ios::out);
+    if (!io.good())
+        throw std::ios_base::failure("Can't open file " + out_filename);
+
+    io.seekg(0, std::ios::end);
+    const std::streamoff end_pos = io.tellg();
+    if (end_pos < static_cast<std::streamoff>(sizeof(uint64_t)))
+        throw std::ios_base::failure("File corrupted. Graph file is too small: " + out_filename);
+
+    io.seekg(-static_cast<std::streamoff>(sizeof(uint64_t)), std::ios::end);
+    if (load_number(io)) {
+        logger->error("File {} corrupted. The graph must not have node ranges indexed", out_filename);
+        exit(1);
+    }
+
+    io.seekp(-static_cast<std::streamoff>(sizeof(uint64_t)), std::ios::end);
+    boss_graph_->serialize_suffix_ranges(io);
+    if (!io.good()) {
+        logger->error("Can't write suffix ranges to file {}", out_filename);
+        exit(1);
+    }
+}
+
 void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
                             const std::string &filename,
                             Mode mode, BOSS::State state) {

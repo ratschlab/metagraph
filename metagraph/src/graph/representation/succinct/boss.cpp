@@ -353,7 +353,7 @@ bool BOSS::load(std::ifstream &instream) {
     }
 }
 
-void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
+void BOSS::serialize_suffix_ranges(std::ostream &outstream) const {
     // dump node range index
     serialize_number(outstream, indexed_suffix_length_);
     indexed_suffix_ranges_.serialize(outstream);
