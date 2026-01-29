@@ -85,6 +85,9 @@ class BOSS {
                                   indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()))
             : 0;
     }
+    uint64_t get_suffix_range(uint64_t i) const {
+        return indexed_suffix_ranges_slct1_(i + 1) - i;
+    }
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
@@ -530,7 +533,6 @@ class BOSS {
     sdsl::sd_vector<>::select_1_type indexed_suffix_ranges_slct1_;
     sdsl::sd_vector<>::select_0_type indexed_suffix_ranges_slct0_;
 
-    inline uint64_t get_suffix_range(uint64_t i) const { return indexed_suffix_ranges_slct1_(i + 1) - i; }
 
     /**
      * This function gets a character c and updates the edge offsets F_

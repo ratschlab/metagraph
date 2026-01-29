@@ -127,6 +127,7 @@ int build_graph(Config *config) {
                 boss_graph->get_k(),
                 config->graph_mode == DeBruijnGraph::CANONICAL,
                 config->count_width,
+                config->suffix.empty() ? config->node_suffix_length : 0,
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
@@ -171,21 +172,6 @@ int build_graph(Config *config) {
             }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);
-            if (config->node_suffix_length) {
-                logger->trace("Loading graph with mmap to index suffix ranges...");
-                utils::with_mmap(true);
-                DBGSuccinct dbg_succ(config->k, config->graph_mode);
-                if (!dbg_succ.load_without_mask(config->outfbase)) {
-                    logger->error("Failed to reload graph for suffix range indexing");
-                    exit(1);
-                }
-
-                index_suffix_ranges(config->node_suffix_length, get_num_threads(), &dbg_succ);
-                if (config->node_suffix_length > 0) {
-                    logger->trace("Appending suffix ranges to the existing graph file...");
-                    dbg_succ.serialize_suffix_ranges_inplace(config->outfbase);
-                }
-            }
             logger->trace("Graph construction and serialization finished in {} sec",
                           timer.elapsed());
             return 0;
@@ -356,8 +342,6 @@ int build_graph(Config *config) {
 
             logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
         }
-
-        index_suffix_ranges(config->node_suffix_length, get_num_threads(), dbg_succ);
 
         if (config->state != dbg_succ->get_state()) {
             logger->trace("Converting graph to state {}", Config::state_to_string(config->state));

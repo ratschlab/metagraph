@@ -10,11 +10,13 @@
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
+#include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "graph/representation/succinct/boss_chunk.hpp"
 
 
 namespace mtg {
@@ -866,9 +868,36 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out = utils::open_new_ofstream(fname);
+    const size_t indexed_suffix_length = chunk.get_indexed_suffix_length();
+    std::vector<BOSS::edge_index> indexed_suffix_ranges_raw;
+    if (indexed_suffix_length)
+        indexed_suffix_ranges_raw = chunk.release_indexed_suffix_ranges_raw();
     boss::BOSS::serialize(std::move(chunk), out, state);
     serialize_number(out, static_cast<int>(mode));
-    serialize_number(out, 0); // suffix ranges are not indexed
+    if (indexed_suffix_length) {
+        Timer timer;
+        sdsl::sd_vector<> indexed_suffix_ranges;
+        if (!indexed_suffix_ranges_raw.empty()) {
+            auto &ranges = indexed_suffix_ranges_raw;
+            ranges[0] = std::max<uint64_t>(ranges[0], 1);
+            // align the upper bounds to enable the binary search on them
+            for (size_t i = 1; i < ranges.size(); ++i) {
+                ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+            }
+            sdsl::sd_vector_builder builder(chunk.size() + ranges.size(), ranges.size());
+            for (auto pos : ranges) {
+                builder.set(pos);
+            }
+            indexed_suffix_ranges = sdsl::sd_vector<>(builder);
+        }
+        auto sr_begin = out.tellp();
+        serialize_number(out, indexed_suffix_length);
+        indexed_suffix_ranges.serialize(out);
+        logger->trace("Compressing and serializing node ranges ({:.2f} MB) took {} sec",
+                      (out.tellp() - sr_begin) / 1e6, timer.elapsed());
+    } else {
+        serialize_number(out, 0); // suffix ranges are not indexed
+    }
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
 }

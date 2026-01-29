@@ -122,6 +122,25 @@ void BOSS::initialize(Chunk *chunk) {
     // alph_size = chunk->alph_size_;
 
     state = State::STAT;
+
+    if (chunk->indexed_suffix_length_) {
+        auto ranges = std::move(chunk->indexed_suffix_ranges_raw_);
+        assert(ranges.size());
+        ranges[0] = std::max<uint64_t>(ranges[0], 1);
+        // align the upper bounds to enable the binary search on them
+        for (size_t i = 1; i < ranges.size(); ++i) {
+            ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+        }
+        sdsl::sd_vector_builder builder(W_->size() + ranges.size(), ranges.size());
+        for (auto pos : ranges) {
+            builder.set(pos);
+        }
+        indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+        indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
+        logger->trace("Node ranges compressed to {:.2f} MB", get_suffix_ranges_index_size() / 8e6);
+    }
 }
 
 /**
