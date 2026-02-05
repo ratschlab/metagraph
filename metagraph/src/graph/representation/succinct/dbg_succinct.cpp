@@ -868,23 +868,21 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out = utils::open_new_ofstream(fname);
+    const size_t chunk_size = chunk.size();
     const size_t indexed_suffix_length = chunk.get_indexed_suffix_length();
-    std::vector<BOSS::edge_index> indexed_suffix_ranges_raw;
-    if (indexed_suffix_length)
-        indexed_suffix_ranges_raw = chunk.release_indexed_suffix_ranges_raw();
+    auto ranges = chunk.release_indexed_suffix_ranges_raw();
     boss::BOSS::serialize(std::move(chunk), out, state);
     serialize_number(out, static_cast<int>(mode));
     if (indexed_suffix_length) {
         Timer timer;
         sdsl::sd_vector<> indexed_suffix_ranges;
-        if (!indexed_suffix_ranges_raw.empty()) {
-            auto &ranges = indexed_suffix_ranges_raw;
+        if (ranges.size()) {
             ranges[0] = std::max<uint64_t>(ranges[0], 1);
             // align the upper bounds to enable the binary search on them
             for (size_t i = 1; i < ranges.size(); ++i) {
                 ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
             }
-            sdsl::sd_vector_builder builder(chunk.size() + ranges.size(), ranges.size());
+            sdsl::sd_vector_builder builder(chunk_size + ranges.size(), ranges.size());
             for (auto pos : ranges) {
                 builder.set(pos);
             }

@@ -76,9 +76,6 @@ class BOSS::Chunk {
 
     uint64_t size() const { return W_.size(); }
     size_t get_indexed_suffix_length() const { return indexed_suffix_length_; }
-    const std::vector<BOSS::edge_index>& get_indexed_suffix_ranges_raw() const {
-        return indexed_suffix_ranges_raw_;
-    }
     std::vector<BOSS::edge_index> release_indexed_suffix_ranges_raw() {
         return std::move(indexed_suffix_ranges_raw_);
     }

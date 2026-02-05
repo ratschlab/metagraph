@@ -285,7 +285,7 @@ TEST(BOSSConstruct, SuffixRangesFromKmersMatchIndexing) {
                 constructor->add_sequences(std::vector<std::string>(input_data));
 
                 BOSS::Chunk chunk = constructor->build_chunk();
-                auto aligned_ranges = chunk.get_indexed_suffix_ranges_raw();
+                auto aligned_ranges = chunk.indexed_suffix_ranges_raw_;
 
                 aligned_ranges[0] = std::max(aligned_ranges[0], (uint64_t)1);
                 for (size_t i = 1; i < aligned_ranges.size(); ++i) {
