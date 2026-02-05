@@ -2,6 +2,7 @@
 #define __BOSS_CHUNK_HPP__
 
 #include <type_traits>
+#include <vector>
 
 #include <sdsl/int_vector_buffer.hpp>
 
@@ -44,6 +45,7 @@ class BOSS::Chunk {
      * @param kmers_with_counts the k-mers and their counts to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
      * weight counts
+     * @param indexed_suffix_length length of k-mer suffixes to index
      * @param swap_dir directory where to write vector buffers for construction with
      * streaming
      */
@@ -52,6 +54,7 @@ class BOSS::Chunk {
           size_t k,
           const Array &kmers_with_counts,
           uint8_t bits_per_count = 0,
+          size_t indexed_suffix_length = 0,
           const std::string &swap_dir = "");
 
     ~Chunk();
@@ -72,7 +75,13 @@ class BOSS::Chunk {
     void extend(Chunk &other);
 
     uint64_t size() const { return W_.size(); }
-
+    size_t get_indexed_suffix_length() const { return indexed_suffix_length_; }
+    const std::vector<BOSS::edge_index>& get_indexed_suffix_ranges_raw() const {
+        return indexed_suffix_ranges_raw_;
+    }
+    std::vector<BOSS::edge_index> release_indexed_suffix_ranges_raw() {
+        return std::move(indexed_suffix_ranges_raw_);
+    }
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);
 
@@ -103,6 +112,8 @@ class BOSS::Chunk {
     sdsl::int_vector_buffer<1> last_;
     std::vector<uint64_t> F_;
     sdsl::int_vector_buffer<> weights_;
+    size_t indexed_suffix_length_ = 0;
+    std::vector<BOSS::edge_index> indexed_suffix_ranges_raw_;
 };
 
 } // namespace boss

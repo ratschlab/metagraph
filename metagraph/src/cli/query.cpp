@@ -1013,7 +1013,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     if (sub_k < full_dbg.get_k()) {
         BOSSConstructor constructor(full_dbg.get_k() - 1,
                                     full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
-                                    0, "", num_threads);
+                                    0, 0, "", num_threads);
         add_to_graph(constructor, contigs, full_dbg.get_k());
 
         graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), full_dbg.get_mode());
