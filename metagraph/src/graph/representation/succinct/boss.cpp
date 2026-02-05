@@ -17,6 +17,7 @@
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
+#include "common/unix_tools.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
@@ -372,7 +373,7 @@ bool BOSS::load(std::ifstream &instream) {
     }
 }
 
-void BOSS::serialize_suffix_ranges(std::ostream &outstream) const {
+void BOSS::serialize_suffix_ranges(std::ofstream &outstream) const {
     // dump node range index
     serialize_number(outstream, indexed_suffix_length_);
     indexed_suffix_ranges_.serialize(outstream);
@@ -401,6 +402,37 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
         indexed_suffix_ranges_ = decltype(indexed_suffix_ranges_)();
         return false;
     }
+}
+
+void BOSS::serialize_suffix_ranges(Chunk&& chunk, std::ofstream &out) {
+    if (!out.good())
+        throw std::ofstream::failure("Error: Can't write to file");
+
+    if (!chunk.indexed_suffix_length_) {
+        serialize_number(out, 0); // suffix ranges are not indexed
+        return;
+    }
+
+    auto &ranges = chunk.indexed_suffix_ranges_raw_;
+    Timer timer;
+    sdsl::sd_vector<> indexed_suffix_ranges;
+    if (ranges.size()) {
+        ranges[0] = std::max<uint64_t>(ranges[0], 1);
+        // align the upper bounds to enable the binary search on them
+        for (size_t i = 1; i < ranges.size(); ++i) {
+            ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+        }
+        sdsl::sd_vector_builder builder(chunk.size() + ranges.size(), ranges.size());
+        for (auto pos : ranges) {
+            builder.set(pos);
+        }
+        indexed_suffix_ranges = sdsl::sd_vector<>(builder);
+    }
+    auto sr_begin = out.tellp();
+    serialize_number(out, chunk.indexed_suffix_length_);
+    indexed_suffix_ranges.serialize(out);
+    logger->trace("Compressing and serializing node ranges ({:.2f} MB) took {} sec",
+                  (out.tellp() - sr_begin) / 1e6, timer.elapsed());
 }
 
 //

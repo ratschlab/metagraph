@@ -10,13 +10,11 @@
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
-#include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
-#include "graph/representation/succinct/boss_chunk.hpp"
 
 
 namespace mtg {
@@ -831,33 +829,6 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     }
 }
 
-void DBGSuccinct::serialize_suffix_ranges_inplace(const std::string &filename) const {
-    const std::string &prefix = utils::remove_suffix(filename, kExtension);
-    const std::string out_filename = prefix + kExtension;
-
-    std::fstream io(out_filename, std::ios::binary | std::ios::in | std::ios::out);
-    if (!io.good())
-        throw std::ios_base::failure("Can't open file " + out_filename);
-
-    io.seekg(0, std::ios::end);
-    const std::streamoff end_pos = io.tellg();
-    if (end_pos < static_cast<std::streamoff>(sizeof(uint64_t)))
-        throw std::ios_base::failure("File corrupted. Graph file is too small: " + out_filename);
-
-    io.seekg(-static_cast<std::streamoff>(sizeof(uint64_t)), std::ios::end);
-    if (load_number(io)) {
-        logger->error("File {} corrupted. The graph must not have node ranges indexed", out_filename);
-        exit(1);
-    }
-
-    io.seekp(-static_cast<std::streamoff>(sizeof(uint64_t)), std::ios::end);
-    boss_graph_->serialize_suffix_ranges(io);
-    if (!io.good()) {
-        logger->error("Can't write suffix ranges to file {}", out_filename);
-        exit(1);
-    }
-}
-
 void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
                             const std::string &filename,
                             Mode mode, BOSS::State state) {
@@ -868,34 +839,9 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out = utils::open_new_ofstream(fname);
-    const size_t chunk_size = chunk.size();
-    const size_t indexed_suffix_length = chunk.get_indexed_suffix_length();
-    auto ranges = chunk.release_indexed_suffix_ranges_raw();
     boss::BOSS::serialize(std::move(chunk), out, state);
     serialize_number(out, static_cast<int>(mode));
-    if (indexed_suffix_length) {
-        Timer timer;
-        sdsl::sd_vector<> indexed_suffix_ranges;
-        if (ranges.size()) {
-            ranges[0] = std::max<uint64_t>(ranges[0], 1);
-            // align the upper bounds to enable the binary search on them
-            for (size_t i = 1; i < ranges.size(); ++i) {
-                ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
-            }
-            sdsl::sd_vector_builder builder(chunk_size + ranges.size(), ranges.size());
-            for (auto pos : ranges) {
-                builder.set(pos);
-            }
-            indexed_suffix_ranges = sdsl::sd_vector<>(builder);
-        }
-        auto sr_begin = out.tellp();
-        serialize_number(out, indexed_suffix_length);
-        indexed_suffix_ranges.serialize(out);
-        logger->trace("Compressing and serializing node ranges ({:.2f} MB) took {} sec",
-                      (out.tellp() - sr_begin) / 1e6, timer.elapsed());
-    } else {
-        serialize_number(out, 0); // suffix ranges are not indexed
-    }
+    boss::BOSS::serialize_suffix_ranges(std::move(chunk), out);
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
 }

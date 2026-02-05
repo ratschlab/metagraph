@@ -75,10 +75,7 @@ class BOSS::Chunk {
     void extend(Chunk &other);
 
     uint64_t size() const { return W_.size(); }
-    size_t get_indexed_suffix_length() const { return indexed_suffix_length_; }
-    std::vector<BOSS::edge_index> release_indexed_suffix_ranges_raw() {
-        return std::move(indexed_suffix_ranges_raw_);
-    }
+
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);
 

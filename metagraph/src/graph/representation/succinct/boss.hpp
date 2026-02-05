@@ -77,7 +77,7 @@ class BOSS {
      * to speed up the search in the BOSS table.
      */
     bool load_suffix_ranges(std::ifstream &instream);
-    void serialize_suffix_ranges(std::ostream &outstream) const;
+    void serialize_suffix_ranges(std::ofstream &outstream) const;
     // Estimate the size of the compressed index in bits
     uint64_t get_suffix_ranges_index_size() const {
         return indexed_suffix_ranges_.size()
@@ -624,6 +624,7 @@ class BOSS {
     // Initialize a BOSS table from Chunk and serialize without loading to RAM.
     // FYI: Note that suffix ranges will not be indexed.
     static void serialize(Chunk&& chunk, std::ofstream &outstream, State state = State::STAT);
+    static void serialize_suffix_ranges(Chunk&& chunk, std::ofstream &outstream);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);
