@@ -656,6 +656,7 @@ bsub -J "genomes_rd_brwt_coord_relax" \
 
 ######################## MetaGut ##########################
 
+```bash
 rm -rf ~/metagenome/data/cloudcompute/metagut_graphs/build/rd;
 mkdir ~/metagenome/data/cloudcompute/metagut_graphs/build/rd;
 
@@ -837,11 +838,12 @@ sbatch -J "metagut_rd_disk_big" \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation_big \
             -p 70"
-
+```
 
 
 ######################## UHGG small ##########################
 
+```
 ln -s ~/metagenome/data/uhgg/uhgg_catalogue/graphs/graph_complete_k31.dbg \
       ~/metagenome/data/uhgg/uhgg_catalogue/graphs/build/rd/graph.dbg;
 
@@ -921,9 +923,10 @@ bsub -J "uhgg_rd_brwt_relax" \
         -p 72 \
         ${DIR}/annotation.row_diff_brwt.annodbg \
         2>&1 | tee ${DIR}/logs/rd_brwt_relax.log"
+```
 
 ######################## UHGG ##########################
-
+```bash
 rm -rf ~/metagenome/data/uhgg/all_genomes/build/rd;
 mkdir ~/metagenome/data/uhgg/all_genomes/build/rd;
 
@@ -1021,10 +1024,10 @@ bsub -J "UHGG_rd_brwt_relax" \
         -p 72 \
         ${DIR}/annotation.row_diff_brwt.annodbg \
         2>&1 | tee ${DIR}/logs/rd_brwt_relax.log"
-
+```
 
 ######################## MetaSUB 19 ##########################
-
+```bash
 mkdir ~/metagenome/data/metasub/graphs/k19/build/rd;
 
 ln -s ~/metagenome/data/metasub/graphs/k19/graph_merged_k19.primary.dbg \
@@ -1120,10 +1123,10 @@ bsub -J "metasub_rd_brwt_relax" \
         -p 72 \
         ${DIR}/annotation.row_diff_brwt.annodbg \
         2>&1 | tee ${DIR}/logs/rd_brwt_relax.log"
-
+```
 
 ######################## MetaSUB 41 ##########################
-
+```bash
 ln -s ~/metagenome/data/metasub/graphs/output_k41_cleaned_graph/graph_merged_k41.primary.dbg \
       ~/metagenome/data/metasub/graphs/k41/build/rd/graph.dbg;
 
@@ -1217,7 +1220,7 @@ sbatch -J "metasub_rd_disk" \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation \
             -p 36"
-
+```
 
 ######################## FUNGI ##########################
 ```bash
@@ -1402,7 +1405,7 @@ sbatch -J "fungi_rd_brwt_relax" \
 ```
 
 ######################## FUNGI SUBSET ##########################
-
+```bash
 DIR=~/metagenome/data/cloudcompute/fungi5k_cleaned_index;
 METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph;
 
@@ -1567,10 +1570,10 @@ sbatch -J "fungi5K_rd_brwt_relax" \
         --relax-arity 32 \
         -o ${DIR}/annotation.relaxed \
         ${DIR}/annotation.row_diff_brwt.annodbg"
-
+```
 
 ######################## PLANTS ##########################
-
+```bash
 DIR=~/metagenome/data/cloudcompute/viridiplantae_graphs;
 METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_master/metagraph;
 bsub -J "plants_primary" \
@@ -3910,7 +3913,7 @@ sbatch -J "build_joint_graph" \
 
 
 
-WINDOW_SIZE=5;
+WINDOW_SIZE=60;
 DIR=~/metagenome/data/tcga_counts/build/smoothing_${WINDOW_SIZE};
 METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph;
 mkdir ${DIR};
@@ -3948,7 +3951,7 @@ sbatch -J "build_clean_graphs" \
         && rm $DIR/graphs/\$name.dbg*"
 
 
-WINDOW_SIZE=5;
+WINDOW_SIZE=60;
 DIR=~/metagenome/data/tcga_counts/build/smoothing_${WINDOW_SIZE};
 METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph;
 cd $DIR;
