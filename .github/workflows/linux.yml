@@ -208,6 +208,16 @@ jobs:
           cd metagraph/build
           ./test_venv/bin/python ../integration_tests/main.py
 
+      - name: check metagraph workflows
+        run: |
+          export PATH="$(pwd)/metagraph/build/:$PATH"
+          metagraph --help
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r metagraph/workflows/requirements.txt
+          cd metagraph/workflows
+          pytest
+
 
   examples:
     runs-on: *platform

@@ -1,3 +1,2 @@
-snakemake>=9.13.0
-pulp==2.7.0
+snakemake>=9.15.0,<9.16.0
 pandas
