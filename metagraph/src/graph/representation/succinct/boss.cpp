@@ -413,7 +413,7 @@ void BOSS::serialize_suffix_ranges(Chunk&& chunk, std::ofstream &out) {
         return;
     }
 
-    auto &ranges = chunk.indexed_suffix_ranges_raw_;
+    auto ranges = std::move(chunk.indexed_suffix_ranges_raw_);
     Timer timer;
     sdsl::sd_vector<> indexed_suffix_ranges;
     if (ranges.size()) {

@@ -45,7 +45,6 @@ class BOSS::Chunk {
      * @param kmers_with_counts the k-mers and their counts to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
      * weight counts
-     * @param indexed_suffix_length length of k-mer suffixes to index
      * @param swap_dir directory where to write vector buffers for construction with
      * streaming
      */
@@ -54,7 +53,6 @@ class BOSS::Chunk {
           size_t k,
           const Array &kmers_with_counts,
           uint8_t bits_per_count = 0,
-          size_t indexed_suffix_length = 0,
           const std::string &swap_dir = "");
 
     ~Chunk();
@@ -75,6 +73,11 @@ class BOSS::Chunk {
     void extend(Chunk &other);
 
     uint64_t size() const { return W_.size(); }
+
+    void set_indexed_suffix_ranges(size_t suffix_length, std::vector<BOSS::edge_index>&& ranges) {
+        indexed_suffix_length_ = suffix_length;
+        indexed_suffix_ranges_raw_ = std::move(ranges);
+    }
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);

@@ -1,10 +1,7 @@
 #include "boss_chunk.hpp"
 
-#include <algorithm>
-#include <cmath>
 #include <iostream>
 
-#include "common/logger.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
@@ -17,7 +14,6 @@ namespace mtg {
 namespace graph {
 namespace boss {
 
-using common::logger;
 using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
 namespace fs = std::filesystem;
@@ -40,9 +36,7 @@ void initialize_chunk(uint64_t alph_size,
                       sdsl::int_vector_buffer<> *W,
                       sdsl::int_vector_buffer<1> *last,
                       std::vector<uint64_t> *F,
-                      sdsl::int_vector_buffer<> *weights = nullptr,
-                      size_t indexed_suffix_length = 0,
-                      std::vector<BOSS::edge_index> *indexed_suffix_ranges_raw = nullptr) {
+                      sdsl::int_vector_buffer<> *weights = nullptr) {
     using T = std::decay_t<decltype(*it)>;
     using KMER = utils::get_first_type_t<T>;
     using CharType = typename KMER::CharType;
@@ -67,30 +61,10 @@ void initialize_chunk(uint64_t alph_size,
     last->push_back(0); // the bit array indicating last outgoing edges for nodes
     F->assign(alph_size, 0); // the offsets for the last characters in the nodes of BOSS
 
-    assert(indexed_suffix_length <= k);
-    if (indexed_suffix_length) {
-        if (indexed_suffix_length * log2(alph_size - 1) >= 64) {
-            logger->error("Trying to index too long suffixes");
-            exit(1);
-        }
-        size_t num_suffixes = 1;
-        for (size_t i = 0; i < indexed_suffix_length; ++i) {
-            num_suffixes *= (alph_size - 1);
-        }
-        logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                      indexed_suffix_length, 2. * num_suffixes * sizeof(uint64_t) * 1e-6);
-        assert(indexed_suffix_ranges_raw);
-        indexed_suffix_ranges_raw->assign(2 * num_suffixes, 0);
-    }
-
     size_t curpos = 1;
     CharType lastF = 0;
     // last kmer for each label, so we can test multiple edges coming to same node
     std::vector<KMER> last_kmer(alph_size, typename KMER::WordType(0));
-
-    KMER prev_kmer = typename KMER::WordType(0);
-    bool valid_suffix = false;
-    uint64_t suffix_index = 0;
 
     while (it != end) {
         const T value = *it;
@@ -112,31 +86,6 @@ void initialize_chunk(uint64_t alph_size,
             last->push_back(false);
         } else {
             last->push_back(true);
-        }
-
-        if (indexed_suffix_length) {
-            if (!KMER::compare_suffix(kmer, prev_kmer, k - indexed_suffix_length)) {
-                // new suffix
-                suffix_index = 0;
-                valid_suffix = true;
-                for (size_t offset = 0; offset < indexed_suffix_length; ++offset) {
-                    const auto c = kmer[k - offset];
-                    if (!c) {
-                        valid_suffix = false;
-                        break;
-                    }
-                    suffix_index = suffix_index * (alph_size - 1) + (c - 1);
-                }
-                prev_kmer = kmer;
-            }
-            if (valid_suffix) {
-                auto &begin = (*indexed_suffix_ranges_raw)[2 * suffix_index];
-                auto &end = (*indexed_suffix_ranges_raw)[2 * suffix_index + 1];
-                if (!begin) {
-                    begin = curpos;
-                }
-                end = curpos + 1;
-            }
         }
 
         // set W
@@ -217,27 +166,23 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
                    size_t k,
                    const Array &kmers_with_counts,
                    uint8_t bits_per_count,
-                   size_t indexed_suffix_length,
                    const std::string &swap_dir)
       : Chunk(alph_size, k, swap_dir) {
 
     weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
                                          std::ios::out, BUFFER_SIZE,
                                          bits_per_count);
-    indexed_suffix_length_ = std::min(indexed_suffix_length, k_);
 
     if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
         initialize_chunk(alph_size_,
                          kmers_with_counts.begin(),
                          kmers_with_counts.end(),
-                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL,
-                         indexed_suffix_length_, &indexed_suffix_ranges_raw_);
+                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     } else {
         auto begin = kmers_with_counts.begin();
         auto end = kmers_with_counts.end();
         initialize_chunk(alph_size_, begin, end,
-                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL,
-                         indexed_suffix_length_, &indexed_suffix_ranges_raw_);
+                         k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     }
 }
 
@@ -246,9 +191,9 @@ using CWQ = common::ChunkedWaitQueue<T>;
 
 #define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
     template BOSS::Chunk::Chunk(uint64_t, size_t, const CWQ<__VA_ARGS__> &, \
-                                uint8_t, size_t, const std::string &dir); \
+                                uint8_t, const std::string &dir); \
     template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<__VA_ARGS__> &, \
-                                uint8_t, size_t, const std::string &dir);
+                                uint8_t, const std::string &dir);
 
 INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer64);
 INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer128);

@@ -1,5 +1,8 @@
 #include "boss_chunk_construct.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include <ips4o.hpp>
 
 #include "common/elias_fano/elias_fano_merger.hpp"
@@ -234,6 +237,80 @@ Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
 
 
 /**
+ * Indexes node ranges for k-mer suffixes during BOSS construction.
+ * Tracks the current edge position and updates the suffix range index
+ * as k-mers are processed in sorted order.
+ */
+template <typename KMER>
+class SuffixRangeIndexer {
+  public:
+    static std::vector<BOSS::edge_index> init_ranges(size_t indexed_suffix_length) {
+        if (!indexed_suffix_length)
+            return {};
+
+        const uint8_t alph_size = KmerExtractorBOSS().alphabet.size();
+        if (indexed_suffix_length * log2(alph_size - 1) >= 64) {
+            logger->error("Trying to index too long suffixes");
+            exit(1);
+        }
+        size_t num_suffixes = 1;
+        for (size_t i = 0; i < indexed_suffix_length; ++i) {
+            num_suffixes *= (alph_size - 1);
+        }
+        logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
+                      indexed_suffix_length, 2. * num_suffixes * sizeof(uint64_t) * 1e-6);
+        return std::vector<BOSS::edge_index>(2 * num_suffixes, 0);
+    }
+
+    SuffixRangeIndexer(size_t k, size_t indexed_suffix_length,
+                       size_t initial_curpos,
+                       std::vector<BOSS::edge_index> *ranges)
+        : k_(k), indexed_suffix_length_(indexed_suffix_length),
+          alph_size_(KmerExtractorBOSS().alphabet.size()),
+          curpos_(initial_curpos),
+          ranges_(ranges) {}
+
+    template <typename V>
+    void operator()(const V &v) {
+        if (indexed_suffix_length_) {
+            KMER kmer(get_first(v));
+            if (!KMER::compare_suffix(kmer, prev_kmer_, k_ - indexed_suffix_length_)) {
+                // new suffix
+                suffix_index_ = 0;
+                valid_suffix_ = true;
+                for (size_t offset = 0; offset < indexed_suffix_length_; ++offset) {
+                    const auto c = kmer[k_ - offset];
+                    if (!c) {
+                        valid_suffix_ = false;
+                        break;
+                    }
+                    suffix_index_ = suffix_index_ * (alph_size_ - 1) + (c - 1);
+                }
+                prev_kmer_ = kmer;
+            }
+            if (valid_suffix_) {
+                auto &begin = (*ranges_)[2 * suffix_index_];
+                auto &end = (*ranges_)[2 * suffix_index_ + 1];
+                if (!begin)
+                    begin = curpos_;
+                end = curpos_ + 1;
+            }
+        }
+        curpos_++;
+    }
+
+  private:
+    const size_t k_;
+    const size_t indexed_suffix_length_;
+    const uint8_t alph_size_;
+    size_t curpos_;
+    std::vector<BOSS::edge_index> *ranges_;
+    KMER prev_kmer_{0};
+    bool valid_suffix_ = false;
+    uint64_t suffix_index_ = 0;
+};
+
+/**
  * Adds dummy nodes for the given kmers and then builds a BOSS table (chunk).
  * The method first adds dummy sink kmers, then dummy sources with sentinels of length 1
  * (aka dummy-1 sources). The method will then gradually add dummy sources with sentinels
@@ -312,8 +389,17 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
+    auto indexed_suffix_ranges = SuffixRangeIndexer<KMER>::init_ranges(indexed_suffix_length);
+    SuffixRangeIndexer<KMER> index_suffix(k, indexed_suffix_length, 2, &indexed_suffix_ranges);
+
+    auto process_kmer = [&](const T &v) {
+        kmers_out->push(v);
+        index_suffix(v);
+    };
+
     ThreadPool async_worker(1, 1);
-    async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out]() {
+    async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out,
+                          &process_kmer]() {
         const KMER_INT kmer_delta
                 = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
 
@@ -323,30 +409,31 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
             KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
             if constexpr(utils::is_pair_v<T>) {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
-                    kmers_out->push({ dummy_kmers[di], 0 });
+                    process_kmer(T{ dummy_kmers[di], 0 });
                     di++;
                 }
-                kmers_out->push({ lifted, kmer.second });
+                process_kmer(T{ lifted, kmer.second });
             } else {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
-                    kmers_out->push(dummy_kmers[di]);
+                    process_kmer(dummy_kmers[di]);
                     di++;
                 }
-                kmers_out->push(lifted);
+                process_kmer(lifted);
             }
         }
         for (size_t i = di; i < dummy_kmers.size(); ++i) {
             if constexpr(utils::is_pair_v<T>) {
-                kmers_out->push({ dummy_kmers[i], 0 });
+                process_kmer(T{ dummy_kmers[i], 0 });
             } else {
-                kmers_out->push(dummy_kmers[i]);
+                process_kmer(dummy_kmers[i]);
             }
         }
         kmers_out->shutdown();
     });
 
     BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(), k, *kmers_out,
-                       bits_per_count, indexed_suffix_length, swap_dir);
+                       bits_per_count, swap_dir);
+    result.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
 
     kmer_collector.clear();
 
@@ -842,7 +929,8 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
                              size_t k,
                              uint8_t bits_per_count,
                              size_t indexed_suffix_length,
-                             std::filesystem::path swap_dir) {
+                             std::filesystem::path swap_dir,
+                             std::vector<BOSS::edge_index> *suffix_ranges) {
     using T_INT = get_int_t<T>;
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
@@ -858,9 +946,16 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
         }
     }
 
+    SuffixRangeIndexer<KMER> index_suffix(k, indexed_suffix_length,
+                                          1 + is_first_chunk, suffix_ranges);
+    auto process_kmer = [&](const T_INT &v) {
+        kmers_out->push(v);
+        index_suffix(v);
+    };
+
     // push all other dummy and non-dummy k-mers to |kmers_out|
     ThreadPool async_worker(1, 1);
-    async_worker.enqueue([kmers_out, real_name, dummy_names]() {
+    async_worker.enqueue([kmers_out, real_name, dummy_names, &process_kmer]() {
         Decoder<T_INT> decoder(real_name, true);
 
         elias_fano::Transformed<elias_fano::MergeDecoder<KMER_INT>, T_INT> decoder_dummy(
@@ -877,18 +972,18 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
         std::optional<T_INT> next = decoder.next();
         while (next && !decoder_dummy.empty()) {
             if (get_first(next.value()) < get_first(decoder_dummy.top())) {
-                kmers_out->push(next.value());
+                process_kmer(next.value());
                 next = decoder.next();
             } else {
-                kmers_out->push(decoder_dummy.pop());
+                process_kmer(decoder_dummy.pop());
             }
         }
         while (next) {
-            kmers_out->push(next.value());
+            process_kmer(next.value());
             next = decoder.next();
         }
         while (!decoder_dummy.empty()) {
-            kmers_out->push(decoder_dummy.pop());
+            process_kmer(decoder_dummy.pop());
         }
 
         kmers_out->shutdown();
@@ -896,7 +991,7 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
 
     return BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), k,
                        reinterpret_container<T>(*kmers_out),
-                       bits_per_count, indexed_suffix_length, swap_dir);
+                       bits_per_count, swap_dir);
 }
 
 template <typename T>
@@ -912,6 +1007,10 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
     assert(real_names.size() == dummy_sink_names.size());
     assert(real_names.size() + 1 == dummy_source_names.front().size());
     assert(dummy_source_names.size() == k);
+
+    assert(indexed_suffix_length <= k);
+    using KMER = get_first_type_t<T>;
+    auto indexed_suffix_ranges = SuffixRangeIndexer<KMER>::init_ranges(indexed_suffix_length);
 
     if (k <= 1) {
         // For k <= 1 BOSS chunks can't be built independently.
@@ -932,8 +1031,11 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
             elias_fano::concat(dummy_source_names[i], dummy_names.back());
         }
 
-        return build_boss_chunk<T>(true, real_name, dummy_names,
-                                   k, bits_per_count, indexed_suffix_length, swap_dir);
+        auto chunk = build_boss_chunk<T>(true, real_name, dummy_names,
+                                         k, bits_per_count, indexed_suffix_length, swap_dir,
+                                         &indexed_suffix_ranges);
+        chunk.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
+        return chunk;
     }
 
     // For k >= 2, BOSS chunks can be built independently, in parallel.
@@ -949,7 +1051,8 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         dummy_names.push_back(dummy_source_names[i][0]);
     }
     BOSS::Chunk chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
-                                            k, bits_per_count, indexed_suffix_length, swap_dir);
+                                            k, bits_per_count, indexed_suffix_length, swap_dir,
+                                            &indexed_suffix_ranges);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
@@ -964,12 +1067,34 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         }
         BOSS::Chunk next = build_boss_chunk<T>(false, // not the first chunk
                                                real_names[F], dummy_names,
-                                               k, bits_per_count, indexed_suffix_length, swap_dir);
+                                               k, bits_per_count, indexed_suffix_length, swap_dir,
+                                               &indexed_suffix_ranges);
         logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
         #pragma omp ordered
-        chunk.extend(next);
-        logger->trace("Chunk ..{}. appended", KmerExtractor2Bit().alphabet[F]);
+        {
+            // Fix up suffix range offsets for this chunk. Each chunk writes
+            // ranges with chunk-local positions (curpos starts at 1). We need
+            // to shift them by the cumulative size of all previous chunks.
+            // Different F values map to disjoint suffix indices, so this is safe.
+            if (indexed_suffix_length) {
+                const size_t alph_size = KmerExtractorBOSS().alphabet.size();
+                size_t offset = chunk.size() - 1;
+                size_t stride = 1;
+                for (size_t i = 1; i < indexed_suffix_length; ++i) {
+                    stride *= (alph_size - 1);
+                }
+                for (size_t i = F * stride; i < (F + 1) * stride; ++i) {
+                    if (indexed_suffix_ranges[2 * i]) {
+                        indexed_suffix_ranges[2 * i] += offset;
+                        indexed_suffix_ranges[2 * i + 1] += offset;
+                    }
+                }
+            }
+            chunk.extend(next);
+            logger->trace("Chunk ..{}. appended", KmerExtractor2Bit().alphabet[F]);
+        }
     }
+    chunk.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
     return chunk;
 }
 
@@ -1052,7 +1177,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                  kmer_collector_.get_k() - 1,
                                  reinterpret_container<T>(kmer_ints),
                                  bits_per_count_,
-                                 indexed_suffix_length_,
                                  swap_dir_);
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
