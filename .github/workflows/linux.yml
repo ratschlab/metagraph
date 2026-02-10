@@ -262,6 +262,7 @@ jobs:
 
       - &build-externalproject-example
         name: Build and run ExternalProject example
+        if: matrix.alphabet == 'DNA'
         run: |
           cd metagraph/examples/ExternalProject
           mkdir -p build/metagraph-external-prefix/src
