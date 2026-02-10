@@ -2,6 +2,8 @@
 
 #include <tsl/hopscotch_map.h>
 
+#include "common/algorithms.hpp"
+
 
 namespace mtg {
 namespace annot {
@@ -41,13 +43,14 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     };
 
     size_t num_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
-    if (num_cols < 300'000) {
+    constexpr size_t kMinReserve = 1024;
+    if (num_cols < utils::kDenseCountThreshold) {
         // For few columns, counting with a dense vector is faster than a hash table
         Vector<std::pair<size_t, size_t>> counts(num_cols);
         sum_rows(counts);
 
         RowValues result;
-        result.reserve(std::min<size_t>(num_cols, 1024));
+        result.reserve(std::min<size_t>(num_cols, kMinReserve));
 
         for (size_t j = 0; j < num_cols; ++j) {
             if (counts[j].first >= min_count) {
@@ -58,11 +61,11 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     }
 
     tsl::hopscotch_map<Column, std::pair<size_t, size_t>> counts;
-    counts.reserve(std::min<size_t>(num_cols, 1024));
+    counts.reserve(std::min<size_t>(num_cols, kMinReserve));
     sum_rows(counts);
 
     RowValues result;
-    result.reserve(std::min<size_t>(num_cols, 1024));
+    result.reserve(std::min<size_t>(num_cols, kMinReserve));
 
     for (const auto &[j, pair] : counts) {
         if (pair.first >= min_count) {

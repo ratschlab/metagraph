@@ -304,6 +304,7 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
 // Container `code_counts` must have pairs (index, count)
 template <class Container>
 void top_n_sorted(Container& code_counts, size_t num_top_labels) {
+    assert(num_top_labels <= code_counts.size());
     auto comp = [](const auto &x, const auto &y) {
         return std::make_pair(y.second, x.first)
               < std::make_pair(x.second, y.first);
@@ -325,7 +326,7 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
     if (code_counts.size() > num_top_labels)
         top_n_sorted(code_counts, num_top_labels);
 
-    // TODO: remove this step?
+    // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
     std::vector<StringCountPair> label_counts;
     label_counts.reserve(code_counts.size());
     for (const auto &[j, count] : code_counts) {
@@ -397,9 +398,8 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                                    annotator_->get_label_encoder(), num_top_labels);
     }
 
-    assert(std::all_of(result.begin(), result.end(),
-                       [&](const auto &pair) { return pair.second <= num_kmers; })
-            || with_kmer_counts);
+    assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
+                                    [&](const auto &pair) { return pair.second <= num_kmers; }));
 
     return result;
 }
@@ -418,7 +418,7 @@ Result filter_and_aggregate(Container&& rows,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
 
-    auto call_bits = [&](const std::function<void(Column, size_t)> &callback) {
+    auto call_bits = [&](const auto &callback) {
         for (const auto &row : rows) {
             for (const auto &j : row) {
                 callback(utils::get_first(j), 1);
@@ -647,6 +647,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 }
 
+#ifndef NDEBUG
 // A sanity check to ensure the same matches are for get_top_label_signatures and get_top_labels
 bool same_results(const std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> &result,
                   const std::vector<StringCountPair> &top_labels) {
@@ -661,6 +662,7 @@ bool same_results(const std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
     }
     return check.empty();
 }
+#endif // NDEBUG
 
 std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,

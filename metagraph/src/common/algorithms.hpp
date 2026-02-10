@@ -447,6 +447,11 @@ namespace utils {
         }
     }
 
+    // Threshold for switching between dense vector and hash table for counting.
+    // Below this value, a dense vector is faster; above it, a hash table uses
+    // less memory and is competitive in speed. Determined empirically.
+    constexpr size_t kDenseCountThreshold = 300'000;
+
     // Accumulate weighted counts of items produced by `enumerate_weighted_items` and return
     // (item, count) pairs whose count is at least `min_count`.
     //
@@ -455,7 +460,8 @@ namespace utils {
     std::vector<std::pair<T /* item */, size_t /* count */>>
     accumulate_counts(Enumerator&& enumerate_weighted_items,
                       size_t universe_size, size_t min_count) {
-        if (universe_size < 300'000) {
+        constexpr size_t kMinReserve = 1024;
+        if (universe_size < kDenseCountThreshold) {
             // For a small universe size, counting with a dense vector is faster than a hash table
             Vector<size_t> counts(universe_size, 0);
             enumerate_weighted_items([&](T item, size_t weight) {
@@ -465,7 +471,7 @@ namespace utils {
             });
 
             std::vector<std::pair<T, size_t>> item_counts;
-            item_counts.reserve(std::min<size_t>(universe_size, 1024));
+            item_counts.reserve(std::min<size_t>(universe_size, kMinReserve));
 
             for (size_t i = 0; i < counts.size(); ++i) {
                 // take only the items with counts >= min_count
@@ -476,7 +482,7 @@ namespace utils {
         }
 
         VectorMap<T, size_t> counts;
-        counts.reserve(std::min<size_t>(universe_size, 1024));
+        counts.reserve(std::min<size_t>(universe_size, kMinReserve));
         enumerate_weighted_items([&](T item, size_t weight) { counts[item] += weight; });
 
         std::vector<std::pair<T, size_t>> item_counts = to_vector(std::move(counts));

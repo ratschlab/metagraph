@@ -581,6 +581,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
                  size_t num_threads,
                  QueryMode query_mode) {
+    // NOTE: If a new query mode is added that requires IntMatrix (integer
+    // annotation), it must be added to this condition as well.
     if (query_mode == COUNTS || query_mode == COUNTS_SUM) {
         const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
 

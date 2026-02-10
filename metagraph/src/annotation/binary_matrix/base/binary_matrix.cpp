@@ -188,7 +188,7 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
         weights[row_ids[i]] += index_counts[i].second;
     }
 
-    auto call_bits = [&](const std::function<void(Column, size_t)> &callback) {
+    auto call_bits = [&](const auto &callback) {
         for (size_t i = 0; i < distinct_rows.size(); ++i) {
             for (Column j : distinct_rows[i]) {
                 callback(j, weights[i]);
