@@ -214,6 +214,7 @@ jobs:
           ./test_venv/bin/python ../integration_tests/main.py
 
       - name: check metagraph workflows
+        if: matrix.alphabet == 'DNA'
         run: |
           export PATH="$(pwd)/metagraph/build/:$PATH"
           metagraph --help
@@ -262,7 +263,6 @@ jobs:
 
       - &build-externalproject-example
         name: Build and run ExternalProject example
-        if: matrix.alphabet == 'DNA'
         run: |
           cd metagraph/examples/ExternalProject
           mkdir -p build/metagraph-external-prefix/src
