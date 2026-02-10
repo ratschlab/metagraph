@@ -49,6 +49,9 @@ class ResourceConfig:
             if not mem_mb:
                 mem_mb = self._get_mem_estimate(wildcards, input, threads)
 
+                if mem_mb == TBDString():
+                    return mem_mb
+
                 max_mem = _get_max_memory(self.config)
                 if mem_mb > max_mem:
                     logger.warning(
