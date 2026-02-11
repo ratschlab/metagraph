@@ -1,10 +1,8 @@
 #include "boss_chunk_construct.hpp"
 
-#include <algorithm>
-#include <cmath>
-
 #include <ips4o.hpp>
 
+#include "common/algorithms.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
@@ -249,14 +247,11 @@ class SuffixRangeIndexer {
             return {};
 
         const uint8_t alph_size = KmerExtractorBOSS().alphabet.size();
-        if (indexed_suffix_length * log2(alph_size - 1) >= 64) {
+        if (indexed_suffix_length * log2(alph_size - 1) > 63) {
             logger->error("Trying to index too long suffixes");
             exit(1);
         }
-        size_t num_suffixes = 1;
-        for (size_t i = 0; i < indexed_suffix_length; ++i) {
-            num_suffixes *= (alph_size - 1);
-        }
+        size_t num_suffixes = utils::ipow(alph_size - 1, indexed_suffix_length);
         logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
                       indexed_suffix_length, 2. * num_suffixes * sizeof(uint64_t) * 1e-6);
         return std::vector<BOSS::edge_index>(2 * num_suffixes, 0);
@@ -1079,10 +1074,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
             if (indexed_suffix_length) {
                 const size_t alph_size = KmerExtractorBOSS().alphabet.size();
                 size_t offset = chunk.size() - 1;
-                size_t stride = 1;
-                for (size_t i = 1; i < indexed_suffix_length; ++i) {
-                    stride *= (alph_size - 1);
-                }
+                const size_t stride = utils::ipow(alph_size - 1, indexed_suffix_length - 1);
                 for (size_t i = F * stride; i < (F + 1) * stride; ++i) {
                     if (indexed_suffix_ranges[2 * i]) {
                         indexed_suffix_ranges[2 * i] += offset;

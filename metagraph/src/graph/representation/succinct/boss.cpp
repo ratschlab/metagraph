@@ -3180,7 +3180,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
     if (indexed_suffix_length_ == 0u)
         return;
 
-    if (indexed_suffix_length_ * log2(alph_size - 1) >= 64)
+    if (indexed_suffix_length_ * log2(alph_size - 1) > 63)
         throw std::runtime_error("ERROR: Trying to index too long suffixes");
 
     // first, take empty suffix and the entire range of nodes in the BOSS table

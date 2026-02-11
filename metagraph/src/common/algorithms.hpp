@@ -7,8 +7,10 @@
 #include <functional>
 #include <utility>
 #include <cassert>
+#include <limits>
 #include <random>
 #include <set>
+#include <stdexcept>
 
 
 namespace utils {
@@ -442,6 +444,27 @@ namespace utils {
                 v[i] = std::round((psum.back() - psum[i - left - 1]) / (left + v.size() - i));
             }
         }
+    }
+
+    /**
+     * Integer exponentiation: returns base^exp.
+     * Uses binary exponentiation for O(log exp) multiplications.
+     * @throws std::overflow_error if the result would overflow uint64_t
+     */
+    inline uint64_t ipow(uint64_t base, unsigned int exp) {
+        uint64_t result = 1;
+        while (exp > 0) {
+            if (exp % 2) {
+                if (base != 0 && result > std::numeric_limits<uint64_t>::max() / base)
+                    throw std::overflow_error("ipow: overflow");
+                result *= base;
+            }
+            if (exp > 1 && base != 0 && base > std::numeric_limits<uint64_t>::max() / base)
+                throw std::overflow_error("ipow: overflow");
+            base *= base;
+            exp /= 2;
+        }
+        return result;
     }
 
 } // namespace utils
