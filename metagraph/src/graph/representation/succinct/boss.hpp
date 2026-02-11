@@ -618,13 +618,23 @@ class BOSS {
 
     bool is_valid() const;
 
+    /**
+     * Align raw suffix ranges to be strictly increasing and build a compressed
+     * sd_vector. The alignment ensures that select queries can be used to
+     * recover the original range values via get_suffix_range().
+     */
+    static sdsl::sd_vector<> build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+                                                    uint64_t universe_size);
+
   public:
     class Chunk;
     void initialize(Chunk *chunk);
     // Initialize a BOSS table from Chunk and serialize without loading to RAM.
-    // FYI: Note that suffix ranges will not be indexed.
-    static void serialize(Chunk&& chunk, std::ofstream &outstream, State state = State::STAT);
-    static void serialize_suffix_ranges(Chunk&& chunk, std::ofstream &outstream);
+    // If mode >= 0, it is serialized after the BOSS data (for DBGSuccinct).
+    // If serialize_suffix_ranges is true, the index of the suffix ranges is appended.
+    static void serialize(Chunk&& chunk, std::ofstream &outstream,
+                          State state = State::STAT, int mode = -1,
+                          bool serialize_suffix_ranges = false);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);

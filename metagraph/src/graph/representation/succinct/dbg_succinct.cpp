@@ -839,9 +839,7 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out = utils::open_new_ofstream(fname);
-    boss::BOSS::serialize(std::move(chunk), out, state);
-    serialize_number(out, static_cast<int>(mode));
-    boss::BOSS::serialize_suffix_ranges(std::move(chunk), out);
+    boss::BOSS::serialize(std::move(chunk), out, state, static_cast<int>(mode), true);
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
 }

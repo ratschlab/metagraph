@@ -241,8 +241,6 @@ void BOSS::Chunk::extend(Chunk &other) {
     if (other.W_.size() == 1)
         return;
 
-    const uint64_t offset = W_.size() - 1;
-
     if (bool(weights_.size()) != bool(other.weights_.size())) {
         std::cerr << "ERROR: trying to concatenate weighted and unweighted blocks" << std::endl;
         exit(1);
@@ -267,20 +265,10 @@ void BOSS::Chunk::extend(Chunk &other) {
         }
     }
 
-    if (indexed_suffix_length_ != other.indexed_suffix_length_) {
-        std::cerr << "ERROR: concatenating chunks with incompatible suffix ranges" << std::endl;
-        exit(1);
-    }
-    auto &ranges = indexed_suffix_ranges_raw_;
-    const auto &other_ranges = other.indexed_suffix_ranges_raw_;
-    assert(ranges.size() == other_ranges.size() && ranges.size() % 2 == 0);
-    for (size_t i = 0; i + 1 < other_ranges.size(); i += 2) {
-        if (other_ranges[i]) {
-            assert(!ranges[i]);
-            ranges[i] = other_ranges[i] + offset;
-            ranges[i + 1] = other_ranges[i + 1] + offset;
-        }
-    }
+    // Suffix ranges are not merged here — they are accumulated externally
+    // (e.g., in a shared vector in build_boss) and set on the final chunk.
+    assert(!indexed_suffix_length_ && !other.indexed_suffix_length_
+            && "suffix ranges must be accumulated externally, not in individual chunks");
 
     assert(W_.size() == last_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
@@ -339,6 +327,16 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         *weights = full_chunk.get_weights();
 
     return graph;
+}
+
+void BOSS::Chunk::set_indexed_suffix_ranges(size_t suffix_length, std::vector<BOSS::edge_index>&& ranges) {
+    indexed_suffix_length_ = suffix_length;
+    indexed_suffix_ranges_ = {};
+    if (suffix_length) {
+        assert(ranges.size()
+                && "suffix ranges must be initialized before building the suffix ranges index");
+        indexed_suffix_ranges_ = BOSS::build_suffix_ranges_sd(std::move(ranges), W_.size());
+    }
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {

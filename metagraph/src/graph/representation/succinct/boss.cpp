@@ -17,7 +17,6 @@
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
-#include "common/unix_tools.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
@@ -97,6 +96,23 @@ BOSS::~BOSS() {
     delete last_;
 }
 
+sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+                                               uint64_t num_edges) {
+    assert(ranges.size());
+    ranges[0] = std::max<uint64_t>(ranges[0], 1);
+    // align the values to be strictly increasing so that select queries
+    // can recover the originals via get_suffix_range(i) = select1(i+1) - i
+    for (size_t i = 1; i < ranges.size(); ++i) {
+        ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+    }
+    assert(std::is_sorted(ranges.begin(), ranges.end()));
+    sdsl::sd_vector_builder builder(num_edges + ranges.size(), ranges.size());
+    for (auto pos : ranges) {
+        builder.set(pos);
+    }
+    return sdsl::sd_vector<>(builder);
+}
+
 template <uint8_t t_width>
 sdsl::int_vector<t_width> to_vector(sdsl::int_vector_buffer<t_width> &buf) {
     buf.flush();
@@ -125,18 +141,8 @@ void BOSS::initialize(Chunk *chunk) {
     state = State::STAT;
 
     if (chunk->indexed_suffix_length_) {
-        auto ranges = std::move(chunk->indexed_suffix_ranges_raw_);
-        assert(ranges.size());
-        ranges[0] = std::max<uint64_t>(ranges[0], 1);
-        // align the upper bounds to enable the binary search on them
-        for (size_t i = 1; i < ranges.size(); ++i) {
-            ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
-        }
-        sdsl::sd_vector_builder builder(W_->size() + ranges.size(), ranges.size());
-        for (auto pos : ranges) {
-            builder.set(pos);
-        }
-        indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+        indexed_suffix_length_ = chunk->indexed_suffix_length_;
+        indexed_suffix_ranges_ = std::move(chunk->indexed_suffix_ranges_);
         indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
         indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
         indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
@@ -267,7 +273,8 @@ void BOSS::serialize(std::ofstream &outstream) const {
     outstream.flush();
 }
 
-void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
+void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state, int mode,
+                     bool serialize_suffix_ranges) {
     if (!out.good())
         throw std::ofstream::failure("Error: Can't write to file");
 
@@ -310,6 +317,16 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
             SERIALIZE_W(wavelet_tree_small);
             SERIALIZE_LAST(bit_vector_small);
             break;
+    }
+
+    // serialize mode if provided (for DBGSuccinct)
+    if (mode >= 0)
+        serialize_number(out, mode);
+
+    if (serialize_suffix_ranges) {
+        assert(mode >= 0 && "suffix ranges require mode to be serialized");
+        serialize_number(out, chunk.indexed_suffix_length_);
+        chunk.indexed_suffix_ranges_.serialize(out);
     }
 
     out.flush();
@@ -402,37 +419,6 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
         indexed_suffix_ranges_ = decltype(indexed_suffix_ranges_)();
         return false;
     }
-}
-
-void BOSS::serialize_suffix_ranges(Chunk&& chunk, std::ofstream &out) {
-    if (!out.good())
-        throw std::ofstream::failure("Error: Can't write to file");
-
-    if (!chunk.indexed_suffix_length_) {
-        serialize_number(out, 0); // suffix ranges are not indexed
-        return;
-    }
-
-    auto ranges = std::move(chunk.indexed_suffix_ranges_raw_);
-    Timer timer;
-    sdsl::sd_vector<> indexed_suffix_ranges;
-    if (ranges.size()) {
-        ranges[0] = std::max<uint64_t>(ranges[0], 1);
-        // align the upper bounds to enable the binary search on them
-        for (size_t i = 1; i < ranges.size(); ++i) {
-            ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
-        }
-        sdsl::sd_vector_builder builder(chunk.size() + ranges.size(), ranges.size());
-        for (auto pos : ranges) {
-            builder.set(pos);
-        }
-        indexed_suffix_ranges = sdsl::sd_vector<>(builder);
-    }
-    auto sr_begin = out.tellp();
-    serialize_number(out, chunk.indexed_suffix_length_);
-    indexed_suffix_ranges.serialize(out);
-    logger->trace("Compressing and serializing node ranges ({:.2f} MB) took {} sec",
-                  (out.tellp() - sr_begin) / 1e6, timer.elapsed());
 }
 
 //
@@ -3224,19 +3210,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
         suffix_ranges.swap(narrowed);
     }
 
-    suffix_ranges[0] = std::max(suffix_ranges[0], (uint64_t)1);
-    // align the upper bounds to enable the binary search on them
-    for (size_t i = 1; i < suffix_ranges.size(); ++i) {
-        suffix_ranges[i] = std::max(suffix_ranges[i], suffix_ranges[i - 1] - (i - 1)) + i;
-    }
-
-    assert(std::is_sorted(suffix_ranges.begin(), suffix_ranges.end()));
-
-    sdsl::sd_vector_builder builder(W_->size() + suffix_ranges.size(), suffix_ranges.size());
-    for (auto pos : suffix_ranges) {
-        builder.set(pos);
-    }
-    indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+    indexed_suffix_ranges_ = build_suffix_ranges_sd(std::move(suffix_ranges), W_->size());
     indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);

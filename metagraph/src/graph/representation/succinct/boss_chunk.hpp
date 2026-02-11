@@ -74,10 +74,7 @@ class BOSS::Chunk {
 
     uint64_t size() const { return W_.size(); }
 
-    void set_indexed_suffix_ranges(size_t suffix_length, std::vector<BOSS::edge_index>&& ranges) {
-        indexed_suffix_length_ = suffix_length;
-        indexed_suffix_ranges_raw_ = std::move(ranges);
-    }
+    void set_indexed_suffix_ranges(size_t suffix_length, std::vector<BOSS::edge_index>&& ranges);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);
@@ -110,7 +107,7 @@ class BOSS::Chunk {
     std::vector<uint64_t> F_;
     sdsl::int_vector_buffer<> weights_;
     size_t indexed_suffix_length_ = 0;
-    std::vector<BOSS::edge_index> indexed_suffix_ranges_raw_;
+    sdsl::sd_vector<> indexed_suffix_ranges_;
 };
 
 } // namespace boss
