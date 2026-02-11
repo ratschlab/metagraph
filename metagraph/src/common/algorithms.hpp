@@ -12,6 +12,9 @@
 #include <set>
 #include <stdexcept>
 
+#include "common/vector_map.hpp"
+#include "common/vector.hpp"
+
 
 namespace utils {
 
@@ -465,6 +468,55 @@ namespace utils {
             exp /= 2;
         }
         return result;
+    }
+
+
+    // Threshold for switching between dense vector and hash table for counting.
+    // Below this value, a dense vector is faster; above it, a hash table uses
+    // less memory and is competitive in speed. Determined empirically.
+    constexpr size_t kDenseCountThreshold = 300'000;
+
+    // Accumulate weighted counts of items produced by `enumerate_weighted_items` and return
+    // (item, count) pairs whose count is at least `min_count`.
+    //
+    // Assumes items are in the range [0, universe_size).
+    template <typename T = uint32_t, class Enumerator>
+    std::vector<std::pair<T /* item */, size_t /* count */>>
+    accumulate_counts(Enumerator&& enumerate_weighted_items,
+                      size_t universe_size, size_t min_count) {
+        constexpr size_t kMinReserve = 1024;
+        if (universe_size < kDenseCountThreshold) {
+            // For a small universe size, counting with a dense vector is faster than a hash table
+            Vector<size_t> counts(universe_size, 0);
+            enumerate_weighted_items([&](T item, size_t weight) {
+                const size_t i = static_cast<size_t>(item);
+                assert(i < universe_size);
+                counts[i] += weight;
+            });
+
+            std::vector<std::pair<T, size_t>> item_counts;
+            item_counts.reserve(std::min<size_t>(universe_size, kMinReserve));
+
+            for (size_t i = 0; i < counts.size(); ++i) {
+                // take only the items with counts >= min_count
+                if (counts[i] >= min_count)
+                    item_counts.emplace_back(static_cast<T>(i), counts[i]);
+            }
+            return item_counts;
+        }
+
+        VectorMap<T, size_t> counts;
+        counts.reserve(std::min<size_t>(universe_size, kMinReserve));
+        enumerate_weighted_items([&](T item, size_t weight) { counts[item] += weight; });
+
+        std::vector<std::pair<T, size_t>> item_counts = to_vector(std::move(counts));
+        // remove items with low counts
+        item_counts.erase(
+            std::remove_if(item_counts.begin(), item_counts.end(),
+                           [&](const auto &p) { return p.second < min_count; }),
+            item_counts.end()
+        );
+        return item_counts;
     }
 
 } // namespace utils

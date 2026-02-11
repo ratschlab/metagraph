@@ -18,7 +18,7 @@ using VectorSet = tsl::ordered_set<T, Hash, EqualTo, Allocator, Container, Index
  * Use when the set is no longer needed and you want to avoid copying.
  */
 template <typename T, class Hash, typename IndexType, class EqualTo, class Allocator, class Container>
-Container take_values(VectorSet<T, Hash, IndexType, EqualTo, Allocator, Container> &&set) {
+Container to_vector(VectorSet<T, Hash, IndexType, EqualTo, Allocator, Container> &&set) {
     Container container;
     container.swap(const_cast<Container &>(set.values_container()));
     return container;

@@ -105,7 +105,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
         }
     }
 
-    auto &m = const_cast<std::vector<std::pair<Row, size_t>>&>(node_to_rd.values_container());
+    auto m = to_vector(std::move(node_to_rd));
     // sort by indexes of rd rows
     // the second value points to the index in batch
     std::sort(m.begin(), m.end(), utils::LessFirst());
