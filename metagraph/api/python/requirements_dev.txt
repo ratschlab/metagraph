@@ -1,4 +1,4 @@
-pip==25.2
+pip==26.0
 bumpversion==0.5.3
 wheel==0.46.2
 watchdog==0.8.3
