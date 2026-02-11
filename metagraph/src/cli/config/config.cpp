@@ -1313,14 +1313,12 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(MATCHES).c_str());
             fprintf(stderr, "\t       Available modes:\n");
-if (advanced) {
             fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
-}
-            fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
-if (advanced) {
+            fprintf(stderr, "\t                %s \tprint labels and the number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
             fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
+if (advanced) {
             fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
 }
             fprintf(stderr, "\t                %s \t\tprint k-mer counts, requires count or coord annotation (...)\n", querymode_to_string(COUNTS).c_str());
@@ -1371,7 +1369,7 @@ if (advanced) {
             fprintf(stderr, "\t   --max-hull-depth [INT]\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
             fprintf(stderr, "\n");
 }
-            fprintf(stderr, "Advanced options for scoring:\n");
+            fprintf(stderr, "\tAdvanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
             fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
@@ -1382,7 +1380,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
 }
             fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for seeding:\n");
+            fprintf(stderr, "\tAdvanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
