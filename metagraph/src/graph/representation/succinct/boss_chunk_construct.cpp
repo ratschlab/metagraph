@@ -284,6 +284,7 @@ class SuffixRangeIndexer {
                 prev_kmer_ = kmer;
             }
             if (valid_suffix_) {
+                assert(2 * suffix_index_ + 1 < ranges_->size() && "suffix_index within bounds");
                 auto &begin = (*ranges_)[2 * suffix_index_];
                 auto &end = (*ranges_)[2 * suffix_index_ + 1];
                 if (!begin)

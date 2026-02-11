@@ -53,7 +53,7 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         }
     }
 
-    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
+    return take_values(std::move(unique_rows));
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
