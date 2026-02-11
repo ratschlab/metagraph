@@ -201,14 +201,14 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
         }
     } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : *v) {
+        for (const auto &[label, count, kmer_presence_mask] : *v) {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
             sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
-            label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
@@ -302,9 +302,9 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         }
     } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : *v) {
+        for (const auto &[label, count, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
-                                  sdsl::util::cnt_one_bits(kmer_presence_mask),
+                                  count,
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
@@ -562,26 +562,6 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     }
 }
 
-template <typename T>
-annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
-                                      std::vector<T> *rows) {
-    assert(rows);
-    annot::LabelEncoder<std::string> new_encoder;
-    tsl::hopscotch_map<size_t, size_t> old_to_new;
-    for (auto &row : *rows) {
-        for (auto &v : row) {
-            auto &j = utils::get_first(v);
-            auto [it, inserted] = old_to_new.emplace(j, new_encoder.size());
-            if (inserted)
-                new_encoder.insert_and_encode(encoder.decode(j));
-
-            assert(encoder.decode(j) == new_encoder.decode(it->second));
-            j = it->second;
-        }
-    }
-    return new_encoder;
-}
-
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
  *             from the full annotation matrix
@@ -591,6 +571,7 @@ annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
  * @param[in]  full_to_small    The mapping between the rows in the full matrix
  *                              and its submatrix.
  * @param[in]  num_threads      The number of threads used.
+ * @param[in]  query_mode       The query mode (determines the output annotation type)
  *
  * @return     Annotation submatrix
  */
@@ -598,8 +579,13 @@ std::unique_ptr<AnnotatedDBG::Annotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
-                 size_t num_threads) {
-    if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+                 size_t num_threads,
+                 QueryMode query_mode) {
+    // NOTE: If a new query mode is added that requires IntMatrix (integer
+    // annotation), it must be added to this condition as well.
+    if (query_mode == COUNTS || query_mode == COUNTS_SUM) {
+        const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
+
         // don't break the topological order for row-diff annotation
         if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
             ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
@@ -613,9 +599,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_indexes.push_back(in_full);
         }
 
-        auto slice = mat->get_row_values(row_indexes);
-
-        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
+        // TODO: make multithreaded
+        auto slice = mat.get_row_values(row_indexes);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
@@ -625,8 +610,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::IntRowAnnotator>(
-            std::make_unique<CSRMatrix>(std::move(rows), label_encoder.size()),
-            std::move(label_encoder)
+            std::make_unique<CSRMatrix>(std::move(rows), full_annotation.num_labels()),
+            full_annotation.get_label_encoder().make_static_copy()
         );
     }
 
@@ -651,14 +636,12 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_ids[full_to_small[i].second] = row_indexes[i];
     }
 
-    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
-
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                           std::move(row_ids),
-                                          label_encoder.size()),
-        std::move(label_encoder)
+                                          full_annotation.num_labels()),
+        full_annotation.get_label_encoder().make_static_copy()
     );
 }
 
@@ -862,7 +845,7 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      const Config *config) {
+                      const Config &config) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
@@ -875,25 +858,25 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     size_t max_hull_depth = 0;
     size_t max_num_nodes_per_suffix = 1;
     double max_hull_depth_per_seq_char = 0.0;
-    if (config) {
-        if (config->alignment_min_seed_length > full_dbg.get_k()) {
+    if (config.align_sequences && config.batch_align) {
+        if (config.alignment_min_seed_length > full_dbg.get_k()) {
             logger->warn("Can't match suffixes longer than k={}."
                          " The value of k={} will be used.",
                          full_dbg.get_k(), full_dbg.get_k());
         }
-        if (config->alignment_min_seed_length
-                && config->alignment_min_seed_length < full_dbg.get_k()) {
+        if (config.alignment_min_seed_length
+                && config.alignment_min_seed_length < full_dbg.get_k()) {
             if (!dbg_succ) {
                 logger->error("Matching suffixes of k-mers only supported for DBGSuccinct");
                 exit(1);
             }
-            sub_k = config->alignment_min_seed_length;
+            sub_k = config.alignment_min_seed_length;
         }
 
-        max_hull_forks = config->max_hull_forks;
-        max_hull_depth = config->max_hull_depth;
-        max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
-        max_num_nodes_per_suffix = config->alignment_max_num_seeds_per_locus;
+        max_hull_forks = config.max_hull_forks;
+        max_hull_depth = config.max_hull_depth;
+        max_hull_depth_per_seq_char = config.alignment_max_nodes_per_seq_char;
+        max_num_nodes_per_suffix = config.alignment_max_num_seeds_per_locus;
     }
 
     Timer timer;
@@ -1075,7 +1058,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto annotation = slice_annotation(full_annotation,
                                        graph->max_index(),
                                        std::move(from_full_to_small),
-                                       num_threads);
+                                       num_threads,
+                                       config.query_mode);
 
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
@@ -1323,7 +1307,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                     }
                 },
                 threads_per_batch,
-                aligner_config_ && config_.batch_align ? &config_ : NULL
+                config_
             );
 
             auto query_graph_construction = batch_timer.elapsed();

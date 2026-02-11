@@ -1,5 +1,9 @@
 #include "int_matrix.hpp"
 
+#include <tsl/hopscotch_map.h>
+
+#include "common/algorithms.hpp"
+
 
 namespace mtg {
 namespace annot {
@@ -28,26 +32,46 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 
     auto row_values = get_row_values(rows);
 
-    size_t n_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
-    Vector<std::pair<size_t, size_t>> counts(n_cols, std::make_pair(0, 0));
-
-    for (size_t t = 0; t < index_counts.size(); ++t) {
-        auto [i, count] = index_counts[t];
-        for (const auto &[j, value] : row_values[t]) {
-            counts[j].first += count;
-            counts[j].second += count * value;
+    auto sum_rows = [&](auto &counts) {
+        for (size_t t = 0; t < index_counts.size(); ++t) {
+            auto [i, count] = index_counts[t];
+            for (const auto &[j, value] : row_values[t]) {
+                counts[j].first += count;
+                counts[j].second += count * value;
+            }
         }
+    };
+
+    size_t num_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
+    constexpr size_t kMinReserve = 1024;
+    if (num_cols < utils::kDenseCountThreshold) {
+        // For few columns, counting with a dense vector is faster than a hash table
+        Vector<std::pair<size_t, size_t>> counts(num_cols);
+        sum_rows(counts);
+
+        RowValues result;
+        result.reserve(std::min<size_t>(num_cols, kMinReserve));
+
+        for (size_t j = 0; j < num_cols; ++j) {
+            if (counts[j].first >= min_count) {
+                result.emplace_back(j, counts[j].second);
+            }
+        }
+        return result;
     }
+
+    tsl::hopscotch_map<Column, std::pair<size_t, size_t>> counts;
+    counts.reserve(std::min<size_t>(num_cols, kMinReserve));
+    sum_rows(counts);
 
     RowValues result;
-    result.reserve(n_cols);
+    result.reserve(std::min<size_t>(num_cols, kMinReserve));
 
-    for (size_t j = 0; j < n_cols; ++j) {
-        if (counts[j].first >= min_count) {
-            result.emplace_back(j, counts[j].second);
+    for (const auto &[j, pair] : counts) {
+        if (pair.first >= min_count) {
+            result.emplace_back(j, pair.second);
         }
     }
-
     return result;
 }
 

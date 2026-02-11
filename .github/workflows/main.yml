@@ -113,7 +113,7 @@ jobs:
   # ========================================================================
 
   test-workflows:
-    name: Test metagraph workflows
+    name: Test workflows (with static binary)
     runs-on: ubuntu-22.04
     needs:
       - Linux
