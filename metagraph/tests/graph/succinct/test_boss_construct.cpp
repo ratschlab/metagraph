@@ -11,6 +11,7 @@
 #define protected public
 #define private public
 
+#include "common/algorithms.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
@@ -299,10 +300,7 @@ TEST(BOSSConstruct, SuffixRangesFromKmersMatchIndexing) {
                 ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
 
                 // save the on-the-fly suffix ranges
-                size_t num_ranges = 1;
-                for (size_t i = 0; i < suffix_length; ++i) {
-                    num_ranges *= (constructed.alph_size - 1);
-                }
+                const size_t num_ranges = utils::ipow(constructed.alph_size - 1, suffix_length);
                 std::vector<uint64_t> onthefly_ranges(2 * num_ranges);
                 for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
                     onthefly_ranges[i] = constructed.get_suffix_range(i);
@@ -672,10 +670,7 @@ TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
                 }
                 reference.index_suffix_ranges(suffix_length, 1);
 
-                size_t num_ranges = 1;
-                for (size_t i = 0; i < suffix_length; ++i) {
-                    num_ranges *= (loaded.alph_size - 1);
-                }
+                const size_t num_ranges = utils::ipow(loaded.alph_size - 1, suffix_length);
                 for (size_t i = 0; i < 2 * num_ranges; ++i) {
                     EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
                         << "k=" << k << " suffix_length=" << suffix_length << " i=" << i;
@@ -787,10 +782,7 @@ TEST(BOSSConstruct, SuffixRangesMaxSuffixLength) {
         chunk.initialize_boss(&constructed);
         ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
 
-        size_t num_ranges = 1;
-        for (size_t i = 0; i < suffix_length; ++i) {
-            num_ranges *= (constructed.alph_size - 1);
-        }
+        const size_t num_ranges = utils::ipow(constructed.alph_size - 1, suffix_length);
         std::vector<uint64_t> onthefly_ranges(2 * num_ranges);
         for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
             onthefly_ranges[i] = constructed.get_suffix_range(i);
@@ -848,7 +840,7 @@ TEST(BOSSConstruct, SuffixRangesSingleKmer) {
         }
         reference.index_suffix_ranges(1, 1);
 
-        size_t num_ranges = loaded.alph_size - 1;
+        const size_t num_ranges = utils::ipow(loaded.alph_size - 1, 1);
         for (size_t i = 0; i < 2 * num_ranges; ++i) {
             EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
                 << "k=" << k << " i=" << i;

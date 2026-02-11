@@ -1,5 +1,7 @@
 #include "boss_chunk_construct.hpp"
 
+#include <cmath>
+
 #include <ips4o.hpp>
 
 #include "common/algorithms.hpp"

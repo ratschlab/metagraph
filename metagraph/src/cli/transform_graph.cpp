@@ -3,6 +3,7 @@
 #include <cmath>
 #include <filesystem>
 
+#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
@@ -23,16 +24,15 @@ void index_suffix_ranges(size_t suffix_length,
                          graph::DBGSuccinct *dbg_succ) {
     suffix_length = std::min(suffix_length, dbg_succ->get_boss().get_k());
 
-    if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
+    const uint8_t alph_size = dbg_succ->get_boss().alph_size;
+    if (suffix_length * log2(alph_size - 1) > 63) {
         logger->error("Node ranges for k-mer suffixes longer than {} cannot be indexed",
-                      static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
+                      static_cast<int>(63 / log2(alph_size - 1)));
         exit(1);
     }
 
     logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                  suffix_length,
-                  std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
-                        * 2. * sizeof(uint64_t) * 1e-6);
+                  suffix_length, utils::ipow(alph_size - 1, suffix_length) * 2. * sizeof(uint64_t) * 1e-6);
     Timer timer;
     dbg_succ->get_boss().index_suffix_ranges(suffix_length, num_threads);
     logger->trace("Compressed node ranges to approx. {:.2f} MB",
