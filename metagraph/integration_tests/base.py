@@ -22,6 +22,7 @@ def update_prefix(PREFIX):
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 
 graph_file_extension = {'succinct': '.dbg',
+                        'succinct_swap': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
                         'hashfast': '.hashfastdbg',
@@ -82,6 +83,10 @@ class TestingBase(unittest.TestCase):
             output += graph_file_extension[repr]
 
         assert mode in ['basic', 'primary', 'canonical']
+
+        if repr.endswith('_swap'):
+            extra_params = '--disk-swap /tmp/ --mem-cap-gb 0.5 ' + extra_params
+            repr = repr[:-5]
 
         construct_command = '{exe} build -p {num_threads} --mode {mode} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
