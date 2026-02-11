@@ -750,9 +750,12 @@ TEST(BOSSConstruct, SuffixRangesSerializeSkipped) {
     {
         std::ifstream in(fname, std::ios::binary);
         ASSERT_TRUE(loaded.load(in));
-        // no mode, no suffix ranges were written — the stream should be at EOF
-        EXPECT_TRUE(in.peek() == std::ifstream::traits_type::eof()
-                    || !in.good());
+        // With mode=-1 and serialize_suffix_ranges=false, BOSS::serialize writes
+        // nothing after the BOSS data. Verify we consumed the entire file.
+        std::streampos pos = in.tellg();
+        in.seekg(0, std::ios::end);
+        std::streampos end = in.tellg();
+        EXPECT_EQ(pos, end) << "extra data written after BOSS (expected none with mode=-1, serialize_suffix_ranges=false)";
     }
 
     EXPECT_EQ(0u, loaded.get_indexed_suffix_length());

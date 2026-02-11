@@ -342,6 +342,9 @@ void BOSS::Chunk::set_indexed_suffix_ranges(size_t suffix_length, std::vector<BO
 bool BOSS::Chunk::load(const std::string &infbase) {
     std::string fname = utils::make_suffix(infbase, kFileExtension);
 
+    indexed_suffix_length_ = 0;
+    indexed_suffix_ranges_ = {};
+
     try {
         W_.close(true);
         last_.close(true);
