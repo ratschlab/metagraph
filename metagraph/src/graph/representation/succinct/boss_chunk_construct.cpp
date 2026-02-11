@@ -261,7 +261,6 @@ class SuffixRangeIndexer {
                        size_t initial_curpos,
                        std::vector<BOSS::edge_index> *ranges)
         : k_(k), indexed_suffix_length_(indexed_suffix_length),
-          alph_size_(KmerExtractorBOSS().alphabet.size()),
           curpos_(initial_curpos),
           ranges_(ranges) {}
 
@@ -296,9 +295,9 @@ class SuffixRangeIndexer {
     }
 
   private:
+    const uint8_t alph_size_ = KmerExtractorBOSS().alphabet.size();
     const size_t k_;
     const size_t indexed_suffix_length_;
-    const uint8_t alph_size_;
     size_t curpos_;
     std::vector<BOSS::edge_index> *ranges_;
     KMER prev_kmer_{0};
