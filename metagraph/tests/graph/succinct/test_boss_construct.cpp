@@ -629,58 +629,60 @@ TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
 #endif
     for (size_t k = 2; k <= kMaxK_SuffixRangesRT; ++k) {
         for (size_t suffix_length = 1; suffix_length <= k; ++suffix_length) {
-            auto constructor = IBOSSChunkConstructor::initialize(
-                k, false, 0, suffix_length, "", 1, 20'000,
-                kmer::ContainerType::VECTOR, "/tmp/", 1e9
-            );
-            constructor->add_sequences(std::vector<std::string>(input_data));
-            BOSS::Chunk chunk = constructor->build_chunk();
-
-            // serialize to a temp file (with mode=0 to enable suffix ranges)
-            const std::string fname = test_dump_basename + ".suffix_rt";
-            {
-                std::ofstream out(fname, std::ios::binary);
-                ASSERT_TRUE(out.good());
-                BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, 0, true);
-            }
-
-            // load back
-            BOSS loaded;
-            {
-                std::ifstream in(fname, std::ios::binary);
-                ASSERT_TRUE(loaded.load(in)) << "k=" << k << " suffix_length=" << suffix_length;
-                int mode = load_number(in);
-                EXPECT_EQ(0, mode);
-                ASSERT_TRUE(loaded.load_suffix_ranges(in))
-                    << "k=" << k << " suffix_length=" << suffix_length;
-            }
-
-            EXPECT_EQ(suffix_length, loaded.get_indexed_suffix_length())
-                << "k=" << k;
-
-            // compare with traditionally indexed ranges
-            BOSS reference(k);
-            {
-                auto ref_constructor = IBOSSChunkConstructor::initialize(
-                    k, false, 0, 0, "", 1, 20'000,
-                    kmer::ContainerType::VECTOR, "/tmp/", 1e9
+            for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+                auto constructor = IBOSSChunkConstructor::initialize(
+                    k, false, 0, suffix_length, "", 1, 20'000,
+                    container, "/tmp/", 1e9
                 );
-                ref_constructor->add_sequences(std::vector<std::string>(input_data));
-                BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
-                ref_chunk.initialize_boss(&reference);
-            }
-            reference.index_suffix_ranges(suffix_length, 1);
+                constructor->add_sequences(std::vector<std::string>(input_data));
+                BOSS::Chunk chunk = constructor->build_chunk();
 
-            size_t num_ranges = 1;
-            for (size_t i = 0; i < suffix_length; ++i) {
-                num_ranges *= (loaded.alph_size - 1);
-            }
-            for (size_t i = 0; i < 2 * num_ranges; ++i) {
-                EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
-                    << "k=" << k << " suffix_length=" << suffix_length << " i=" << i;
-            }
+                // serialize to a temp file (with mode=0 to enable suffix ranges)
+                const std::string fname = test_dump_basename + ".suffix_rt";
+                {
+                    std::ofstream out(fname, std::ios::binary);
+                    ASSERT_TRUE(out.good());
+                    BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, 0, true);
+                }
 
-            std::remove(fname.c_str());
+                // load back
+                BOSS loaded;
+                {
+                    std::ifstream in(fname, std::ios::binary);
+                    ASSERT_TRUE(loaded.load(in)) << "k=" << k << " suffix_length=" << suffix_length;
+                    int mode = load_number(in);
+                    EXPECT_EQ(0, mode);
+                    ASSERT_TRUE(loaded.load_suffix_ranges(in))
+                        << "k=" << k << " suffix_length=" << suffix_length;
+                }
+
+                EXPECT_EQ(suffix_length, loaded.get_indexed_suffix_length())
+                    << "k=" << k;
+
+                // compare with traditionally indexed ranges
+                BOSS reference(k);
+                {
+                    auto ref_constructor = IBOSSChunkConstructor::initialize(
+                        k, false, 0, 0, "", 1, 20'000,
+                        kmer::ContainerType::VECTOR, "/tmp/", 1e9
+                    );
+                    ref_constructor->add_sequences(std::vector<std::string>(input_data));
+                    BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
+                    ref_chunk.initialize_boss(&reference);
+                }
+                reference.index_suffix_ranges(suffix_length, 1);
+
+                size_t num_ranges = 1;
+                for (size_t i = 0; i < suffix_length; ++i) {
+                    num_ranges *= (loaded.alph_size - 1);
+                }
+                for (size_t i = 0; i < 2 * num_ranges; ++i) {
+                    EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
+                        << "k=" << k << " suffix_length=" << suffix_length << " i=" << i;
+                }
+
+                std::remove(fname.c_str());
+            }
         }
     }
 }
@@ -737,12 +739,12 @@ TEST(BOSSConstruct, SuffixRangesSerializeSkipped) {
 
     EXPECT_EQ(suffix_length, chunk.indexed_suffix_length_);
 
-    // serialize WITHOUT suffix ranges (mode=-1, serialize_suffix_ranges=false)
+    // serialize WITHOUT suffix ranges (BOSS-only overload, no mode)
     const std::string fname = test_dump_basename + ".suffix_skip";
     {
         std::ofstream out(fname, std::ios::binary);
         ASSERT_TRUE(out.good());
-        BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, -1, false);
+        BOSS::serialize(std::move(chunk), out, BOSS::State::STAT);
     }
 
     // load back: should get a valid BOSS but no suffix ranges
@@ -750,12 +752,12 @@ TEST(BOSSConstruct, SuffixRangesSerializeSkipped) {
     {
         std::ifstream in(fname, std::ios::binary);
         ASSERT_TRUE(loaded.load(in));
-        // With mode=-1 and serialize_suffix_ranges=false, BOSS::serialize writes
-        // nothing after the BOSS data. Verify we consumed the entire file.
+        // The BOSS-only overload writes nothing after the BOSS data.
+        // Verify we consumed the entire file.
         std::streampos pos = in.tellg();
         in.seekg(0, std::ios::end);
         std::streampos end = in.tellg();
-        EXPECT_EQ(pos, end) << "extra data written after BOSS (expected none with mode=-1, serialize_suffix_ranges=false)";
+        EXPECT_EQ(pos, end) << "extra data written after BOSS (expected none with BOSS-only overload)";
     }
 
     EXPECT_EQ(0u, loaded.get_indexed_suffix_length());

@@ -624,7 +624,7 @@ class BOSS {
      * recover the original range values via get_suffix_range().
      */
     static sdsl::sd_vector<> build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
-                                                    uint64_t universe_size);
+                                                    uint64_t num_edges);
 
   public:
     class Chunk;

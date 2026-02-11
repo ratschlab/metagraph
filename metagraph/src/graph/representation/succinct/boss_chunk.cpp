@@ -329,13 +329,14 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     return graph;
 }
 
-void BOSS::Chunk::set_indexed_suffix_ranges(size_t suffix_length, std::vector<BOSS::edge_index>&& ranges) {
+void BOSS::Chunk::set_indexed_suffix_ranges(size_t suffix_length,
+                                            std::vector<edge_index>&& ranges) {
     indexed_suffix_length_ = suffix_length;
     indexed_suffix_ranges_ = {};
     if (suffix_length) {
         assert(ranges.size()
                 && "suffix ranges must be initialized before building the suffix ranges index");
-        indexed_suffix_ranges_ = BOSS::build_suffix_ranges_sd(std::move(ranges), W_.size());
+        indexed_suffix_ranges_ = build_suffix_ranges_sd(std::move(ranges), W_.size());
     }
 }
 
