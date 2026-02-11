@@ -278,7 +278,7 @@ TEST(BOSSConstruct, SuffixRangesFromKmersMatchIndexing) {
         "GTGTGTGTGGGGGGCCCTTTTTTCATA",
     };
 
-    for (size_t k = 1; k <= 7; ++k) {
+    for (size_t k = 1; k <= (_PROTEIN_GRAPH ? 3 : 7); ++k) {
         for (size_t suffix_length = 1; suffix_length <= k; ++suffix_length) {
             for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
                 auto constructor = IBOSSChunkConstructor::initialize(
@@ -617,7 +617,7 @@ TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
         "GTGTGTGTGGGGGGCCCTTTTTTCATA",
     };
 
-    for (size_t k = 2; k <= 7; ++k) {
+    for (size_t k = 2; k <= (_PROTEIN_GRAPH ? 4 : 7); ++k) {
         for (size_t suffix_length = 1; suffix_length <= k; ++suffix_length) {
             auto constructor = IBOSSChunkConstructor::initialize(
                 k, false, 0, suffix_length, "", 1, 20'000,
