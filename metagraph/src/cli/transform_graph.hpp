@@ -3,9 +3,6 @@
 
 #include <cstddef>
 
-namespace mtg::graph {
-class DBGSuccinct;
-} // namespace mtg::graph
 
 namespace mtg {
 namespace cli {
