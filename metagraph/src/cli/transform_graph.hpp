@@ -1,8 +1,6 @@
 #ifndef __TRANSFORM_GRAPH_HPP__
 #define __TRANSFORM_GRAPH_HPP__
 
-#include <cstddef>
-
 
 namespace mtg {
 namespace cli {
