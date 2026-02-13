@@ -92,7 +92,8 @@ int transform_graph(Config *config) {
     }
 
     if (config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
-        size_t suffix_length = std::min<size_t>(config->node_suffix_length, dbg_succ->get_boss().get_k());
+        size_t suffix_length = std::min((size_t)config->node_suffix_length,
+                                        dbg_succ->get_boss().get_k());
         timer.reset();
         dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
         logger->trace("Indexing of node ranges took {} sec", timer.elapsed());

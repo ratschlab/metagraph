@@ -2,7 +2,6 @@
 #define __BOSS_CHUNK_HPP__
 
 #include <type_traits>
-#include <vector>
 
 #include <sdsl/int_vector_buffer.hpp>
 

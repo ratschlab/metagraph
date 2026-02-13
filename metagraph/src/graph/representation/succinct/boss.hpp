@@ -1,7 +1,6 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
-#include <ostream>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
