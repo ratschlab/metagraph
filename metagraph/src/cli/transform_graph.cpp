@@ -19,15 +19,6 @@ namespace cli {
 using mtg::common::logger;
 
 
-void index_suffix_ranges(size_t suffix_length,
-                         size_t num_threads,
-                         graph::DBGSuccinct *dbg_succ) {
-    suffix_length = std::min(suffix_length, dbg_succ->get_boss().get_k());
-    Timer timer;
-    dbg_succ->get_boss().index_suffix_ranges(suffix_length, num_threads);
-    logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
-}
-
 int transform_graph(Config *config) {
     assert(config);
 
@@ -100,8 +91,12 @@ int transform_graph(Config *config) {
         timer.reset();
     }
 
-    if (config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length())
-        index_suffix_ranges(config->node_suffix_length, get_num_threads(), dbg_succ.get());
+    if (config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
+        size_t suffix_length = std::min<size_t>(config->node_suffix_length, dbg_succ->get_boss().get_k());
+        timer.reset();
+        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
+        logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+    }
 
     if (config->to_adj_list) {
         logger->trace("Converting graph to adjacency list...");

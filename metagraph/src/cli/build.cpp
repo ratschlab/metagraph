@@ -14,7 +14,6 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
-#include "transform_graph.hpp"
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
@@ -408,8 +407,6 @@ int concatenate_graph_chunks(Config *config) {
                               " those that cannot be removed");
                 dbg_succ->mask_dummy_kmers(get_num_threads(), true);
             }
-
-            index_suffix_ranges(config->node_suffix_length, get_num_threads(), dbg_succ.get());
 
             graph = std::move(dbg_succ);
             break;
