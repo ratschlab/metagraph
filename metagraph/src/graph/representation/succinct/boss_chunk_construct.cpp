@@ -236,6 +236,21 @@ Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
 }
 
 
+size_t check_num_suffix_ranges(size_t suffix_length) {
+    // alphabet.size() - 1 because we don't index suffixes with $
+    const uint8_t sigma = KmerExtractorBOSS().alphabet.size() - 1;
+    const size_t max_suffix_len = static_cast<size_t>(63 / log2(sigma));
+    if (suffix_length > max_suffix_len) {
+        logger->error("Node ranges for k-mer suffixes longer than {} cannot be indexed",
+                      max_suffix_len);
+        exit(1);
+    }
+    size_t num_ranges = utils::ipow(sigma, suffix_length);
+    logger->trace("Indexing all node ranges for suffixes of length {} in {:.2f} MB",
+                  suffix_length, num_ranges * 2. * sizeof(uint64_t) * 1e-6);
+    return num_ranges;
+}
+
 /**
  * Indexes node ranges for k-mer suffixes during BOSS construction.
  * Tracks the current edge position and updates the suffix range index
@@ -247,24 +262,16 @@ class SuffixRangeIndexer {
     static std::vector<BOSS::edge_index> init_ranges(size_t indexed_suffix_length) {
         if (!indexed_suffix_length)
             return {};
-
-        const uint8_t alph_size = KmerExtractorBOSS().alphabet.size();
-        if (indexed_suffix_length * log2(alph_size - 1) > 63) {
-            logger->error("Trying to index too long suffixes");
-            exit(1);
-        }
-        size_t num_suffixes = utils::ipow(alph_size - 1, indexed_suffix_length);
-        logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                      indexed_suffix_length, 2. * num_suffixes * sizeof(uint64_t) * 1e-6);
-        return std::vector<BOSS::edge_index>(2 * num_suffixes, 0);
+        size_t num_ranges = check_num_suffix_ranges(indexed_suffix_length);
+        return std::vector<BOSS::edge_index>(2 * num_ranges, 0);
     }
 
     SuffixRangeIndexer(size_t k, size_t indexed_suffix_length,
-                       size_t initial_curpos,
+                       size_t initial_pos,
                        std::vector<BOSS::edge_index> *ranges)
         : k_(k), indexed_suffix_length_(indexed_suffix_length),
-          curpos_(initial_curpos),
-          ranges_(ranges) {}
+          pos_(initial_pos),
+          ranges_(*ranges) {}
 
     template <typename V>
     void operator()(const V &v) {
@@ -272,7 +279,7 @@ class SuffixRangeIndexer {
             KMER kmer(get_first(v));
             if (!KMER::compare_suffix(kmer, prev_kmer_, k_ - indexed_suffix_length_)) {
                 // new suffix
-                suffix_index_ = 0;
+                uint64_t suffix_index_ = 0;
                 valid_suffix_ = true;
                 for (size_t offset = 0; offset < indexed_suffix_length_; ++offset) {
                     const auto c = kmer[k_ - offset];
@@ -283,28 +290,27 @@ class SuffixRangeIndexer {
                     suffix_index_ = suffix_index_ * (alph_size_ - 1) + (c - 1);
                 }
                 prev_kmer_ = kmer;
+                if (valid_suffix_) {
+                    assert(2 * suffix_index_ + 1 < ranges_.size() && "suffix_index within bounds");
+                    ranges_[2 * suffix_index_] = pos_;  // set the range begin
+                    range_end_ = &ranges_[2 * suffix_index_ + 1];
+                }
             }
-            if (valid_suffix_) {
-                assert(2 * suffix_index_ + 1 < ranges_->size() && "suffix_index within bounds");
-                auto &begin = (*ranges_)[2 * suffix_index_];
-                auto &end = (*ranges_)[2 * suffix_index_ + 1];
-                if (!begin)
-                    begin = curpos_;
-                end = curpos_ + 1;
-            }
+            if (valid_suffix_)
+                *range_end_ = pos_ + 1;  // update the range end
         }
-        curpos_++;
+        pos_++;
     }
 
   private:
     const uint8_t alph_size_ = KmerExtractorBOSS().alphabet.size();
     const size_t k_;
     const size_t indexed_suffix_length_;
-    size_t curpos_;
-    std::vector<BOSS::edge_index> *ranges_;
+    size_t pos_;
+    std::vector<BOSS::edge_index> &ranges_;
+    BOSS::edge_index *range_end_;
     KMER prev_kmer_{0};
     bool valid_suffix_ = false;
-    uint64_t suffix_index_ = 0;
 };
 
 /**
@@ -1070,7 +1076,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         #pragma omp ordered
         {
             // Fix up suffix range offsets for this chunk. Each chunk writes
-            // ranges with chunk-local positions (curpos starts at 1). We need
+            // ranges with chunk-local positions (pos starts at 1). We need
             // to shift them by the cumulative size of all previous chunks.
             // Different F values map to disjoint suffix indices, so this is safe.
             if (indexed_suffix_length) {

@@ -221,8 +221,7 @@ class TestDiffAssembly(TestingBase):
             cls.graph_repr = 'succinct'
             cls.mask_dummy = True
 
-        if cls.graph_repr.endswith('_swap'):
-            cls.graph_repr = cls.graph_repr[:-len('_swap')]
+        cls.graph_repr = cls.graph_repr.removesuffix('_swap')
 
         k = 31
         construct_command = '{exe} build {mask_dummy} -p {num_threads} \

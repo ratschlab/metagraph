@@ -34,6 +34,8 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
     virtual uint64_t get_k() const = 0;
 };
 
+size_t check_num_suffix_ranges(size_t suffix_length);
+
 } // namespace boss
 } // namespace graph
 } // namespace mtg

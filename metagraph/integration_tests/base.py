@@ -86,7 +86,7 @@ class TestingBase(unittest.TestCase):
 
         if repr.endswith('_swap'):
             extra_params = '--disk-swap /tmp/ --mem-cap-gb 0.5 ' + extra_params
-            repr = repr[:-5]
+            repr = repr.removesuffix('_swap')
 
         construct_command = '{exe} build -p {num_threads} --mode {mode} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(

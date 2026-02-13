@@ -455,14 +455,18 @@ namespace utils {
      * @throws std::overflow_error if the result would overflow uint64_t
      */
     inline uint64_t ipow(uint64_t base, unsigned int exp) {
+        if (base == 0)
+            return exp == 0;
+
         uint64_t result = 1;
         while (exp > 0) {
+            const uint64_t max_multiple = std::numeric_limits<uint64_t>::max() / base;
             if (exp % 2) {
-                if (base != 0 && result > std::numeric_limits<uint64_t>::max() / base)
+                if (result > max_multiple)
                     throw std::overflow_error("ipow: overflow");
                 result *= base;
             }
-            if (exp > 1 && base != 0 && base > std::numeric_limits<uint64_t>::max() / base)
+            if (exp > 1 && base > max_multiple)
                 throw std::overflow_error("ipow: overflow");
             base *= base;
             exp /= 2;

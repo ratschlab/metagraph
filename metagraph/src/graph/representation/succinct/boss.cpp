@@ -110,7 +110,11 @@ sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
     for (auto pos : ranges) {
         builder.set(pos);
     }
-    return sdsl::sd_vector<>(builder);
+    sdsl::sd_vector<> sd(builder);
+    logger->trace("Compressed node ranges to approx. {:.2f} MB",
+                  footprint_sd_vector(sd.size(), ranges.size()) / 8e6);
+    ranges = {};
+    return sd;
 }
 
 template <uint8_t t_width>
@@ -146,7 +150,6 @@ void BOSS::initialize(Chunk *chunk) {
         indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
         indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
         indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
-        logger->trace("Node ranges compressed to {:.2f} MB", get_suffix_ranges_index_size() / 8e6);
     }
 }
 
@@ -3180,8 +3183,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
     if (indexed_suffix_length_ == 0u)
         return;
 
-    if (indexed_suffix_length_ * log2(alph_size - 1) > 63)
-        throw std::runtime_error("ERROR: Trying to index too long suffixes");
+    check_num_suffix_ranges(indexed_suffix_length_);
 
     // first, take empty suffix and the entire range of nodes in the BOSS table
     // will store pairs: begin[0], end[0], begin[1], end[1], ...
