@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include <tsl/hopscotch_set.h>
+
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
@@ -79,7 +81,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    #pragma omp parallel for num_threads(num_threads) schedule(static, 2048) private(node_to_rd)
+    tsl::hopscotch_set<Row> visited_rows;
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(static, 500) private(visited_rows)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
@@ -89,8 +92,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
             assert(graph_->in_graph(node));
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.key());
+            bool is_new = visited_rows.insert(row).second;
+            rd_paths_trunc[i].push_back(row);
 
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
@@ -104,9 +107,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
             node = row_diff_successor(*graph_, node, fork_succ_);
         }
-    }
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
+        #pragma omp ordered
         for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
             auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
             rd_paths_trunc[i][j] = it.value();
@@ -118,7 +120,6 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     }
 
     auto m = to_vector(std::move(node_to_rd));
-
     // sort by indexes of rd rows
     // the second value points to the index in batch
     std::sort(m.begin(), m.end(), utils::LessFirst());

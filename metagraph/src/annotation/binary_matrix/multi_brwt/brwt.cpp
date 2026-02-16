@@ -8,7 +8,6 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/logger.hpp"
 
 
 namespace mtg {
@@ -55,7 +54,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     std::mutex mu;
     std::vector<SetBitPositions> rows(row_ids.size());
     slice_rows<Column>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, 20, std::max<int>(10, num_columns() / 20), thread_pool,
+        {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
         [&](const std::vector<size_t> &sliced_rows, const Vector<Column> &slice) {
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
