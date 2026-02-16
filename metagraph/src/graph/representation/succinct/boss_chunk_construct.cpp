@@ -279,7 +279,7 @@ class SuffixRangeIndexer {
             KMER kmer(get_first(v));
             if (!KMER::compare_suffix(kmer, prev_kmer_, k_ - indexed_suffix_length_)) {
                 // new suffix
-                uint64_t suffix_index_ = 0;
+                uint64_t suffix_index = 0;
                 valid_suffix_ = true;
                 for (size_t offset = 0; offset < indexed_suffix_length_; ++offset) {
                     const auto c = kmer[k_ - offset];
@@ -287,20 +287,25 @@ class SuffixRangeIndexer {
                         valid_suffix_ = false;
                         break;
                     }
-                    suffix_index_ = suffix_index_ * (alph_size_ - 1) + (c - 1);
+                    suffix_index = suffix_index * (alph_size_ - 1) + (c - 1);
                 }
                 prev_kmer_ = kmer;
                 if (valid_suffix_) {
-                    assert(2 * suffix_index_ + 1 < ranges_.size() && "suffix_index within bounds");
-                    ranges_[2 * suffix_index_] = pos_;  // set the range begin
-                    range_end_ = &ranges_[2 * suffix_index_ + 1];
+                    assert(2 * suffix_index + 1 < ranges_.size() && "suffix_index within bounds");
+                    ranges_[2 * suffix_index] = pos_;  // set the range begin
+                    range_end_ = &ranges_[2 * suffix_index + 1];
                 }
             }
             if (valid_suffix_)
                 *range_end_ = pos_ + 1;  // update the range end
         }
+        // Here we assume that all redundant dummy k-mers have been removed, so each new k-mer
+        // corresponds to an actual new edge in the BOSS table and thus increments the position.
+        // This assumption is checked below by comparing the final pos_ with the final chunk size.
         pos_++;
     }
+
+    size_t pos() const { return pos_; }
 
   private:
     const uint8_t alph_size_ = KmerExtractorBOSS().alphabet.size();
@@ -308,7 +313,7 @@ class SuffixRangeIndexer {
     const size_t indexed_suffix_length_;
     size_t pos_;
     std::vector<BOSS::edge_index> &ranges_;
-    BOSS::edge_index *range_end_;
+    BOSS::edge_index *range_end_ = nullptr;
     KMER prev_kmer_{0};
     bool valid_suffix_ = false;
 };
@@ -436,6 +441,12 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
 
     BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(), k, *kmers_out,
                        bits_per_count, swap_dir);
+    if (index_suffix.pos() != result.size()) {
+        assert(false && "should never happen: all redundant dummy k-mers must be removed");
+        logger->error("Suffix range indexer counted {} k-mers, but the chunk size is {}",
+                      index_suffix.pos(), result.size());
+        exit(1);
+    }
     result.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
 
     kmer_collector.clear();
@@ -992,9 +1003,15 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
         kmers_out->shutdown();
     });
 
-    return BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), k,
-                       reinterpret_container<T>(*kmers_out),
-                       bits_per_count, swap_dir);
+    BOSS::Chunk chunk(KmerExtractorBOSS().alphabet.size(), k, reinterpret_container<T>(*kmers_out),
+                      bits_per_count, swap_dir);
+    if (index_suffix.pos() != chunk.size()) {
+        assert(false && "should never happen: all redundant dummy k-mers must be removed");
+        logger->error("Suffix range indexer counted {} k-mers, but the chunk size is {}",
+                      index_suffix.pos(), chunk.size());
+        exit(1);
+    }
+    return chunk;
 }
 
 template <typename T>

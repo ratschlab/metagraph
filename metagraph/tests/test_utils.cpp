@@ -1145,4 +1145,139 @@ TEST(smooth_vector, check_asserts_even) {
     }
 }
 
+// ============================================================
+// ipow tests
+// ============================================================
+
+TEST(ipow, ZeroExpReturnsOne) {
+    EXPECT_EQ(1u, utils::ipow(0, 0));
+    EXPECT_EQ(1u, utils::ipow(1, 0));
+    EXPECT_EQ(1u, utils::ipow(2, 0));
+    EXPECT_EQ(1u, utils::ipow(100, 0));
+    EXPECT_EQ(1u, utils::ipow(std::numeric_limits<uint64_t>::max(), 0));
+}
+
+TEST(ipow, ZeroBaseReturnsZero) {
+    EXPECT_EQ(0u, utils::ipow(0, 1));
+    EXPECT_EQ(0u, utils::ipow(0, 2));
+    EXPECT_EQ(0u, utils::ipow(0, 100));
+}
+
+TEST(ipow, OneBaseAlwaysOne) {
+    EXPECT_EQ(1u, utils::ipow(1, 0));
+    EXPECT_EQ(1u, utils::ipow(1, 1));
+    EXPECT_EQ(1u, utils::ipow(1, 100));
+    EXPECT_EQ(1u, utils::ipow(1, std::numeric_limits<unsigned int>::max()));
+}
+
+TEST(ipow, ExpOneReturnsBase) {
+    EXPECT_EQ(2u, utils::ipow(2, 1));
+    EXPECT_EQ(5u, utils::ipow(5, 1));
+    EXPECT_EQ(123456789u, utils::ipow(123456789, 1));
+    EXPECT_EQ(std::numeric_limits<uint64_t>::max(),
+              utils::ipow(std::numeric_limits<uint64_t>::max(), 1));
+}
+
+TEST(ipow, SmallPowersOfTwo) {
+    for (unsigned int e = 0; e < 64; ++e) {
+        EXPECT_EQ(uint64_t(1) << e, utils::ipow(2, e)) << "2^" << e;
+    }
+}
+
+TEST(ipow, PowersOfTen) {
+    uint64_t expected = 1;
+    for (unsigned int e = 0; e <= 19; ++e) {
+        EXPECT_EQ(expected, utils::ipow(10, e)) << "10^" << e;
+        if (e < 19)
+            expected *= 10;
+    }
+}
+
+TEST(ipow, SmallBaseSmallExp) {
+    // brute-force check for small values
+    for (uint64_t base = 2; base <= 20; ++base) {
+        uint64_t result = 1;
+        for (unsigned int exp = 0; exp <= 15; ++exp) {
+            EXPECT_EQ(result, utils::ipow(base, exp))
+                << base << "^" << exp;
+            if (result <= std::numeric_limits<uint64_t>::max() / base)
+                result *= base;
+            else
+                break;
+        }
+    }
+}
+
+TEST(ipow, MatchesBOSSAlphabetSizes) {
+    // DNA: sigma = alph_size - 1 = 5
+    EXPECT_EQ(1u,   utils::ipow(5, 0));
+    EXPECT_EQ(5u,   utils::ipow(5, 1));
+    EXPECT_EQ(25u,  utils::ipow(5, 2));
+    EXPECT_EQ(125u, utils::ipow(5, 3));
+    EXPECT_EQ(uint64_t(5) * 5 * 5 * 5 * 5 * 5 * 5, utils::ipow(5, 7));
+
+    // Protein: sigma = 21
+    EXPECT_EQ(21u,    utils::ipow(21, 1));
+    EXPECT_EQ(441u,   utils::ipow(21, 2));
+    EXPECT_EQ(9261u,  utils::ipow(21, 3));
+}
+
+TEST(ipow, LargestNonOverflowing) {
+    // 2^63 is the largest power of 2 that fits in uint64_t
+    EXPECT_EQ(uint64_t(1) << 63, utils::ipow(2, 63));
+
+    // 3^40 = 12157665459056928801, fits in uint64_t
+    EXPECT_EQ(UINT64_C(12157665459056928801), utils::ipow(3, 40));
+
+    // 5^27 = 7450580596923828125, fits
+    EXPECT_EQ(UINT64_C(7450580596923828125), utils::ipow(5, 27));
+
+    // 10^19 = 10000000000000000000, fits
+    EXPECT_EQ(UINT64_C(10000000000000000000), utils::ipow(10, 19));
+
+    // UINT64_MAX^1 fits
+    EXPECT_EQ(std::numeric_limits<uint64_t>::max(),
+              utils::ipow(std::numeric_limits<uint64_t>::max(), 1));
+}
+
+TEST(ipow, OverflowThrows) {
+    // 2^64 overflows
+    EXPECT_THROW(utils::ipow(2, 64), std::overflow_error);
+
+    // 3^41 overflows (3^40 * 3 > UINT64_MAX)
+    EXPECT_THROW(utils::ipow(3, 41), std::overflow_error);
+
+    // 5^28 overflows
+    EXPECT_THROW(utils::ipow(5, 28), std::overflow_error);
+
+    // 10^20 overflows
+    EXPECT_THROW(utils::ipow(10, 20), std::overflow_error);
+
+    // large base with exp=2
+    EXPECT_THROW(utils::ipow(uint64_t(1) << 32, 2), std::overflow_error);
+
+    // UINT64_MAX^2 overflows
+    EXPECT_THROW(utils::ipow(std::numeric_limits<uint64_t>::max(), 2),
+                 std::overflow_error);
+
+    // large base, large exp
+    EXPECT_THROW(utils::ipow(1000000, 4), std::overflow_error);
+}
+
+TEST(ipow, OverflowBoundary) {
+    // For base=2: 2^63 fits, 2^64 does not
+    EXPECT_NO_THROW(utils::ipow(2, 63));
+    EXPECT_THROW(utils::ipow(2, 64), std::overflow_error);
+
+    // For base=10: 10^19 fits, 10^20 does not
+    EXPECT_NO_THROW(utils::ipow(10, 19));
+    EXPECT_THROW(utils::ipow(10, 20), std::overflow_error);
+
+    // UINT64_MAX = 18446744073709551615
+    // floor(UINT64_MAX^(1/2)) = 4294967295 = 2^32 - 1
+    uint64_t sqrt_max = (uint64_t(1) << 32) - 1;
+    EXPECT_NO_THROW(utils::ipow(sqrt_max, 2));
+    EXPECT_THROW(utils::ipow(sqrt_max + 1, 2), std::overflow_error);
+}
+
 } // namespace
