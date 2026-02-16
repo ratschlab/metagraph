@@ -1198,12 +1198,10 @@ TEST(ipow, SmallBaseSmallExp) {
     for (uint64_t base = 2; base <= 20; ++base) {
         uint64_t result = 1;
         for (unsigned int exp = 0; exp <= 15; ++exp) {
-            EXPECT_EQ(result, utils::ipow(base, exp))
-                << base << "^" << exp;
-            if (result <= std::numeric_limits<uint64_t>::max() / base)
-                result *= base;
-            else
+            EXPECT_EQ(result, utils::ipow(base, exp)) << base << "^" << exp;
+            if (result > std::numeric_limits<uint64_t>::max() / base)
                 break;
+            result *= base;
         }
     }
 }

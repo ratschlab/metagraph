@@ -237,15 +237,15 @@ Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
 
 
 size_t check_num_suffix_ranges(size_t suffix_length) {
-    // alphabet.size() - 1 because we don't index suffixes with $
-    const uint8_t sigma = KmerExtractorBOSS().alphabet.size() - 1;
-    const size_t max_suffix_len = static_cast<size_t>(63 / log2(sigma));
+    // KmerExtractor2Bit because we don't index suffixes with $
+    const size_t alphabet_size = KmerExtractor2Bit().alphabet.size();
+    const size_t max_suffix_len = static_cast<size_t>(63 / log2(alphabet_size));
     if (suffix_length > max_suffix_len) {
         logger->error("Node ranges for k-mer suffixes longer than {} cannot be indexed",
                       max_suffix_len);
         exit(1);
     }
-    size_t num_ranges = utils::ipow(sigma, suffix_length);
+    size_t num_ranges = utils::ipow(alphabet_size, suffix_length);
     logger->trace("Indexing all node ranges for suffixes of length {} in {:.2f} MB",
                   suffix_length, num_ranges * 2. * sizeof(uint64_t) * 1e-6);
     return num_ranges;
@@ -287,7 +287,7 @@ class SuffixRangeIndexer {
                         valid_suffix_ = false;
                         break;
                     }
-                    suffix_index = suffix_index * (alph_size_ - 1) + (c - 1);
+                    suffix_index = suffix_index * alphabet_size_ + (c - 1);
                 }
                 prev_kmer_ = kmer;
                 if (valid_suffix_) {
@@ -308,7 +308,7 @@ class SuffixRangeIndexer {
     size_t pos() const { return pos_; }
 
   private:
-    const uint8_t alph_size_ = KmerExtractorBOSS().alphabet.size();
+    const uint8_t alphabet_size_ = KmerExtractor2Bit().alphabet.size();
     const size_t k_;
     const size_t indexed_suffix_length_;
     size_t pos_;
@@ -317,6 +317,16 @@ class SuffixRangeIndexer {
     KMER prev_kmer_{0};
     bool valid_suffix_ = false;
 };
+
+template <typename T>
+void check_consistency(const SuffixRangeIndexer<T> &suffix_indexer, const BOSS::Chunk &chunk) {
+    if (suffix_indexer.pos() != chunk.size()) {
+        assert(false && "should never happen: all redundant dummy k-mers must be removed");
+        logger->error("Suffix range indexer counted {} k-mers, but the chunk size is {}",
+                      suffix_indexer.pos(), chunk.size());
+        exit(1);
+    }
+}
 
 /**
  * Adds dummy nodes for the given kmers and then builds a BOSS table (chunk).
@@ -398,11 +408,11 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
     }
 
     auto indexed_suffix_ranges = SuffixRangeIndexer<KMER>::init_ranges(indexed_suffix_length);
-    SuffixRangeIndexer<KMER> index_suffix(k, indexed_suffix_length, 2, &indexed_suffix_ranges);
+    SuffixRangeIndexer<KMER> suffix_indexer(k, indexed_suffix_length, 2, &indexed_suffix_ranges);
 
     auto process_kmer = [&](const T &v) {
         kmers_out->push(v);
-        index_suffix(v);
+        suffix_indexer(v);
     };
 
     ThreadPool async_worker(1, 1);
@@ -441,12 +451,8 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
 
     BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(), k, *kmers_out,
                        bits_per_count, swap_dir);
-    if (index_suffix.pos() != result.size()) {
-        assert(false && "should never happen: all redundant dummy k-mers must be removed");
-        logger->error("Suffix range indexer counted {} k-mers, but the chunk size is {}",
-                      index_suffix.pos(), result.size());
-        exit(1);
-    }
+    check_consistency(suffix_indexer, result);
+
     result.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
 
     kmer_collector.clear();
@@ -960,11 +966,11 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
         }
     }
 
-    SuffixRangeIndexer<KMER> index_suffix(k, indexed_suffix_length,
-                                          1 + is_first_chunk, suffix_ranges);
+    SuffixRangeIndexer<KMER> suffix_indexer(k, indexed_suffix_length,
+                                            1 + is_first_chunk, suffix_ranges);
     auto process_kmer = [&](const T_INT &v) {
         kmers_out->push(v);
-        index_suffix(v);
+        suffix_indexer(v);
     };
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
@@ -1005,12 +1011,7 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
 
     BOSS::Chunk chunk(KmerExtractorBOSS().alphabet.size(), k, reinterpret_container<T>(*kmers_out),
                       bits_per_count, swap_dir);
-    if (index_suffix.pos() != chunk.size()) {
-        assert(false && "should never happen: all redundant dummy k-mers must be removed");
-        logger->error("Suffix range indexer counted {} k-mers, but the chunk size is {}",
-                      index_suffix.pos(), chunk.size());
-        exit(1);
-    }
+    check_consistency(suffix_indexer, chunk);
     return chunk;
 }
 
@@ -1097,9 +1098,9 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
             // to shift them by the cumulative size of all previous chunks.
             // Different F values map to disjoint suffix indices, so this is safe.
             if (indexed_suffix_length) {
-                const size_t alph_size = KmerExtractorBOSS().alphabet.size();
-                size_t offset = chunk.size() - 1;
-                const size_t stride = utils::ipow(alph_size - 1, indexed_suffix_length - 1);
+                const size_t alphabet_size = KmerExtractor2Bit().alphabet.size();
+                const size_t stride = utils::ipow(alphabet_size, indexed_suffix_length - 1);
+                const size_t offset = chunk.size() - 1;
                 for (size_t i = F * stride; i < (F + 1) * stride; ++i) {
                     if (indexed_suffix_ranges[2 * i]) {
                         indexed_suffix_ranges[2 * i] += offset;
@@ -1159,6 +1160,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           swap_dir,
                           disk_cap_bytes),
           bits_per_count_(bits_per_count), indexed_suffix_length_(indexed_suffix_length) {
+        assert(filter_suffix.empty() || !indexed_suffix_length);
         if (filter_suffix.size()
                 && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
@@ -1240,15 +1242,11 @@ initialize_boss_chunk_constructor(size_t k,
                                   size_t indexed_suffix_length,
                                   const std::string &filter_suffix,
                                   const Args& ...args) {
+    assert(indexed_suffix_length <= k);
     if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
         // DBGSuccinct::k = BOSS::k + 1
         logger->error("For succinct graph, k must be between 2 and {}",
                       256 / KmerExtractorBOSS::bits_per_char);
-        exit(1);
-    }
-    if (indexed_suffix_length > k) {  // here k is for BOSS, hence k-mer size is k+1
-        logger->error("Suffix of indexed k-mer ranges must be shorter than k ({} passed for k={})",
-                      indexed_suffix_length, k);
         exit(1);
     }
 
@@ -1333,8 +1331,8 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &swap_dir,
                                   size_t disk_cap_bytes) {
-#define OTHER_ARGS k, both_strands, bits_per_count, indexed_suffix_length, \
-                   filter_suffix, num_threads, memory_preallocated, swap_dir, disk_cap_bytes
+#define OTHER_ARGS k, both_strands, bits_per_count, indexed_suffix_length, filter_suffix, \
+                   num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     assert(k);
 

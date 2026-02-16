@@ -338,6 +338,47 @@ TEST(BOSSConstruct, ConstructionShort) {
     }
 }
 
+// Regression test: when constructing from suffix-filtered chunks, each chunk
+// sees only a subset of k-mers. add_dummy_sink_kmers generates dummy sinks for
+// nodes that appear terminal within a chunk, but may have outgoing edges in
+// another chunk. After merging chunks, these become redundant dummy sink edges
+// (same node, same $ edge, but a real edge also exists). initialize_chunk must
+// skip them via the `curW == 0 && curF > 0` condition. If that skip is removed,
+// the BOSS table would contain extra edges and fail the equality check.
+TEST(BOSSConstruct, RedundantDummySinkInChunkedConstruction) {
+    std::vector<std::string> sequences = { "AAACCCGGGTTTACGT" };
+
+    for (size_t k = 2; k < std::min((size_t)10, kMaxK); ++k) {
+        BOSS boss_ref(k);
+        for (auto &s : sequences) {
+            boss_ref.add_sequence(s);
+        }
+
+        for (size_t suffix_len = 1; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
+            BOSS::Chunk graph_data;
+            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
+                std::unique_ptr<IBOSSChunkConstructor> constructor(
+                    IBOSSChunkConstructor::initialize(k, false, 0, 0, suffix));
+                for (auto &s : sequences) {
+                    constructor->add_sequence(s);
+                }
+                BOSS::Chunk next = constructor->build_chunk();
+                if (graph_data.size()) {
+                    graph_data.extend(next);
+                } else {
+                    graph_data = std::move(next);
+                }
+            }
+            BOSS boss;
+            graph_data.initialize_boss(&boss);
+            EXPECT_EQ(boss_ref, boss)
+                << "k=" << k << " suffix_len=" << suffix_len
+                << " ref_edges=" << boss_ref.num_edges()
+                << " chunk_edges=" << boss.num_edges();
+        }
+    }
+}
+
 TEST(BOSSConstruct, ConstructionFromChunks) {
     for (size_t k = 1; k < kMaxK; k += 6) {
         BOSS boss_dynamic(k);

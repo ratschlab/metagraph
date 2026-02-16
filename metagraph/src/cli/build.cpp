@@ -126,7 +126,7 @@ int build_graph(Config *config) {
                 boss_graph->get_k(),
                 config->graph_mode == DeBruijnGraph::CANONICAL,
                 config->count_width,
-                config->suffix.empty() ? config->node_suffix_length : 0,
+                suffix.empty() ? config->node_suffix_length : 0,
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
