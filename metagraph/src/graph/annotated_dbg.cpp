@@ -3,10 +3,16 @@
 #include <array>
 #include <cstdlib>
 
+#include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
+
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
+#include "common/algorithms.hpp"
 #include "common/aligned_vector.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
@@ -19,6 +25,7 @@ using mtg::common::logger;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
 using Column = mtg::annot::matrix::BinaryMatrix::Column;
+using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -36,8 +43,10 @@ AnnotatedSequenceGraph
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
-                           bool force_fast)
-      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
+                           bool force_fast,
+                           std::unique_ptr<annot::CoordToHeader> coord_to_header)
+      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg),
+        coord_to_header_(std::move(coord_to_header)) {}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
@@ -220,6 +229,13 @@ void AnnotatedDBG::annotate_kmer_coords(
     }
 }
 
+size_t get_min_count(double discovery_fraction, double presence_fraction,
+                     size_t num_kmers, size_t num_present) {
+    if (num_present < std::max(1.0, std::ceil(presence_fraction * num_kmers)))
+        return num_kmers + 1;  // not enough k-mers in the graph -> return an unattainable threshold
+    return std::max(1.0, std::ceil(discovery_fraction * num_kmers));
+}
+
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                             double discovery_fraction,
                                             double presence_fraction) const {
@@ -232,43 +248,37 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
+    if (coord_to_header_) {
+        auto kmer_coord_res = get_kmer_coordinates(sequence, std::numeric_limits<size_t>::max(),
+                                                   discovery_fraction, presence_fraction);
+        std::vector<Label> result;
+        result.reserve(kmer_coord_res.size());
+        for (auto &[label, count, coords] : kmer_coord_res) {
+            result.emplace_back(std::move(label));
+        }
+        return result;
+    }
+
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+
     VectorMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
-    size_t num_missing_kmers = 0;
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             index_counts[graph_to_anno_index(i)]++;
             num_present_kmers++;
-        } else {
-            num_missing_kmers++;
         }
     });
 
-    size_t min_count = std::max(1.0, std::ceil(presence_fraction
-                                                 * (num_present_kmers
-                                                     + num_missing_kmers)));
+    size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                     num_kmers, num_present_kmers);
     if (num_present_kmers < min_count)
         return {};
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction
-                                                 * (num_present_kmers
-                                                     + num_missing_kmers)));
-
-    if (num_present_kmers < min_count)
-        return {};
-
-    return get_labels(index_counts.values_container(), min_count);
-}
-
-std::vector<Label>
-AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
-                         size_t min_count) const {
-    assert(check_compatibility());
-
-    auto code_counts = annotator_->get_matrix().sum_rows(index_counts, min_count);
+    auto code_counts = annotator_->get_matrix().sum_rows(index_counts.values_container(), min_count);
 
     std::vector<Label> labels;
     labels.reserve(code_counts.size());
@@ -291,6 +301,41 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
+// Container `code_counts` must have pairs (index, count)
+template <class Container>
+void top_n_sorted(Container& code_counts, size_t num_top_labels) {
+    assert(num_top_labels <= code_counts.size());
+    auto comp = [](const auto &x, const auto &y) {
+        return std::make_pair(y.second, x.first)
+              < std::make_pair(x.second, y.first);
+    };
+    std::nth_element(code_counts.begin(),
+                     code_counts.begin() + num_top_labels,
+                     code_counts.end(),
+                     comp);
+    // leave only the first |num_top_labels| top labels
+    code_counts.resize(num_top_labels);
+    // sort the top labels by counts
+    std::sort(code_counts.begin(), code_counts.end(), comp);
+}
+
+template <class Container>
+std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
+                                               const annot::LabelEncoder<> &label_encoder,
+                                               size_t num_top_labels) {
+    if (code_counts.size() > num_top_labels)
+        top_n_sorted(code_counts, num_top_labels);
+
+    // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
+    std::vector<StringCountPair> label_counts;
+    label_counts.reserve(code_counts.size());
+    for (const auto &[j, count] : code_counts) {
+        label_counts.emplace_back(label_encoder.decode(j), count);
+    }
+
+    return label_counts;
+}
+
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
@@ -306,8 +351,26 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    VectorMap<row_index, size_t> index_counts;
+    if (coord_to_header_) {
+        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
+                                                   discovery_fraction, presence_fraction);
+        std::vector<StringCountPair> result;
+        result.reserve(kmer_coord_res.size());
+        for (auto &[label, count, coords] : kmer_coord_res) {
+            if (with_kmer_counts) {
+                count = 0;
+                for (const auto &tuple : coords) {
+                    count += tuple.size();
+                }
+            }
+            result.emplace_back(std::move(label), count);
+        }
+        return result;
+    }
+
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+
+    VectorMap<row_index, size_t> index_counts;
     index_counts.reserve(num_kmers);
 
     size_t num_present_kmers = 0;
@@ -319,59 +382,108 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
+    size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                     num_kmers, num_present_kmers);
     if (num_present_kmers < min_count)
         return {};
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
-    if (num_present_kmers < min_count)
-        return {};
+    std::vector<StringCountPair> result;
+    if (with_kmer_counts) {
+        result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
+                                        .sum_row_values(index_counts.values_container(), min_count),
+                                   annotator_->get_label_encoder(), num_top_labels);
+    } else {
+        result = filter_and_decode(annotator_->get_matrix()
+                                        .sum_rows(index_counts.values_container(), min_count),
+                                   annotator_->get_label_encoder(), num_top_labels);
+    }
 
-    auto top_labels = get_top_labels(index_counts.values_container(),
-                                     num_top_labels, min_count, with_kmer_counts);
+    assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
+                                    [&](const auto &pair) { return pair.second <= num_kmers; }));
 
-    assert(std::all_of(top_labels.begin(), top_labels.end(),
-                       [&](const auto &pair) { return pair.second <= num_kmers; })
-            || with_kmer_counts);
+    return result;
+}
 
-    return top_labels;
+
+template <class Result, class Container>
+Result filter_and_aggregate(Container&& rows,
+                            const annot::LabelEncoder<Label> &label_encoder,
+                            size_t min_count,
+                            size_t num_top_labels,
+                            const std::vector<size_t> &kmer_positions,
+                            size_t num_kmers) {
+    static_assert(utils::is_one_of_v<Result,
+                    std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
+                    std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
+                    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
+    using ValueType = std::tuple_element_t<2, typename Result::value_type>;
+
+    auto call_bits = [&](const auto &callback) {
+        for (const auto &row : rows) {
+            for (const auto &j : row) {
+                callback(utils::get_first(j), 1);
+            }
+        }
+    };
+    std::vector<std::pair<Column, size_t>> counts
+            = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
+
+    if (counts.size() > num_top_labels)
+        top_n_sorted(counts, num_top_labels);
+
+    // Aggregate results (group by labels)
+    tsl::hopscotch_map<Column, ValueType> values;
+    values.reserve(counts.size());
+    for (const auto &[j, count] : counts) {
+        values.emplace(j, num_kmers);
+    }
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        for (auto &item : rows[i]) {
+            auto j = utils::get_first(item);
+            auto it = values.find(j);
+            if (it != values.end()) {
+                if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
+                    it.value()[kmer_positions[i]] = true;
+                } else {
+                    it.value()[kmer_positions[i]] = std::move(item.second);
+                }
+            }
+        }
+        rows[i].clear();
+    }
+    rows.clear();
+
+    Result result;
+    result.reserve(counts.size());
+    for (const auto &[j, count] : counts) {
+        result.emplace_back(label_encoder.decode(j), count, std::move(values[j]));
+    }
+
+    return result;
+}
+
+void map_to_rows(const DeBruijnGraph &graph, std::string_view sequence,
+                 std::vector<AnnotatedDBG::row_index> *row_indices,
+                 std::vector<size_t> *kmer_positions) {
+    assert(sequence.size() >= graph.get_k());
+
+    size_t num_kmers = sequence.size() - graph.get_k() + 1;
+    row_indices->reserve(num_kmers);
+    kmer_positions->reserve(num_kmers);
+    size_t j = 0;
+    graph.map_to_nodes(sequence, [&](AnnotatedDBG::node_index i) {
+        if (i > 0) {
+            kmer_positions->push_back(j);
+            row_indices->push_back(AnnotatedDBG::graph_to_anno_index(i));
+        }
+        j++;
+    });
+    assert(j == num_kmers);
 }
 
 std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
-                              size_t num_top_labels,
-                              double discovery_fraction,
-                              double presence_fraction) const {
-    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
-    return get_kmer_counts(nodes, num_top_labels, discovery_fraction, presence_fraction);
-}
-
-Vector<std::pair<Column, size_t>> filter(const Vector<size_t> &col_counts,
-                                         size_t min_count,
-                                         size_t num_top_labels) {
-    Vector<std::pair<Column, size_t>> code_counts;
-    code_counts.reserve(col_counts.size());
-
-    for (size_t j = 0; j < col_counts.size(); ++j) {
-        if (col_counts[j] >= min_count)
-            code_counts.emplace_back(j, col_counts[j]);
-    }
-
-    if (code_counts.size() > num_top_labels) {
-        // sort by the number of matched k-mers
-        std::sort(code_counts.begin(), code_counts.end(),
-                  [](const auto &x, const auto &y) {
-                      return std::make_pair(y.second, x.first)
-                            < std::make_pair(x.second, y.first);
-                  });
-        // keep only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
-    }
-    return code_counts;
-}
-
-std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>
-AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction) const {
@@ -381,28 +493,34 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
-    if (!nodes.size())
+    if (sequence.size() < dbg_.get_k())
         return {};
 
-    std::vector<row_index> rows;
-    rows.reserve(nodes.size());
-
-    std::vector<size_t> kmer_positions;
-    kmer_positions.reserve(nodes.size());
-
-    for (size_t j = 0; j < nodes.size(); ++j) {
-        if (nodes[j] > 0) {
-            kmer_positions.push_back(j);
-            rows.push_back(graph_to_anno_index(nodes[j]));
+    if (coord_to_header_) {
+        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
+                                                   discovery_fraction, presence_fraction);
+        std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
+        result.reserve(kmer_coord_res.size());
+        for (auto &[label, count, coords] : kmer_coord_res) {
+            result.emplace_back(std::move(label), count, coords.size());
+            auto &counts = std::get<2>(result.back());
+            for (size_t i = 0; i < coords.size(); ++i) {
+                counts[i] = coords[i].size();
+            }
         }
+        return result;
     }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * nodes.size()));
-    if (rows.size() < min_count)
-        return {};
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction * nodes.size()));
-    if (rows.size() < min_count)
+    // kmers in the graph and their positions in the query sequence
+    std::vector<row_index> row_indices;
+    std::vector<size_t> kmer_positions;  // positions of k-mers in the query sequence
+    map_to_rows(dbg_, sequence, &row_indices, &kmer_positions);
+
+    size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                     num_kmers, kmer_positions.size());
+    if (kmer_positions.size() < min_count)
         return {};
 
     const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
@@ -411,55 +529,14 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
         exit(1);
     }
 
-    auto row_values = int_matrix->get_row_values(rows);
+    auto row_values = int_matrix->get_row_values(row_indices);
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row_values : row_values) {
-        for (const auto &[j, count] : row_values) {
-            col_counts[j]++;
-        }
-    }
-
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
-
-    std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, num_kmer_matches, counts] = result[i];
-
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        num_kmer_matches = code_counts[i].second;
-        counts.resize(nodes.size(), 0);
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    // set the counts
-    for (size_t i = 0; i < row_values.size(); ++i) {
-        // set the non-empty tuples
-        for (auto &[j, count] : row_values[i]) {
-            if (col_counts[j])
-                std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = count;
-        }
-    }
-
-    return result;
+    return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
+        row_values, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 }
 
 std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
 AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
-                                   size_t num_top_labels,
-                                   double discovery_fraction,
-                                   double presence_fraction) const {
-    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
-    return get_kmer_coordinates(nodes, num_top_labels, discovery_fraction, presence_fraction);
-}
-
-std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
-AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction) const {
@@ -469,28 +546,19 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
-    if (!nodes.size())
+    if (sequence.size() < dbg_.get_k())
         return {};
 
-    std::vector<row_index> rows;
-    rows.reserve(nodes.size());
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    std::vector<size_t> kmer_positions;
-    kmer_positions.reserve(nodes.size());
+    // kmers in the graph and their positions in the query sequence
+    std::vector<row_index> row_indices;
+    std::vector<size_t> kmer_positions;  // positions of k-mers in the query sequence
+    map_to_rows(dbg_, sequence, &row_indices, &kmer_positions);
 
-    for (size_t j = 0; j < nodes.size(); ++j) {
-        if (nodes[j] > 0) {
-            kmer_positions.push_back(j);
-            rows.push_back(graph_to_anno_index(nodes[j]));
-        }
-    }
-
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * nodes.size()));
-    if (rows.size() < min_count)
-        return {};
-
-    min_count = std::max(1.0, std::ceil(discovery_fraction * nodes.size()));
-    if (rows.size() < min_count)
+    size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                     num_kmers, kmer_positions.size());
+    if (kmer_positions.size() < min_count)
         return {};
 
     const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
@@ -499,44 +567,104 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
         exit(1);
     }
 
-    auto rows_tuples = tuple_matrix->get_row_tuples(rows);
+    auto rows_tuples = tuple_matrix->get_row_tuples(row_indices);
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row_tuples : rows_tuples) {
-        for (const auto &[j, tuple] : row_tuples) {
-            col_counts[j]++;
+    if (coord_to_header_) {
+        if (annotator_->num_labels() != coord_to_header_->num_columns()) {
+            logger->error("Incompatible number of columns in CoordToHeader and annotation matrix: "
+                          "{} != {}", coord_to_header_->num_columns(), annotator_->num_labels());
+            exit(1);
         }
-    }
 
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
+        coord_to_header_->map_to_local_coords(&rows_tuples);
+        // Now each coord in `rows_tuples` is `coord = local_coord * num_headers[j] + header_id`
 
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, count, coords] = result[i];
-
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        count = code_counts[i].second;
-        coords.resize(nodes.size());
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    for (size_t i = 0; i < rows_tuples.size(); ++i) {
-        // set the non-empty tuples
-        for (auto &[j, tuple] : rows_tuples[i]) {
-            if (col_counts[j])
-                std::get<2>(result[col_counts[j] - 1])[kmer_positions[i]] = std::move(tuple);
+        // Before splitting coords across headers, filter them by the number of k-mer matches
+        using Header = std::pair<Column, size_t>; // global header id
+        using Count = size_t;
+        std::vector<std::pair<Header, Count>> counts;
+        {
+            VectorMap<Header, Count> counts_map;
+            tsl::hopscotch_set<Header> matches;
+            for (const auto &row : rows_tuples) {
+                matches.clear();
+                for (auto &[col, coords] : row) {
+                    for (uint64_t coord : coords) {
+                        size_t header = coord % coord_to_header_->num_headers(col);
+                        matches.emplace(col, header);
+                    }
+                }
+                for (const Header &h : matches) {
+                    counts_map[h]++;
+                }
+            }
+            counts = to_vector(std::move(counts_map));
         }
+
+        // remove headers with insufficient number of k-mer matches
+        counts.erase(std::remove_if(counts.begin(), counts.end(),
+                                    [&](const auto &pair) { return pair.second < min_count; }),
+                     counts.end());
+
+        // keep only top-n headers
+        if (counts.size() > num_top_labels)
+            top_n_sorted(counts, num_top_labels);
+
+        // split coordinates across headers
+        tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
+        coords_map.reserve(counts.size());
+        for (const auto &[h, count] : counts) {
+            coords_map.emplace(h, num_kmers);
+        }
+        for (size_t i = 0; i < rows_tuples.size(); ++i) {
+            for (auto &[col, coords] : rows_tuples[i]) {
+                for (uint64_t coord : coords) {
+                    size_t header = coord % coord_to_header_->num_headers(col);
+                    uint64_t local_coord = coord / coord_to_header_->num_headers(col);
+                    auto it = coords_map.find({col, header});
+                    if (it != coords_map.end())
+                        it.value()[kmer_positions[i]].push_back(local_coord);
+                }
+                coords.clear();
+            }
+            rows_tuples[i].clear();
+        }
+        rows_tuples.clear();
+
+        std::vector<std::tuple<std::string, Count, std::vector<Tuple>>> result;
+        result.reserve(counts.size());
+        for (const auto &[h, count] : counts) {
+            const auto &[col, header] = h;
+            auto &coords = coords_map[h];
+            result.emplace_back(coord_to_header_->get_headers(col)[header],
+                                count, std::move(coords));
+        }
+
+        return result;
     }
 
-    return result;
+    return filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
+        rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 }
 
-std::vector<std::pair<Label, sdsl::bit_vector>>
+#ifndef NDEBUG
+// A sanity check to ensure the same matches are for get_top_label_signatures and get_top_labels
+bool same_results(const std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> &result,
+                  const std::vector<StringCountPair> &top_labels) {
+    assert(top_labels.size() == result.size());
+    std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
+    for (const auto &[label, count, mask] : result) {
+        assert(count == sdsl::util::cnt_one_bits(mask));
+        auto find = check.find(label);
+        assert(find != check.end());
+        assert(find->second == sdsl::util::cnt_one_bits(mask));
+        check.erase(find);
+    }
+    return check.empty();
+}
+#endif // NDEBUG
+
+std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
@@ -553,144 +681,55 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     if (discovery_fraction == 1.) {
-        std::vector<std::pair<Label, sdsl::bit_vector>> presence_vectors;
-
         auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
+        std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
         for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(
                 std::move(label),
+                count,
                 sdsl::bit_vector(num_kmers, true)
             );
         }
         return presence_vectors;
     }
 
-    // kmers and their positions in the query sequence
-    std::vector<row_index> row_indices;
-    row_indices.reserve(num_kmers);
-
-    std::vector<size_t> kmer_positions;
-    kmer_positions.reserve(num_kmers);
-
-    size_t j = 0;
-    graph_->map_to_nodes(sequence, [&](node_index i) {
-        if (i > 0) {
-            kmer_positions.push_back(j);
-            row_indices.push_back(graph_to_anno_index(i));
+    if (coord_to_header_) {
+        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
+                                                   discovery_fraction, presence_fraction);
+        std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> result;
+        result.reserve(kmer_coord_res.size());
+        for (auto &[label, count, coords] : kmer_coord_res) {
+            assert(coords.size() == sequence.size() - dbg_.get_k() + 1);
+            result.emplace_back(std::move(label), count, coords.size());
+            auto &mask = std::get<2>(result.back());
+            for (size_t i = 0; i < coords.size(); ++i) {
+                if (coords[i].size())
+                    mask[i] = true;
+            }
         }
-        j++;
-    });
-    assert(j == num_kmers);
+        assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
+        return result;
+    }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * num_kmers));
-    if (kmer_positions.size() < min_count)
-        return {};
+    // kmers in the graph and their positions in the query sequence
+    std::vector<row_index> row_indices;
+    std::vector<size_t> kmer_positions;  // positions of k-mers in the query sequence
+    map_to_rows(dbg_, sequence, &row_indices, &kmer_positions);
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
-    if (kmer_positions.size() < min_count)
+    size_t min_count = get_min_count(discovery_fraction, presence_fraction,
+                                     num_kmers, kmer_positions.size());
+    if (row_indices.size() < min_count)
         return {};
 
     auto rows = annotator_->get_matrix().get_rows(row_indices);
 
-    // FYI: one could use tsl::hopscotch_map for counting but it is slower
-    // than std::vector unless the number of columns is ~1M or higher
-    Vector<size_t> col_counts(annotator_->num_labels(), 0);
-    for (const auto &row : rows) {
-        for (auto j : row) {
-            col_counts[j]++;
-        }
-    }
+    auto result = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
+        rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
 
-    Vector<std::pair<Column, size_t>> code_counts = filter(col_counts, min_count, num_top_labels);
-
-    std::vector<std::pair<Label, sdsl::bit_vector>> result(code_counts.size());
-    col_counts.assign(annotator_->num_labels(), 0); // will map columns to indexes in `result`
-
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        auto &[label, mask] = result[i];
-
-        // TODO: remove the decoding step?
-        label = annotator_->get_label_encoder().decode(code_counts[i].first);
-        mask = sdsl::bit_vector(num_kmers, 0);
-
-        col_counts[code_counts[i].first] = i + 1;
-    }
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        for (auto j : rows[i]) {
-            if (col_counts[j])
-                result[col_counts[j] - 1].second[kmer_positions[i]] = true;
-        }
-    }
-
-#ifndef NDEBUG
-    // sanity check, make sure that the same matches are output by get_top_labels
-    auto top_labels = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
-    assert(top_labels.size() == result.size());
-
-    std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
-    for (const auto &[label, mask] : result) {
-        auto find = check.find(label);
-        assert(find != check.end());
-        assert(find->second == sdsl::util::cnt_one_bits(mask));
-        check.erase(find);
-    }
-    assert(check.empty());
-#endif // NDEBUG
+    assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 
     return result;
-}
-
-template <class Container>
-std::vector<StringCountPair> top_labels(Container&& code_counts,
-                                        const annot::LabelEncoder<> &label_encoder,
-                                        size_t num_top_labels,
-                                        size_t min_count) {
-    assert(std::all_of(
-        code_counts.begin(), code_counts.end(),
-        [&](const auto &code_count) { return code_count.second >= min_count; }
-    ));
-    std::ignore = min_count;
-
-    if (code_counts.size() > num_top_labels) {
-        // sort labels by counts to get the top |num_top_labels|
-        std::sort(code_counts.begin(), code_counts.end(),
-                  [](const auto &x, const auto &y) {
-                      return std::make_pair(y.second, x.first)
-                            < std::make_pair(x.second, y.first);
-                  });
-        // leave only the first |num_top_labels| top labels
-        code_counts.resize(num_top_labels);
-    }
-
-    // TODO: remove this step?
-    std::vector<StringCountPair> label_counts(code_counts.size());
-    for (size_t i = 0; i < code_counts.size(); ++i) {
-        label_counts[i].first = label_encoder.decode(code_counts[i].first);
-        label_counts[i].second = code_counts[i].second;
-    }
-
-    return label_counts;
-}
-
-std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
-                             size_t num_top_labels,
-                             size_t min_count,
-                             bool with_kmer_counts) const {
-    assert(check_compatibility());
-
-    if (with_kmer_counts) {
-        return top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
-                                                  .sum_row_values(index_counts, min_count),
-                          annotator_->get_label_encoder(),
-                          num_top_labels, min_count);
-    } else {
-        return top_labels(annotator_->get_matrix().sum_rows(index_counts, min_count),
-                          annotator_->get_label_encoder(),
-                          num_top_labels, min_count);
-    }
 }
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {

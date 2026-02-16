@@ -23,9 +23,9 @@ namespace mtg {
 using namespace mtg::annot::matrix;
 
 namespace annot {
-using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
+using CallColumn = std::function<void(uint64_t, std::unique_ptr<bit_vector>&&)>;
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &, size_t)> &call_columns,
                        size_t max_brwt_arity = 1);
 } // namespace annot
 
@@ -124,9 +124,10 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(const BitVectorPtrArray &
 }
 template <>
 Rainbow<BRWT> build_matrix_from_columns<Rainbow<BRWT>>(const BitVectorPtrArray &columns, uint64_t) {
-    return std::move(*annot::convert_to_RainbowBRWT([&](const auto &callback) {
+    return std::move(*annot::convert_to_RainbowBRWT([&](const auto &callback, size_t num_threads) {
+        #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
         for (size_t j = 0; j < columns.size(); ++j) {
-            callback(columns[j]->copy());
+            callback(j, columns[j]->copy());
         }
     }));
 }

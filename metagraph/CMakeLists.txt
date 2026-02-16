@@ -275,8 +275,12 @@ ExternalProject_Add(SDSL
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${SDSL_INSTALL}
              -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
              -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
-  INSTALL_COMMAND ${CMAKE_COMMAND} --build . --target install
-          COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
+             -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE}
+)
+# Delete gtest headers after install
+ExternalProject_Add_Step(SDSL remove_gtest
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${SDSL_INSTALL}/include/gtest
+  DEPENDEES install
 )
 
 
@@ -336,7 +340,9 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+set(SSHASH_BUILD_EXECUTABLES OFF)
 add_subdirectory(external-libraries/sshash SYSTEM)
+target_include_directories(sshash_static PRIVATE external-libraries/zlib)
 add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
@@ -541,8 +547,8 @@ foreach(def ${METAGRAPH_PUBLIC_DEFS})
 endforeach()
 
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/config.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/config.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/compile_definitions.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/common/compile_definitions.hpp
     @ONLY
 )
 
