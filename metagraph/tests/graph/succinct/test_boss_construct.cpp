@@ -354,7 +354,7 @@ TEST(BOSSConstruct, RedundantDummySinkInChunkedConstruction) {
             boss_ref.add_sequence(s);
         }
 
-        for (size_t suffix_len = 1; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
+        for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
             BOSS::Chunk graph_data;
             for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
