@@ -948,8 +948,8 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
                              const std::vector<std::string> &dummy_names,
                              size_t k,
                              uint8_t bits_per_count,
-                             size_t indexed_suffix_length,
                              std::filesystem::path swap_dir,
+                             size_t indexed_suffix_length,
                              std::vector<BOSS::edge_index> *suffix_ranges) {
     using T_INT = get_int_t<T>;
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
@@ -1053,8 +1053,8 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         }
 
         auto chunk = build_boss_chunk<T>(true, real_name, dummy_names,
-                                         k, bits_per_count, indexed_suffix_length, swap_dir,
-                                         &indexed_suffix_ranges);
+                                         k, bits_per_count, swap_dir,
+                                         indexed_suffix_length, &indexed_suffix_ranges);
         chunk.set_indexed_suffix_ranges(indexed_suffix_length, std::move(indexed_suffix_ranges));
         return chunk;
     }
@@ -1072,8 +1072,8 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         dummy_names.push_back(dummy_source_names[i][0]);
     }
     BOSS::Chunk chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
-                                            k, bits_per_count, indexed_suffix_length, swap_dir,
-                                            &indexed_suffix_ranges);
+                                            k, bits_per_count, swap_dir,
+                                            indexed_suffix_length, &indexed_suffix_ranges);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
@@ -1088,8 +1088,8 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         }
         BOSS::Chunk next = build_boss_chunk<T>(false, // not the first chunk
                                                real_names[F], dummy_names,
-                                               k, bits_per_count, indexed_suffix_length, swap_dir,
-                                               &indexed_suffix_ranges);
+                                               k, bits_per_count, swap_dir,
+                                               indexed_suffix_length, &indexed_suffix_ranges);
         logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
         #pragma omp ordered
         {
@@ -1159,7 +1159,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           memory_preallocated,
                           swap_dir,
                           disk_cap_bytes),
-          bits_per_count_(bits_per_count), indexed_suffix_length_(indexed_suffix_length) {
+          bits_per_count_(bits_per_count),
+          indexed_suffix_length_(indexed_suffix_length) {
         assert(filter_suffix.empty() || !indexed_suffix_length);
         if (filter_suffix.size()
                 && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {

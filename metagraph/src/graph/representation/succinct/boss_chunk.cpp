@@ -266,7 +266,7 @@ void BOSS::Chunk::extend(Chunk &other) {
     }
 
     // Suffix ranges are not merged here — they are accumulated externally
-    // (e.g., in a shared vector in build_boss) and set on the final chunk.
+    // (e.g., in a shared vector) and set on the final chunk with set_indexed_suffix_ranges().
     assert(!indexed_suffix_length_ && !other.indexed_suffix_length_
             && "suffix ranges must be accumulated externally, not in individual chunks");
 
@@ -343,6 +343,7 @@ void BOSS::Chunk::set_indexed_suffix_ranges(size_t suffix_length,
 bool BOSS::Chunk::load(const std::string &infbase) {
     std::string fname = utils::make_suffix(infbase, kFileExtension);
 
+    // the index of suffix ranges is never serialized in BOSS::Chunk
     indexed_suffix_length_ = 0;
     indexed_suffix_ranges_ = {};
 
