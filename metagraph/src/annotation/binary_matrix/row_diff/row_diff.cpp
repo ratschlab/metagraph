@@ -81,8 +81,12 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
+    // Phase 1: Parallel path tracing.
+    // Thread-private node_to_rd provides intra-thread dedup (early path
+    // termination when a node was already visited by the same thread).
+    // Cross-thread dedup is handled in Phase 2.
     tsl::hopscotch_set<Row> visited_rows;
-    #pragma omp parallel for ordered num_threads(num_threads) schedule(static, 500) private(visited_rows)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 500) private(visited_rows)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
@@ -107,8 +111,12 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
             node = row_diff_successor(*graph_, node, fork_succ_);
         }
+    }
 
-        #pragma omp ordered
+    // Phase 2: Serial index assignment with cross-thread deduplication.
+    // Re-processes stored row IDs through a global map to assign canonical
+    // indices and truncate paths that converge across thread boundaries.
+    for (size_t i = 0; i < row_ids.size(); ++i) {
         for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
             auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
             rd_paths_trunc[i][j] = it.value();
