@@ -126,8 +126,8 @@ int build_graph(Config *config) {
                 boss_graph->get_k(),
                 config->graph_mode == DeBruijnGraph::CANONICAL,
                 config->count_width,
-                suffix.empty() ? config->node_suffix_length : 0,
                 suffix,
+                suffix.empty() ? config->node_suffix_length : 0,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
                 config->tmp_dir.empty() ? kmer::ContainerType::VECTOR

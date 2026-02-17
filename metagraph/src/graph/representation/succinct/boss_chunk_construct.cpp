@@ -1135,8 +1135,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     BOSSChunkConstructor(size_t k,
                          bool both_strands,
                          uint8_t bits_per_count,
-                         size_t indexed_suffix_length,
                          const std::string &filter_suffix,
+                         size_t indexed_suffix_length,
                          size_t num_threads,
                          double memory_preallocated,
                          const std::filesystem::path &swap_dir,
@@ -1240,8 +1240,8 @@ static std::unique_ptr<IBOSSChunkConstructor>
 initialize_boss_chunk_constructor(size_t k,
                                   bool both_strands,
                                   uint8_t bits_per_count,
-                                  size_t indexed_suffix_length,
                                   const std::string &filter_suffix,
+                                  size_t indexed_suffix_length,
                                   const Args& ...args) {
     assert(indexed_suffix_length <= k);
     if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
@@ -1251,7 +1251,7 @@ initialize_boss_chunk_constructor(size_t k,
         exit(1);
     }
 
-#define ARGS k, both_strands, bits_per_count, indexed_suffix_length, filter_suffix, args...
+#define ARGS k, both_strands, bits_per_count, filter_suffix, indexed_suffix_length, args...
 
     // collect real k-mers in tight layout only if suffix is empty
     if (filter_suffix.empty()) {
@@ -1325,14 +1325,14 @@ std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor::initialize(size_t k,
                                   bool both_strands,
                                   uint8_t bits_per_count,
-                                  size_t indexed_suffix_length,
                                   const std::string &filter_suffix,
+                                  size_t indexed_suffix_length,
                                   size_t num_threads,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &swap_dir,
                                   size_t disk_cap_bytes) {
-#define OTHER_ARGS k, both_strands, bits_per_count, indexed_suffix_length, filter_suffix, \
+#define OTHER_ARGS k, both_strands, bits_per_count, filter_suffix, indexed_suffix_length, \
                    num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     assert(k);
