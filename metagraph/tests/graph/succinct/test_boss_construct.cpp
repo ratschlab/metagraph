@@ -642,7 +642,7 @@ TEST(BOSSConstruct, SuffixRangesSingleKmer) {
 
             // compare with traditionally indexed
             auto ref_constructor = IBOSSChunkConstructor::initialize(
-                k, false, 0, "", 0, 0, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
+                k, false, 0, "", 0, 1, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
             );
             ref_constructor->add_sequences({ std::string(k, 'A') });
             BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
@@ -796,7 +796,7 @@ TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
 
                 // compare with traditionally indexed ranges
                 auto ref_constructor = IBOSSChunkConstructor::initialize(
-                    k, false, 0, "", 0, 0, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
+                    k, false, 0, "", 0, 1, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
                 );
                 ref_constructor->add_sequences(std::vector<std::string>(input_data));
                 BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
