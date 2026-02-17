@@ -86,7 +86,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // termination when a node was already visited by the same thread).
     // Cross-thread dedup is handled in Phase 2.
     tsl::hopscotch_set<Row> visited_rows;
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 500) private(visited_rows)
+    // schedule must be static because each thread needs to process rows in order
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1000) private(visited_rows)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
