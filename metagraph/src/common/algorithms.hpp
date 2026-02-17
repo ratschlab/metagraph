@@ -7,8 +7,10 @@
 #include <functional>
 #include <utility>
 #include <cassert>
+#include <limits>
 #include <random>
 #include <set>
+#include <stdexcept>
 
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
@@ -446,6 +448,32 @@ namespace utils {
             }
         }
     }
+
+    /**
+     * Integer exponentiation: returns base^exp.
+     * Uses binary exponentiation for O(log exp) multiplications.
+     * @throws std::overflow_error if the result would overflow uint64_t
+     */
+    inline uint64_t ipow(uint64_t base, unsigned int exp) {
+        if (base == 0)
+            return exp == 0;
+
+        uint64_t result = 1;
+        while (exp > 0) {
+            const uint64_t max_multiple = std::numeric_limits<uint64_t>::max() / base;
+            if (exp % 2) {
+                if (result > max_multiple)
+                    throw std::overflow_error("ipow: overflow");
+                result *= base;
+            }
+            if (exp > 1 && base > max_multiple)
+                throw std::overflow_error("ipow: overflow");
+            base *= base;
+            exp /= 2;
+        }
+        return result;
+    }
+
 
     // Threshold for switching between dense vector and hash table for counting.
     // Below this value, a dense vector is faster; above it, a hash table uses

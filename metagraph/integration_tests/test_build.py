@@ -5,16 +5,10 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
-from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
 """Test graph construction"""
-
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
 
 build_params = {'succinct': ('succinct', '""'),
                 'succinct_disk': ('succinct', '/tmp/'),  # build with disk swap

@@ -96,6 +96,27 @@ BOSS::~BOSS() {
     delete last_;
 }
 
+sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+                                               uint64_t num_edges) {
+    assert(ranges.size());
+    ranges[0] = std::max<uint64_t>(ranges[0], 1);
+    // align the values to be strictly increasing so that select queries
+    // can recover the originals via get_suffix_range(i) = select1(i+1) - i
+    for (size_t i = 1; i < ranges.size(); ++i) {
+        ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+    }
+    assert(std::is_sorted(ranges.begin(), ranges.end()));
+    sdsl::sd_vector_builder builder(num_edges + ranges.size(), ranges.size());
+    for (auto pos : ranges) {
+        builder.set(pos);
+    }
+    sdsl::sd_vector<> sd(builder);
+    logger->trace("Compressed node ranges to approx. {:.2f} MB",
+                  footprint_sd_vector(sd.size(), ranges.size()) / 8e6);
+    ranges = {};
+    return sd;
+}
+
 template <uint8_t t_width>
 sdsl::int_vector<t_width> to_vector(sdsl::int_vector_buffer<t_width> &buf) {
     buf.flush();
@@ -122,6 +143,14 @@ void BOSS::initialize(Chunk *chunk) {
     // alph_size = chunk->alph_size_;
 
     state = State::STAT;
+
+    if (chunk->indexed_suffix_length_) {
+        indexed_suffix_length_ = chunk->indexed_suffix_length_;
+        indexed_suffix_ranges_ = std::move(chunk->indexed_suffix_ranges_);
+        indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
+    }
 }
 
 /**
@@ -247,7 +276,8 @@ void BOSS::serialize(std::ofstream &outstream) const {
     outstream.flush();
 }
 
-void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
+void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state, int mode,
+                     bool serialize_suffix_ranges) {
     if (!out.good())
         throw std::ofstream::failure("Error: Can't write to file");
 
@@ -290,6 +320,16 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
             SERIALIZE_W(wavelet_tree_small);
             SERIALIZE_LAST(bit_vector_small);
             break;
+    }
+
+    // serialize mode if provided (for DBGSuccinct)
+    if (mode >= 0)
+        serialize_number(out, mode);
+
+    if (serialize_suffix_ranges) {
+        assert(mode >= 0 && "suffix ranges require mode to be serialized");
+        serialize_number(out, chunk.indexed_suffix_length_);
+        chunk.indexed_suffix_ranges_.serialize(out);
     }
 
     out.flush();
@@ -3143,8 +3183,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
     if (indexed_suffix_length_ == 0u)
         return;
 
-    if (indexed_suffix_length_ * log2(alph_size - 1) >= 64)
-        throw std::runtime_error("ERROR: Trying to index too long suffixes");
+    check_num_suffix_ranges(indexed_suffix_length_);
 
     // first, take empty suffix and the entire range of nodes in the BOSS table
     // will store pairs: begin[0], end[0], begin[1], end[1], ...
@@ -3173,19 +3212,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
         suffix_ranges.swap(narrowed);
     }
 
-    suffix_ranges[0] = std::max(suffix_ranges[0], (uint64_t)1);
-    // align the upper bounds to enable the binary search on them
-    for (size_t i = 1; i < suffix_ranges.size(); ++i) {
-        suffix_ranges[i] = std::max(suffix_ranges[i], suffix_ranges[i - 1] - (i - 1)) + i;
-    }
-
-    assert(std::is_sorted(suffix_ranges.begin(), suffix_ranges.end()));
-
-    sdsl::sd_vector_builder builder(W_->size() + suffix_ranges.size(), suffix_ranges.size());
-    for (auto pos : suffix_ranges) {
-        builder.set(pos);
-    }
-    indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+    indexed_suffix_ranges_ = build_suffix_ranges_sd(std::move(suffix_ranges), W_->size());
     indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
