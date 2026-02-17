@@ -22,7 +22,8 @@ class CSRMatrix : public RowMajor, public IntMatrix {
     CSRMatrix(Vector<RowValues>&& rows, uint64_t num_columns);
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }

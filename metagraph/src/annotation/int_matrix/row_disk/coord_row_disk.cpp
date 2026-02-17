@@ -9,6 +9,18 @@ namespace matrix {
 
 using mtg::common::logger;
 
+std::vector<CoordRowDisk::RowValues>
+CoordRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
+    return get_rows_parallel<RowValues>(rows, num_threads,
+                [&](const auto &rows) { return get_view().get_row_values(rows); });
+}
+
+std::vector<CoordRowDisk::RowTuples>
+CoordRowDisk::get_row_tuples(const std::vector<Row> &rows, size_t num_threads) const {
+    return get_rows_parallel<RowTuples>(rows, num_threads,
+                [&](const auto &rows) { return get_view().get_row_tuples(rows); });
+}
+
 std::vector<BinaryMatrix::Row>
 CoordRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for CoordRowDisk, consider"

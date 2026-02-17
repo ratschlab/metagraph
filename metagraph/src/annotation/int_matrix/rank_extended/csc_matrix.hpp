@@ -29,7 +29,8 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
         column_values_(column_values) {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -57,10 +58,12 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
 
 template <class BaseMatrix, class ColumnValues>
 inline std::vector<typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues>
-CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(const std::vector<Row> &rows) const {
-    const auto &column_ranks = binary_matrix_.get_column_ranks(rows);
+CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(const std::vector<Row> &rows,
+                                                    size_t num_threads) const {
+    const auto &column_ranks = binary_matrix_.get_column_ranks(rows, num_threads);
     std::vector<RowValues> row_values(rows.size());
-    // TODO: reshape?
+
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < rows.size(); ++i) {
         row_values[i].reserve(column_ranks[i].size());
         for (auto [j, r] : column_ranks[i]) {

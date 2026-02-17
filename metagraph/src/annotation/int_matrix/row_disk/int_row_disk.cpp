@@ -9,6 +9,13 @@ namespace matrix {
 
 using mtg::common::logger;
 
+
+std::vector<IntRowDisk::RowValues>
+IntRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
+    return get_rows_parallel<RowValues>(rows, num_threads,
+                [&](const auto &rows) { return get_view().get_row_values(rows); });
+}
+
 std::vector<BinaryMatrix::Row> IntRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for IntRowDisk, consider"
                  " using a column-major format");

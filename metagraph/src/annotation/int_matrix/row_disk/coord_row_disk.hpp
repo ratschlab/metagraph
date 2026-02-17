@@ -29,17 +29,15 @@ class CoordRowDisk : public RowMajor, public MultiIntMatrix {
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const {
-        return get_view().get_row_values(rows);
-    }
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     // return total number of attributes in all tuples
     uint64_t num_attributes() const { return num_attributes_; }
 
     // return entries of the matrix -- where each entry is a set of integers
-    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const {
-        return get_view().get_row_tuples(rows);
-    }
+    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     bool load(std::istream &f);
 

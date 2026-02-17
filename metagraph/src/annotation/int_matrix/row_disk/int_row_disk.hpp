@@ -29,9 +29,8 @@ class IntRowDisk : public RowMajor, public IntMatrix {
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const {
-        return get_view().get_row_values(rows);
-    }
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     bool load(std::istream &f);
 

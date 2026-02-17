@@ -112,19 +112,23 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
 
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
-BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
-    Vector<std::pair<Column, uint64_t>> slice;
-    // expect at least 3 relations per row
-    slice.reserve(row_ids.size() * 4);
-
-    slice_rows(row_ids, &slice);
-
-    assert(slice.size() >= row_ids.size());
-
-    std::vector<Vector<std::pair<Column, uint64_t>>> rows;
-    call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-        rows.emplace_back(row_begin, row_end);
-    });
+BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) const {
+    ThreadPool thread_pool(num_threads);
+    std::mutex mu;
+    std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
+    slice_rows<std::pair<Column, uint64_t>>(row_ids, utils::arange<size_t>(0, row_ids.size()),
+        {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
+        [&](const std::vector<size_t> &sliced_rows, const Vector<std::pair<Column, uint64_t>> &slice) {
+            auto rows_it = sliced_rows.begin();
+            std::lock_guard<std::mutex> lock(mu);
+            call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+                rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
+                ++rows_it;
+            });
+            assert(rows_it == sliced_rows.end());
+        }
+    );
+    thread_pool.join();
     return rows;
 }
 

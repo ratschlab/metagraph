@@ -190,7 +190,6 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows, num_threads);
-    common::logger->trace("row-diff paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids, num_threads);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());

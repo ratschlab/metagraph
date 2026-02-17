@@ -168,6 +168,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
 
+    common::logger->trace("row-diff paths traversed, rows to query: {} -> {}", row_ids.size(), rd_ids.size());
+
     return { rd_ids, rd_paths_trunc, times_traversed };
 }
 
