@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include <tsl/hopscotch_set.h>
+#include <ips4o.hpp>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
@@ -81,18 +82,19 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    const size_t kBlockSize = num_threads > 1
-                        ? std::min<size_t>(1000, (row_ids.size() + num_threads - 1) / num_threads)
-                        : row_ids.size();
+    const size_t kMaxBlockSize = 1000;
+    const size_t block_size = num_threads > 1
+            ? std::min<size_t>(kMaxBlockSize, (row_ids.size() + num_threads - 1) / num_threads)
+            : row_ids.size();
     tsl::hopscotch_set<Row> visited_rows;
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic) private(visited_rows)
-    for (size_t begin = 0; begin < row_ids.size(); begin += kBlockSize) {
+    for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
         size_t visited_before = visited_rows.size();
         // Phase 1: Parallel path tracing.
         // Thread-private node_to_rd provides intra-thread dedup (early path
         // termination when a node was already visited by the same thread).
         // Cross-thread dedup is handled in Phase 2.
-        const size_t end = std::min<size_t>(begin + kBlockSize, row_ids.size());
+        const size_t end = std::min<size_t>(begin + block_size, row_ids.size());
         for (size_t i = begin; i < end; ++i) {
             Row row = row_ids[i];
 
@@ -145,7 +147,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     auto m = to_vector(std::move(node_to_rd));
     // sort by indexes of rd rows
     // the second value points to the index in batch
-    std::sort(m.begin(), m.end(), utils::LessFirst());
+    ips4o::parallel::sort(m.begin(), m.end(), utils::LessFirst(), num_threads);
     // collect an array of rd rows
     std::vector<Row> rd_ids(m.size());
     for (size_t i = 0; i < m.size(); ++i) {
@@ -166,7 +168,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
 
-    return std::make_tuple(std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed));
+    return { rd_ids, rd_paths_trunc, times_traversed };
 }
 
 } // namespace matrix

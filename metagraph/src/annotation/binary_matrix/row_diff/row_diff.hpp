@@ -196,7 +196,7 @@ RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) c
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
     rd_ids = std::vector<Row>();
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1000)
     for (size_t i = 0; i < rd_rows.size(); ++i) {
         std::sort(rd_rows[i].begin(), rd_rows[i].end());
     }
