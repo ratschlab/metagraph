@@ -916,7 +916,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     );
 
     logger->trace("[Query graph construction] Batch graph contains {} k-mers"
-                  " and took {} sec to construct",
+                  " and constructed in {} sec",
                   graph_init->num_nodes(), timer.elapsed());
     timer.reset();
 
@@ -934,8 +934,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
-
-    logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
@@ -987,8 +985,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     graph_init.reset();
-
-    logger->trace("[Query graph construction] Building the query graph...");
     timer.reset();
     std::shared_ptr<DeBruijnGraph> graph;
 
@@ -1009,9 +1005,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Query graph contains {} k-mers"
                   " and took {} sec to construct",
                   graph->num_nodes(), timer.elapsed());
-    timer.reset();
-
-    logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
 
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
@@ -1039,9 +1032,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
     }
 
-    logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
-                  timer.elapsed());
-
     contigs = decltype(contigs)();
 
     for (auto &[first, second] : from_full_to_small) {
@@ -1050,8 +1040,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         second = AnnotatedDBG::graph_to_anno_index(second);
     }
 
-    logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
-                  from_full_to_small.size());
+    timer.reset();
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
@@ -1064,7 +1053,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
-    timer.reset();
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
