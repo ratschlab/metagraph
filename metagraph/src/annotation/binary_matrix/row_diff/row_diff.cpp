@@ -81,50 +81,64 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    // Phase 1: Parallel path tracing.
-    // Thread-private node_to_rd provides intra-thread dedup (early path
-    // termination when a node was already visited by the same thread).
-    // Cross-thread dedup is handled in Phase 2.
+    const size_t kBlockSize = num_threads > 1
+                        ? std::min<size_t>(1000, (row_ids.size() + num_threads - 1) / num_threads)
+                        : row_ids.size();
     tsl::hopscotch_set<Row> visited_rows;
-    // schedule must be static because each thread needs to process rows in order
-    #pragma omp parallel for num_threads(num_threads) schedule(static, 1000) private(visited_rows)
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        Row row = row_ids[i];
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic) private(visited_rows)
+    for (size_t begin = 0; begin < row_ids.size(); begin += kBlockSize) {
+        size_t visited_before = visited_rows.size();
+        // Phase 1: Parallel path tracing.
+        // Thread-private node_to_rd provides intra-thread dedup (early path
+        // termination when a node was already visited by the same thread).
+        // Cross-thread dedup is handled in Phase 2.
+        const size_t end = std::min<size_t>(begin + kBlockSize, row_ids.size());
+        for (size_t i = begin; i < end; ++i) {
+            Row row = row_ids[i];
 
-        node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+            node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
-        while (true) {
-            assert(graph_->in_graph(node));
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+            while (true) {
+                assert(graph_->in_graph(node));
+                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-            bool is_new = visited_rows.insert(row).second;
-            rd_paths_trunc[i].push_back(row);
+                bool is_new = visited_rows.insert(row).second;
+                rd_paths_trunc[i].push_back(row);
 
-            // If a node had been reached before, we interrupt the diff path.
-            // The annotation for that node will have been reconstructed earlier
-            // than for other nodes in this path as well. Thus, we will start
-            // reconstruction from that node and don't need its successors.
-            if (!is_new)
-                break;
+                // If a node had been reached before, we interrupt the diff path.
+                // The annotation for that node will have been reconstructed earlier
+                // than for other nodes in this path as well. Thus, we will start
+                // reconstruction from that node and don't need its successors.
+                if (!is_new)
+                    break;
 
-            if (anchor_[row])
-                break;
+                if (anchor_[row])
+                    break;
 
-            node = row_diff_successor(*graph_, node, fork_succ_);
-        }
-    }
-
-    // Phase 2: Serial index assignment with cross-thread deduplication.
-    // Re-processes stored row IDs through a global map to assign canonical
-    // indices and truncate paths that converge across thread boundaries.
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
-            auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
-            rd_paths_trunc[i][j] = it.value();
-            if (!is_new) {
-                rd_paths_trunc[i].resize(j + 1);
-                break;
+                node = row_diff_successor(*graph_, node, fork_succ_);
             }
+        }
+
+        // Phase 2: Serial index assignment with cross-thread deduplication.
+        // Re-processes stored row IDs through a global map to assign canonical
+        // indices and truncate paths that converge across thread boundaries.
+        #pragma omp ordered
+        {
+            // insert new rows visited by other threads during this thread's execution
+            for (auto it = node_to_rd.begin() + visited_before; it != node_to_rd.end(); ++it) {
+                visited_rows.insert(it->first);
+            }
+            for (size_t i = begin; i < end; ++i) {
+                for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
+                    auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
+                    rd_paths_trunc[i][j] = it.value();
+                    if (!is_new) {
+                        rd_paths_trunc[i].resize(j + 1);
+                        break;
+                    }
+                }
+            }
+            assert(visited_rows.size() == node_to_rd.size());  // this thread's cache is synced now
         }
     }
 
