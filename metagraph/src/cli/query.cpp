@@ -599,8 +599,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_indexes.push_back(in_full);
         }
 
-        // TODO: make multithreaded
-        auto slice = mat.get_row_values(row_indexes);
+        auto slice = mat.get_row_values(row_indexes, num_threads);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
