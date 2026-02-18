@@ -9,6 +9,16 @@ namespace matrix {
 
 using mtg::common::logger;
 
+std::vector<BinaryMatrix::SetBitPositions>
+CoordRowDisk::get_rows(const std::vector<Row> &row_ids) const {
+    View view = get_view();
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = view.get_row(row_ids[i]);
+    }
+    return rows;
+}
+
 std::vector<CoordRowDisk::RowValues>
 CoordRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
     return get_rows_parallel<RowValues>(rows, num_threads,

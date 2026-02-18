@@ -11,7 +11,11 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class RowDisk : public RowMajor {
+// FYI: This could be inherited from RowMajor, but here we have an overhead for
+//      a single row query. Hence, the assumption of RowMajor (querying a batch
+//      of rows is as efficient as querying them separately) is not satisfied.
+//      Thus, we inherit from the generic BinaryMatrix.
+class RowDisk : public BinaryMatrix {
   public:
     RowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = RA_ivbuffer_size;
@@ -20,7 +24,8 @@ class RowDisk : public RowMajor {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
-    SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
+    using BinaryMatrix::get_rows;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
