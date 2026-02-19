@@ -199,6 +199,8 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
+                    if (result.back().second.empty())  // just for safety, normally shouldn't happen
+                        result.pop_back();
                 }
                 ++it;
                 ++it2;
@@ -214,10 +216,10 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     assert(std::all_of(row->begin(), row->end(),
                        [](auto &p) { return p.second.size(); }));
     for (auto &[j, tuple] : *row) {
-        assert(std::is_sorted(tuple.begin(), tuple.end()));
         for (uint64_t &c : tuple) {
             c -= SHIFT;
         }
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
     }
 }
 
