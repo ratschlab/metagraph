@@ -148,8 +148,7 @@ template <class F, class G, class H, class Callback>
 void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows,
                          G add_diff, H decode_diffs, Callback call_row, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == graph::AnnotatedDBG::graph_to_anno_index(graph_->num_nodes() + 1)
-                && "anchors must be loaded");
+    assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     // No sorting in order not to break the topological order for row-diff annotation
