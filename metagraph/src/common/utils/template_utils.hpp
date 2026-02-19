@@ -139,6 +139,21 @@ struct LessSecond {
     }
 };
 
+template <class OutContainer, class InContainer>
+OutContainer get_firsts(const InContainer &v) {
+    OutContainer result;
+    result.reserve(v.size());
+    for (const auto &x : v) {
+        result.push_back(get_first(x));
+    }
+    return result;
+}
+
+template <class InContainer>
+auto get_firsts(const InContainer &v) {
+    return get_firsts<get_first_type_t<typename InContainer::value_type>>(v);
+}
+
 } // namespace utils
 
 #endif // __TEMPLATE_UTILS_HPP__
