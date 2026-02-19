@@ -50,7 +50,7 @@ void call_sliced_rows(Slice &slice, Callback call_row) {
 
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
-    ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
     std::mutex mu;
     std::vector<SetBitPositions> rows(row_ids.size());
     slice_rows<Column>(row_ids, utils::arange<size_t>(0, row_ids.size()),
@@ -113,7 +113,7 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) const {
-    ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
     std::mutex mu;
     std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
     slice_rows<std::pair<Column, uint64_t>>(row_ids, utils::arange<size_t>(0, row_ids.size()),

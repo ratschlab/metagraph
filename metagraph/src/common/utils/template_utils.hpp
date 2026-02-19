@@ -139,6 +139,7 @@ struct LessSecond {
     }
 };
 
+// Example: get_firsts<vector<int>>(vector<pair<int, size_t>>{{1, 2}, {3, 4}}) returns {1, 3}
 template <class OutContainer, class InContainer>
 OutContainer get_firsts(const InContainer &v) {
     OutContainer result;
@@ -147,11 +148,6 @@ OutContainer get_firsts(const InContainer &v) {
         result.push_back(get_first(x));
     }
     return result;
-}
-
-template <class InContainer>
-auto get_firsts(const InContainer &v) {
-    return get_firsts<get_first_type_t<typename InContainer::value_type>>(v);
 }
 
 } // namespace utils

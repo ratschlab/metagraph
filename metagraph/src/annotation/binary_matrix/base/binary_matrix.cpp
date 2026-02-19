@@ -41,16 +41,16 @@ BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads
     return result;
 }
 
-#define INSTANTIATEATE_GET_ROWS_PARALLEL(T) \
+#define INSTANTIATE_GET_ROWS_PARALLEL(T) \
     template std::vector<T> \
     BinaryMatrix::get_rows_parallel<T>(const std::vector<Row> &, size_t, \
                                        std::function<std::vector<T>(const std::vector<Row> &)>)
 
-INSTANTIATEATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
+INSTANTIATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
 using RowWithCounts = Vector<std::pair<Column, uint64_t>>;
-INSTANTIATEATE_GET_ROWS_PARALLEL(RowWithCounts);
+INSTANTIATE_GET_ROWS_PARALLEL(RowWithCounts);
 using RowWithCoords = Vector<std::pair<Column, SmallVector<uint64_t>>>;
-INSTANTIATEATE_GET_ROWS_PARALLEL(RowWithCoords);
+INSTANTIATE_GET_ROWS_PARALLEL(RowWithCoords);
 
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {

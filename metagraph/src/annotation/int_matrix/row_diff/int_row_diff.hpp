@@ -100,6 +100,7 @@ template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
@@ -134,6 +135,7 @@ template <class BaseMatrix>
 std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
     std::vector<RowValues> rows;
+    rows.reserve(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
