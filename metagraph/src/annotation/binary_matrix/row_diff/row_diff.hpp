@@ -170,9 +170,11 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     typename decltype(rd_rows)::value_type result;
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        result.resize(0);
+        auto it = rd_paths_trunc[i].rbegin();
+        result = rd_rows[*it];
+        --times_traversed[*it];
         // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
