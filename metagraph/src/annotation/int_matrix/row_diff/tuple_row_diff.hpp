@@ -37,6 +37,8 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
                                           size_t num_threads = 1) const override;
 
@@ -111,6 +113,28 @@ TupleRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threa
         num_threads
     );
     return to_vector(std::move(unique_rows));
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::RowValues>
+TupleRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
+    std::vector<RowValues> rows(row_ids.size());
+    size_t i = 0;
+    call_rows(row_ids,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_row_tuples(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](const RowTuples &row) {
+            RowValues &row_values = rows[i++];
+            row_values.reserve(row.size());
+            for (const auto &[j, tuple] : row) {
+                row_values.emplace_back(j, tuple.size());
+            }
+        },
+        num_threads
+    );
+    return rows;
 }
 
 template <class BaseMatrix>

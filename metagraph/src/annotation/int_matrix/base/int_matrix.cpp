@@ -75,25 +75,6 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     return result;
 }
 
-// for each row return the sizes of all non-empty tuples
-std::vector<MultiIntMatrix::RowValues>
-MultiIntMatrix::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
-    std::vector<RowTuples> row_tuples = get_row_tuples(rows, num_threads);
-
-    std::vector<RowValues> row_values(row_tuples.size());
-
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < row_tuples.size(); ++i) {
-        row_values[i].resize(row_tuples[i].size());
-        for (size_t j = 0; j < row_tuples[i].size(); ++j) {
-            row_values[i][j].first = row_tuples[i][j].first;
-            row_values[i][j].second = row_tuples[i][j].second.size();
-        }
-    }
-
-    return row_values;
-}
-
 } // namespace matrix
 } // namespace annot
 } // namespace mtg

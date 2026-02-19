@@ -38,10 +38,6 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual ~MultiIntMatrix() {}
 
-    // return tuple sizes (if not zero) at each entry
-    virtual std::vector<RowValues> get_row_values(const std::vector<BinaryMatrix::Row> &rows,
-                                                  size_t num_threads = 1) const;
-
     // return total number of attributes in all tuples
     virtual uint64_t num_attributes() const = 0;
 
