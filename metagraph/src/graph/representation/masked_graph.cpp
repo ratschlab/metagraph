@@ -161,7 +161,7 @@ void MaskedDeBruijnGraph
     if (only_valid_nodes_in_mask_) {
         // iterate only through the nodes marked in the mask
         // TODO: add terminate<bool(void)> to call_ones
-        size_t batch_size = kmers_in_graph_->size() / num_threads;
+        size_t batch_size = std::max<size_t>(1, kmers_in_graph_->size() / num_threads);
 
         #pragma omp parallel for num_threads(num_threads) schedule(static)
         for (node_index begin = 0; begin <= kmers_in_graph_->size(); begin += batch_size) {

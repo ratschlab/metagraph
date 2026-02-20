@@ -83,9 +83,10 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const size_t kMaxBlockSize = 1000;
-    const size_t block_size = num_threads > 1
-            ? std::min<size_t>(kMaxBlockSize, (row_ids.size() + num_threads - 1) / num_threads)
-            : row_ids.size();
+    const size_t block_size = std::max<size_t>(1,  // avoid division by zero in the omp schedule
+                    num_threads > 1 ? std::min<size_t>(kMaxBlockSize, row_ids.size() / num_threads)
+                                    : row_ids.size());
+
     tsl::hopscotch_set<Row> visited_rows;
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic) private(visited_rows)
     for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
@@ -132,7 +133,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
             }
             for (size_t i = begin; i < end; ++i) {
                 for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
-                    auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j], node_to_rd.size());
+                    auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j],
+                                                               node_to_rd.size());
                     rd_paths_trunc[i][j] = it.value();
                     if (!is_new) {
                         rd_paths_trunc[i].resize(j + 1);
@@ -168,7 +170,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
 
-    common::logger->trace("row-diff paths traversed, rows to query: {} -> {}", row_ids.size(), rd_ids.size());
+    common::logger->trace("row-diff paths traversed, rows to query: {} -> {}",
+                          row_ids.size(), rd_ids.size());
 
     return { rd_ids, rd_paths_trunc, times_traversed };
 }

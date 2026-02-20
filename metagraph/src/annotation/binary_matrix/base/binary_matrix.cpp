@@ -25,13 +25,13 @@ BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads
                                 const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
     std::vector<T> result(rows.size());
 
-    const size_t block_size = num_threads > 1
-            ? std::min<size_t>(kRowBatchSize, (rows.size() + num_threads - 1) / num_threads)
-            : rows.size();
+    const size_t batch_size = std::max<size_t>(1,  // avoid division by zero in the omp schedule
+                    num_threads > 1 ? std::min<size_t>(kRowBatchSize, rows.size() / num_threads)
+                                    : rows.size());
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (size_t begin = 0; begin < rows.size(); begin += block_size) {
-        size_t end = std::min(begin + block_size, rows.size());
+    for (size_t begin = 0; begin < rows.size(); begin += batch_size) {
+        size_t end = std::min(begin + batch_size, rows.size());
         auto batch = get_rows(std::vector<Row>(rows.begin() + begin, rows.begin() + end));
         std::copy(std::make_move_iterator(batch.begin()),
                   std::make_move_iterator(batch.end()),
@@ -69,13 +69,11 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     assert(!dynamic_cast<const IRowDiff *>(this) && "RowDiff must override get_rows_dict()");
 
-    const size_t block_size = num_threads > 1
-            ? std::min<size_t>(kRowBatchSize, (rows->size() + num_threads - 1) / num_threads)
-            : rows->size();
+    const size_t batch_size = std::max<size_t>(1, std::min(kRowBatchSize, rows->size() / num_threads));
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t begin = 0; begin < row_to_index.size(); begin += block_size) {
-        const uint64_t end = std::min(begin + block_size,
+    for (uint64_t begin = 0; begin < row_to_index.size(); begin += batch_size) {
+        const uint64_t end = std::min(begin + batch_size,
                                       static_cast<uint64_t>(row_to_index.size()));
 
         std::vector<Row> ids(end - begin);
@@ -187,8 +185,7 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     std::vector<SetBitPositions> unique_rows(codes.size());
 
-    size_t batch_size = std::min(kRowBatchSize,
-                                 (codes.size() + num_threads - 1) / num_threads);
+    const size_t batch_size = std::max<size_t>(1, std::min(kRowBatchSize, codes.size() / num_threads));
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < codes.size(); i += batch_size) {
