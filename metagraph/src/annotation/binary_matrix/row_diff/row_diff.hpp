@@ -129,6 +129,7 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
     assert(graph_ && "graph must be loaded");
+    assert(diffs_.num_rows() == graph_->max_index());
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
@@ -194,6 +195,7 @@ template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);

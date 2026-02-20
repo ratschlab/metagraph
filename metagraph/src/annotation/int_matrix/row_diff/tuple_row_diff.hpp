@@ -66,6 +66,7 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
+    assert(diffs_.num_rows() == graph_->max_index());
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
