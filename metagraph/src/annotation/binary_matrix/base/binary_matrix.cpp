@@ -22,7 +22,7 @@ using Column = RainbowMatrix::Column;
 template <typename T>
 std::vector<T>
 BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads,
-                                std::function<std::vector<T>(const std::vector<Row> &)> get_rows) {
+                                const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
     std::vector<T> result(rows.size());
 
     const size_t block_size = num_threads > 1
@@ -44,7 +44,7 @@ BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads
 #define INSTANTIATE_GET_ROWS_PARALLEL(T) \
     template std::vector<T> \
     BinaryMatrix::get_rows_parallel<T>(const std::vector<Row> &, size_t, \
-                                       std::function<std::vector<T>(const std::vector<Row> &)>)
+                                       const std::function<std::vector<T>(const std::vector<Row> &)> &)
 
 INSTANTIATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
 using RowWithCounts = Vector<std::pair<Column, uint64_t>>;
