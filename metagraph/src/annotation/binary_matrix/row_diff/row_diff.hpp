@@ -131,7 +131,6 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     assert(graph_ && "graph must be loaded");
     assert(diffs_.num_rows() == graph_->max_index());
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     std::vector<Row> result;
@@ -164,7 +163,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1000)
     for (size_t i = 0; i < rd_rows.size(); ++i) {
         decode_diffs(&rd_rows[i]);
-        std::sort(rd_rows[i].begin(), rd_rows[i].end());
+        std::sort(rd_rows[i].begin(), rd_rows[i].end(), utils::LessFirst());
     }
 
     // reconstruct annotation rows from row-diff
