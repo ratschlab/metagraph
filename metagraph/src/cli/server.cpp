@@ -279,6 +279,8 @@ int run_server(Config *config) {
 
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
 
+    bool loaded_with_mmap = utils::with_mmap();
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
@@ -334,6 +336,7 @@ int run_server(Config *config) {
                          " Make sure they're on a fast disk.");
             utils::with_mmap(true);
         }
+        loaded_with_mmap = true;
 
         logger->info("[Server] Loading graphs...");
         for (const auto &[name, graphs] : indexes) {
@@ -359,7 +362,8 @@ int run_server(Config *config) {
         utils::set_mmap(false);
     }
 
-    size_t memory_left = 500'000'000'000;  // 500 GB
+    size_t memory_all = config->memory_available * 1e9;
+    size_t memory_left = memory_all;
     std::condition_variable space_cv;
     std::mutex space_mutex;
 
@@ -403,9 +407,19 @@ int run_server(Config *config) {
                             try {
                                 std::unique_ptr<AnnotatedDBG> index_loaded;
                                 const AnnotatedDBG *index;
-                                if (content_json.isMember("in_ram") && content_json["in_ram"].asBool()) {
-                                    size_t index_size = std::filesystem::file_size(graph_fname)
-                                                       + std::filesystem::file_size(anno_fname);
+                                bool in_ram = content_json.isMember("in_ram") && content_json["in_ram"].asBool();
+                                if (in_ram && !loaded_with_mmap)
+                                    in_ram = false;  // already in RAM, no need to re-load
+                                size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
+                                                                + std::filesystem::file_size(anno_fname)
+                                                           : -1;
+                                if (in_ram && index_size > memory_all) {
+                                    logger->warn("Request {}: Graph of size {} GB is too large to fit into "
+                                                 "RAM (available memory: {} GB). It will be queried with mmap",
+                                                 request_id, index_size / 1e9, memory_all / 1e9);
+                                    in_ram = false;
+                                }
+                                if (in_ram) {
                                     {
                                         std::unique_lock<std::mutex> lock(space_mutex);
                                         space_cv.wait(lock, [&]() {
