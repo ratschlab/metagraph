@@ -130,7 +130,6 @@ How to handle large datasets?
 
 Extremely large succinct graphs can be constructed by building their parts separately
 and writing them to disk on the fly with flag ``--inplace``.
-In such cases, don't forget to index suffix ranges afterwards with ``metagraph transform --index-ranges ...``.
 
 Annotation
 ==========

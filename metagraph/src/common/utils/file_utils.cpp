@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
+#include <system_error>
 
 #if defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
@@ -19,6 +20,7 @@
 namespace utils {
 
 using mtg::common::logger;
+namespace fs = std::filesystem;
 
 std::filesystem::path SWAP_PATH;
 std::vector<std::string> TMP_DIRS;
@@ -139,6 +141,23 @@ bool check_if_writable(const std::string &filename) {
         std::remove(filename.c_str());
 
     return true;
+}
+
+
+void rename_or_move_file(const std::string &old_fname, const std::string &fname) {
+    std::error_code ec;
+    fs::rename(old_fname, fname, ec);
+    // check if rename was successful
+    if (!ec)
+        return;
+    // if cross-device, fallback to copy + remove
+    if (ec == std::errc::cross_device_link) {
+        fs::copy_file(old_fname, fname, fs::copy_options::overwrite_existing);
+        fs::remove(old_fname);
+        return;
+    }
+    // other errors
+    throw fs::filesystem_error("rename failed", old_fname, fname, ec);
 }
 
 

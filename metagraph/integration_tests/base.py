@@ -3,6 +3,9 @@ import subprocess
 import unittest
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
+import psutil
+import shutil
+import time
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -19,6 +22,7 @@ def update_prefix(PREFIX):
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 
 graph_file_extension = {'succinct': '.dbg',
+                        'succinct_swap': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
                         'hashfast': '.hashfastdbg',
@@ -42,11 +46,22 @@ class TestingBase(unittest.TestCase):
         cls.tempdir = TemporaryDirectory()
 
     @staticmethod
+    def _run_command(command: str, error_prefix: str, shell: bool = False, retry: int = 0):
+        """Run a subprocess command and raise AssertionError if it fails."""
+        for attempt in range(1 + retry):
+            if shell:
+                res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
+            else:
+                res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+            if res.returncode == 0:
+                return res
+            time.sleep(1)  # wait 1 sec before retrying
+        raise AssertionError(f"{error_prefix} failed with return code {res.returncode}\nCommand: {command}\nStdout: {res.stdout.decode()}\nStderr: {res.stderr.decode()}")
+
+    @staticmethod
     def _get_stats(graph_path):
         stats_command = METAGRAPH + ' stats ' + graph_path + ' --mmap'
-        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
-        if res.returncode != 0:
-            raise AssertionError(f"Command '{stats_command}' failed with return code {res.returncode} and error: {res.stderr.decode()}")
+        TestingBase._run_command(stats_command, f"Command '{stats_command}'")
         stats_command = METAGRAPH + ' stats ' + graph_path + MMAP_FLAG
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         parsed = dict()
@@ -69,6 +84,10 @@ class TestingBase(unittest.TestCase):
 
         assert mode in ['basic', 'primary', 'canonical']
 
+        if repr.endswith('_swap'):
+            extra_params = '--disk-swap /tmp/ --mem-cap-gb 0.5 ' + extra_params
+            repr = repr.removesuffix('_swap')
+
         construct_command = '{exe} build -p {num_threads} --mode {mode} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
@@ -81,8 +100,7 @@ class TestingBase(unittest.TestCase):
             input=input
         ) + MMAP_FLAG
 
-        res = subprocess.run([construct_command], shell=True)
-        assert res.returncode == 0
+        TestingBase._run_command(construct_command, "Build command", shell=True)
 
         if mode == 'primary':
             transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
@@ -95,8 +113,7 @@ class TestingBase(unittest.TestCase):
                 input=output
             ) + MMAP_FLAG
 
-            res = subprocess.run([transform_command], shell=True)
-            assert res.returncode == 0
+            TestingBase._run_command(transform_command, "Transform command", shell=True)
 
             construct_command = '{exe} build --mode primary -p {num_threads} {extra_params} \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
@@ -109,8 +126,7 @@ class TestingBase(unittest.TestCase):
                 input='{}.fasta.gz'.format(output)
             ) + MMAP_FLAG
 
-            res = subprocess.run([construct_command], shell=True)
-            assert res.returncode == 0
+            TestingBase._run_command(construct_command, "Build primary command", shell=True)
 
     @staticmethod
     def _clean(graph, output, extra_params=''):
@@ -122,8 +138,7 @@ class TestingBase(unittest.TestCase):
             extra_params=extra_params,
             input=graph
         ) + MMAP_FLAG
-        res = subprocess.run([clean_command], shell=True)
-        assert res.returncode == 0
+        TestingBase._run_command(clean_command, "Clean command", shell=True)
 
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
@@ -159,8 +174,29 @@ class TestingBase(unittest.TestCase):
         if with_counts:
             command += ' --count-kmers'
 
-        res = subprocess.run([command], shell=True)
-        assert(res.returncode == 0)
+        # Monitor RAM and disk usage before command
+
+        mem_before = psutil.virtual_memory()
+        disk_before = shutil.disk_usage('/')
+        sys_before_gb = (mem_before.total - mem_before.available) / 1024 / 1024 / 1024
+        sys_total_gb = mem_before.total / 1024 / 1024 / 1024
+        sys_before_pct = mem_before.percent
+        disk_before_gb = disk_before.used / 1024 / 1024 / 1024
+        disk_total_gb = disk_before.total / 1024 / 1024 / 1024
+        disk_before_pct = (disk_before.used / disk_before.total) * 100
+
+        res = TestingBase._run_command(command, "Annotate command", shell=True, retry=5)
+
+        # Monitor RAM and disk usage after command
+        mem_after = psutil.virtual_memory()
+        disk_after = shutil.disk_usage('/')
+        sys_after_gb = (mem_after.total - mem_after.available) / 1024 / 1024 / 1024
+        sys_after_pct = mem_after.percent
+        disk_after_gb = disk_after.used / 1024 / 1024 / 1024
+        disk_after_pct = (disk_after.used / disk_after.total) * 100
+
+        print(f"\033[33m[ RESOURCE ]\033[0m Before: RAM {sys_before_gb:.1f}/{sys_total_gb:.1f}GB ({sys_before_pct:.1f}%) | Disk {disk_before_gb:.1f}/{disk_total_gb:.1f}GB ({disk_before_pct:.1f}%)\n"
+              f"\033[33m[          ]\033[0m  After: RAM {sys_after_gb:.1f}/{sys_total_gb:.1f}GB ({sys_after_pct:.1f}%) | Disk {disk_after_gb:.1f}/{disk_total_gb:.1f}GB ({disk_after_pct:.1f}%)", flush=True)
 
         if target_anno == anno_repr:
             return
@@ -183,8 +219,7 @@ class TestingBase(unittest.TestCase):
         if not no_fork_opt:
             if target_anno.startswith('row_diff'):
                 print('-- Building RowDiff without fork optimization...')
-            res = subprocess.run([command + other_args], shell=True)
-            assert(res.returncode == 0)
+            TestingBase._run_command(command + other_args, "Transform_anno command", shell=True)
 
         if target_anno == 'row_diff':
             without_input_anno = command.split(' ')
@@ -193,30 +228,24 @@ class TestingBase(unittest.TestCase):
             if not no_anchor_opt:
                 if separate:
                     print('-- Building RowDiff succ/pred...')
-                    res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True)
-                    assert(res.returncode == 0)
-                res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True)
-                assert(res.returncode == 0)
+                    TestingBase._run_command('echo \"\" | ' + without_input_anno + ' --row-diff-stage 1', "RowDiff stage 1 (separate) command", shell=True)
+                TestingBase._run_command(command + ' --row-diff-stage 1' + other_args, "RowDiff stage 1 command", shell=True)
                 subprocess.run([f'rm -f {output}.row_count'], shell=True)
             if separate:
                 print('-- Assigning anchors...')
-                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
-                assert(res.returncode == 0)
-            res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True)
-            assert(res.returncode == 0)
+                TestingBase._run_command('echo \"\" | ' + without_input_anno + ' --row-diff-stage 2', "RowDiff stage 2 (separate) command", shell=True)
+            TestingBase._run_command(command + ' --row-diff-stage 2' + other_args, "RowDiff stage 2 command", shell=True)
             subprocess.run([f'rm -f {output}.row_reduction'], shell=True)
 
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg' + MMAP_FLAG
-                res = subprocess.run([command], shell=True)
-                assert (res.returncode == 0)
+                TestingBase._run_command(command, "Transform_anno (final) command", shell=True)
                 subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
             else:
                 subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
-            res = subprocess.run([command], shell=True)
-            assert (res.returncode == 0)
+            TestingBase._run_command(command, "Relax_brwt command", shell=True)

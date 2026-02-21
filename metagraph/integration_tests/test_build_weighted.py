@@ -7,16 +7,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
 """Test graph construction"""
-
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
 
 build_params = {'succinct': ('succinct', '""'),
                 'succinct_disk': ('succinct', '/tmp/'),  # build with disk swap
@@ -24,6 +18,11 @@ build_params = {'succinct': ('succinct', '""'),
                 'hash': ('hash', '""'),
                 'hashfast': ('hashfast', '""'),
                 'hashstr': ('hashstr', '""')}
+
+# Also test with swap in shm but only if it exists (Linux but not MacOS)
+# (shm has a different filesystem, hence we're testing cross-device moves here)
+if os.path.isdir("/dev/shm"):
+    build_params['succinct_shm'] = ('succinct', '/dev/shm/')
 
 BUILDS = [name for name, _ in build_params.items()]
 

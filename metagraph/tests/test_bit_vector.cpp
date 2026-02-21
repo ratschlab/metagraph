@@ -128,9 +128,10 @@ void reference_based_test(const bit_vector &vector,
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
 
     ASSERT_DEBUG_DEATH(vector.select1(0), "");
+    ASSERT_DEBUG_DEATH(vector.select1(max_rank + 1), "");
+    ASSERT_DEBUG_DEATH(vector.select1(max_rank + 1000), "");
 
     for (size_t i : { 1, 2, 10, 100, 1000 }) {
-        ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
         EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2))
             << bit_vector_stat(reference);
     }
@@ -185,8 +186,9 @@ void test_bit_vector_queries() {
         EXPECT_EQ(0, (*vector)[i]);
         EXPECT_EQ(i + 1, vector->rank0(i));
         EXPECT_EQ(0u, vector->rank1(i));
-        ASSERT_DEBUG_DEATH(vector->select1(i), "");
     }
+    ASSERT_DEBUG_DEATH(vector->select1(0), "");
+    ASSERT_DEBUG_DEATH(vector->select1(1), "");
     EXPECT_EQ(0u, vector->rank1(0));
     EXPECT_EQ(0u, vector->rank1(1'000));
     EXPECT_EQ(10u, vector->rank0(1'000));
@@ -252,8 +254,9 @@ TYPED_TEST(BitVectorTest, select0) {
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
-        ASSERT_DEBUG_DEATH(vector->select0(i), "");
     }
+    ASSERT_DEBUG_DEATH(vector->select0(0), "");
+    ASSERT_DEBUG_DEATH(vector->select0(1), "");
 
     vector.reset(new TypeParam(10, 0));
     ASSERT_TRUE(vector);

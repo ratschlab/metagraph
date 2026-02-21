@@ -1,0 +1,279 @@
+name: Linux
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        required: true
+        type: string
+      alphabet:
+        required: true
+        type: string
+      compiler:
+        required: true
+        type: string
+      cc:
+        required: true
+        type: string
+      cxx:
+        required: true
+        type: string
+      build_static:
+        required: true
+        type: string
+      with_avx:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: &platform ubuntu-22.04
+
+    env: &linux-build-env
+      CCACHE_DEFAULT_DIR: ~/.cache/ccache
+      LD_LIBRARY_PATH: /usr/local/lib/:$LD_LIBRARY_PATH
+      DESCRIPTOR: >-
+        ${{ inputs.build_type }}-${{ inputs.alphabet }}-${{ inputs.compiler }}-${{ inputs.build_static == 'ON' && 'static' || 'dynamic' }}-${{ inputs.with_avx == 'ON' && 'AVX' || 'noAVX' }}
+      CMAKE_ARGS: >-
+        -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+        -DBUILD_STATIC=${{ inputs.build_static }}
+        -DWITH_AVX=${{ inputs.with_avx }}
+        -DWITH_MSSE42=${{ inputs.with_avx }}
+        -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
+
+    name: Build
+    defaults: &linux-shell-defaults
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - &checkout-submodules-cache
+        name: Checkout submodules cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}
+
+      - &checkout-submodules-update
+        name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - &install-linux-deps
+        name: Install build dependencies
+        run: |
+          sudo apt-get update
+          if [[ "${{ inputs.compiler }}" == "g++-13" ]]; then
+              sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+              sudo apt-get update
+          fi
+          if [[ "${{ inputs.compiler }}" != "clang" ]]; then
+              sudo apt-get install -y ${{ inputs.compiler }}
+          fi
+          sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+          if [ "${{ inputs.build_static }}" = "ON" ]; then
+            sudo apt-get install -y libcurl4-openssl-dev
+          fi
+          echo "CC=$(which ${{ inputs.cc }})" >> $GITHUB_ENV
+          echo "CXX=$(which ${{ inputs.cxx }})" >> $GITHUB_ENV
+
+      - &install-ccache-linux
+        name: Install ccache (Linux)
+        run: sudo apt-get install -y ccache
+
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-build-${{ env.DESCRIPTOR }}
+
+      - &setup-ccache-config
+        name: Setup ccache config
+        run: |
+          ccache --set-config=max_size=1G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      - &configure-metagraph
+        name: Configure
+        run: |
+          mkdir -p metagraph/build
+          cd metagraph/build
+          cmake ${CMAKE_ARGS} ..
+
+      - &build-metagraph
+        name: Build metagraph
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+      - &build-unit-tests
+        name: Build unit tests
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
+
+      - &build-other
+        name: Build other
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - &show-ccache-stats
+        name: Show ccache statistics
+        run: ccache --show-stats
+
+      - &upload-build-artifacts
+        name: upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: &artifact artifact-${{ env.DESCRIPTOR }}
+          path: |
+            metagraph/build/metagraph_${{ inputs.alphabet }}
+            metagraph/build/unit_tests
+          include-hidden-files: true
+          retention-days: 1
+
+      # for potential release
+      - name: rename binary
+        if: inputs.with_avx == 'OFF'
+        run: mv metagraph/build/metagraph_${{ inputs.alphabet }} metagraph/build/metagraph_${{ inputs.alphabet }}_noAVX
+
+      - name: upload static binary
+        if: ${{ inputs.build_static == 'ON' && inputs.compiler == 'g++-13' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: metagraph_${{ inputs.alphabet }}${{ inputs.with_avx == 'OFF' && '_noAVX' || '' }}_linux_x86
+          path: metagraph/build/metagraph_${{ inputs.alphabet }}${{ inputs.with_avx == 'OFF' && '_noAVX' || '' }}
+
+  unit-tests:
+    runs-on: *platform
+    needs: [build]
+
+    env: *linux-build-env
+
+    name: Unit Tests
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *install-linux-deps
+
+      - &download-build-artifacts
+        name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: *artifact
+          path: metagraph/build
+
+      - &run-unit-tests
+        name: run unit tests
+        run: |
+          cd metagraph/build && chmod +x unit_tests && ./unit_tests
+
+
+  integration-tests:
+    runs-on: *platform
+    needs: [build]
+
+    env: *linux-build-env
+
+    name: Integration Tests
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - *install-linux-deps
+
+      - name: Install Python packages for tests
+        run: |
+          pip3 install parameterized
+          sudo apt-get install python3-venv
+
+      - *download-build-artifacts
+
+      - &recreate-metagraph-symlink
+        name: Recreate metagraph symlink
+        run: |
+          cd metagraph/build
+          binary_name="metagraph_${{ inputs.alphabet }}"
+          chmod +x "${binary_name}"
+          ln -sf "${binary_name}" metagraph
+
+      - &run-integration-tests
+        name: Run integration tests
+        run: |
+          ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
+          cd metagraph/build
+          ./test_venv/bin/python ../integration_tests/main.py
+
+      - name: check metagraph workflows
+        if: inputs.alphabet == 'DNA'
+        run: |
+          export PATH="$(pwd)/metagraph/build/:$PATH"
+          metagraph --help
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r metagraph/workflows/requirements.txt
+          cd metagraph/workflows
+          pytest
+
+
+  examples:
+    runs-on: *platform
+
+    env: *linux-build-env
+    name: Examples
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *checkout-submodules-cache
+
+      - *checkout-submodules-update
+
+      - *install-linux-deps
+
+      - *install-ccache-linux
+
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-examples-${{ env.DESCRIPTOR }}
+
+      - *setup-ccache-config
+
+      - &build-subdirectory-example
+        name: Build and run subdirectory example
+        run: |
+          cd metagraph/examples/subdirectory
+          mkdir -p build && cd build
+          cmake ${CMAKE_ARGS} ..
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make run_example
+
+      - &build-externalproject-example
+        name: Build and run ExternalProject example
+        run: |
+          cd metagraph/examples/ExternalProject
+          mkdir -p build/metagraph-external-prefix/src
+          ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
+          cd build
+          cmake -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} ${CMAKE_ARGS} ..
+          # Skip GitHub sync for speed and to bypass github.sha unavailability in PRs from forks
+          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
+          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
+          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make run_example
+
+      - *show-ccache-stats

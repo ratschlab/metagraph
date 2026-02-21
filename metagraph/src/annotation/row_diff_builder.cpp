@@ -692,23 +692,6 @@ void read_next_block(sdsl::int_vector_buffer<>::iterator &it,
     }
 }
 
-void read_next_blocks(sdsl::int_vector_buffer<>::iterator *succ_it_p,
-                      sdsl::int_vector_buffer<1>::iterator *succ_boundary_it_p,
-                      sdsl::int_vector_buffer<>::iterator *pred_it_p,
-                      sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
-                      uint64_t block_size,
-                      std::array<std::vector<uint64_t>, 4> *out) {
-    #pragma omp parallel sections num_threads(2)
-    {
-        #pragma omp section
-        read_next_block(*succ_it_p, *succ_boundary_it_p, block_size,
-                        out->at(0), out->at(1));
-        #pragma omp section
-        read_next_block(*pred_it_p, *pred_boundary_it_p, block_size,
-                        out->at(2), out->at(3));
-    }
-}
-
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
  * BLOCK_SIZE rows at a time and invokes #call_ones for each set bit.
@@ -743,15 +726,20 @@ void traverse_anno_chunked(
     auto pred_it = pred.begin();
     auto pred_boundary_it = pred_boundary.begin();
 
-    ThreadPool async_reader(1, 1);
+    ThreadPool async_reader(2);
     // start reading the first block
     uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
     std::array<std::vector<uint64_t>, 4> context;
     std::array<std::vector<uint64_t>, 4> context_other;
-    async_reader.enqueue(read_next_blocks,
-                         &succ_it, &succ_boundary_it,
-                         &pred_it, &pred_boundary_it,
-                         next_block_size, &context_other);
+
+    async_reader.enqueue([&]() {
+        read_next_block(succ_it, succ_boundary_it, next_block_size,
+                        context_other[0], context_other[1]);
+    });
+    async_reader.enqueue([&]() {
+        read_next_block(pred_it, pred_boundary_it, next_block_size,
+                        context_other[2], context_other[3]);
+    });
 
     // get a full array of all columns for the omp parallelization below
     const auto col_indexes = get_all_column_indexes(col_annotations);
@@ -760,8 +748,6 @@ void traverse_anno_chunked(
 
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
         uint64_t block_size = next_block_size;
-        next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
-
         before_chunk(block_size);
 
         // finish reading this block
@@ -773,10 +759,15 @@ void traverse_anno_chunked(
         std::vector<uint64_t> &pred_chunk_idx = context[3];
 
         // start reading next block
-        async_reader.enqueue(read_next_blocks,
-                             &succ_it, &succ_boundary_it,
-                             &pred_it, &pred_boundary_it,
-                             next_block_size, &context_other);
+        next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
+        async_reader.enqueue([&]() {
+            read_next_block(succ_it, succ_boundary_it, next_block_size,
+                            context_other[0], context_other[1]);
+        });
+        async_reader.enqueue([&]() {
+            read_next_block(pred_it, pred_boundary_it, next_block_size,
+                            context_other[2], context_other[3]);
+        });
 
         assert(succ_chunk.size() == succ_chunk_idx.back());
         assert(pred_chunk.size() == pred_chunk_idx.back());

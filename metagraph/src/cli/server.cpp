@@ -108,9 +108,7 @@ Json::Value process_search_request(const Json::Value &json,
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
 
-    // dummy pool doing everything in the caller thread
-    ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
+    QueryExecutor engine(config, anno_graph, std::move(aligner_config));
 
     // Query sequences and callback by appending result to vector with mutex for thread safety
     engine.query_fasta(tf.name(),
@@ -504,6 +502,18 @@ int run_server(Config *config) {
             if (!config->fnames.size() && !check_data_ready(anno_graph, response))
                 throw CustomResponse();  // the index is not loaded yet, so we can't process the request
 
+            auto get_num_labels = [](const AnnotatedDBG &anno_dbg) {
+                uint64_t num_labels = 0;
+                if (const auto *coord_to_header = anno_dbg.get_coord_to_header()) {
+                    for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+                        num_labels += coord_to_header->num_sequences(col);
+                    }
+                } else {
+                    num_labels = anno_dbg.get_annotator().num_labels();
+                }
+                return num_labels;
+            };
+
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
@@ -526,7 +536,7 @@ int run_server(Config *config) {
                 uint64_t num_labels = 0;
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
-                        num_labels += graphs_cache[{ graph_fname, anno_fname }]->get_annotator().num_labels();
+                        num_labels += get_num_labels(*graphs_cache[{ graph_fname, anno_fname }]);
                     }
                 }
                 root["annotation"]["labels"] = num_labels;
@@ -538,7 +548,7 @@ int run_server(Config *config) {
                                                         == graph::DeBruijnGraph::CANONICAL);
                 const auto &annotation = anno_graph.get()->get_annotator();
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
-                root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
+                root["annotation"]["labels"] = get_num_labels(*anno_graph.get());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
             }
             return root;

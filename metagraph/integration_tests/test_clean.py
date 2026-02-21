@@ -7,16 +7,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS, graph_file_extension
 
 
 """Test graph construction"""
-
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
 
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 

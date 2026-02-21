@@ -2,10 +2,14 @@
 
 #include <filesystem>
 
+#include <omp.h>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -14,6 +18,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
 
 
 namespace mtg {
@@ -24,6 +29,8 @@ namespace fs = std::filesystem;
 using namespace mtg::seq_io;
 
 using mtg::common::logger;
+
+const size_t LOGGING_INTERVAL_SEQS = 100'000;
 
 
 template <class Callback>
@@ -64,7 +71,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace(
                         "processed {} variants, last was annotated as <{}>, {} sec",
                         total_seqs, fmt::join(labels, "><"), timer.elapsed());
@@ -83,7 +90,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace("processed {} sequences, annotated as <{}>, {} sec",
                                   total_seqs, fmt::join(labels, "><"), timer.elapsed());
                 }
@@ -134,7 +141,7 @@ void call_annotations(const std::string &file,
                 total_seqs += 1;
 
                 if (logger->level() <= spdlog::level::level_enum::trace
-                                                && total_seqs % 10000 == 0) {
+                                                && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                     logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                   total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                 }
@@ -208,7 +215,7 @@ void add_kmer_counts(const std::string &file,
             total_seqs++;
 
             if (logger->level() <= spdlog::level::level_enum::trace
-                                            && total_seqs % 10000 == 0) {
+                                            && total_seqs % LOGGING_INTERVAL_SEQS == 0) {
                 logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                               total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
             }
@@ -233,23 +240,63 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         forward_and_reverse = false;
     }
 
-    Timer timer;
-
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
-
     // not too small, not too large
-    const size_t batch_size = 1'000;
-    const size_t batch_length = 100'000;
+    const size_t BATCH_SIZE = 5'000;
+    const size_t BATCH_LENGTH = 100'000;
+
+    if (config.index_header_coords) {
+        // Collect sequence headers and compute k-mer counts
+        std::vector<std::vector<std::string>> headers(files.size());
+        std::vector<std::vector<uint64_t>> num_kmers(files.size());
+        #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
+        for (size_t i = 0; i < files.size(); ++i) {
+            call_annotations(
+                files[i],
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                false, // config.filename_anno
+                true, // config.annotate_sequence_headers
+                false, // parse_counts_from_headers
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                {}, // config.anno_labels
+                [&](std::string sequence, auto labels, uint64_t) {
+                    assert(labels.size() == 1 && "each sequence has a single label (header)");
+                    if (sequence.size() >= k) {
+                        if (headers[i].empty() || headers[i].back() != labels[0]) {
+                            headers[i].push_back(labels[0]);
+                            num_kmers[i].push_back(0);
+                        }
+                        num_kmers[i].back() += sequence.size() - k + 1;
+                    }
+                }
+            );
+        }
+        annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
+        auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
+        headers_map.serialize(fname);
+        logger->trace("CoordToHeader mapping serialized to {}", fname);
+        return;
+    }
 
     if (config.coordinates) {
+        #pragma omp parallel num_threads(get_num_threads())
+        #pragma omp single
         for (const auto &file : files) {
-            BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
-                [&](auto&& data) {
-                    thread_pool.enqueue([&](auto &data) {
-                        anno_graph->annotate_kmer_coords(std::move(data));
-                    }, std::move(data));
+            using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
+            BatchAccumulator<Seq> batcher(
+                [&anno_graph](std::vector<Seq>&& data) {
+                    auto *data_p = new std::vector<Seq>(std::move(data));
+                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    {
+                        std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
+                        anno_graph->annotate_kmer_coords(*data_ptr);
+                    }
                 },
-                batch_size, batch_length, batch_size
+                BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
             );
 
             logger->trace("Annotating k-mer coordinates for file {}", file);
@@ -279,7 +326,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
                         logger->error("All input sequences must have the same"
-                                      " length when flag --const-length is on");
+                                      " length when flag --num-kmers-in-seq is on");
                         exit(1);
                     }
                     if (sequence.size() >= k) {
@@ -293,22 +340,24 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             );
         }
 
-        thread_pool.join();
-
         anno_graph->get_annotator().serialize(annotator_filename);
-
         return;
     }
 
-    // iterate over input files
+    #pragma omp parallel num_threads(get_num_threads())
+    #pragma omp single
     for (const auto &file : files) {
-        BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
-            [&](auto&& data) {
-                thread_pool.enqueue([&](auto &data) {
-                    anno_graph->annotate_sequences(std::move(data));
-                }, std::move(data));
+        using Seq = std::pair<std::string, std::vector<std::string>>;
+        BatchAccumulator<Seq> batcher(
+            [&anno_graph](std::vector<Seq>&& data) {
+                auto *data_p = new std::vector<Seq>(std::move(data));
+                #pragma omp task firstprivate(data_p) shared(anno_graph)
+                {
+                    std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
+                    anno_graph->annotate_sequences(*data_ptr);
+                }
             },
-            batch_size, batch_length, batch_size
+            BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
         );
         call_annotations(
             file,
@@ -332,27 +381,26 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         );
     }
 
-    thread_pool.join();
-
     if (config.count_kmers) {
         // add k-mer counts to existing binary annotations
+        #pragma omp parallel num_threads(get_num_threads())
+        #pragma omp single
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
 
-            BatchAccumulator<std::tuple<std::string,
-                                        std::vector<std::string>,
-                                        std::vector<uint64_t>>> batcher(
-                [&](auto&& data) {
-                    using Batch = std::vector<std::tuple<std::string,
-                                                         std::vector<std::string>,
-                                                         std::vector<uint64_t>>>;
-                    thread_pool.enqueue([&](Batch &data) {
-                        for (auto &[seq, labels, kmer_counts] : data) {
+            using Seq = std::tuple<std::string, std::vector<std::string>, std::vector<uint64_t>>;
+            BatchAccumulator<Seq> batcher(
+                [&anno_graph](std::vector<Seq>&& data) {
+                    auto *data_p = new std::vector<Seq>(std::move(data));
+                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    {
+                        std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
+                        for (auto &[seq, labels, kmer_counts] : *data_ptr) {
                             anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
                         }
-                    }, std::move(data));
+                    }
                 },
-                batch_size, batch_length, batch_size
+                BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
             );
 
             const std::string &counts_fname
@@ -407,8 +455,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         }
     }
 
-    thread_pool.join();
-
     anno_graph->get_annotator().serialize(annotator_filename);
 }
 
@@ -420,17 +466,31 @@ int annotate_graph(Config *config) {
 
     assert(config->infbase_annotators.size() <= 1);
 
+    if (config->index_header_coords) {
+        if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
+            logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
+                          "only be constructed for annotated filenames (use flag `--anno-filename`)");
+            exit(1);
+        }
+        logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
+        logger->info("Note: It's essential that the files are passed in the order of the columns "
+                     "in the graph annotation (check with `metagraph stats --print-col-names ...`)");
+        config->separately = false;
+    }
+
     const auto graph = load_critical_dbg(config->infbase);
 
     if (!config->separately) {
+        omp_set_max_active_levels(2);
         annotate_data(graph, *config, files, config->outfbase);
 
     } else {
         // |config->separately| is true
 
         // annotate multiple files in parallel, each with |parallel_each| threads
-        size_t num_threads = get_num_threads();
+        size_t num_threads = std::max<size_t>(1, get_num_threads());
         set_num_threads(std::max(1u, config->parallel_each));
+        omp_set_max_active_levels(3);
 
         if (!config->outfbase.empty()) {
             try {
@@ -447,7 +507,7 @@ int annotate_graph(Config *config) {
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
                     : files[i],
-                2000 / std::max((size_t)1, num_threads));
+                2000 / num_threads);
         }
     }
 

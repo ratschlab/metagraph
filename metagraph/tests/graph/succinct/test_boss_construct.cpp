@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <sstream>
 #include <mutex>
@@ -10,7 +11,9 @@
 #define protected public
 #define private public
 
+#include "common/algorithms.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/serialization.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/sorted_sets/sorted_multiset_disk.hpp"
@@ -134,7 +137,7 @@ TEST(BOSSConstruct, ConstructionEQAppending) {
         }
         for (bool weighted : { false, true }) {
             for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 0, 1,
                                             20000, container);
                 constructor.add_sequences(std::vector<std::string>(input_data));
                 BOSS constructed(&constructor);
@@ -154,7 +157,7 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
     };
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
-            BOSSConstructor constructor(k, false, 8, "", 1, 20000, container);
+            BOSSConstructor constructor(k, false, 8, "", 0, 1, 20000, container);
             constructor.add_sequences(std::vector<std::string>(input_data));
 
             BOSS constructed;
@@ -191,7 +194,7 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
             BOSS constructed(k);
 
             auto constructor
-                    = IBOSSChunkConstructor::initialize(k, false, 8, "", 1, 20000, container);
+                    = IBOSSChunkConstructor::initialize(k, false, 8, "", 0, 1, 20000, container);
 
             for (auto &&sequence : input_data) {
                 constructor->add_sequence(std::move(sequence));
@@ -237,7 +240,7 @@ TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
         }
         for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
             for (bool weighted : { false, true }) {
-                BOSSConstructor constructor(k, true, weighted ? 8 : 0, "", 1,
+                BOSSConstructor constructor(k, true, weighted ? 8 : 0, "", 0, 1,
                                             20'000, container);
                 constructor.add_sequences(std::vector<std::string>(input_data));
                 BOSS constructed(&constructor);
@@ -256,7 +259,7 @@ TEST(BOSSConstruct, ConstructionLong) {
 
         for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
             for (bool weighted : { false, true }) {
-                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 0, 1,
                                             20'000, container);
                 constructor.add_sequences({ std::string(k + 1, 'A') });
                 BOSS constructed(&constructor);
@@ -275,7 +278,7 @@ TEST(BOSSConstruct, ConstructionShort) {
 
         for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
             for (bool weighted : { false, true }) {
-                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 0, 1,
                                             20'000, container);
                 constructor.add_sequences({ std::string(k, 'A') });
                 BOSS constructed(&constructor);
@@ -304,7 +307,7 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
                         for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                             std::unique_ptr<IBOSSChunkConstructor> constructor(
                                     IBOSSChunkConstructor::initialize(k, false, weighted ? 8 : 0,
-                                                                      suffix, num_threads, 20000, container));
+                                                                      suffix, 0, num_threads, 20000, container));
 
                             constructor->add_sequence(std::string(100, 'A'));
                             constructor->add_sequence(std::string(100, 'C'));
@@ -557,6 +560,343 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
     // AA, BB
     ASSERT_EQ(2u, result.data().size());
 #endif
+}
+
+
+// Regression test: when constructing from suffix-filtered chunks, each chunk
+// sees only a subset of k-mers. add_dummy_sink_kmers generates dummy sinks for
+// nodes that appear terminal within a chunk, but may have outgoing edges in
+// another chunk. After merging chunks, these become redundant dummy sink edges
+// (same node, same $ edge, but a real edge also exists). initialize_chunk must
+// skip them via the `curW == 0 && curF > 0` condition. If that skip is removed,
+// the BOSS table would contain extra edges and fail the equality check.
+TEST(BOSSConstruct, RedundantDummySinkInChunkedConstruction) {
+    std::vector<std::string> sequences = { "AAACCCGGGTTTACGT" };
+
+    for (size_t k = 2; k < std::min((size_t)10, kMaxK); ++k) {
+        BOSS boss_ref(k);
+        for (auto &s : sequences) {
+            boss_ref.add_sequence(s);
+        }
+
+        for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
+            BOSS::Chunk graph_data;
+            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
+                std::unique_ptr<IBOSSChunkConstructor> constructor(
+                    IBOSSChunkConstructor::initialize(k, false, 0, suffix, 0));
+                for (auto &s : sequences) {
+                    constructor->add_sequence(s);
+                }
+                BOSS::Chunk next = constructor->build_chunk();
+                if (graph_data.size()) {
+                    graph_data.extend(next);
+                } else {
+                    graph_data = std::move(next);
+                }
+            }
+            BOSS boss;
+            graph_data.initialize_boss(&boss);
+            EXPECT_EQ(boss_ref, boss)
+                << "k=" << k << " suffix_len=" << suffix_len
+                << " ref_edges=" << boss_ref.num_edges()
+                << " chunk_edges=" << boss.num_edges();
+        }
+    }
+}
+
+
+bool operator==(const sdsl::sd_vector<> &first, const sdsl::sd_vector<> &second) {
+    return (first.m_size == second.m_size
+            && first.m_wl == second.m_wl
+            && first.m_low == second.m_low
+            && first.m_high == second.m_high);
+}
+
+// Test that suffix ranges survive a serialize→load round-trip with a single k-mer.
+TEST(BOSSConstruct, SuffixRangesSingleKmer) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k <= 3; ++k) {
+            // A single k-mer of all A's
+            auto constructor = IBOSSChunkConstructor::initialize(
+                k, false, 0, "", 1 /* suffix_length */, 4, 20'000, container, "/tmp/", 1e9
+            );
+            constructor->add_sequences({ std::string(k, 'A') });
+            BOSS::Chunk chunk = constructor->build_chunk();
+
+            const std::string fname = test_dump_basename + ".suffix_single";
+            {
+                std::ofstream out(fname, std::ios::binary);
+                ASSERT_TRUE(out.good());
+                BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, 0, true);
+            }
+
+            BOSS loaded;
+            {
+                std::ifstream in(fname, std::ios::binary);
+                ASSERT_TRUE(loaded.load(in));
+                load_number(in); // mode
+                ASSERT_TRUE(loaded.load_suffix_ranges(in));
+            }
+
+            EXPECT_EQ(1u, loaded.get_indexed_suffix_length());
+
+            // compare with traditionally indexed
+            auto ref_constructor = IBOSSChunkConstructor::initialize(
+                k, false, 0, "", 0, 1, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
+            );
+            ref_constructor->add_sequences({ std::string(k, 'A') });
+            BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
+            BOSS reference(k);
+            ref_chunk.initialize_boss(&reference);
+            reference.index_suffix_ranges(1, 1);
+
+            ASSERT_EQ(reference.indexed_suffix_length_, loaded.indexed_suffix_length_);
+            ASSERT_TRUE(reference.indexed_suffix_ranges_ == loaded.indexed_suffix_ranges_);
+
+            const size_t num_ranges = utils::ipow(loaded.alph_size - 1, 1);
+            for (size_t i = 0; i < 2 * num_ranges; ++i) {
+                EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
+                    << "k=" << k << " i=" << i;
+            }
+
+            std::remove(fname.c_str());
+        }
+    }
+}
+
+void reindex_ranges_and_compare(BOSS &constructed) {
+    // save suffix ranges
+    size_t suffix_length = constructed.indexed_suffix_length_;
+    sdsl::sd_vector<> indexed_suffix_ranges = constructed.indexed_suffix_ranges_;
+
+    const size_t num_ranges = utils::ipow(constructed.alph_size - 1, suffix_length);
+    std::vector<uint64_t> onthefly_ranges(suffix_length ? 2 * num_ranges : 0);
+    for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
+        onthefly_ranges[i] = constructed.get_suffix_range(i);
+    }
+
+    constructed.indexed_suffix_length_ = 0;
+    constructed.indexed_suffix_ranges_ = {};
+
+    // overwrite with traditionally computed ranges
+    constructed.index_suffix_ranges(suffix_length, 1);
+    ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
+    ASSERT_EQ(constructed.indexed_suffix_length_, suffix_length);
+    ASSERT_TRUE(constructed.indexed_suffix_ranges_ == indexed_suffix_ranges);
+
+    for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
+        EXPECT_EQ(onthefly_ranges[i], constructed.get_suffix_range(i))
+            << "k=" << constructed.get_k() << " suffix_length=" << suffix_length << " i=" << i;
+    }
+}
+
+// Test with suffix_length = k (maximum possible suffix length).
+TEST(BOSSConstruct, SuffixRangesMaxSuffixLength) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+    };
+
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k <= 4; ++k) {
+            size_t suffix_length = k; // maximum
+
+            auto constructor = IBOSSChunkConstructor::initialize(
+                k, false, 0, "", suffix_length, 1, 20'000, container, "/tmp/", 1e9
+            );
+            constructor->add_sequences(std::vector<std::string>(input_data));
+            BOSS::Chunk chunk = constructor->build_chunk();
+
+            // initialize BOSS from chunk and capture on-the-fly ranges
+            BOSS constructed(k);
+            chunk.initialize_boss(&constructed);
+            ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
+            reindex_ranges_and_compare(constructed);
+        }
+    }
+}
+
+TEST(BOSSConstruct, SuffixRangesFromKmersMatchIndexing) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
+
+#if _PROTEIN_GRAPH
+    constexpr size_t kMaxK_SuffixRanges = 3;
+#else
+    constexpr size_t kMaxK_SuffixRanges = 7;
+#endif
+    for (size_t k = 1; k <= kMaxK_SuffixRanges; ++k) {
+        for (size_t suffix_length = 0; suffix_length <= k; ++suffix_length) {
+            for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+                auto constructor = IBOSSChunkConstructor::initialize(
+                    k, false, 0, "", suffix_length, 4, 20'000, container, "/tmp/", 1e9
+                );
+                constructor->add_sequences(std::vector<std::string>(input_data));
+
+                BOSS::Chunk chunk = constructor->build_chunk();
+
+                BOSS constructed(k);
+                chunk.initialize_boss(&constructed);
+                ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
+                reindex_ranges_and_compare(constructed);
+            }
+        }
+    }
+}
+
+// Test round-trip: build chunk with suffix ranges, serialize via
+// BOSS::serialize(Chunk&&), load back, verify suffix ranges match.
+TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
+
+#if _PROTEIN_GRAPH
+    constexpr size_t kMaxK_SuffixRangesRT = 4;
+#else
+    constexpr size_t kMaxK_SuffixRangesRT = 7;
+#endif
+    for (size_t k = 2; k <= kMaxK_SuffixRangesRT; ++k) {
+        for (size_t suffix_length = 1; suffix_length <= k; ++suffix_length) {
+            for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+                auto constructor = IBOSSChunkConstructor::initialize(
+                    k, false, 0, "", suffix_length, 4, 20'000, container, "/tmp/", 1e9
+                );
+                constructor->add_sequences(std::vector<std::string>(input_data));
+                BOSS::Chunk chunk = constructor->build_chunk();
+
+                // serialize to a temp file (with mode=0 to enable suffix ranges)
+                const std::string fname = test_dump_basename + ".suffix_rt";
+                {
+                    std::ofstream out(fname, std::ios::binary);
+                    ASSERT_TRUE(out.good());
+                    BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, 0, true);
+                }
+
+                // load back
+                BOSS loaded;
+                {
+                    std::ifstream in(fname, std::ios::binary);
+                    ASSERT_TRUE(loaded.load(in)) << "k=" << k << " suffix_length=" << suffix_length;
+                    int mode = load_number(in);
+                    EXPECT_EQ(0, mode);
+                    ASSERT_TRUE(loaded.load_suffix_ranges(in))
+                        << "k=" << k << " suffix_length=" << suffix_length;
+                }
+
+                EXPECT_EQ(suffix_length, loaded.get_indexed_suffix_length())
+                    << "k=" << k;
+
+                // compare with traditionally indexed ranges
+                auto ref_constructor = IBOSSChunkConstructor::initialize(
+                    k, false, 0, "", 0, 1, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
+                );
+                ref_constructor->add_sequences(std::vector<std::string>(input_data));
+                BOSS::Chunk ref_chunk = ref_constructor->build_chunk();
+                BOSS reference(k);
+                ref_chunk.initialize_boss(&reference);
+                reference.index_suffix_ranges(suffix_length, 1);
+
+                ASSERT_EQ(reference.indexed_suffix_length_, loaded.indexed_suffix_length_);
+                ASSERT_TRUE(reference.indexed_suffix_ranges_ == loaded.indexed_suffix_ranges_);
+
+                const size_t num_ranges = utils::ipow(loaded.alph_size - 1, suffix_length);
+                for (size_t i = 0; i < 2 * num_ranges; ++i) {
+                    EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
+                        << "k=" << k << " suffix_length=" << suffix_length << " i=" << i;
+                }
+
+                reindex_ranges_and_compare(loaded);
+
+                std::remove(fname.c_str());
+            }
+        }
+    }
+}
+
+// Test round-trip with suffix_length=0 (no suffix ranges).
+TEST(BOSSConstruct, SuffixRangesSerializeNone) {
+    std::vector<std::string> input_data = { "ACAGCTAGCTAGCTAGCTAGCTG" };
+
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k : { 2, 5 }) {
+            auto constructor = IBOSSChunkConstructor::initialize(
+                k, false, 0, "", 0 /* no suffix indexing */, 4, 20'000, container, "/tmp/", 1e9
+            );
+            constructor->add_sequences(std::vector<std::string>(input_data));
+            BOSS::Chunk chunk = constructor->build_chunk();
+
+            EXPECT_EQ(0u, chunk.indexed_suffix_length_);
+
+            const std::string fname = test_dump_basename + ".suffix_none";
+            {
+                std::ofstream out(fname, std::ios::binary);
+                ASSERT_TRUE(out.good());
+                BOSS::serialize(std::move(chunk), out, BOSS::State::STAT, 0, true);
+            }
+
+            BOSS loaded;
+            {
+                std::ifstream in(fname, std::ios::binary);
+                ASSERT_TRUE(loaded.load(in));
+                load_number(in); // mode
+                // suffix_length=0 means no sd_vector was written;
+                // load_suffix_ranges reads 0 and returns true
+                ASSERT_TRUE(loaded.load_suffix_ranges(in));
+            }
+
+            EXPECT_EQ(0u, loaded.get_indexed_suffix_length());
+
+            std::remove(fname.c_str());
+        }
+    }
+}
+
+// Test that serialize_suffix_ranges=false skips suffix range data entirely.
+TEST(BOSSConstruct, SuffixRangesSerializeSkipped) {
+    std::vector<std::string> input_data = { "ACAGCTAGCTAGCTAGCTAGCTG" };
+    size_t k = 4;
+    size_t suffix_length = 2;
+
+    auto constructor = IBOSSChunkConstructor::initialize(
+        k, false, 0, "", suffix_length, 4, 20'000, kmer::ContainerType::VECTOR, "/tmp/", 1e9
+    );
+    constructor->add_sequences(std::vector<std::string>(input_data));
+    BOSS::Chunk chunk = constructor->build_chunk();
+
+    EXPECT_EQ(suffix_length, chunk.indexed_suffix_length_);
+
+    // serialize WITHOUT suffix ranges (BOSS-only overload, no mode)
+    const std::string fname = test_dump_basename + ".suffix_skip";
+    {
+        std::ofstream out(fname, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        BOSS::serialize(std::move(chunk), out, BOSS::State::STAT);
+    }
+
+    // load back: should get a valid BOSS but no suffix ranges
+    BOSS loaded;
+    {
+        std::ifstream in(fname, std::ios::binary);
+        ASSERT_TRUE(loaded.load(in));
+        // The BOSS-only overload writes nothing after the BOSS data.
+        // Verify we consumed the entire file.
+        std::streampos pos = in.tellg();
+        in.seekg(0, std::ios::end);
+        std::streampos end = in.tellg();
+        EXPECT_EQ(pos, end) << "extra data written after BOSS (expected none with BOSS-only overload)";
+    }
+
+    EXPECT_EQ(0u, loaded.get_indexed_suffix_length());
+
+    std::remove(fname.c_str());
 }
 
 }  // namespace
