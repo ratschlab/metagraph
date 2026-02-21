@@ -359,7 +359,7 @@ int run_server(Config *config) {
         utils::set_mmap(false);
     }
 
-    std::atomic<size_t> memory_left = 500'000'000'000;  // 500 GB
+    size_t memory_left = 500'000'000'000;  // 500 GB
     std::condition_variable space_cv;
     std::mutex space_mutex;
 
@@ -389,13 +389,23 @@ int run_server(Config *config) {
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                         futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                            size_t index_size_reserved = 0;
+                            auto release_memory = [&]() {
+                                if (!index_size_reserved)
+                                    return;
+                                {
+                                    std::unique_lock<std::mutex> lock(space_mutex);
+                                    memory_left += index_size_reserved;
+                                }
+                                index_size_reserved = 0;
+                                space_cv.notify_all();
+                            };
                             try {
                                 std::unique_ptr<AnnotatedDBG> index_loaded;
                                 const AnnotatedDBG *index;
-                                size_t index_size = 0;
                                 if (content_json.isMember("in_ram") && content_json["in_ram"].asBool()) {
-                                    index_size = std::filesystem::file_size(graph_fname)
-                                                + std::filesystem::file_size(anno_fname);
+                                    size_t index_size = std::filesystem::file_size(graph_fname)
+                                                       + std::filesystem::file_size(anno_fname);
                                     {
                                         std::unique_lock<std::mutex> lock(space_mutex);
                                         space_cv.wait(lock, [&]() {
@@ -403,6 +413,7 @@ int run_server(Config *config) {
                                         });
                                         memory_left -= index_size;
                                     }
+                                    index_size_reserved = index_size;
                                     logger->trace("Request {}: Loading graph of size {} GB to RAM...",
                                                   request_id, index_size / 1e9);
                                     Config config_copy = *config;
@@ -416,14 +427,8 @@ int run_server(Config *config) {
 
                                 auto json = process_search_request(content_json, *index, *config);
 
-                                if (index_loaded) {
-                                    index_loaded.reset();
-                                    {
-                                        std::unique_lock<std::mutex> lock(space_mutex);
-                                        memory_left += index_size;
-                                    }
-                                    space_cv.notify_all();
-                                }
+                                index_loaded.reset();
+                                release_memory();
 
                                 std::lock_guard<std::mutex> lock(mu);
                                 if (result.empty()) {
@@ -441,6 +446,7 @@ int run_server(Config *config) {
                                     }
                                 }
                             } catch (...) {
+                                release_memory();
                                 return std::current_exception();
                             }
                             return std::exception_ptr();
