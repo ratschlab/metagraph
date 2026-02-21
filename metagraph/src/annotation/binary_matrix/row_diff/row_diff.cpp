@@ -10,6 +10,7 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/unix_tools.hpp"
 
 namespace mtg {
 namespace annot {
@@ -73,6 +74,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     using Row = BinaryMatrix::Row;
 
+    Timer timer;
+
     // map row index to its index in |rd_rows|
     VectorMap<Row, size_t> node_to_rd;
     node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
@@ -83,9 +86,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const size_t kMaxBlockSize = 1000;
-    const size_t block_size = std::max<size_t>(1,  // avoid division by zero in the omp schedule
-                    num_threads > 1 ? std::min<size_t>(kMaxBlockSize, row_ids.size() / num_threads)
-                                    : row_ids.size());
+    const size_t block_size = get_chunk_size(row_ids.size(), kMaxBlockSize, num_threads);
 
     tsl::hopscotch_set<Row> visited_rows;
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic) private(visited_rows)
@@ -170,8 +171,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
 
-    common::logger->trace("row-diff paths traversed, rows to query: {} -> {}",
-                          row_ids.size(), rd_ids.size());
+    common::logger->trace("RD paths traversed with {} threads in {} sec, chunk size: {}, rows to query: {} -> {}",
+                          num_threads, timer.elapsed(), block_size, row_ids.size(), rd_ids.size());
 
     return { rd_ids, rd_paths_trunc, times_traversed };
 }

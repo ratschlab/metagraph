@@ -25,9 +25,7 @@ BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads
                                 const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
     std::vector<T> result(rows.size());
 
-    const size_t batch_size = std::max<size_t>(1,  // avoid division by zero in the omp schedule
-                    num_threads > 1 ? std::min<size_t>(kRowBatchSize, rows.size() / num_threads)
-                                    : rows.size());
+    const size_t batch_size = get_chunk_size(rows.size(), kRowBatchSize, num_threads);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t begin = 0; begin < rows.size(); begin += batch_size) {
@@ -69,7 +67,7 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     assert(!dynamic_cast<const IRowDiff *>(this) && "RowDiff must override get_rows_dict()");
 
-    const size_t batch_size = std::max<size_t>(1, std::min(kRowBatchSize, rows->size() / num_threads));
+    const size_t batch_size = get_chunk_size(rows->size(), kRowBatchSize, num_threads, false);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t begin = 0; begin < row_to_index.size(); begin += batch_size) {

@@ -14,6 +14,17 @@
 void set_num_threads(unsigned int num_threads);
 unsigned int get_num_threads();
 
+inline size_t get_chunk_size(size_t total_size,
+                             size_t max_chunk_size,
+                             size_t num_threads,
+                             bool one_chunk_if_single_thread = true) {
+    num_threads = std::max<size_t>(1, num_threads);
+    return (one_chunk_if_single_thread && num_threads < 2)
+            ? std::max<size_t>(1, total_size)
+            : std::max<size_t>(1, std::min<size_t>(max_chunk_size,
+                                                    (total_size + num_threads - 1) / num_threads));
+}
+
 
 /**
  * A Thread Pool for parallel execution of tasks with arbitrary parameters
