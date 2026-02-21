@@ -279,6 +279,8 @@ int run_server(Config *config) {
 
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
 
+    bool loaded_with_mmap = utils::with_mmap();
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
@@ -334,6 +336,7 @@ int run_server(Config *config) {
                          " Make sure they're on a fast disk.");
             utils::with_mmap(true);
         }
+        loaded_with_mmap = true;
 
         logger->info("[Server] Loading graphs...");
         for (const auto &[name, graphs] : indexes) {
@@ -356,7 +359,13 @@ int run_server(Config *config) {
             exit(1);
         }
         logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
+        utils::set_mmap(false);
     }
+
+    size_t memory_all = config->memory_available * 1e9;
+    size_t memory_left = memory_all;
+    std::condition_variable space_cv;
+    std::mutex space_mutex;
 
     // the actual server
     HttpServer server;
@@ -383,9 +392,58 @@ int run_server(Config *config) {
                 std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
+                        futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                            size_t index_size_reserved = 0;
+                            auto release_memory = [&]() {
+                                if (!index_size_reserved)
+                                    return;
+                                {
+                                    std::unique_lock<std::mutex> lock(space_mutex);
+                                    memory_left += index_size_reserved;
+                                }
+                                index_size_reserved = 0;
+                                space_cv.notify_all();
+                            };
                             try {
+                                std::unique_ptr<AnnotatedDBG> index_loaded;
+                                const AnnotatedDBG *index;
+                                bool in_ram = content_json.isMember("in_ram") && content_json["in_ram"].asBool();
+                                if (in_ram && !loaded_with_mmap)
+                                    in_ram = false;  // already in RAM, no need to re-load
+                                size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
+                                                                + std::filesystem::file_size(anno_fname)
+                                                           : -1;
+                                if (in_ram && index_size > memory_all) {
+                                    logger->warn("Request {}: Graph of size {} GB is too large to fit into "
+                                                 "RAM (available memory: {} GB). It will be queried with mmap",
+                                                 request_id, index_size / 1e9, memory_all / 1e9);
+                                    in_ram = false;
+                                }
+                                if (in_ram) {
+                                    {
+                                        std::unique_lock<std::mutex> lock(space_mutex);
+                                        space_cv.wait(lock, [&]() {
+                                            return memory_left >= index_size;
+                                        });
+                                        memory_left -= index_size;
+                                    }
+                                    index_size_reserved = index_size;
+                                    logger->trace("Request {}: Loading graph of size {} GB to RAM...",
+                                                  request_id, index_size / 1e9);
+                                    Config config_copy = *config;
+                                    config_copy.infbase = graph_fname;
+                                    config_copy.infbase_annotators = { anno_fname };
+                                    index_loaded = initialize_annotated_dbg(config_copy);
+                                    index = index_loaded.get();
+                                } else {
+                                    index = graphs_cache[{ graph_fname, anno_fname }].get();
+                                }
+
                                 auto json = process_search_request(content_json, *index, *config);
+
+                                index_loaded.reset();
+                                release_memory();
+
                                 std::lock_guard<std::mutex> lock(mu);
                                 if (result.empty()) {
                                     result = std::move(json);
@@ -402,6 +460,7 @@ int run_server(Config *config) {
                                     }
                                 }
                             } catch (...) {
+                                release_memory();
                                 return std::current_exception();
                             }
                             return std::exception_ptr();
