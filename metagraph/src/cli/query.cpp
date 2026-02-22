@@ -972,8 +972,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                                      num_found_kmers += node != DeBruijnGraph::npos; });
         num_kmers += contigs[i].second.size();
     }
-    logger->trace("[Query graph construction] Contigs mapped to the full graph (found {} / {} k-mers) in {} sec",
-                  num_found_kmers, num_kmers, timer.elapsed());
+    logger->trace("[Query graph construction] Contigs mapped to the full graph [threads: {}, contigs: {}, chunk_size: {}] (found {} / {} k-mers) in {} sec",
+                  num_threads, contigs.size(), chunk_size, num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
