@@ -706,6 +706,13 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
 
         mode_ = static_cast<Mode>(load_number(*in));
 
+        if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
+            auto offset = in->tellg();
+            madvise(mmap_in->get_mmap_context()->data() + offset,
+                    mmap_in->get_mmap_context()->file_size_bytes() - offset,
+                    MADV_WILLNEED);
+        }
+
         if (!boss_graph_->load_suffix_ranges(*in))
             logger->warn("No index for node ranges could be loaded");
     }
