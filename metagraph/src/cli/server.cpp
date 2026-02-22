@@ -364,6 +364,7 @@ int run_server(Config *config) {
 
     size_t memory_all = config->memory_available * 1e9;
     size_t memory_left = memory_all;
+    std::atomic<size_t> graphs_being_queried = 0;
     std::condition_variable space_cv;
     std::mutex space_mutex;
 
@@ -384,7 +385,15 @@ int run_server(Config *config) {
             if (!config->fnames.size()) {
                 if (content_json.isMember("graphs"))
                     throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
-                result = process_search_request(content_json, *anno_graph.get(), *config);
+                logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
+                              request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
+                try {
+                    result = process_search_request(content_json, *anno_graph.get(), *config);
+                } catch (...) {
+                    graphs_being_queried--;
+                    throw;
+                }
+                graphs_being_queried--;
             } else {
                 std::vector<std::string> graphs_to_query
                         = filter_graphs_from_list(indexes, content_json, request_id);
@@ -393,6 +402,8 @@ int run_server(Config *config) {
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                         futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                            logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
+                                          request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                             size_t index_size_reserved = 0;
                             auto release_memory = [&]() {
                                 if (!index_size_reserved)
@@ -461,8 +472,10 @@ int run_server(Config *config) {
                                 }
                             } catch (...) {
                                 release_memory();
+                                graphs_being_queried--;
                                 return std::current_exception();
                             }
+                            graphs_being_queried--;
                             return std::exception_ptr();
                         }));
                     }
