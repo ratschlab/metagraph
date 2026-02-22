@@ -695,6 +695,12 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         std::unique_ptr<std::ifstream> in
             = utils::open_ifstream(utils::make_suffix(filename, kExtension));
 
+        if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
+            madvise(mmap_in->get_mmap_context()->data(),
+                    mmap_in->get_mmap_context()->file_size_bytes(),
+                    MADV_RANDOM);
+        }
+
         if (!boss_graph_->load(*in))
             return false;
 
