@@ -19,6 +19,43 @@ const size_t kRowBatchSize = 10'000;
 using Column = RainbowMatrix::Column;
 
 
+template <typename T>
+std::vector<T>
+BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads,
+                                const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
+    std::vector<T> result(rows.size());
+
+    const size_t batch_size = get_chunk_size(rows.size(), kRowBatchSize, num_threads);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t begin = 0; begin < rows.size(); begin += batch_size) {
+        size_t end = std::min(begin + batch_size, rows.size());
+        auto batch = get_rows(std::vector<Row>(rows.begin() + begin, rows.begin() + end));
+        std::copy(std::make_move_iterator(batch.begin()),
+                  std::make_move_iterator(batch.end()),
+                  result.begin() + begin);
+    }
+
+    return result;
+}
+
+#define INSTANTIATE_GET_ROWS_PARALLEL(T) \
+    template std::vector<T> \
+    BinaryMatrix::get_rows_parallel<T>(const std::vector<Row> &, size_t, \
+                                       const std::function<std::vector<T>(const std::vector<Row> &)> &)
+
+INSTANTIATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
+using RowWithCounts = Vector<std::pair<Column, uint64_t>>;
+INSTANTIATE_GET_ROWS_PARALLEL(RowWithCounts);
+using RowWithCoords = Vector<std::pair<Column, SmallVector<uint64_t>>>;
+INSTANTIATE_GET_ROWS_PARALLEL(RowWithCoords);
+
+std::vector<BinaryMatrix::SetBitPositions>
+BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {
+    return get_rows_parallel<SetBitPositions>(rows, num_threads,
+                [&](const std::vector<Row> &rows) { return get_rows(rows); });
+}
+
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
@@ -28,15 +65,13 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         row_to_index[i] = std::make_pair((*rows)[i], i);
     }
 
-    // don't break the topological order for row-diff annotation
-    if (!dynamic_cast<const IRowDiff *>(this)) {
-        ips4o::parallel::sort(row_to_index.begin(), row_to_index.end(),
-                              utils::LessFirst(), num_threads);
-    }
+    assert(!dynamic_cast<const IRowDiff *>(this) && "RowDiff must override get_rows_dict()");
+
+    const size_t batch_size = get_chunk_size(rows->size(), kRowBatchSize, num_threads, false);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t begin = 0; begin < row_to_index.size(); begin += kRowBatchSize) {
-        const uint64_t end = std::min(begin + kRowBatchSize,
+    for (uint64_t begin = 0; begin < row_to_index.size(); begin += batch_size) {
+        const uint64_t end = std::min(begin + batch_size,
                                       static_cast<uint64_t>(row_to_index.size()));
 
         std::vector<Row> ids(end - begin);
@@ -148,8 +183,7 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     std::vector<SetBitPositions> unique_rows(codes.size());
 
-    size_t batch_size = std::min(kRowBatchSize,
-                                 (codes.size() + num_threads - 1) / num_threads);
+    const size_t batch_size = std::max<size_t>(1, std::min(kRowBatchSize, codes.size() / num_threads));
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < codes.size(); i += batch_size) {
@@ -202,6 +236,16 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 std::vector<BinaryMatrix::SetBitPositions>
 RowMajor::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
+    }
+    return rows;
+}
+
+std::vector<BinaryMatrix::SetBitPositions>
+RowMajor::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         rows[i] = get_row(row_ids[i]);
     }

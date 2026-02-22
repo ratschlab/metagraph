@@ -275,7 +275,10 @@ int run_server(Config *config) {
 
     ThreadPool graphs_pool(get_num_threads());
     size_t num_server_threads = std::max(1u, get_num_threads());
-    set_num_threads(0);
+    set_num_threads(config->parallel_each);
+    config->parallel_each = 1;  // query one batch at a time
+
+    logger->info("[Server] Threads per graph: {}", get_num_threads());
 
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
 

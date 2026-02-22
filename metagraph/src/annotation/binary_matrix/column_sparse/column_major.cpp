@@ -43,37 +43,27 @@ ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-Vector<std::pair<ColumnMajor::Column, uint64_t>>
-ColumnMajor::get_column_ranks(Row row) const {
-    assert(row < num_rows() || !columns_.size());
-
-    Vector<std::pair<Column, uint64_t>> result;
-    for (size_t i = 0; i < columns_.size(); ++i) {
-        assert(columns_[i]);
-
-        if (uint64_t r = columns_[i]->conditional_rank1(row))
-            result.emplace_back(i, r);
-    }
-    return result;
-}
-
 std::vector<Vector<std::pair<ColumnMajor::Column, uint64_t>>>
-ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
-    std::vector<Vector<std::pair<Column, uint64_t>>> result(row_ids.size());
+ColumnMajor::get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const {
+    using T = Vector<std::pair<Column, uint64_t>>;
 
-    for (size_t j = 0; j < columns_.size(); ++j) {
-        assert(columns_[j]);
-        const bit_vector &col = *columns_[j];
+    return get_rows_parallel<T>(rows, num_threads, [&](const std::vector<Row> &row_ids) {
+        std::vector<T> result(row_ids.size());
 
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            assert(row_ids[i] < num_rows());
+        for (size_t j = 0; j < columns_.size(); ++j) {
+            assert(columns_[j]);
+            const bit_vector &col = *columns_[j];
 
-            if (uint64_t r = col.conditional_rank1(row_ids[i]))
-                result[i].emplace_back(j, r);
+            for (size_t i = 0; i < row_ids.size(); ++i) {
+                assert(row_ids[i] < num_rows());
+
+                if (uint64_t r = col.conditional_rank1(row_ids[i]))
+                    result[i].emplace_back(j, r);
+            }
         }
-    }
 
-    return result;
+        return result;
+    });
 }
 
 void ColumnMajor::call_columns(const std::vector<Column> &columns,

@@ -599,8 +599,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_indexes.push_back(in_full);
         }
 
-        // TODO: make multithreaded
-        auto slice = mat.get_row_values(row_indexes);
+        auto slice = mat.get_row_values(row_indexes, num_threads);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
@@ -916,7 +915,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     );
 
     logger->trace("[Query graph construction] Batch graph contains {} k-mers"
-                  " and took {} sec to construct",
+                  " and constructed in {} sec",
                   graph_init->num_nodes(), timer.elapsed());
     timer.reset();
 
@@ -935,11 +934,37 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
+    if (num_threads > 1) {
+        // break long contigs into shorter segments for better load balancing
+#ifndef NDEBUG
+        // to trigger the rebalancing of contigs on small tests
+        const size_t kMaxPathSize = 1;
+#else
+        // E.g., for k=31 and indexed node ranges with suffix length 12,
+        // the overhead will be (31-12)/640 = 3% in the worst case.
+        const size_t kMaxPathSize = 640;
+#endif
+        const size_t k = graph_init->get_k();
+        for (size_t i = 0; i < contigs.size(); ++i) {
+            assert(contigs[i].first.size() >= k);
+            const size_t orig_path_size = contigs[i].first.size() - k + 1;
+            if (orig_path_size <= kMaxPathSize)
+                continue;
+            for (size_t offset = kMaxPathSize; offset < orig_path_size; offset += kMaxPathSize) {
+                contigs.emplace_back(std::piecewise_construct,
+                    std::forward_as_tuple(contigs[i].first, offset, kMaxPathSize + k - 1),
+                    std::forward_as_tuple());
+            }
+            contigs[i].first.resize(kMaxPathSize + k - 1);
+        }
+    }
+
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 100)
+    assert(num_threads);
+    size_t chunk_size = min<size_t>(max<size_t>(1, contigs.size() / (num_threads * 10)), 100);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, chunk_size)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
@@ -947,8 +972,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                                      num_found_kmers += node != DeBruijnGraph::npos; });
         num_kmers += contigs[i].second.size();
     }
-    logger->trace("[Query graph construction] Contigs mapped to the full graph (found {} / {} k-mers) in {} sec",
-                  num_found_kmers, num_kmers, timer.elapsed());
+    logger->trace("[Query graph construction] Contigs mapped to the full graph [threads: {}, contigs: {}, chunk_size: {}] (found {} / {} k-mers) in {} sec",
+                  num_threads, contigs.size(), chunk_size, num_found_kmers, num_kmers, timer.elapsed());
     timer.reset();
 
     size_t original_size = contigs.size();
@@ -987,8 +1012,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     graph_init.reset();
-
-    logger->trace("[Query graph construction] Building the query graph...");
     timer.reset();
     std::shared_ptr<DeBruijnGraph> graph;
 
@@ -1009,9 +1032,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Query graph contains {} k-mers"
                   " and took {} sec to construct",
                   graph->num_nodes(), timer.elapsed());
-    timer.reset();
-
-    logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
 
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
@@ -1039,9 +1059,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
     }
 
-    logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
-                  timer.elapsed());
-
     contigs = decltype(contigs)();
 
     for (auto &[first, second] : from_full_to_small) {
@@ -1050,8 +1067,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         second = AnnotatedDBG::graph_to_anno_index(second);
     }
 
-    logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
-                  from_full_to_small.size());
+    timer.reset();
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
@@ -1064,7 +1080,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Query annotation with {} rows, {} labels,"
                   " and {} set bits constructed in {} sec", annotation->num_objects(),
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
-    timer.reset();
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));

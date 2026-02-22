@@ -16,7 +16,7 @@ namespace matrix {
 // the only difference will be that there is some additional data stored
 // for now for simplicity I just use different class
 // and also different base class
-class IntRowDisk : public RowMajor, public IntMatrix {
+class IntRowDisk : public BinaryMatrix, public IntMatrix {
   public:
     IntRowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = std::max((size_t)8, RA_ivbuffer_size / 8);
@@ -25,13 +25,13 @@ class IntRowDisk : public RowMajor, public IntMatrix {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
-    SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
+    using BinaryMatrix::get_rows;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const {
-        return get_view().get_row_values(rows);
-    }
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const;
 
     bool load(std::istream &f);
 
@@ -51,7 +51,7 @@ class IntRowDisk : public RowMajor, public IntMatrix {
             uint64_t num_set_bits,
             uint8_t max_val);
 
-    const RowMajor& get_binary_matrix() const { return *this; }
+    const BinaryMatrix& get_binary_matrix() const { return *this; }
 
   private:
     // For the multithreading to work properly, we open int_vector_buffer<> in

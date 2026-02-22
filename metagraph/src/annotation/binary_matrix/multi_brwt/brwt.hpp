@@ -31,9 +31,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows, size_t num_threads) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
-    get_column_ranks(const std::vector<Row> &rows) const;
+    get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const;
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    bool show_progress = common::get_verbose()) const;
 
@@ -60,6 +61,15 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
 
     void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
+
+    template <typename T>
+    void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+                    std::vector<std::pair<const BRWT*, size_t>> call_stack,
+                    size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
+                    std::function<void(const std::vector<size_t>&, const Vector<T>&)> call_slice) const;
+
+    std::pair<std::vector<bool>, std::vector<BRWT::Row>>
+    get_zero_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;

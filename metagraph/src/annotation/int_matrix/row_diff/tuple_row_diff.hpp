@@ -35,7 +35,12 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
 
     std::vector<Row> get_column(Column j) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
+    std::vector<SetBitPositions>
+    get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const override;
+    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -61,6 +66,7 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
+    assert(diffs_.num_rows() == graph_->max_index());
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
@@ -81,58 +87,71 @@ std::vector<BinaryMatrix::SetBitPositions>
 TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows;
     rows.reserve(row_ids.size());
-    for (const auto &row : get_row_tuples(row_ids)) {
-        rows.emplace_back();
-        rows.back().reserve(row.size());
-        for (const auto &[j, _] : row) {
-            rows.back().push_back(j);
-        }
-    }
+    call_rows(row_ids,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_row_tuples(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](const RowTuples &row) { rows.push_back(utils::get_firsts<SetBitPositions>(row)); },
+        1
+    );
+    return rows;
+}
+
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
+    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
+    size_t i = 0;
+    call_rows(*rows,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_row_tuples(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](const RowTuples &row) {
+            auto it = unique_rows.emplace(utils::get_firsts<SetBitPositions>(row)).first;
+            (*rows)[i++] = it - unique_rows.begin();
+        },
+        num_threads
+    );
+    return to_vector(std::move(unique_rows));
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::RowValues>
+TupleRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
+    std::vector<RowValues> rows(row_ids.size());
+    size_t i = 0;
+    call_rows(row_ids,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_row_tuples(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](const RowTuples &row) {
+            RowValues &row_values = rows[i++];
+            row_values.reserve(row.size());
+            for (const auto &[j, tuple] : row) {
+                row_values.emplace_back(j, tuple.size());
+            }
+        },
+        num_threads
+    );
     return rows;
 }
 
 template <class BaseMatrix>
 std::vector<MultiIntMatrix::RowTuples>
-TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
-
-    std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
-    for (auto &row : rd_rows) {
-        decode_diffs(&row);
-    }
-
-    rd_ids = std::vector<Row>();
-
-    // reconstruct annotation rows from row-diff
-    std::vector<RowTuples> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowTuples &result = rows[i];
-
-        auto it = rd_paths_trunc[i].rbegin();
-        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-        result = rd_rows[*it];
-        // propagate back and reconstruct full annotations for predecessors
-        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
-            } else {
-                // free memory
-                rd_rows[*it] = {};
-            }
-        }
-        assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return p.second.size(); }));
-    }
-
+TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids, size_t num_threads) const {
+    std::vector<RowTuples> rows;
+    rows.reserve(row_ids.size());
+    call_rows(row_ids,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_row_tuples(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](const RowTuples &row) { rows.push_back(row); },
+        num_threads
+    );
     return rows;
 }
 
@@ -181,6 +200,8 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
+                    if (result.back().second.empty())  // just for safety, normally shouldn't happen
+                        result.pop_back();
                 }
                 ++it;
                 ++it2;
@@ -193,11 +214,13 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     }
 
     assert(std::is_sorted(row->begin(), row->end()));
+    assert(std::all_of(row->begin(), row->end(),
+                       [](auto &p) { return p.second.size(); }));
     for (auto &[j, tuple] : *row) {
-        assert(std::is_sorted(tuple.begin(), tuple.end()));
         for (uint64_t &c : tuple) {
             c -= SHIFT;
         }
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
     }
 }
 

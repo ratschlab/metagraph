@@ -54,7 +54,11 @@ class IRowDiff {
   protected:
     // get row-diff paths starting at |row_ids|
     std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
+    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads = 1) const;
+
+    template <class F, class G, class H, class Callback>
+    void call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows, G add_diff,
+                   H decode_diffs, Callback call_row, size_t num_threads) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
@@ -125,8 +129,8 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
     assert(graph_ && "graph must be loaded");
+    assert(diffs_.num_rows() == graph_->max_index());
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
     std::vector<Row> result;
@@ -140,28 +144,37 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     return result;
 }
 
-template <class BaseMatrix>
-std::vector<BinaryMatrix::SetBitPositions>
-RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+template <class F, class G, class H, class Callback>
+void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows,
+                         G add_diff, H decode_diffs, Callback call_row, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
+    // No sorting in order not to break the topological order for row-diff annotation
 
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+    // get row-diff paths
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids, num_threads);
+
+    auto rd_rows = call_rd_rows(rd_ids, num_threads);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-    rd_ids = std::vector<Row>();
+    rd_ids = {};
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1000)
+    for (size_t i = 0; i < rd_rows.size(); ++i) {
+        decode_diffs(&rd_rows[i]);
+        std::sort(rd_rows[i].begin(), rd_rows[i].end(), utils::LessFirst());
+    }
 
     // reconstruct annotation rows from row-diff
-    std::vector<SetBitPositions> rows(row_ids.size());
+    typename decltype(rd_rows)::value_type result;
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        SetBitPositions &result = rows[i];
+        auto it = rd_paths_trunc[i].rbegin();
+        result = rd_rows[*it];
+        --times_traversed[*it];
         // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
@@ -171,60 +184,46 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
                 rd_rows[*it] = {};
             }
         }
+        call_row(result);
     }
-    DEBUG_LOG("Reconstructed annotations for {} rows", rows.size());
+    DEBUG_LOG("Reconstructed annotations for {} rows", row_ids.size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
+}
 
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    call_rows(row_ids,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_rows(rd_ids, num_threads);
+        },
+        add_diff, [](SetBitPositions *row) {},
+        [&](const SetBitPositions &row) { rows.push_back(row); },
+        1
+    );
     return rows;
 }
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    if (num_threads > 1)
-        return BinaryMatrix::get_rows_dict(rows, num_threads);
-
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
-    // No sorting in order not to break the topological order for row-diff annotation
-
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
-    common::logger->trace("RD: paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
-
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
-    DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-    rd_ids = std::vector<Row>();
-
-    // reconstruct annotation rows from row-diff
-    SetBitPositions result;
-
-    for (size_t i = 0; i < rows->size(); ++i) {
-        result.resize(0);
-        // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
-            } else {
-                // free memory
-                rd_rows[*it] = {};
-            }
-        }
-        auto it = unique_rows.emplace(result).first;
-        (*rows)[i] = it - unique_rows.begin();
-    }
-    DEBUG_LOG("Reconstructed annotations for {} rows", rows->size());
-    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
-
+    size_t i = 0;
+    call_rows(*rows,
+        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+            return diffs_.get_rows(rd_ids, num_threads);
+        },
+        add_diff, [](SetBitPositions *row) {},
+        [&](const SetBitPositions &row) {
+            auto it = unique_rows.emplace(row).first;
+            (*rows)[i++] = it - unique_rows.begin();
+        },
+        num_threads
+    );
     return to_vector(std::move(unique_rows));
 }
-
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(std::istream &f) {
