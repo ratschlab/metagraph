@@ -938,7 +938,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         // break long contigs into shorter segments for better load balancing
 #ifndef NDEBUG
         // to trigger the rebalancing of contigs on small tests
-        const size_t kMaxPathSize = 10;
+        const size_t kMaxPathSize = 50;
 #else
         // E.g., for k=31 and indexed node ranges with suffix length 12,
         // the overhead will be (31-12)/640 = 3% in the worst case.
