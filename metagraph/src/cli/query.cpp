@@ -884,8 +884,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k());
     size_t max_input_sequence_length = 0;
 
-    logger->trace("[Query graph construction] Building the batch graph...");
-
     if (kPrefilterWithBloom && dbg_succ && sub_k == full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
