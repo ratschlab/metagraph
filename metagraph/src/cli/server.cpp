@@ -402,7 +402,7 @@ int run_server(Config *config) {
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                         futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
-                            logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
+                            logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                           request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                             size_t index_size_reserved = 0;
                             auto release_memory = [&]() {
@@ -430,6 +430,7 @@ int run_server(Config *config) {
                                                  request_id, index_size / 1e9, memory_all / 1e9);
                                     in_ram = false;
                                 }
+                                Timer timer;
                                 if (in_ram) {
                                     {
                                         std::unique_lock<std::mutex> lock(space_mutex);
@@ -439,8 +440,9 @@ int run_server(Config *config) {
                                         memory_left -= index_size;
                                     }
                                     index_size_reserved = index_size;
-                                    logger->trace("Request {}: Loading graph of size {} GB to RAM...",
-                                                  request_id, index_size / 1e9);
+                                    logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
+                                                  request_id, graph_fname, index_size / 1e9);
+                                    timer.reset();
                                     Config config_copy = *config;
                                     config_copy.infbase = graph_fname;
                                     config_copy.infbase_annotators = { anno_fname };
@@ -451,6 +453,8 @@ int run_server(Config *config) {
                                 }
 
                                 auto json = process_search_request(content_json, *index, *config);
+                                logger->trace("Request {}: Search in graph {} {} finished in {} sec",
+                                              request_id, graph_fname, anno_fname, timer.elapsed());
 
                                 index_loaded.reset();
                                 release_memory();
