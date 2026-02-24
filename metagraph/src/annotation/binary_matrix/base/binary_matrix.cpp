@@ -176,7 +176,7 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         }
         (*rows)[i] = codes.size() - 1;
     }
-    row_codes = {};
+    decltype(row_codes)().swap(row_codes);
 
     if (num_threads <= 1)
         return codes_to_rows(codes);

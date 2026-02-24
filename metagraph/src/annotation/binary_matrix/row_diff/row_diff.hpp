@@ -158,7 +158,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
     auto rd_rows = call_rd_rows(rd_ids, num_threads);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-    rd_ids = {};
+    decltype(rd_ids)().swap(rd_ids);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1000)
     for (size_t i = 0; i < rd_rows.size(); ++i) {
@@ -172,7 +172,8 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     for (size_t i = 0; i < row_ids.size(); ++i) {
         auto it = rd_paths_trunc[i].rbegin();
         result = rd_rows[*it];
-        --times_traversed[*it];
+        if (!(--times_traversed[*it]))
+            decltype(result)().swap(rd_rows[*it]);  // free memory
         // propagate back and reconstruct full annotations for predecessors
         for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
             add_diff(rd_rows[*it], &result);
@@ -181,7 +182,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
                 rd_rows[*it] = result;
             } else {
                 // free memory
-                rd_rows[*it] = {};
+                decltype(result)().swap(rd_rows[*it]);
             }
         }
         call_row(result);
