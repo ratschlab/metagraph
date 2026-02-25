@@ -169,6 +169,8 @@ template class StaticBinRelAnnotator<BinRelWT, std::string>;
 
 template class StaticBinRelAnnotator<UniqueRowBinmat, std::string>;
 
+template class StaticBinRelAnnotator<ColumnMajor, std::string>;
+
 template class StaticBinRelAnnotator<Rainbow<BRWT>, std::string>;
 
 template class StaticBinRelAnnotator<RowDiff<ColumnMajor>, std::string>;

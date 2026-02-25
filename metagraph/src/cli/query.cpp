@@ -12,6 +12,8 @@
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
@@ -615,32 +617,61 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         );
     }
 
-    // shortcut construction for Rainbow<> annotation
-    std::vector<uint64_t> row_indexes(full_to_small.size());
-    for (size_t i = 0; i < full_to_small.size(); ++i) {
-        row_indexes[i] = full_to_small[i].first;
+    // Build a ColumnMajor annotation for the query graph.
+    // This processes rows in small batches, populating per-column bit vectors
+    // incrementally.  Compared to the previous get_rows_dict → UniqueRowBinmat
+    // path, this avoids materialising entire dense rows as SetBitPositions
+    // vectors, which can use orders of magnitude more RAM than the compact
+    // column bit-vector representation (C×N/8 bytes vs U×C×4 bytes).
+
+    uint64_t num_columns = full_annotation.num_labels();
+
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
+        ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
+                              utils::LessFirst(), num_threads);
     }
 
-    // get unique rows and set pointers to them in |row_indexes|
-    auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
+    // Initialise one bit vector per column, sized to num_rows in the query graph
+    std::vector<sdsl::bit_vector> col_bvs(num_columns, sdsl::bit_vector(num_rows, 0));
 
-    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
-                                 " Reduce the query batch size.");
+    // Adaptive batch size: keep each batch's decompressed SetBitPositions under
+    // ~64 MB.  For dense annotations num_columns can be large, so the batch
+    // shrinks accordingly.
+    const size_t kTargetBatchBytes = 64ULL * 1024 * 1024;
+    size_t batch_size = std::max<size_t>(
+            1, kTargetBatchBytes / (num_columns * sizeof(BinaryMatrix::Column) + 1));
+
+    for (size_t begin = 0; begin < full_to_small.size(); begin += batch_size) {
+        size_t end = std::min(begin + batch_size, full_to_small.size());
+
+        std::vector<BinaryMatrix::Row> ids;
+        ids.reserve(end - begin);
+        for (size_t i = begin; i < end; ++i) {
+            ids.push_back(full_to_small[i].first);
+        }
+
+        auto rows = full_annotation.get_matrix().get_rows(ids);
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            uint64_t target_row = full_to_small[begin + i].second;
+            for (auto col : rows[i]) {
+                assert(col < num_columns);
+                col_bvs[col][target_row] = 1;
+            }
+        }
     }
 
-    // insert one empty row for representing unmatched rows
-    unique_rows.emplace_back();
-    std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
-    for (size_t i = 0; i < row_indexes.size(); ++i) {
-        row_ids[full_to_small[i].second] = row_indexes[i];
+    // Wrap the raw bit vectors in compressed bit_vector_sd instances
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    columns.reserve(num_columns);
+    for (auto &bv : col_bvs) {
+        columns.emplace_back(new bit_vector_sd(std::move(bv)));
     }
+    col_bvs = {};  // free raw bit vectors
 
-    // copy annotations from the full graph to the query graph
-    return std::make_unique<annot::UniqueRowAnnotator>(
-        std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
-                                          std::move(row_ids),
-                                          full_annotation.num_labels()),
+    return std::make_unique<annot::ColumnMajorAnnotator>(
+        std::make_unique<ColumnMajor>(std::move(columns)),
         full_annotation.get_label_encoder().make_static_copy()
     );
 }
