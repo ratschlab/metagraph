@@ -60,8 +60,13 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
-                rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
+                // keep tight to reduce the RAM usage
+                SetBitPositions new_row(rows[*rows_it].size() + std::distance(row_begin, row_end));
+                new_row.assign(rows[*rows_it].begin(), rows[*rows_it].end());
+                new_row.insert(new_row.end(), row_begin, row_end);
+                assert(new_row.size() < 4
+                        || new_row.capacity() == rows[*rows_it].size() + std::distance(row_begin, row_end));
+                rows[*rows_it].swap(new_row);
                 ++rows_it;
             });
             assert(rows_it == sliced_rows.end());
@@ -133,6 +138,7 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+                // keep tight to reduce the RAM usage
                 rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
