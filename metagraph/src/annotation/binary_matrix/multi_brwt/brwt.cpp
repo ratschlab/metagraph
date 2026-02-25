@@ -66,6 +66,11 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
         }
     );
     thread_pool.join();
+    size_t num_bits = 0;
+    for (const auto &row : rows) {
+        num_bits += row.size();
+    }
+    common::logger->trace("Queried {} rows of length {} in BRWT. Got {} set bits", rows.size(), num_columns(), num_bits);
     return rows;
 }
 

@@ -189,6 +189,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     }
     DEBUG_LOG("Reconstructed annotations for {} rows", row_ids.size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
+    assert(std::all_of(rd_rows.begin(), rd_rows.end(), [](const auto &v) { return v.empty(); }));
 }
 
 template <class BaseMatrix>
