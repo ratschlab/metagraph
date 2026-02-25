@@ -55,10 +55,12 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     std::vector<SetBitPositions> rows(row_ids.size());
     slice_rows<Column>(row_ids, utils::arange<size_t>(0, row_ids.size()),
         {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
-        [&](const std::vector<size_t> &sliced_rows, const Vector<Column> &slice) {
+        [&](const std::vector<size_t> &sliced_rows, Vector<Column> &&slice) {
+            slice.shrink_to_fit();
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
             });
@@ -67,10 +69,13 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     );
     thread_pool.join();
     size_t num_bits = 0;
+    size_t total_capacity = 0;
     for (const auto &row : rows) {
         num_bits += row.size();
+        total_capacity += row.capacity();
     }
-    common::logger->trace("Queried {} rows of length {} in BRWT. Got {} set bits", rows.size(), num_columns(), num_bits);
+    common::logger->trace("Queried {} rows of length {} in BRWT. Got {} set bits, total capacity: {}, capacity per row: {}",
+                          rows.size(), num_columns(), num_bits, total_capacity, (double)total_capacity / rows.size());
     return rows;
 }
 
@@ -123,10 +128,12 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
     std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
     slice_rows<std::pair<Column, uint64_t>>(row_ids, utils::arange<size_t>(0, row_ids.size()),
         {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
-        [&](const std::vector<size_t> &sliced_rows, const Vector<std::pair<Column, uint64_t>> &slice) {
+        [&](const std::vector<size_t> &sliced_rows, Vector<std::pair<Column, uint64_t>> &&slice) {
+            slice.shrink_to_fit();
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
             });
@@ -282,7 +289,7 @@ template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                       std::vector<std::pair<const BRWT*, size_t>> call_stack,
                       size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
-                      std::function<void(const std::vector<size_t>&, const Vector<T>&)> call_slice) const {
+                      std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const {
     if (child_nodes_.size()
             && row_ids.size()
             && call_stack.size() < cutoff_depth
@@ -313,7 +320,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                     col = node->assignments_.get(j, col);
             }
         }
-        call_slice(rows, slice);
+        call_slice(rows, std::move(slice));
     }
 }
 
