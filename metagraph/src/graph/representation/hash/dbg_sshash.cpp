@@ -1,6 +1,9 @@
 #include "dbg_sshash.hpp"
 
+#include <memory>
 #include <type_traits>
+
+#include <sdsl/memory_management.hpp>
 
 #include <streaming_query.hpp>
 #include <progress_bar.hpp>
@@ -18,6 +21,7 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/file_utils.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 
@@ -732,6 +736,11 @@ bool DBGSSHash::load(std::istream& in) {
     num_nodes_ = num_nodes;
 
     if (num_nodes_) {
+        // Enable zero-copy mmap if the stream is backed by an mmap'd file
+        if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
+            auto ctx = mmap_stream->get_mmap_context();
+            loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
+        }
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
         succ_is_next_.load(in);
         pred_is_prev_.load(in);
@@ -742,8 +751,8 @@ bool DBGSSHash::load(std::istream& in) {
 
 bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    std::ifstream fin(suffixed_filename, std::ios::binary);
-    return load(fin);
+    auto fin = utils::open_ifstream(suffixed_filename);
+    return load(*fin);
 }
 
 } // namespace graph
