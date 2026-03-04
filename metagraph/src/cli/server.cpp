@@ -454,8 +454,9 @@ int run_server(Config *config) {
                                 }
 
                                 auto json = process_search_request(content_json, *index, *config);
-                                logger->trace("Request {}: Search in graph {} {} finished in {} sec",
-                                              request_id, graph_fname, anno_fname, timer.elapsed());
+                                logger->trace("Request {}: {} graph {} {} in {} sec",
+                                              request_id, in_ram ? "Loaded and searched" : "Searched",
+                                              graph_fname, anno_fname, timer.elapsed());
 
                                 index_loaded.reset();
                                 release_memory();
@@ -486,8 +487,8 @@ int run_server(Config *config) {
                     }
                 }
                 for (auto &future : futures) {
-                    if (future.get())
-                        std::rethrow_exception(future.get());
+                    if (auto ex = future.get())
+                        std::rethrow_exception(ex);
                 }
             }
             return result;
