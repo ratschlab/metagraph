@@ -427,7 +427,7 @@ int run_server(Config *config) {
                                                            : -1;
                                 if (in_ram && index_size > memory_all) {
                                     logger->warn("Request {}: Graph of size {} GB is too large to fit into "
-                                                 "RAM (available memory: {} GB). It will be queried with mmap",
+                                                 "RAM (reserved memory: {} GB). It will be queried with mmap",
                                                  request_id, index_size / 1e9, memory_all / 1e9);
                                     in_ram = false;
                                 }
