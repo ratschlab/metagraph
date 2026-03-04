@@ -116,7 +116,7 @@ Config::Config(int argc, char *argv[]) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--mmap")) {
-            utils::with_mmap(true);
+            utils::set_mmap(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {

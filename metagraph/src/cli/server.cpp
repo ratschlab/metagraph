@@ -334,9 +334,9 @@ int run_server(Config *config) {
         if (!utils::with_mmap()) {
             logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
                          " Make sure they're on a fast disk.");
-            utils::with_mmap(true);
+            utils::set_mmap(true);
+            loaded_with_mmap = true;
         }
-        loaded_with_mmap = true;
 
         logger->info("[Server] Loading graphs...");
         for (const auto &[name, graphs] : indexes) {
@@ -359,6 +359,7 @@ int run_server(Config *config) {
             exit(1);
         }
         logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
+        // Reset so that dynamically loaded graphs (pulled into RAM for queries) don't use mmap.
         utils::set_mmap(false);
     }
 
