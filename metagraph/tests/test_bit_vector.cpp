@@ -5,6 +5,7 @@
 
 #include "test_helpers.hpp"
 
+#include "common/utils/file_utils.hpp"
 #include "common/vectors/sd_vector_builder_disk.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -390,26 +391,32 @@ uint64_t space_taken(const bit_vector_type &vec) {
 }
 
 TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
-    double tolerance = 0.01;
+    bool mmap_original = utils::with_mmap();
+    for (bool mmap : { true, false }) {
+        utils::set_mmap(mmap);
 
-    if constexpr(std::is_same_v<TypeParam, bit_vector_hyb<>>)
-        return;
+        if constexpr(std::is_same_v<TypeParam, bit_vector_hyb<>>)
+            return;
 
-    DataGenerator gen;
-    for (uint64_t size : { 1'000'000, 10'000'000 }) {
-        for (double density : { .05, .2, .4, .5, .7, .9, .95 }) {
-            sdsl::bit_vector bv = gen.generate_random_column(size, density);
-            uint64_t footprint = space_taken(TypeParam(bv));
-            EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * (1 - tolerance)) << "Density: " << density;
-            EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * (1 + tolerance)) << "Density: " << density;
+        DataGenerator gen;
+        for (uint64_t size : { 1'000'000, 10'000'000 }) {
+            // slightly larger tolerance for small vectors
+            const double TOLERANCE = size > 1'000'000 ? 0.01 : 0.012;
+            for (double density : { .05, .2, .4, .5, .7, .9, .95 }) {
+                sdsl::bit_vector bv = gen.generate_random_column(size, density);
+                uint64_t footprint = space_taken(TypeParam(bv));
+                EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                        footprint * (1 - TOLERANCE)) << "Density: " << density;
+                EXPECT_LE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
+                        footprint * (1 + TOLERANCE)) << "Density: " << density;
+            }
         }
     }
+    utils::set_mmap(mmap_original);
 }
 
 TEST(select_support_mcl, PredictedMemoryFootprint) {
-    double tolerance = 0.01;
+    const double TOLERANCE = 0.01;
 
     DataGenerator gen;
     for (uint64_t size : { 1'000'000, 10'000'000, 100'000'000 }) {
@@ -418,9 +425,9 @@ TEST(select_support_mcl, PredictedMemoryFootprint) {
 
             uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));
             EXPECT_GE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * (1 - tolerance)) << "Size: " << size << "\tDensity: " << density;
+                      footprint * (1 - TOLERANCE)) << "Size: " << size << "\tDensity: " << density;
             EXPECT_LE(footprint_select_support_mcl(bv.size(), sdsl::util::cnt_one_bits(bv)),
-                      footprint * (1 + tolerance)) << "Size: " << size << "\tDensity: " << density;
+                      footprint * (1 + TOLERANCE)) << "Size: " << size << "\tDensity: " << density;
         }
     }
 }
