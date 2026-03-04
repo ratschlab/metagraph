@@ -279,6 +279,8 @@ int run_server(Config *config) {
 
     std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
 
+    bool loaded_with_mmap = utils::with_mmap();
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
@@ -332,7 +334,8 @@ int run_server(Config *config) {
         if (!utils::with_mmap()) {
             logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
                          " Make sure they're on a fast disk.");
-            utils::with_mmap(true);
+            utils::set_mmap(true);
+            loaded_with_mmap = true;
         }
 
         logger->info("[Server] Loading graphs...");
@@ -356,7 +359,15 @@ int run_server(Config *config) {
             exit(1);
         }
         logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
+        // Reset so that dynamically loaded graphs (pulled into RAM for queries) don't use mmap.
+        utils::set_mmap(false);
     }
+
+    size_t memory_all = config->memory_available * 1e9;
+    size_t memory_left = memory_all;
+    std::atomic<size_t> graphs_being_queried = 0;
+    std::condition_variable space_cv;
+    std::mutex space_mutex;
 
     // the actual server
     HttpServer server;
@@ -375,7 +386,15 @@ int run_server(Config *config) {
             if (!config->fnames.size()) {
                 if (content_json.isMember("graphs"))
                     throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
-                result = process_search_request(content_json, *anno_graph.get(), *config);
+                logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
+                              request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
+                try {
+                    result = process_search_request(content_json, *anno_graph.get(), *config);
+                } catch (...) {
+                    graphs_being_queried--;
+                    throw;
+                }
+                graphs_being_queried--;
             } else {
                 std::vector<std::string> graphs_to_query
                         = filter_graphs_from_list(indexes, content_json, request_id);
@@ -383,9 +402,65 @@ int run_server(Config *config) {
                 std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        futures.push_back(graphs_pool.enqueue([&,config,index(graphs_cache[{ graph_fname, anno_fname }].get())]() {
+                        futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                            logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
+                                          request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
+                            size_t index_size_reserved = 0;
+                            auto release_memory = [&]() {
+                                if (!index_size_reserved)
+                                    return;
+                                {
+                                    std::unique_lock<std::mutex> lock(space_mutex);
+                                    memory_left += index_size_reserved;
+                                }
+                                index_size_reserved = 0;
+                                space_cv.notify_all();
+                            };
                             try {
+                                std::unique_ptr<AnnotatedDBG> index_loaded;
+                                const AnnotatedDBG *index;
+                                bool in_ram = content_json.isMember("in_ram") && content_json["in_ram"].asBool();
+                                if (in_ram && !loaded_with_mmap)
+                                    in_ram = false;  // already in RAM, no need to re-load
+                                size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
+                                                                + std::filesystem::file_size(anno_fname)
+                                                           : -1;
+                                if (in_ram && index_size > memory_all) {
+                                    logger->warn("Request {}: Graph of size {} GB is too large to fit into "
+                                                 "RAM (reserved memory: {} GB). It will be queried with mmap",
+                                                 request_id, index_size / 1e9, memory_all / 1e9);
+                                    in_ram = false;
+                                }
+                                Timer timer;
+                                if (in_ram) {
+                                    {
+                                        std::unique_lock<std::mutex> lock(space_mutex);
+                                        space_cv.wait(lock, [&]() {
+                                            return memory_left >= index_size;
+                                        });
+                                        memory_left -= index_size;
+                                    }
+                                    index_size_reserved = index_size;
+                                    logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
+                                                  request_id, graph_fname, index_size / 1e9);
+                                    timer.reset();
+                                    Config config_copy = *config;
+                                    config_copy.infbase = graph_fname;
+                                    config_copy.infbase_annotators = { anno_fname };
+                                    index_loaded = initialize_annotated_dbg(config_copy);
+                                    index = index_loaded.get();
+                                } else {
+                                    index = graphs_cache[{ graph_fname, anno_fname }].get();
+                                }
+
                                 auto json = process_search_request(content_json, *index, *config);
+                                logger->trace("Request {}: {} graph {} {} in {} sec",
+                                              request_id, in_ram ? "Loaded and searched" : "Searched",
+                                              graph_fname, anno_fname, timer.elapsed());
+
+                                index_loaded.reset();
+                                release_memory();
+
                                 std::lock_guard<std::mutex> lock(mu);
                                 if (result.empty()) {
                                     result = std::move(json);
@@ -402,15 +477,18 @@ int run_server(Config *config) {
                                     }
                                 }
                             } catch (...) {
+                                release_memory();
+                                graphs_being_queried--;
                                 return std::current_exception();
                             }
+                            graphs_being_queried--;
                             return std::exception_ptr();
                         }));
                     }
                 }
                 for (auto &future : futures) {
-                    if (future.get())
-                        std::rethrow_exception(future.get());
+                    if (auto ex = future.get())
+                        std::rethrow_exception(ex);
                 }
             }
             return result;
