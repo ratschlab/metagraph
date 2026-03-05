@@ -61,12 +61,9 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
                 // keep tight to reduce the RAM usage
-                // This could be a simple reserve() but folly::small_vector reserves more than requested
-                SetBitPositions new_row(rows[*rows_it].size() + std::distance(row_begin, row_end));
-                new_row.assign(rows[*rows_it].begin(), rows[*rows_it].end());
-                new_row.insert(new_row.end(), row_begin, row_end);
-                rows[*rows_it].swap(new_row);
-                assert(rows[*rows_it].capacity() == rows[*rows_it].size() || rows[*rows_it].size() < 4);
+                // FYI: still not tight with folly::small_vector, which always allocates more
+                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
+                rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
             });
             assert(rows_it == sliced_rows.end());
