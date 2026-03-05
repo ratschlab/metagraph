@@ -24,6 +24,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                bool both_strands = false,
                uint8_t bits_per_count = 0,
                const std::string &filter_suffix = "",
+               size_t indexed_suffix_length = 0,
                size_t num_threads = 1,
                double memory_preallocated = 0,
                mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
@@ -32,6 +33,8 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
     virtual uint64_t get_k() const = 0;
 };
+
+size_t check_num_suffix_ranges(size_t suffix_length);
 
 } // namespace boss
 } // namespace graph

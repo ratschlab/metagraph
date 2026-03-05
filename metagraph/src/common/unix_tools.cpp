@@ -123,7 +123,7 @@ size_t get_max_files_open() {
 }
 
 int get_num_fds() {
-    FILE *p = popen(fmt::format("set -o pipefail; lsof -p {} | tail -n +2 | wc -l", getpid()).c_str(), "r");
+    FILE *p = popen(fmt::format("bash -c 'set -o pipefail; lsof -p {} | tail -n +2 | wc -l'", getpid()).c_str(), "r");
     if (!p) {
         logger->error("Can't open pipe to check the number of file descriptors with `lsof`");
         exit(1);

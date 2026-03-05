@@ -62,6 +62,7 @@ Config::Config(int argc, char *argv[]) {
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
         num_top_labels = 10'000;
+        memory_available = 0;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -116,7 +117,7 @@ Config::Config(int argc, char *argv[]) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--mmap")) {
-            utils::with_mmap(true);
+            utils::set_mmap(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
@@ -1407,6 +1408,7 @@ if (advanced) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seq index exists [off]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
         } break;
     }
 
