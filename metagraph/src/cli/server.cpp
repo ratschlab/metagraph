@@ -273,7 +273,7 @@ int run_server(Config *config) {
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
-    ThreadPool graphs_pool(get_num_threads(), 1000);
+    ThreadPool graphs_pool(get_num_threads(), /*max_num_tasks*/1000);
     size_t num_server_threads = std::max(1u, get_num_threads());
     set_num_threads(std::max(1u, config->parallel_each));
     config->parallel_each = 1;  // query one batch at a time

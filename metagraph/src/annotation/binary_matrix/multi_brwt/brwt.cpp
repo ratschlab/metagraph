@@ -207,15 +207,11 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
 // Appends to `slice`
 template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
-    T delim;
-    if constexpr(utils::is_pair_v<T>) {
-        delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
-    } else {
-        delim = std::numeric_limits<Column>::max();
-    }
+    T delim = {};
+    utils::get_first(delim) = std::numeric_limits<Column>::max();
 
     // check if this is a leaf
-    if (!child_nodes_.size()) {
+    if (child_nodes_.empty()) {
         assert(assignments_.size() == 1);
 
         for (Row i : row_ids) {
