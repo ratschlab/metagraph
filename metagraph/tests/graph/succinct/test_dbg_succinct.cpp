@@ -526,4 +526,33 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleInOut) {
     EXPECT_EQ(ref_node_str, node_str) << *graph;
 }
 
+TEST(DBGSuccinct, CallNodesSmallGraphManyThreads) {
+    // Regression: call_nodes with max_index() < num_threads caused
+    // block_size = 0, triggering SIGFPE in the OpenMP trip count computation.
+    for (size_t k = 2; k < 5; ++k) {
+        auto graph = std::make_unique<DBGSuccinct>(k);
+        graph->add_sequence(std::string(k, 'A'));
+        graph->mask_dummy_kmers(1, false);
+
+        ASSERT_GT(graph->max_index(), 0u);
+
+        size_t num_nodes = 0;
+        graph->call_nodes([&](auto) { num_nodes++; },
+                          []() { return false; },
+                          graph->max_index() + 10);
+        EXPECT_EQ(num_nodes, graph->num_nodes());
+    }
+}
+
+TEST(DBGSuccinct, CallNodesEmptyGraphManyThreads) {
+    auto graph = std::make_unique<DBGSuccinct>(3);
+    graph->mask_dummy_kmers(1, false);
+
+    size_t num_nodes = 0;
+    graph->call_nodes([&](auto) { num_nodes++; },
+                      []() { return false; },
+                      8);
+    EXPECT_EQ(0u, num_nodes);
+}
+
 } // namespace

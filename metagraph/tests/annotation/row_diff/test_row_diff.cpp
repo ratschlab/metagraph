@@ -192,14 +192,14 @@ TEST(RowDiff, GetAnnotationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal_masked = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::bit_vector bterminal(graph.max_index() + 1);
+    sdsl::bit_vector bterminal(graph.max_index());
     sdsl::bit_vector cols_masked[2] = {
         { 1, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 0, 0, 0, 1, 0, 1, 1 }
     };
     sdsl::bit_vector cols_concrete[2];
-    cols_concrete[0].resize(graph.max_index() + 1);
-    cols_concrete[1].resize(graph.max_index() + 1);
+    cols_concrete[0].resize(bterminal.size());
+    cols_concrete[1].resize(bterminal.size());
     graph.call_nodes([&](auto i) {
         auto rank = graph_to_anno_index(graph.rank_node(i));
         bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];
@@ -323,14 +323,14 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal_masked = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::bit_vector bterminal(graph.max_index() + 1);
+    sdsl::bit_vector bterminal(graph.max_index());
     sdsl::bit_vector cols_masked[2] = {
         {0, 0, 1, 0, 0, 0, 1, 0, 1, 0 },
         {0, 1, 1, 0, 0, 0, 0, 0, 1, 0 }
     };
     sdsl::bit_vector cols_concrete[2];
-    cols_concrete[0].resize(graph.max_index() + 1);
-    cols_concrete[1].resize(graph.max_index() + 1);
+    cols_concrete[0].resize(bterminal.size());
+    cols_concrete[1].resize(bterminal.size());
     graph.call_nodes([&](auto i) {
         auto rank = graph_to_anno_index(graph.rank_node(i));
         bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];
