@@ -60,9 +60,6 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-                // keep tight to reduce the RAM usage
-                // FYI: still not tight with folly::small_vector, which always allocates more
-                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
             });
@@ -135,10 +132,7 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-                // keep tight to reduce the RAM usage
-                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
-                assert(rows[*rows_it].capacity() == rows[*rows_it].size());
                 ++rows_it;
             });
             assert(rows_it == sliced_rows.end());
