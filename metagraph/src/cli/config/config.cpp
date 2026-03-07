@@ -646,11 +646,14 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
-                                    || anno_type == RowDiffCoord;
+                                    || anno_type == RowDiffCoord
+                                    || anno_type == RowDiffCharBRWT;
         // For row_diff_brwt and row_diff_flat inputs, the anchor and fork-succ
         // bitmaps are embedded in the .annodbg, so no graph is needed when
         // re-formatting to another row_diff representation.
+        // Computing successor characters for row_diff_char_brwt still needs the graph.
         const bool input_has_embedded_anchor = fnames.size()
+                && anno_type != RowDiffCharBRWT
                 && (fnames.front().ends_with(annot::RowDiffBRWTAnnotator::kExtension)
                         || fnames.front().ends_with(annot::RowDiffRowFlatAnnotator::kExtension));
         if (input_has_embedded_anchor && fnames.size() != 1) {
@@ -784,6 +787,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_sparse";
         case RowDiffDisk:
             return "row_diff_disk";
+        case RowDiffCharBRWT:
+            return "row_diff_char_brwt";
         case IntRowDiffDisk:
             return "row_diff_int_disk";
         case RowDiffDiskCoord:
@@ -831,6 +836,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowSparse;
     } else if (string == "row_diff_disk") {
         return AnnotationType::RowDiffDisk;
+    } else if (string == "row_diff_char_brwt") {
+        return AnnotationType::RowDiffCharBRWT;
     } else if (string == "row_diff_int_disk") {
         return AnnotationType::IntRowDiffDisk;
     } else if (string == "row_diff_disk_coord") {
@@ -950,7 +957,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
-                                   "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
+                                   "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord, row_diff_char_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt )";
 
     switch (identity) {
