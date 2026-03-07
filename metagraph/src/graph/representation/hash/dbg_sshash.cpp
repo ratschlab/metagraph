@@ -351,9 +351,41 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     }
 }
 
+DBGSSHash::node_index DBGSSHash::trivial_outgoing(node_index node) const {
+    assert(in_graph(node));
+    if (node <= dict_size()) {
+        if (succ_is_next_[node])
+            return node + 1;
+    } else {
+        // RC node v: forward counterpart is v - dict_size()
+        // pred_is_prev_[fwd] means successor of RC node is node - 1
+        if (pred_is_prev_[node - dict_size()])
+            return node - 1;
+    }
+    return npos;
+}
+
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
     assert(in_graph(node));
-    // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
+    // Fast path: if successor is the next index, just check if the character matches
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node]) {
+            if (get_last_char(node + 1) == next_char)
+                return node + 1;
+            else
+                return npos; // degree-1 node, but character doesn't match
+        }
+    } else {
+        node_index rev_comp = reverse_complement(node);
+        if (pred_is_prev_[rev_comp]) {
+            --rev_comp;
+            if (complement(get_first_char(rev_comp)) == next_char)
+                return reverse_complement(rev_comp);
+            else
+                return npos;
+        }
+    }
+    // Slow path: full MPHF lookup
     return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 

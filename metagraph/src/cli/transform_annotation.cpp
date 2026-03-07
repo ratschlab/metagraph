@@ -12,6 +12,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
+#include "load/load_graph.hpp"
 
 
 namespace mtg {
@@ -783,6 +784,10 @@ int transform_annotation(Config *config) {
                 logger->error("Convert to row_diff first, and then to row_diff_disk");
                 return 0;
             }
+            case Config::RowDiffCharBRWT: {
+                logger->error("Convert to row_diff_brwt first, and then to row_diff_char_brwt");
+                return 0;
+            }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
@@ -935,6 +940,37 @@ int transform_annotation(Config *config) {
         annotator.load(files[0]);
 
         convert_to_row_diff<RowDiffRowFlatAnnotator>(annotator, config->outfbase);
+        logger->trace("Serialized to {}", config->outfbase);
+
+    } else if (input_anno_type == Config::RowDiffBRWT && config->anno_type == Config::RowDiffCharBRWT) {
+        if (files.size() != 1) {
+            logger->error("Can only convert row_diff_brwt annotations one at a time");
+            exit(1);
+        }
+
+        logger->trace("Loading annotation...");
+        RowDiffBRWTAnnotator annotator;
+        annotator.load(files[0]);
+
+        logger->trace("Loading graph...");
+        auto graph = load_critical_dbg(config->infbase);
+
+        logger->trace("Computing rd_succ_char from fork_succ...");
+        auto [needs_char, rd_succ_char] = compute_rd_succ_char(*graph, annotator.get_matrix().fork_succ());
+
+        // Serialize as RowDiffCharBRWT (v3.0 format: anchor + needs_char + rd_succ_char + diffs)
+        const auto &fname = utils::make_suffix(config->outfbase,
+                                               RowDiffCharBRWTAnnotator::kExtension);
+        std::ofstream out = utils::open_new_ofstream(fname);
+        annotator.get_label_encoder().serialize(out);
+        out.write("v3.0", 4);
+        annotator.get_matrix().anchor().serialize(out);
+        needs_char.serialize(out);
+        rd_succ_char.serialize(out);
+        // BRWT diffs are identical to the original
+        annotator.get_matrix().diffs().serialize(out);
+        out.close();
+
         logger->trace("Serialized to {}", config->outfbase);
 
     } else {
