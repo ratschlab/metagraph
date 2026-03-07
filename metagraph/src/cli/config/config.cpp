@@ -623,7 +623,8 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
-                                    || anno_type == RowDiffCoord;
+                                    || anno_type == RowDiffCoord
+                                    || anno_type == RowDiffCharBRWT;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
@@ -743,6 +744,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_sparse";
         case RowDiffDisk:
             return "row_diff_disk";
+        case RowDiffCharBRWT:
+            return "row_diff_char_brwt";
         case IntRowDiffDisk:
             return "row_diff_int_disk";
         case RowDiffDiskCoord:
@@ -790,6 +793,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowSparse;
     } else if (string == "row_diff_disk") {
         return AnnotationType::RowDiffDisk;
+    } else if (string == "row_diff_char_brwt") {
+        return AnnotationType::RowDiffCharBRWT;
     } else if (string == "row_diff_int_disk") {
         return AnnotationType::IntRowDiffDisk;
     } else if (string == "row_diff_disk_coord") {
