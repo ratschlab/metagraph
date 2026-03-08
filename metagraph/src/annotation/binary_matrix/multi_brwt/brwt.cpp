@@ -34,15 +34,20 @@ bool BRWT::get(Row row, Column column) const {
     return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
 }
 
+template <typename T>
+T make_delim() {
+    T delim = {};
+    utils::get_first(delim) = std::numeric_limits<BRWT::Column>::max();
+    return delim;
+}
+
 template <class Slice, class Callback>
 void call_sliced_rows(Slice &slice, Callback call_row) {
+    const auto delim = make_delim<typename Slice::value_type>();
     for (auto row_begin = slice.begin(); row_begin != slice.end(); ) {
-        // every row in `slice` ends with `-1`
-        auto row_end = row_begin;
-        while (utils::get_first(*row_end) != std::numeric_limits<BRWT::Column>::max()) {
-            ++row_end;
-            assert(row_end != slice.end());
-        }
+        // every row in `slice` ends with the delimiter
+        auto row_end = std::find(row_begin, slice.end(), delim);
+        assert(row_end != slice.end());
         call_row(row_begin, row_end);
         row_begin = row_end + 1;
     }
@@ -64,8 +69,7 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     std::mutex mu;
     std::vector<RowT> rows(row_ids.size());
     slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, kMaxParallelDepth,
-        std::max<size_t>(kMinColumnsForParallel, num_columns() / 20),
+        {}, std::max<size_t>(kMinColumnsForParallel, num_columns() / 20),
         thread_pool,
         [&](const std::vector<size_t> &sliced_rows, Vector<T> &&slice) {
             slice.shrink_to_fit();
@@ -197,8 +201,7 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
 // Appends to `slice`
 template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
-    T delim = {};
-    utils::get_first(delim) = std::numeric_limits<Column>::max();
+    const T delim = make_delim<T>();
 
     // check if this is a leaf
     if (child_nodes_.empty()) {
@@ -277,37 +280,38 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
 template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
-                      std::vector<std::pair<const BRWT*, size_t>> call_stack,
-                      size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
+                      std::vector<AncestorEntry> call_stack,
+                      size_t max_columns_cutoff, ThreadPool &thread_pool,
                       std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const {
     if (child_nodes_.size()
             && row_ids.size()
-            && call_stack.size() < cutoff_depth
+            && call_stack.size() < kMaxParallelDepth
             && num_columns() > max_columns_cutoff) {
         // construct indexing for children and the inverse mapping
         auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
 
         utils::erase(&rows, skip_row);
-        call_stack.emplace_back(this, 0);
+        call_stack.push_back({ this, 0 });
 
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
-            call_stack.back().second = j;
+            call_stack.back().child_idx = j;
             thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(rows), std::move(call_stack), cutoff_depth,
+                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(rows), std::move(call_stack),
                                                   max_columns_cutoff, thread_pool, call_slice);
             });
         }
     } else {
         Vector<T> slice;
+        // expect at least 3 relations per row on average
         slice.reserve(row_ids.size() * 4);
         slice_rows(row_ids, &slice);
         // transform column indexes
         for (auto it = call_stack.rbegin(); it != call_stack.rend(); ++it) {
-            const auto &[node, j] = *it;
+            const auto &[node, child_idx] = *it;
             for (size_t i = 0; i < slice.size(); ++i) {
                 auto &col = utils::get_first(slice[i]);
                 if (col != std::numeric_limits<Column>::max())
-                    col = node->assignments_.get(j, col);
+                    col = node->assignments_.get(child_idx, col);
             }
         }
         call_slice(rows, std::move(slice));

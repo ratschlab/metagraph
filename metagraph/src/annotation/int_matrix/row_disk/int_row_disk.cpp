@@ -21,7 +21,7 @@ IntRowDisk::get_rows(const std::vector<Row> &row_ids) const {
 
 std::vector<IntRowDisk::RowValues>
 IntRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
-    return get_rows_parallel<RowValues>(rows, num_threads,
+    return get_row_data_parallel<RowValues>(rows, num_threads,
                 [&](const auto &rows) { return get_view().get_row_values(rows); });
 }
 

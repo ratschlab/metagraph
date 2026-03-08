@@ -14,12 +14,14 @@
 void set_num_threads(unsigned int num_threads);
 unsigned int get_num_threads();
 
+// Compute chunk size for splitting |total_size| items across |num_threads|.
+// num_threads = 0 is treated as 1 (single-threaded).
 inline size_t get_chunk_size(size_t total_size,
                              size_t max_chunk_size,
                              size_t num_threads,
                              bool one_chunk_if_single_thread = true) {
     num_threads = std::max<size_t>(1, num_threads);
-    return (one_chunk_if_single_thread && num_threads < 2)
+    return (one_chunk_if_single_thread && num_threads == 1)
             ? std::max<size_t>(1, total_size)
             : std::max<size_t>(1, std::min<size_t>(max_chunk_size,
                                                     (total_size + num_threads - 1) / num_threads));

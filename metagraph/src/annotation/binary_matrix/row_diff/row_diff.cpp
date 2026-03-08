@@ -95,7 +95,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
         size_t visited_before = visited_rows.size();
         // Phase 1: Parallel path tracing.
-        // Thread-private node_to_rd provides intra-thread dedup (early path
+        // Thread-private visited_rows provides intra-thread dedup (early path
         // termination when a node was already visited by the same thread).
         // Cross-thread dedup is handled in Phase 2.
         const size_t end = std::min<size_t>(begin + block_size, row_ids.size());
@@ -108,7 +108,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
                 assert(graph_->in_graph(node));
                 row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-                bool is_new = visited_rows.insert(row).second;
+                auto [it, is_new] = visited_rows.insert(row);
                 rd_paths_trunc[i].push_back(row);
 
                 // If a node had been reached before, we interrupt the diff path.

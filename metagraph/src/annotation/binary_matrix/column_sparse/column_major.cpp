@@ -47,7 +47,7 @@ std::vector<Vector<std::pair<ColumnMajor::Column, uint64_t>>>
 ColumnMajor::get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const {
     using T = Vector<std::pair<Column, uint64_t>>;
 
-    return get_rows_parallel<T>(rows, num_threads, [&](const std::vector<Row> &row_ids) {
+    return get_row_data_parallel<T>(rows, num_threads, [&](const std::vector<Row> &row_ids) {
         std::vector<T> result(row_ids.size());
 
         for (size_t j = 0; j < columns_.size(); ++j) {
