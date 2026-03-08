@@ -85,6 +85,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
+    // Max rows per OMP chunk for path tracing. Balances parallelism overhead
+    // against cross-thread deduplication granularity.
     const size_t kMaxBlockSize = 1000;
     const size_t block_size = get_chunk_size(row_ids.size(), kMaxBlockSize, num_threads);
 
@@ -174,7 +176,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     common::logger->trace("RD paths traversed with {} threads in {} sec, chunk size: {}, rows to query: {} -> {}",
                           num_threads, timer.elapsed(), block_size, row_ids.size(), rd_ids.size());
 
-    return { rd_ids, rd_paths_trunc, times_traversed };
+    return { std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed) };
 }
 
 } // namespace matrix

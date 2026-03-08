@@ -60,7 +60,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
 
-    void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
+    template <typename RowT>
+    std::vector<RowT>
+    slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
 
     template <typename T>
     void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,

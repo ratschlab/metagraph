@@ -349,6 +349,8 @@ int run_server(Config *config) {
                 graph_anno_pairs.emplace_back(graph_fname, anno_fname);
             }
         }
+        // All keys are pre-inserted above, so concurrent value updates to
+        // different keys are safe (no rehashing or iterator invalidation).
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < graph_anno_pairs.size(); ++i) {
             auto &anno_dbg = graphs_cache[graph_anno_pairs[i]];

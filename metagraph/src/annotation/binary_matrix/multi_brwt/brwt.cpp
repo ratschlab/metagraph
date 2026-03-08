@@ -48,14 +48,26 @@ void call_sliced_rows(Slice &slice, Callback call_row) {
     }
 }
 
-std::vector<BRWT::SetBitPositions>
-BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+// Maximum depth at which BRWT parallel traversal spawns new thread pool tasks.
+// Beyond this depth, subtrees are queried inline to limit task fan-out.
+const size_t kMaxParallelDepth = 20;
+
+// Minimum number of columns in a subtree to justify spawning a parallel task.
+// Subtrees narrower than this are queried inline.
+const size_t kMinColumnsForParallel = 10;
+
+template <typename RowT>
+std::vector<RowT>
+BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const {
+    using T = typename RowT::value_type;
     ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
     std::mutex mu;
-    std::vector<SetBitPositions> rows(row_ids.size());
-    slice_rows<Column>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
-        [&](const std::vector<size_t> &sliced_rows, Vector<Column> &&slice) {
+    std::vector<RowT> rows(row_ids.size());
+    slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()),
+        {}, kMaxParallelDepth,
+        std::max<size_t>(kMinColumnsForParallel, num_columns() / 20),
+        thread_pool,
+        [&](const std::vector<size_t> &sliced_rows, Vector<T> &&slice) {
             slice.shrink_to_fit();
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
@@ -69,6 +81,12 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
         }
     );
     thread_pool.join();
+    return rows;
+}
+
+std::vector<BRWT::SetBitPositions>
+BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+    auto rows = slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
     size_t num_bits = 0;
     size_t total_capacity = 0;
     for (const auto &row : rows) {
@@ -85,12 +103,6 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return get_rows(row_ids, 0);
 }
 
-void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
-    // TODO: It may be faster if index columns are queried in ranges instead of with element-wise
-    // access queries.
-    slice_rows(utils::arange<Row>(begin, end - begin), slice);
-}
-
 void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
                      bool show_progress) const {
     Vector<Column> slice;
@@ -103,7 +115,7 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
         assert(begin <= end);
 
         slice.resize(0);
-        slice_rows(begin, end, &slice);
+        slice_rows(utils::arange<Row>(begin, end - begin), &slice);
 
         call_sliced_rows(slice, [](auto row_begin, auto row_end) { std::sort(row_begin, row_end); });
 
@@ -121,29 +133,9 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
     }
 }
 
-
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) const {
-    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
-    std::mutex mu;
-    std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
-    slice_rows<std::pair<Column, uint64_t>>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, 20, std::max<size_t>(10, num_columns() / 20), thread_pool,
-        [&](const std::vector<size_t> &sliced_rows, Vector<std::pair<Column, uint64_t>> &&slice) {
-            slice.shrink_to_fit();
-            auto rows_it = sliced_rows.begin();
-            std::lock_guard<std::mutex> lock(mu);
-            call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-                // call reserve to reduce the RAM usage
-                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
-                rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
-                ++rows_it;
-            });
-            assert(rows_it == sliced_rows.end());
-        }
-    );
-    thread_pool.join();
-    return rows;
+    return slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
 }
 
 std::pair<std::vector<bool>, std::vector<BRWT::Row>>
