@@ -160,7 +160,8 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
     std::vector<BinaryMatrix::Row>().swap(rd_ids);
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1000)
+    // 200 rows per task, to make the task dispatch time negligible
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 200)
     for (size_t i = 0; i < rd_rows.size(); ++i) {
         decode_diffs(&rd_rows[i]);
         std::sort(rd_rows[i].begin(), rd_rows[i].end(), utils::LessFirst());
