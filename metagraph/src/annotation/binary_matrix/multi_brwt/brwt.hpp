@@ -77,8 +77,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
                     size_t max_columns_cutoff, ThreadPool &thread_pool,
                     std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const;
 
-    std::pair<std::vector<bool>, std::vector<BRWT::Row>>
-    get_zero_rows(const std::vector<Row> &rows) const;
+    // Returns (nonzero_indices, child_row_ids): indices into row_ids where
+    // the nonzero_rows_ bit is set, and their mapped child coordinate IDs.
+    std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
+    get_nonzero_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;

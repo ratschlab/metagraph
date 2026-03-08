@@ -142,12 +142,12 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
     return slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
 }
 
-std::pair<std::vector<bool>, std::vector<BRWT::Row>>
-BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
+std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
+BRWT::get_nonzero_rows(const std::vector<Row> &row_ids) const {
+    std::vector<size_t> nonzero_indices;
     std::vector<Row> child_row_ids;
+    nonzero_indices.reserve(row_ids.size());
     child_row_ids.reserve(row_ids.size());
-
-    std::vector<bool> skip_row(row_ids.size(), true);
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         assert(row_ids[i] < num_rows());
@@ -175,7 +175,7 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
 
                     // map index from parent's to children's coordinate system
                     child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
-                    skip_row[i] = false;
+                    nonzero_indices.push_back(i);
                 }
             } while (++i < row_ids.size()
                         && row_ids[i] < global_offset + 64
@@ -187,11 +187,11 @@ BRWT::get_zero_rows(const std::vector<Row> &row_ids) const {
             if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
                 // map index from parent's to children's coordinate system
                 child_row_ids.push_back(rank - 1);
-                skip_row[i] = false;
+                nonzero_indices.push_back(i);
             }
         }
     }
-    return std::make_pair(std::move(skip_row), std::move(child_row_ids));
+    return { std::move(nonzero_indices), std::move(child_row_ids) };
 }
 
 // If T = Column
@@ -228,8 +228,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     }
 
     // construct indexing for children and the inverse mapping
-    auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
-    if (!child_row_ids.size()) {
+    auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids);
+    if (child_row_ids.empty()) {
         for (size_t i = 0; i < row_ids.size(); ++i) {
             slice->push_back(delim);
         }
@@ -263,14 +263,17 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
     size_t slice_offset = slice->size();
 
+    // merge rows from children using two-pointer approach
+    size_t nz = 0;
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (!skip_row[i]) {
+        if (nz < nonzero_indices.size() && nonzero_indices[nz] == i) {
             // merge rows from child submatrices
             for (size_t &p : pos) {
                 while ((*slice)[p++] != delim) {
                     slice->push_back((*slice)[p - 1]);
                 }
             }
+            ++nz;
         }
         slice->push_back(delim);
     }
@@ -288,9 +291,15 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             && call_stack.size() < kMaxParallelDepth
             && num_columns() > max_columns_cutoff) {
         // construct indexing for children and the inverse mapping
-        auto [skip_row, child_row_ids] = get_zero_rows(row_ids);
+        auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids);
 
-        utils::erase(&rows, skip_row);
+        // keep only indices of rows with nonzero bits
+        std::vector<size_t> filtered_rows;
+        filtered_rows.reserve(nonzero_indices.size());
+        for (size_t idx : nonzero_indices) {
+            filtered_rows.push_back(rows[idx]);
+        }
+        rows = std::move(filtered_rows);
         call_stack.push_back({ this, 0 });
 
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
