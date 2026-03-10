@@ -280,7 +280,7 @@ int run_server(Config *config) {
 
     logger->info("[Server] Threads per graph: {}", get_num_threads());
 
-    std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
+    VectorMap<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
 
     bool loaded_with_mmap = utils::with_mmap();
 
@@ -347,22 +347,14 @@ int run_server(Config *config) {
                 graphs_cache[{ graph_fname, anno_fname }] = nullptr;
             }
         }
-        std::vector<std::pair<std::string, std::string>> graph_anno_pairs;
-        graph_anno_pairs.reserve(graphs_cache.size());
-        for (const auto &[graph_anno_pair, _] : graphs_cache) {
-            graph_anno_pairs.push_back(graph_anno_pair);
-        }
-        std::vector<std::unique_ptr<AnnotatedDBG>> loaded_graphs(graph_anno_pairs.size());
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
-        for (size_t i = 0; i < graph_anno_pairs.size(); ++i) {
+        for (size_t i = 0; i < graphs_cache.size(); ++i) {
             Config config_copy = *config;
-            const auto &[graph_fname, anno_fname] = graph_anno_pairs[i];
+            auto it = graphs_cache.nth(i);
+            const auto &[graph_fname, anno_fname] = it.key();
             config_copy.infbase = graph_fname;
             config_copy.infbase_annotators = { anno_fname };
-            loaded_graphs[i] = initialize_annotated_dbg(config_copy);
-        }
-        for (size_t i = 0; i < graph_anno_pairs.size(); ++i) {
-            graphs_cache[graph_anno_pairs[i]] = std::move(loaded_graphs[i]);
+            it.value() = initialize_annotated_dbg(config_copy);
         }
         if (graphs_cache.empty()) {
             logger->error("[Server] No graphs to serve. Exiting.");
