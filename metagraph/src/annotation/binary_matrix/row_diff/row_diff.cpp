@@ -70,6 +70,7 @@ std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+    num_threads = std::max<size_t>(1, num_threads);
 
     using Row = BinaryMatrix::Row;
 
@@ -95,11 +96,10 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // when a node was already visited by the same thread).
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
-        const size_t end = std::min<size_t>(begin + block_size, row_ids.size());
+        const size_t end = std::min(begin + block_size, row_ids.size());
 
         const int t = omp_get_thread_num();
         auto &node_to_rd = node_to_rd_local[t];
-        node_to_rd.reserve((end - begin) * RD_PATH_RESERVE_SIZE);
 
         for (size_t i = begin; i < end; ++i) {
             path_thread[i] = t;
@@ -151,15 +151,15 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     // sort by indexes of rd rows
     // the second value points to the index in batch
+    // (row_4, 4), (row_4, 0), (row_7, 2), ...
     ips4o::parallel::sort(m.begin(), m.end(), utils::LessFirst(), num_threads);
     // collect an array of rd rows
-    std::vector<Row> rd_ids(m.size());
+    std::vector<Row> rd_ids = utils::get_firsts<std::vector<Row>>(m);
+    // map indexes in batch (used in `rd_paths_trunc`) to new indexes
+    // (where rows are sorted).
+    std::vector<size_t> new_idx(m.size());
     for (size_t i = 0; i < m.size(); ++i) {
-        rd_ids[i] = m[i].first;
-    }
-    // make m[].first map indexes in batch to new indexes (where rows are sorted)
-    for (size_t i = 0; i < m.size(); ++i) {
-        m[m[i].second].first = i;
+        new_idx[m[i].second] = i;
     }
 
     // keeps how many times rows in |rd_rows| will be queried
@@ -167,7 +167,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     for (auto &rd_path : rd_paths_trunc) {
         for (auto &j : rd_path) {
-            j = m[j].first;
+            j = new_idx[j];
             times_traversed[j]++;
         }
     }

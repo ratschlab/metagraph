@@ -31,8 +31,6 @@ namespace matrix {
 const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
 
-const size_t RD_PATH_RESERVE_SIZE = 2;
-
 
 class IRowDiff {
   public:
