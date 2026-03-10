@@ -943,18 +943,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         const size_t kMaxPathSize = 640;
 #endif
         const size_t k = graph_init->get_k();
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            assert(contigs[i].first.size() >= k);
-            const size_t orig_path_size = contigs[i].first.size() - k + 1;
-            if (orig_path_size <= kMaxPathSize)
-                continue;
+        std::vector<std::pair<std::string, std::vector<node_index>>> extra_contigs;
+        for (auto &[contig, _] : contigs) {
+            assert(contig.size() >= k);
+            const size_t orig_path_size = contig.size() - k + 1;
             for (size_t offset = kMaxPathSize; offset < orig_path_size; offset += kMaxPathSize) {
-                contigs.emplace_back(std::piecewise_construct,
-                    std::forward_as_tuple(contigs[i].first, offset, kMaxPathSize + k - 1),
+                extra_contigs.emplace_back(std::piecewise_construct,
+                    std::forward_as_tuple(contig, offset, kMaxPathSize + k - 1),
                     std::forward_as_tuple());
             }
-            contigs[i].first.resize(kMaxPathSize + k - 1);
+            contig.resize(std::min(contig.size(), kMaxPathSize + k - 1));
         }
+        contigs.insert(contigs.end(),
+                       std::make_move_iterator(extra_contigs.begin()),
+                       std::make_move_iterator(extra_contigs.end()));
     }
 
     // map from nodes in query graph to full graph
