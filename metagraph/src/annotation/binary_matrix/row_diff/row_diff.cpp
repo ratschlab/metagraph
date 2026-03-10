@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 
-#include <tsl/hopscotch_set.h>
 #include <ips4o.hpp>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
@@ -11,7 +10,6 @@
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/unix_tools.hpp"
-#include "common/vector_set.hpp"
 
 namespace mtg {
 namespace annot {
