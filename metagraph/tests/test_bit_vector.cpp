@@ -458,7 +458,6 @@ TYPED_TEST(BitVectorTest, Serialization) {
     }
 }
 
-/* TODO: re-enable this later
 TYPED_TEST(BitVectorTest, LoadWithMMAP) {
     std::vector<std::initializer_list<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -487,7 +486,6 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
         reference_based_test(*vector, numbers);
     }
 }
-*/
 
 TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
     std::vector<std::initializer_list<bool>> init_lists = {

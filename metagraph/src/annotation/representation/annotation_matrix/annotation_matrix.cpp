@@ -181,6 +181,8 @@ template class StaticBinRelAnnotator<RowDiff<RowSparse>, std::string>;
 
 template class StaticBinRelAnnotator<RowDiff<RowDisk>, std::string>;
 
+template class StaticBinRelAnnotator<RowDiffChar<BRWT>, std::string>;
+
 template class StaticBinRelAnnotator<IntRowDiff<IntRowDisk>, std::string>;
 
 template class StaticBinRelAnnotator<TupleRowDiff<CoordRowDisk>, std::string>;

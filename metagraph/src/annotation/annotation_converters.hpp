@@ -135,6 +135,13 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 
 std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase);
 
+// Compute sparse successor character data for CharSucc mode.
+// Returns (needs_char bitvector, compact char array). Only nodes where the graph
+// can't trivially determine the successor have stored characters.
+std::pair<bit_vector_small, sdsl::int_vector<>>
+compute_rd_succ_char(const graph::DeBruijnGraph &graph,
+                     const bit_vector &fork_succ);
+
 template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files);
