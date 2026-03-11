@@ -16,7 +16,7 @@ namespace annot {
 namespace matrix {
 
 const size_t kNumRowsInBlock = 250'000;
-const size_t kColumnChunkDivisor = 20;
+const size_t kColumnChunksPerThread = 3;
 
 
 bool BRWT::get(Row row, Column column) const {
@@ -70,16 +70,15 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
     std::mutex mu;
     std::vector<RowT> rows(row_ids.size());
-    slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, std::max<size_t>(kMinColumnsForParallel, num_columns() / kColumnChunkDivisor),
+    slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()), {},
+        std::max<size_t>(kMinColumnsForParallel,
+                         num_columns() / (kColumnChunksPerThread * num_threads)),
         thread_pool,
         [&](const std::vector<size_t> &sliced_rows, Vector<T> &&slice) {
             slice.shrink_to_fit();
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
-                // call reserve to reduce the RAM usage
-                rows[*rows_it].reserve(rows[*rows_it].size() + std::distance(row_begin, row_end));
                 rows[*rows_it].insert(rows[*rows_it].end(), row_begin, row_end);
                 ++rows_it;
             });
@@ -100,7 +99,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
         num_bits += row.size();
         total_capacity += row.capacity();
     }
-    common::logger->trace("Queried {} rows of length {} [{} set bits, total capacity: {}, capacity per row: {}] in BRWT in {} sec",
+    common::logger->trace("Queried {} rows of length {} [{} set bits, total capacity: {}, capacity per row: {:.2f}] in BRWT in {} sec",
                           rows.size(), num_columns(), num_bits, total_capacity, (double)total_capacity / rows.size(), timer.elapsed());
     return rows;
 }
