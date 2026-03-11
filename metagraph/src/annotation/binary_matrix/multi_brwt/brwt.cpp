@@ -295,6 +295,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             && num_columns() > max_columns_cutoff) {
         // construct indexing for children and the inverse mapping
         auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids);
+        auto child_row_ids_ptr = std::make_shared<const std::vector<Row>>(std::move(child_row_ids));
 
         // keep only indices of rows with nonzero bits
         std::vector<size_t> filtered_rows;
@@ -307,8 +308,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
 
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
             call_stack.back().child_idx = j;
-            thread_pool.force_enqueue_front([=,child_row_ids{child_row_ids},&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(child_row_ids, std::move(rows), std::move(call_stack),
+            thread_pool.force_enqueue_front([=,&thread_pool]() {
+                this->child_nodes_[j]->slice_rows(*child_row_ids_ptr, std::move(rows), std::move(call_stack),
                                                   max_columns_cutoff, thread_pool, call_slice);
             });
         }
