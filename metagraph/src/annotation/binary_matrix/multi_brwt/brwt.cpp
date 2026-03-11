@@ -8,6 +8,7 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -15,6 +16,7 @@ namespace annot {
 namespace matrix {
 
 const size_t kNumRowsInBlock = 250'000;
+const size_t kColumnChunkDivisor = 20;
 
 
 bool BRWT::get(Row row, Column column) const {
@@ -69,7 +71,7 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     std::mutex mu;
     std::vector<RowT> rows(row_ids.size());
     slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()),
-        {}, std::max<size_t>(kMinColumnsForParallel, num_columns() / 20),
+        {}, std::max<size_t>(kMinColumnsForParallel, num_columns() / kColumnChunkDivisor),
         thread_pool,
         [&](const std::vector<size_t> &sliced_rows, Vector<T> &&slice) {
             slice.shrink_to_fit();
@@ -90,6 +92,7 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
 
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+    Timer timer;
     auto rows = slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
     size_t num_bits = 0;
     size_t total_capacity = 0;
@@ -97,8 +100,8 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
         num_bits += row.size();
         total_capacity += row.capacity();
     }
-    common::logger->trace("Queried {} rows of length {} in BRWT. Got {} set bits, total capacity: {}, capacity per row: {}",
-                          rows.size(), num_columns(), num_bits, total_capacity, (double)total_capacity / rows.size());
+    common::logger->trace("Queried {} rows of length {} [{} set bits, total capacity: {}, capacity per row: {}] in BRWT in {} sec",
+                          rows.size(), num_columns(), num_bits, total_capacity, (double)total_capacity / rows.size(), timer.elapsed());
     return rows;
 }
 
