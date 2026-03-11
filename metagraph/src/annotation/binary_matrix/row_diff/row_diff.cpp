@@ -88,45 +88,42 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     // Max rows per OMP chunk for path tracing. Balances parallelism overhead
     // against cross-thread deduplication granularity.
-    const size_t kMaxBlockSize = 1000;
+    const size_t kMaxBlockSize = 10000;
     const size_t block_size = get_chunk_size(row_ids.size(), kMaxBlockSize, num_threads);
 
     // Phase 1: Parallel path tracing.
     // |node_to_rd_local| provides intra-thread dedup (early path termination
     // when a node was already visited by the same thread).
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
-        const size_t end = std::min(begin + block_size, row_ids.size());
-
+    // FYI: It's essential that the omp loop is ORDERED so that each thread gets rows in order.
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic, block_size)
+    for (size_t i = 0; i < row_ids.size(); ++i) {
         const int t = omp_get_thread_num();
         auto &node_to_rd = node_to_rd_local[t];
 
-        for (size_t i = begin; i < end; ++i) {
-            path_thread[i] = t;
+        path_thread[i] = t;
 
-            Row row = row_ids[i];
+        Row row = row_ids[i];
 
-            node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+        node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
-            while (true) {
-                assert(graph_->in_graph(node));
-                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+        while (true) {
+            assert(graph_->in_graph(node));
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-                auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-                rd_paths_trunc[i].push_back(it.value());
+            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
+            rd_paths_trunc[i].push_back(it.value());
 
-                // If a node had been reached before, we interrupt the diff path.
-                // The annotation for that node will have been reconstructed earlier
-                // than for other nodes in this path as well. Thus, we will start
-                // reconstruction from that node and don't need its successors.
-                if (!is_new)
-                    break;
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
+            if (!is_new)
+                break;
 
-                if (anchor_[row])
-                    break;
+            if (anchor_[row])
+                break;
 
-                node = row_diff_successor(*graph_, node, fork_succ_);
-            }
+            node = row_diff_successor(*graph_, node, fork_succ_);
         }
     }
 
