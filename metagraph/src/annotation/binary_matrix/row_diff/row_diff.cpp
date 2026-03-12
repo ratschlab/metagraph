@@ -15,6 +15,7 @@ namespace mtg {
 namespace annot {
 
 using node_index = graph::DeBruijnGraph::node_index;
+using common::logger;
 
 node_index row_diff_successor(const graph::DeBruijnGraph &graph,
                               node_index node,
@@ -169,8 +170,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
 
-    common::logger->trace("RD paths traversed [threads: {}, rows: {} -> {}, chunk_size: {}] in {} sec",
-                          num_threads, row_ids.size(), rd_ids.size(), block_size, timer.elapsed());
+    logger->trace("RD paths traversed [threads: {}, rows: {} -> {}, chunk_size: {}] in {} sec",
+                  num_threads, row_ids.size(), rd_ids.size(), block_size, timer.elapsed());
 
     return { std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed) };
 }

@@ -819,6 +819,30 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
     }
 }
 
+void split_contigs_for_rebalancing(size_t k,
+                                   size_t kmers_per_seq,
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
+    assert(k > 0);
+    assert(kmers_per_seq > 0);
+
+    std::vector<std::pair<std::string, std::vector<node_index>>> extra_contigs;
+    for (auto &[contig, path] : *contigs) {
+        assert(contig.size() >= k);
+        assert(path.empty());
+        const size_t segment_length = kmers_per_seq + k - 1;
+        const size_t orig_path_size = contig.size() - k + 1;
+        for (size_t offset = kmers_per_seq; offset < orig_path_size; offset += kmers_per_seq) {
+            extra_contigs.emplace_back(std::piecewise_construct,
+                std::forward_as_tuple(contig, offset, segment_length),
+                std::forward_as_tuple());
+        }
+        contig.resize(std::min(contig.size(), segment_length));
+    }
+    contigs->insert(contigs->end(),
+                    std::make_move_iterator(extra_contigs.begin()),
+                    std::make_move_iterator(extra_contigs.end()));
+}
+
 /**
  * Construct a de Bruijn graph from the query sequences
  * fetched in |call_sequences|.
@@ -933,30 +957,11 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     if (num_threads > 1) {
-        // break long contigs into shorter segments for better load balancing
-#ifndef NDEBUG
-        // to trigger the rebalancing of contigs on small tests
-        const size_t kMaxPathSize = 50;
-#else
+        // Break long contigs into shorter segments for better load balancing.
         // E.g., for k=31 and indexed node ranges with suffix length 12,
         // the overhead will be (31-12)/640 = 3% in the worst case.
         const size_t kMaxPathSize = 640;
-#endif
-        const size_t k = graph_init->get_k();
-        std::vector<std::pair<std::string, std::vector<node_index>>> extra_contigs;
-        for (auto &[contig, _] : contigs) {
-            assert(contig.size() >= k);
-            const size_t orig_path_size = contig.size() - k + 1;
-            for (size_t offset = kMaxPathSize; offset < orig_path_size; offset += kMaxPathSize) {
-                extra_contigs.emplace_back(std::piecewise_construct,
-                    std::forward_as_tuple(contig, offset, kMaxPathSize + k - 1),
-                    std::forward_as_tuple());
-            }
-            contig.resize(std::min(contig.size(), kMaxPathSize + k - 1));
-        }
-        contigs.insert(contigs.end(),
-                       std::make_move_iterator(extra_contigs.begin()),
-                       std::make_move_iterator(extra_contigs.end()));
+        split_contigs_for_rebalancing(graph_init->get_k(), kMaxPathSize, &contigs);
     }
 
     // map from nodes in query graph to full graph
