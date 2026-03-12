@@ -74,8 +74,7 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
         std::max<size_t>(kMinColumnsForParallel,
                          num_columns() / (kColumnChunksPerThread * num_threads)),
         thread_pool,
-        [&](const std::vector<size_t> &sliced_rows, Vector<T> &&slice) {
-            slice.shrink_to_fit();
+        [&](std::vector<size_t> &&sliced_rows, Vector<T> &&slice) {
             auto rows_it = sliced_rows.begin();
             std::lock_guard<std::mutex> lock(mu);
             call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
@@ -287,7 +286,7 @@ template <typename T>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                       std::vector<AncestorEntry> call_stack,
                       size_t max_columns_cutoff, ThreadPool &thread_pool,
-                      std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const {
+                      std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const {
     if (child_nodes_.size()
             && row_ids.size()
             && call_stack.size() < kMaxParallelDepth
@@ -326,7 +325,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                     col = node->assignments_.get(child_idx, col);
             }
         }
-        call_slice(rows, std::move(slice));
+        call_slice(std::move(rows), std::move(slice));
     }
 }
 

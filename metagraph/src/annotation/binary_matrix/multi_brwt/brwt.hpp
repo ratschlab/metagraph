@@ -75,7 +75,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                     std::vector<AncestorEntry> call_stack,
                     size_t max_columns_cutoff, ThreadPool &thread_pool,
-                    std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const;
+                    std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const;
 
     // Returns (nonzero_indices, child_row_ids): indices into row_ids where
     // the nonzero_rows_ bit is set, and their mapped child coordinate IDs.
