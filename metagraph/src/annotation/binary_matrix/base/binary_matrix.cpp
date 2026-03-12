@@ -65,7 +65,11 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         row_to_index[i] = std::make_pair((*rows)[i], i);
     }
 
-    assert(!dynamic_cast<const IRowDiff *>(this) && "RowDiff must override get_rows_dict()");
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this)) {
+        ips4o::parallel::sort(row_to_index.begin(), row_to_index.end(),
+                              utils::LessFirst(), num_threads);
+    }
 
     const size_t batch_size = get_chunk_size(rows->size(), kRowBatchSize, num_threads, false);
 
