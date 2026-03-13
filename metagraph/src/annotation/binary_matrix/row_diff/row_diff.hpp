@@ -159,6 +159,9 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
+    if (row_ids.empty())
+        return;
+
     // No sorting in order not to break the topological order for row-diff annotation
 
     // get row-diff paths
