@@ -67,7 +67,10 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
     fork_succ_.load(*f);
 }
 
-std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
+std::tuple<std::vector<BinaryMatrix::Row>,
+           std::vector<std::vector<size_t>>,
+           std::vector<size_t>,
+           std::vector<int>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
@@ -85,7 +88,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
     // Records which thread traced each path (for offset remapping in Phase 2).
-    std::vector<int> path_thread(row_ids.size());
+    std::vector<int> group(row_ids.size());
 
     const size_t block_size = get_chunk_size(row_ids.size(), 2000 /* max_chunk_size */, num_threads);
 
@@ -98,7 +101,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         const int t = omp_get_thread_num();
         auto &node_to_rd = node_to_rd_local[t];
 
-        path_thread[i] = t;
+        group[i] = t;
 
         Row row = row_ids[i];
 
@@ -139,7 +142,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
         }
     }
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        const size_t offset = offsets[path_thread[i]];
+        const size_t offset = offsets[group[i]];
         std::for_each(rd_paths_trunc[i].begin(), rd_paths_trunc[i].end(),
                       [&](size_t &index) { index += offset; });
     }
@@ -170,7 +173,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     logger->trace("RD paths traversed [threads: {}, rows: {} -> {}, chunk_size: {}] in {} sec",
                   num_threads, row_ids.size(), rd_ids.size(), block_size, timer.elapsed());
 
-    return { std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed) };
+    return { std::move(rd_ids), std::move(rd_paths_trunc),
+             std::move(times_traversed), std::move(group) };
 }
 
 } // namespace matrix
