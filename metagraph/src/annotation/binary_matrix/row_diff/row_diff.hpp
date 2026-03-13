@@ -184,7 +184,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
                 decltype(result)().swap(rd_rows[*it]);
             }
         }
-        call_row(result);
+        call_row(i, result);
     }
     DEBUG_LOG("Reconstructed annotations for {} rows", row_ids.size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
@@ -194,14 +194,13 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    rows.reserve(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);
         },
         add_diff, [](SetBitPositions *row) {},
-        [&](const SetBitPositions &row) { rows.push_back(row); },
+        [&](size_t i, const SetBitPositions &row) { rows[i] = row; },
         1
     );
     return rows;
@@ -211,15 +210,14 @@ template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
-    size_t i = 0;
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);
         },
         add_diff, [](SetBitPositions *row) {},
-        [&](const SetBitPositions &row) {
+        [&](size_t i, const SetBitPositions &row) {
             auto it = unique_rows.emplace(row).first;
-            (*rows)[i++] = it - unique_rows.begin();
+            (*rows)[i] = it - unique_rows.begin();
         },
         num_threads
     );
