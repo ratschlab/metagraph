@@ -30,8 +30,8 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
+    using BinaryMatrix::get_rows;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows, size_t num_threads) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const;
@@ -59,23 +59,6 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // appends to `slice`
     template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
-
-    template <typename RowT>
-    std::vector<RowT>
-    slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
-
-    // Tracks the BRWT node and its child index at each level during parallel tree
-    // traversal, so that column indices can be remapped when merging results from subtrees.
-    struct AncestorEntry {
-        const BRWT *node;
-        size_t child_idx;
-    };
-
-    template <typename T>
-    void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
-                    std::vector<AncestorEntry> call_stack,
-                    size_t max_columns_cutoff, ThreadPool &thread_pool,
-                    std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const;
 
     // Returns (nonzero_indices, child_row_ids): indices into row_ids where
     // the nonzero_rows_ bit is set, and their mapped child coordinate IDs.
