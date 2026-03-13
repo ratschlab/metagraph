@@ -19,12 +19,14 @@ unsigned int get_num_threads();
 inline size_t get_chunk_size(size_t total_size,
                              size_t max_chunk_size,
                              size_t num_threads,
-                             bool one_chunk_if_single_thread = true) {
+                             bool one_chunk_if_single_thread = true,
+                             size_t chunks_per_thread = 2) {
     num_threads = std::max<size_t>(1, num_threads);
+    size_t num_chunks = num_threads * chunks_per_thread;
     return (one_chunk_if_single_thread && num_threads == 1)
             ? std::max<size_t>(1, total_size)
             : std::max<size_t>(1, std::min<size_t>(max_chunk_size,
-                                                    (total_size + num_threads - 1) / num_threads));
+                                                    (total_size + num_chunks - 1) / num_chunks));
 }
 
 

@@ -87,10 +87,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // Records which thread traced each path (for offset remapping in Phase 2).
     std::vector<int> path_thread(row_ids.size());
 
-    // Max rows per OMP chunk for path tracing. Balances parallelism overhead
-    // against cross-thread deduplication granularity.
-    const size_t kMaxBlockSize = 10000;
-    const size_t block_size = get_chunk_size(row_ids.size(), kMaxBlockSize, num_threads);
+    const size_t block_size = get_chunk_size(row_ids.size(), 2000 /* max_chunk_size */, num_threads);
 
     // Phase 1: Parallel path tracing.
     // |node_to_rd_local| provides intra-thread dedup (early path termination

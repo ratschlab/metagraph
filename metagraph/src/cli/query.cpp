@@ -968,8 +968,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
     assert(num_threads);
-    // ~10 chunks per thread for load balancing, capped at 100 contigs in each
-    size_t chunk_size = get_chunk_size(contigs.size(), 100, num_threads * 10);
+    size_t chunk_size = get_chunk_size(contigs.size(), 1000 /* max_chunk_size */, num_threads);
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, chunk_size)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
