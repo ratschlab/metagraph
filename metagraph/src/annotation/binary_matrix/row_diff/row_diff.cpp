@@ -10,6 +10,7 @@
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/unix_tools.hpp"
+#include "common/vector_set.hpp"
 
 namespace mtg {
 namespace annot {
@@ -70,7 +71,7 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
 std::tuple<std::vector<BinaryMatrix::Row>,
            std::vector<std::vector<size_t>>,
            std::vector<size_t>,
-           std::vector<int>>
+           std::vector<std::vector<size_t>>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
@@ -80,28 +81,28 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     Timer timer;
 
-    // Thread-local maps for deduping rows (map row_id to index [0,1,2,...] in batch).
-    std::vector<VectorMap<Row, size_t>> node_to_rd_local(num_threads);
+    // Thread-local sets indexing rows.
+    std::vector<VectorSet<Row>> rows_visited_local(num_threads);
 
     // Truncated row-diff paths, store thread-local indexes of deduped rows.
     // The last index in each path points to an anchor or to a row which had
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
-    // Records which thread traced each path (for offset remapping in Phase 2).
-    std::vector<int> group(row_ids.size());
+    // Records which paths were traced by each thread (for offset remapping in Phase 2).
+    std::vector<std::vector<size_t>> groups(num_threads);
 
-    const size_t block_size = get_chunk_size(row_ids.size(), 2000 /* max_chunk_size */, num_threads);
+    const size_t block_size = get_chunk_size(row_ids.size(), 10000 /* max_chunk_size */, num_threads);
 
     // Phase 1: Parallel path tracing.
-    // |node_to_rd_local| provides intra-thread dedup (early path termination
+    // |rows_visited_local| provides intra-thread dedup (early path termination
     // when a node was already visited by the same thread).
     // FYI: It's essential that the omp loop is ORDERED so that each thread gets rows in order.
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic, block_size)
     for (size_t i = 0; i < row_ids.size(); ++i) {
         const int t = omp_get_thread_num();
-        auto &node_to_rd = node_to_rd_local[t];
+        auto &rows_visited = rows_visited_local[t];
 
-        group[i] = t;
+        groups[t].push_back(i);
 
         Row row = row_ids[i];
 
@@ -111,8 +112,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
             assert(graph_->in_graph(node));
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.value());
+            auto [it, is_new] = rows_visited.emplace(row);
+            rd_paths_trunc[i].push_back(it - rows_visited.begin());
 
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
@@ -133,40 +134,43 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     // Note: We skip the cross-thread dedup because it it has to be sequential
     //       and that adds too much overhead. Besides, the intra-thread dedup
     //       already significantly reduces redundant paths.
-    std::vector<size_t> offsets(num_threads);
-    std::vector<std::pair<Row, size_t>> m;
-    for (size_t t = 0; t < num_threads; ++t) {
-        offsets[t] = m.size();
-        for (const auto &[row, index] : node_to_rd_local[t]) {
-            m.emplace_back(row, index + offsets[t]);
-        }
+    std::vector<size_t> offsets(groups.size() + 1);
+    for (size_t g = 0; g < groups.size(); ++g) {
+        offsets[g + 1] = offsets[g] + rows_visited_local[g].size();
     }
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        const size_t offset = offsets[group[i]];
-        std::for_each(rd_paths_trunc[i].begin(), rd_paths_trunc[i].end(),
-                      [&](size_t &index) { index += offset; });
+    std::vector<std::pair<Row, size_t>> m(offsets.back());
+    std::vector<Row> rd_ids(offsets.back());
+    std::vector<size_t> new_idx(offsets.back());
+    std::vector<size_t> times_traversed(offsets.back());
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        const size_t offset = offsets[g];
+        const auto &vec = rows_visited_local[g].values_container();
+        for (size_t i = 0; i < vec.size(); ++i) {
+            m[offset + i] = { vec[i], offset + i };
+        }
     }
 
     // sort by indexes of rd rows
     // the second value points to the index in batch
     // (row_4, 4), (row_4, 0), (row_7, 2), ...
     ips4o::parallel::sort(m.begin(), m.end(), utils::LessFirst(), num_threads);
-    // collect an array of rd rows
-    std::vector<Row> rd_ids = utils::get_firsts<std::vector<Row>>(m);
+
     // map indexes in batch (used in `rd_paths_trunc`) to new indexes
     // (where rows are sorted).
-    std::vector<size_t> new_idx(m.size());
+    #pragma omp parallel for num_threads(num_threads) schedule(static)
     for (size_t i = 0; i < m.size(); ++i) {
+        rd_ids[i] = m[i].first;
         new_idx[m[i].second] = i;
     }
 
-    // keeps how many times rows in |rd_rows| will be queried
-    std::vector<size_t> times_traversed(rd_ids.size(), 0);
-
-    for (auto &rd_path : rd_paths_trunc) {
-        for (auto &j : rd_path) {
-            j = new_idx[j];
-            times_traversed[j]++;
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        for (size_t i : groups[g]) {
+            for (auto &j : rd_paths_trunc[i]) {
+                j = new_idx[j + offsets[g]];
+                times_traversed[j]++;
+            }
         }
     }
 
@@ -174,7 +178,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
                   num_threads, row_ids.size(), rd_ids.size(), block_size, timer.elapsed());
 
     return { std::move(rd_ids), std::move(rd_paths_trunc),
-             std::move(times_traversed), std::move(group) };
+             std::move(times_traversed), std::move(groups) };
 }
 
 } // namespace matrix

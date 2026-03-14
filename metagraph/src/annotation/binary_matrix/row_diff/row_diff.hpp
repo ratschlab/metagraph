@@ -54,14 +54,14 @@ class IRowDiff {
 
   protected:
     // get row-diff paths starting at |row_ids|
-    // Returns: (rd_ids, rd_paths_trunc, times_traversed, group)
-    // group[i] records which OMP thread traced path i in get_rd_ids.
+    // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
+    // groups[i] records which paths starting at row i from row_ids were traced by each OMP thread.
     // Rows from different groups access disjoint rd_rows entries, enabling
     // parallel reconstruction grouped by thread.
     std::tuple<std::vector<BinaryMatrix::Row>,
                std::vector<std::vector<size_t>>,
                std::vector<size_t>,
-               std::vector<int>>
+               std::vector<std::vector<size_t>>>
     get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads = 1) const;
 
     template <class F, class G, class H, class Callback>
@@ -169,8 +169,8 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     std::vector<BinaryMatrix::Row> rd_ids;
     std::vector<std::vector<size_t>> rd_paths_trunc;
     std::vector<size_t> times_traversed;
-    std::vector<int> group;
-    std::tie(rd_ids, rd_paths_trunc, times_traversed, group) = get_rd_ids(row_ids, num_threads);
+    std::vector<std::vector<size_t>> groups;
+    std::tie(rd_ids, rd_paths_trunc, times_traversed, groups) = get_rd_ids(row_ids, num_threads);
     double get_rd_ids_time = timer.elapsed();
     timer.reset();
 
@@ -191,31 +191,25 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
     // Reconstruct annotation rows from row-diff.
     // Since get_rd_ids skips cross-thread deduplication, rows from different
-    // thread groups access disjoint rd_rows entries. We exploit this to
-    // reconstruct each group in parallel, while preserving the sequential
-    // dependency order within each group.
+    // groups access disjoint rd_rows entries. We exploit this to reconstruct
+    // each group in parallel, while preserving the sequential dependency
+    // order within each group.
     using RowType = typename std::decay_t<decltype(rd_rows)>::value_type;
 
-    int num_groups = 1 + *std::max_element(group.begin(), group.end());
-
-    #pragma omp parallel num_threads(num_groups)
-    {
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t g = 0; g < groups.size(); ++g) {
         RowType result;
         // accumulate and call results in small batches to avoid locking overhead
-        const size_t batch_size = 100;
         std::vector<std::pair<size_t, RowType>> results;
+        results.reserve(100);
         auto call_rows_batch = [&]() {
             #pragma omp critical
-            {
-                for (const auto &[idx, result] : results) {
-                    call_row(idx, result);
-                }
+            for (const auto &[idx, result] : results) {
+                call_row(idx, result);
             }
             results.resize(0);
         };
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            if (group[i] != omp_get_thread_num())
-                continue;
+        for (size_t i : groups[g]) {
             auto it = rd_paths_trunc[i].rbegin();
             result = rd_rows[*it];
             if (!(--times_traversed[*it]))
@@ -229,7 +223,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
                 }
             }
             results.emplace_back(i, result);
-            if (results.size() == batch_size)
+            if (results.size() == results.capacity())
                 call_rows_batch();
         }
         call_rows_batch();
