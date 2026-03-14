@@ -14,6 +14,21 @@
 void set_num_threads(unsigned int num_threads);
 unsigned int get_num_threads();
 
+// Compute chunk size for splitting |total_size| items across |num_threads|.
+// num_threads = 0 is treated as 1 (single-threaded).
+inline size_t get_chunk_size(size_t total_size,
+                             size_t max_chunk_size,
+                             size_t num_threads,
+                             bool one_chunk_if_single_thread = true,
+                             size_t chunks_per_thread = 2) {
+    num_threads = std::max<size_t>(1, num_threads);
+    size_t num_chunks = num_threads * chunks_per_thread;
+    return (one_chunk_if_single_thread && num_threads == 1)
+            ? std::max<size_t>(1, total_size)
+            : std::max<size_t>(1, std::min<size_t>(max_chunk_size,
+                                                    (total_size + num_chunks - 1) / num_chunks));
+}
+
 
 /**
  * A Thread Pool for parallel execution of tasks with arbitrary parameters

@@ -273,12 +273,13 @@ int run_server(Config *config) {
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
-    ThreadPool graphs_pool(get_num_threads());
+    ThreadPool graphs_pool(get_num_threads(), 1000 /* max_num_tasks */);
     size_t num_server_threads = std::max(1u, get_num_threads());
-    set_num_threads(0);
+    set_num_threads(std::max(1u, config->parallel_each));
+    config->parallel_each = 1;  // query one batch at a time
+    logger->info("[Server] Threads per graph: {}", get_num_threads());
 
-    std::unordered_map<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
-
+    VectorMap<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
     bool loaded_with_mmap = utils::with_mmap();
 
     if (config->infbase_annotators.size() == 1) {
@@ -344,16 +345,15 @@ int run_server(Config *config) {
                 graphs_cache[{ graph_fname, anno_fname }] = nullptr;
             }
         }
-        for (auto &[graph_anno, anno_dbg] : graphs_cache) {
+        #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
+        for (size_t i = 0; i < graphs_cache.size(); ++i) {
             Config config_copy = *config;
-            const auto &[graph_fname, anno_fname] = graph_anno;
+            auto it = graphs_cache.nth(i);
+            const auto &[graph_fname, anno_fname] = it.key();
             config_copy.infbase = graph_fname;
             config_copy.infbase_annotators = { anno_fname };
-            graphs_pool.enqueue([config_copy{std::move(config_copy)},anno_dbg{std::ref(anno_dbg)}]() {
-                initialize_annotated_dbg(config_copy).swap(anno_dbg);
-            });
+            it.value() = initialize_annotated_dbg(config_copy);
         }
-        graphs_pool.join();
         if (graphs_cache.empty()) {
             logger->error("[Server] No graphs to serve. Exiting.");
             exit(1);
@@ -450,7 +450,7 @@ int run_server(Config *config) {
                                     index_loaded = initialize_annotated_dbg(config_copy);
                                     index = index_loaded.get();
                                 } else {
-                                    index = graphs_cache[{ graph_fname, anno_fname }].get();
+                                    index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                 }
 
                                 auto json = process_search_request(content_json, *index, *config);
@@ -524,7 +524,7 @@ int run_server(Config *config) {
             } else {
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
-                        const auto &labels = graphs_cache[{ graph_fname, anno_fname }]->get_annotator().get_label_encoder().get_labels();
+                        const auto &labels = graphs_cache.at({ graph_fname, anno_fname })->get_annotator().get_label_encoder().get_labels();
                         for (const std::string &label : labels) {
                             root.append(label);
                         }
@@ -575,7 +575,7 @@ int run_server(Config *config) {
                 uint64_t num_labels = 0;
                 for (const auto &[name, graphs] : indexes) {
                     for (const auto &[graph_fname, anno_fname] : graphs) {
-                        num_labels += get_num_labels(*graphs_cache[{ graph_fname, anno_fname }]);
+                        num_labels += get_num_labels(*graphs_cache.at({ graph_fname, anno_fname }));
                     }
                 }
                 root["annotation"]["labels"] = num_labels;

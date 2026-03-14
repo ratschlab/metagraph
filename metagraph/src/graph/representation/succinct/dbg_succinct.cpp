@@ -197,7 +197,7 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                              size_t num_threads,
                              size_t batch_size) const {
     if (valid_edges_) {
-        size_t block_size = max_index() / num_threads;
+        size_t block_size = std::max<size_t>(1, max_index() / num_threads);
 
         #pragma omp parallel for num_threads(num_threads) schedule(static)
         for (size_t begin = 1; begin <= max_index(); begin += block_size) {

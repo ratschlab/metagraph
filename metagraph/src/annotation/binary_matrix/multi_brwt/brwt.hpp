@@ -30,10 +30,11 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
+    using BinaryMatrix::get_rows;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
-    get_column_ranks(const std::vector<Row> &rows) const;
+    get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const;
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    bool show_progress = common::get_verbose()) const;
 
@@ -59,7 +60,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
 
-    void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
+    // Returns (nonzero_indices, child_row_ids): indices into row_ids where
+    // the nonzero_rows_ bit is set, and their mapped child coordinate IDs.
+    std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
+    get_nonzero_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
