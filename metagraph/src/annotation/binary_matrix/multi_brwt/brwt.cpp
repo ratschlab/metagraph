@@ -8,7 +8,6 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -56,7 +55,6 @@ void call_sliced_rows(Slice &slice, Callback call_row) {
 
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids) const {
-    Timer timer;
     Vector<Column> slice;
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
@@ -69,14 +67,6 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         rows.emplace_back(row_begin, row_end);
     });
     assert(rows.size() == row_ids.size());
-    size_t num_bits = 0;
-    size_t total_capacity = 0;
-    for (const auto &row : rows) {
-        num_bits += row.size();
-        total_capacity += row.capacity();
-    }
-    common::logger->trace("Queried {} rows of length {} [{} set bits, total capacity: {}, capacity per row: {:.2f}] in BRWT in {} sec",
-                          rows.size(), num_columns(), num_bits, total_capacity, (double)total_capacity / rows.size(), timer.elapsed());
     return rows;
 }
 

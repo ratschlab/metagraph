@@ -171,7 +171,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     std::vector<size_t> times_traversed;
     std::vector<std::vector<size_t>> groups;
     std::tie(rd_ids, rd_paths_trunc, times_traversed, groups) = get_rd_ids(row_ids, num_threads);
-    double get_rd_ids_time = timer.elapsed();
+    double rd_traversal_time = timer.elapsed();
     timer.reset();
 
     auto rd_rows = call_rd_rows(rd_ids, num_threads);
@@ -179,11 +179,15 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     timer.reset();
     std::vector<BinaryMatrix::Row>().swap(rd_ids);
 
+    size_t num_rd_bits = 0;
+    size_t total_capacity = 0;
     // 200 rows per task, to make the task dispatch time negligible
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 200)
     for (size_t i = 0; i < rd_rows.size(); ++i) {
         decode_diffs(&rd_rows[i]);
         std::sort(rd_rows[i].begin(), rd_rows[i].end(), utils::LessFirst());
+        num_rd_bits += rd_rows[i].size();
+        total_capacity += rd_rows[i].capacity();
     }
 
     double decode_diffs_time = timer.elapsed();
@@ -228,10 +232,14 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
         }
         call_rows_batch();
     }
-    double call_row_time = timer.elapsed();
-    common::logger->trace("Reconstructed annotations for {} rows: get_rd_ids: {:.2f} sec, "
-        "call_rd_rows: {:.2f} sec, decode_diffs: {:.2f} sec, call_row: {:.2f} sec",
-        row_ids.size(), get_rd_ids_time, call_rd_rows_time, decode_diffs_time, call_row_time);
+
+    common::logger->trace("RD query [threads: {}, rows: {} -> {} ({:.1f}x)] -- "
+            "traversal: {:.2f} sec, call_rd_rows: {:.2f} sec (set bits: {}, capacity: {}), "
+            "decoding: {:.2f} sec, reconstruction: {:.2f} sec",
+            num_threads, row_ids.size(), rd_rows.size(), (double)rd_rows.size()/row_ids.size(),
+            rd_traversal_time, call_rd_rows_time, num_rd_bits, total_capacity,
+            decode_diffs_time, timer.elapsed());
+
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
     assert(std::all_of(rd_rows.begin(), rd_rows.end(), [](const auto &v) { return v.empty(); }));
 }

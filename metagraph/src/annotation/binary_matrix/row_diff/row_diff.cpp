@@ -9,7 +9,6 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/unix_tools.hpp"
 #include "common/vector_set.hpp"
 
 namespace mtg {
@@ -78,8 +77,6 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
     num_threads = std::max<size_t>(1, num_threads);
 
     using Row = BinaryMatrix::Row;
-
-    Timer timer;
 
     // Thread-local sets indexing rows.
     std::vector<VectorSet<Row>> rows_visited_local(num_threads);
@@ -173,9 +170,6 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
             }
         }
     }
-
-    logger->trace("RD paths traversed [threads: {}, rows: {} -> {}, chunk_size: {}] in {} sec",
-                  num_threads, row_ids.size(), rd_ids.size(), block_size, timer.elapsed());
 
     return { std::move(rd_ids), std::move(rd_paths_trunc),
              std::move(times_traversed), std::move(groups) };
