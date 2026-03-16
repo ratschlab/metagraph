@@ -221,16 +221,25 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     // query all children subtrees and get relations from them
     size_t slice_start = slice->size();
 
-    std::vector<size_t> pos(child_nodes_.size());
+    std::vector<size_t> pos;
+    pos.reserve(child_nodes_.size());
 
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
-        pos[j] = slice->size();
+        size_t offset = slice->size();
         child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
 
-        assert(slice->size() >= pos[j] + child_row_ids.size());
+        if (slice->size() == offset + child_row_ids.size()) {
+            // no non-empty rows in this child
+            slice->resize(offset);
+            continue;
+        }
+
+        assert(slice->size() > offset + child_row_ids.size());
+
+        pos.push_back(offset);
 
         // transform column indexes
-        for (size_t i = pos[j]; i < slice->size(); ++i) {
+        for (size_t i = offset; i < slice->size(); ++i) {
             auto &v = (*slice)[i];
             if (v != delim) {
                 auto &col = utils::get_first(v);
@@ -241,22 +250,21 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
     size_t slice_offset = slice->size();
 
-    // merge rows from children using two-pointer approach
-    size_t nz = 0;
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (nz < nonzero_indices.size() && nonzero_indices[nz] == i) {
-            // merge rows from child submatrices
-            for (size_t &p : pos) {
-                while ((*slice)[p++] != delim) {
-                    slice->push_back((*slice)[p - 1]);
-                }
+    // merge rows from children
+    size_t last_nz = 0;
+    for (size_t nz : nonzero_indices) {
+        slice->insert(slice->end(), nz - last_nz, delim);
+        // merge rows from child submatrices
+        for (size_t &p : pos) {
+            while ((*slice)[p++] != delim) {
+                slice->push_back((*slice)[p - 1]);
             }
-            ++nz;
         }
-        slice->push_back(delim);
+        last_nz = nz;
     }
 
     slice->erase(slice->begin() + slice_start, slice->begin() + slice_offset);
+    slice->insert(slice->end(), row_ids.size() - last_nz, delim);
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
