@@ -128,16 +128,20 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
 
     // Phase 2: Merge thread-local maps and remap path indices.
     //
-    // Note: We skip the cross-thread dedup because it it has to be sequential
-    //       and that adds too much overhead. Besides, the intra-thread dedup
-    //       already significantly reduces redundant paths.
+    // Note: We skip the cross-thread dedup because it has to be sequential
+    //       and that adds too much overhead. The intra-thread dedup already
+    //       significantly reduces redundant paths.
     std::vector<size_t> offsets(groups.size() + 1);
     for (size_t g = 0; g < groups.size(); ++g) {
         offsets[g + 1] = offsets[g] + rows_visited_local[g].size();
     }
+    // (rd_row_id, original_batch_index) pairs used for sorting/remapping
     std::vector<std::pair<Row, size_t>> m(offsets.back());
+    // row-diff row IDs in sorted order (deduplicated only within each thread group)
     std::vector<Row> rd_ids(offsets.back());
+    // map original batch indices to their positions in sorted rd_ids
     std::vector<size_t> new_idx(offsets.back());
+    // multiplicity per sorted rd_ids entry (for repeated traversals)
     std::vector<size_t> times_traversed(offsets.back());
     #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
     for (size_t g = 0; g < groups.size(); ++g) {

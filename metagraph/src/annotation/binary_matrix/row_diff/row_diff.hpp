@@ -5,8 +5,6 @@
 #include <string>
 #include <vector>
 
-#include <omp.h>
-
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
@@ -55,7 +53,7 @@ class IRowDiff {
   protected:
     // get row-diff paths starting at |row_ids|
     // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
-    // groups[i] records which paths starting at row i from row_ids were traced by each OMP thread.
+    // groups[g] records indices of row_ids paths traced in group g.
     // Rows from different groups access disjoint rd_rows entries, enabling
     // parallel reconstruction grouped by thread.
     std::tuple<std::vector<BinaryMatrix::Row>,
@@ -166,9 +164,13 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
     // get row-diff paths
     Timer timer;
+    // Unique row-diff row IDs to fetch and decode
     std::vector<BinaryMatrix::Row> rd_ids;
+    // Truncated reconstruction paths (indices into rd_ids) per queried row
     std::vector<std::vector<size_t>> rd_paths_trunc;
+    // Multiplicity for each queried row path returned by get_rd_ids()
     std::vector<size_t> times_traversed;
+    // Independent groups of row paths that can be reconstructed in parallel
     std::vector<std::vector<size_t>> groups;
     std::tie(rd_ids, rd_paths_trunc, times_traversed, groups) = get_rd_ids(row_ids, num_threads);
     double rd_traversal_time = timer.elapsed();
@@ -196,7 +198,7 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
     // Reconstruct annotation rows from row-diff.
     // Since get_rd_ids skips cross-thread deduplication, rows from different
-    // groups access disjoint rd_rows entries. We exploit this to reconstruct
+    // groups access disjoint rd_rows entries. We use that to reconstruct
     // each group in parallel, while preserving the sequential dependency
     // order within each group.
     using RowType = typename std::decay_t<decltype(rd_rows)>::value_type;
@@ -209,8 +211,10 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
         results.reserve(100);
         auto call_rows_batch = [&]() {
             #pragma omp critical
-            for (const auto &[idx, result] : results) {
-                call_row(idx, result);
+            {
+                for (const auto &[idx, result] : results) {
+                    call_row(idx, result);
+                }
             }
             results.resize(0);
         };

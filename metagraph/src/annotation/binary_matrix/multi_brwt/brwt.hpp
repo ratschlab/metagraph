@@ -60,8 +60,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     template <typename T>
     void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
 
-    // Returns (nonzero_indices, child_row_ids): indices into row_ids where
-    // the nonzero_rows_ bit is set, and their mapped child coordinate IDs.
+    // Returns (`nonzero_indices`, `child_row_ids`): indices into `rows` for
+    // the rows with the set bit in `nonzero_rows_`, and their recalculated
+    // (via rank) row indices for those rows in the children.
     std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
     get_nonzero_rows(const std::vector<Row> &rows) const;
 

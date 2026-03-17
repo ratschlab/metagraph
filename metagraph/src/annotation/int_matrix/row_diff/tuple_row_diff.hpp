@@ -196,7 +196,8 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
-                    if (result.back().second.empty())  // just for safety, normally shouldn't happen
+                    // just for safety, normally rows without coordinates shouldn't be annotated
+                    if (result.back().second.empty())
                         result.pop_back();
                 }
                 ++it;

@@ -225,7 +225,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     pos.reserve(child_nodes_.size());
 
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
-        size_t offset = slice->size();
+        const size_t offset = slice->size();
+
         child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
 
         if (slice->size() == offset + child_row_ids.size()) {
@@ -233,7 +234,6 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
             slice->resize(offset);
             continue;
         }
-
         assert(slice->size() > offset + child_row_ids.size());
 
         pos.push_back(offset);
