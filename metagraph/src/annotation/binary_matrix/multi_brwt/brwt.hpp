@@ -62,7 +62,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     // Returns (`nonzero_indices`, `child_row_ids`): indices into `rows` for
     // the rows with the set bit in `nonzero_rows_`, and their recalculated
-    // (via rank) row indices for those rows in the children.
+    // (via rank) row indices for the respective rows in the children.
     std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
     get_nonzero_rows(const std::vector<Row> &rows) const;
 
