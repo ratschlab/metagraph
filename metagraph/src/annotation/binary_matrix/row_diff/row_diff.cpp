@@ -3,15 +3,19 @@
 #include <filesystem>
 #include <fstream>
 
+#include <ips4o.hpp>
+
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/vector_set.hpp"
 
 namespace mtg {
 namespace annot {
 
 using node_index = graph::DeBruijnGraph::node_index;
+using common::logger;
 
 node_index row_diff_successor(const graph::DeBruijnGraph &graph,
                               node_index node,
@@ -63,23 +67,40 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
     fork_succ_.load(*f);
 }
 
-std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
+std::tuple<std::vector<BinaryMatrix::Row>,
+           std::vector<std::vector<size_t>>,
+           std::vector<size_t>,
+           std::vector<std::vector<size_t>>>
+IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+    num_threads = std::max<size_t>(1, num_threads);
 
     using Row = BinaryMatrix::Row;
 
-    // map row index to its index in |rd_rows|
-    VectorMap<Row, size_t> node_to_rd;
-    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+    // Thread-local sets indexing rows.
+    std::vector<VectorSet<Row>> rows_visited_local(num_threads);
 
-    // Truncated row-diff paths, indexes to |rd_rows|.
+    // Truncated row-diff paths, store thread-local indexes of deduped rows.
     // The last index in each path points to an anchor or to a row which had
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
+    // Records which paths were traced by each thread (for offset remapping in Phase 2).
+    std::vector<std::vector<size_t>> groups(num_threads);
 
+    const size_t block_size = get_chunk_size(row_ids.size(), 10000 /* max_chunk_size */, num_threads);
+
+    // Phase 1: Parallel path tracing.
+    // |rows_visited_local| provides intra-thread dedup (early path termination
+    // when a node was already visited by the same thread).
+    // FYI: It's essential that the omp loop is ORDERED so that each thread gets rows in order.
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic, block_size)
     for (size_t i = 0; i < row_ids.size(); ++i) {
+        const int t = omp_get_thread_num();
+        auto &rows_visited = rows_visited_local[t];
+
+        groups[t].push_back(i);
+
         Row row = row_ids[i];
 
         node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
@@ -88,8 +109,8 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
             assert(graph_->in_graph(node));
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.value());
+            auto [it, is_new] = rows_visited.emplace(row);
+            rd_paths_trunc[i].push_back(it - rows_visited.begin());
 
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
@@ -105,31 +126,57 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
         }
     }
 
-    auto m = to_vector(std::move(node_to_rd));
-    // sort by indexes of rd rows
-    // the second value points to the index in batch
-    std::sort(m.begin(), m.end(), utils::LessFirst());
-    // collect an array of rd rows
-    std::vector<Row> rd_ids(m.size());
-    for (size_t i = 0; i < m.size(); ++i) {
-        rd_ids[i] = m[i].first;
+    // Phase 2: Merge thread-local maps and remap path indices.
+    //
+    // Note: We skip the cross-thread dedup because it has to be sequential
+    //       and that adds too much overhead. The intra-thread dedup already
+    //       significantly reduces redundant paths.
+    std::vector<size_t> offsets(groups.size() + 1);
+    for (size_t g = 0; g < groups.size(); ++g) {
+        offsets[g + 1] = offsets[g] + rows_visited_local[g].size();
     }
-    // make m[].first map indexes in batch to new indexes (where rows are sorted)
-    for (size_t i = 0; i < m.size(); ++i) {
-        m[m[i].second].first = i;
-    }
-
-    // keeps how many times rows in |rd_rows| will be queried
-    std::vector<size_t> times_traversed(rd_ids.size(), 0);
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        for (auto &j : rd_paths_trunc[i]) {
-            j = m[j].first;
-            times_traversed[j]++;
+    // (rd_row_id, original_batch_index) pairs used for sorting/remapping
+    std::vector<std::pair<Row, size_t>> m(offsets.back());
+    // row-diff row IDs in sorted order (deduplicated only within each thread group)
+    std::vector<Row> rd_ids(offsets.back());
+    // map original batch indices to their positions in sorted rd_ids
+    std::vector<size_t> new_idx(offsets.back());
+    // multiplicity per sorted rd_ids entry (for repeated traversals)
+    std::vector<size_t> times_traversed(offsets.back());
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        const size_t offset = offsets[g];
+        const auto &vec = rows_visited_local[g].values_container();
+        for (size_t i = 0; i < vec.size(); ++i) {
+            m[offset + i] = { vec[i], offset + i };
         }
     }
 
-    return std::make_tuple(std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed));
+    // sort by indexes of rd rows
+    // the second value points to the index in batch
+    // (row_4, 4), (row_4, 0), (row_7, 2), ...
+    ips4o::parallel::sort(m.begin(), m.end(), utils::LessFirst(), num_threads);
+
+    // map indexes in batch (used in `rd_paths_trunc`) to new indexes
+    // (where rows are sorted).
+    #pragma omp parallel for num_threads(num_threads) schedule(static)
+    for (size_t i = 0; i < m.size(); ++i) {
+        rd_ids[i] = m[i].first;
+        new_idx[m[i].second] = i;
+    }
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        for (size_t i : groups[g]) {
+            for (auto &j : rd_paths_trunc[i]) {
+                j = new_idx[j + offsets[g]];
+                times_traversed[j]++;
+            }
+        }
+    }
+
+    return { std::move(rd_ids), std::move(rd_paths_trunc),
+             std::move(times_traversed), std::move(groups) };
 }
 
 } // namespace matrix

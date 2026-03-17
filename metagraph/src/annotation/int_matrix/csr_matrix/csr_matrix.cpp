@@ -20,8 +20,9 @@ CSRMatrix::CSRMatrix(Vector<RowValues>&& rows, uint64_t num_columns)
 }
 
 std::vector<CSRMatrix::RowValues>
-CSRMatrix::get_row_values(const std::vector<Row> &rows) const {
+CSRMatrix::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
     std::vector<RowValues> row_values(rows.size());
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < rows.size(); ++i) {
         row_values[i] = vector_[rows[i]];
     }

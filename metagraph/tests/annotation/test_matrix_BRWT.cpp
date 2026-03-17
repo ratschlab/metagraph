@@ -6,6 +6,7 @@
 
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 
 
 namespace {
@@ -71,6 +72,36 @@ TYPED_TEST(BinaryMatrixBRWTTest, ArityTwoCol) {
         // root + 2 leaves
         EXPECT_EQ(3u, matrix.num_nodes());
         EXPECT_EQ(2u, matrix.avg_arity());
+    }
+}
+
+TYPED_TEST(BinaryMatrixBRWTTest, GetRowsManyThreadsPreservesMembershipWithDuplicates) {
+    BitVectorPtrArray columns;
+    columns.emplace_back(new bit_vector_sd({ 1, 0, 0, 0, 1, 0, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 1, 0, 0, 1, 0, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 1, 0, 0, 1, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 1, 0, 1, 0, 0, 0, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 0, 0, 1, 0, 1, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 0, 0, 0, 0, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 1, 1, 1, 0, 0, 0, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 0, 0, 0, 1, 1, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 0, 1, 0, 0, 0, 1 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 0, 1, 0, 0, 0, 1, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 1, 0, 0, 0, 0, 1, 0, 0 }));
+    columns.emplace_back(new bit_vector_sd({ 0, 1, 0, 0, 0, 0, 1, 0 }));
+
+    auto matrix = build_matrix_from_columns<TypeParam>(std::move(columns));
+    std::vector<BinaryMatrix::Row> row_ids = { 0, 2, 2, 3, 5, 7, 0 };
+
+    auto single_thread_rows = matrix.get_rows(row_ids);
+    auto many_thread_rows = matrix.get_rows(row_ids, 4);
+
+    ASSERT_EQ(single_thread_rows.size(), many_thread_rows.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        std::sort(single_thread_rows[i].begin(), single_thread_rows[i].end());
+        std::sort(many_thread_rows[i].begin(), many_thread_rows[i].end());
+        EXPECT_EQ(single_thread_rows[i], many_thread_rows[i]) << "row index " << row_ids[i];
     }
 }
 

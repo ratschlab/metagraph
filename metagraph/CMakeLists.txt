@@ -306,11 +306,17 @@ else()
 endif()
 
 if(APPLE)
+  if(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
+    set(HOMEBREW_DIR /opt/homebrew)
+  else()
+    set(HOMEBREW_DIR /usr/local)
+  endif()
+endif()
+
+if(APPLE)
   if(NOT DEFINED ICU_ROOT)
-    if(EXISTS /opt/homebrew/opt/icu4c)
-      set(ICU_ROOT "/opt/homebrew/opt/icu4c")
-    elseif(EXISTS /usr/local/opt/icu4c)
-      set(ICU_ROOT "/usr/local/opt/icu4c")
+    if(EXISTS ${HOMEBREW_DIR}/opt/icu4c)
+      set(ICU_ROOT "${HOMEBREW_DIR}/opt/icu4c")
     else()
       find_program(CONDA_EXECUTABLE conda)
       if(CONDA_EXECUTABLE)
@@ -488,14 +494,8 @@ target_link_directories(metagraph-core INTERFACE
 )
 
 if(APPLE)
-  target_link_directories(metagraph-core INTERFACE /usr/local/lib)
-  if(EXISTS /opt/homebrew/lib)
-    target_link_directories(metagraph-core INTERFACE /opt/homebrew/lib)
-  endif()
-  target_include_directories(metagraph-core SYSTEM PUBLIC
-    /usr/local/include
-    /opt/homebrew/include
-  )
+  target_link_directories(metagraph-core INTERFACE ${HOMEBREW_DIR}/lib)
+  target_include_directories(metagraph-core SYSTEM PUBLIC ${HOMEBREW_DIR}/include)
 endif()
 
 if(ICU_DATA_LIBRARY_PATH)

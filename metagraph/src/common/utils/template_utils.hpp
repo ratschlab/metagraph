@@ -139,6 +139,17 @@ struct LessSecond {
     }
 };
 
+// Example: get_firsts<vector<int>>(vector<pair<int, size_t>>{{1, 2}, {3, 4}}) returns {1, 3}
+template <class OutContainer, class InContainer>
+OutContainer get_firsts(const InContainer &v) {
+    OutContainer result;
+    result.reserve(v.size());
+    for (const auto &x : v) {
+        result.push_back(get_first(x));
+    }
+    return result;
+}
+
 } // namespace utils
 
 #endif // __TEMPLATE_UTILS_HPP__
