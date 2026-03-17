@@ -30,8 +30,8 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
-    using BinaryMatrix::get_rows;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows, size_t num_threads) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows, size_t num_threads) const;
@@ -58,13 +58,28 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // helper function for querying rows in batches
     // appends to `slice`
     template <typename T>
-    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
+    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice,
+                    ThreadPool *thread_pool = nullptr) const;
+
+    template <typename RowT>
+    std::vector<RowT>
+    slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
+
+    // `call_stack` tracks the child indexes at each level during parallel tree
+    // traversal, so that column indices can be remapped when merging results from subtrees.
+    template <typename T>
+    void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+                    const BRWT *root, std::vector<size_t> call_stack,
+                    size_t max_columns_cutoff, ThreadPool &thread_pool,
+                    std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const;
 
     // Returns (`nonzero_indices`, `child_row_ids`): indices into `rows` for
     // the rows with the set bit in `nonzero_rows_`, and their recalculated
     // (via rank) row indices for the respective rows in the children.
     std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
-    get_nonzero_rows(const std::vector<Row> &rows) const;
+    get_nonzero_rows(const std::vector<Row> &rows,
+                     ThreadPool *thread_pool = nullptr,
+                     bool adaptive_chunk_size = true) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
