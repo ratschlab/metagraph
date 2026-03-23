@@ -54,6 +54,7 @@ class ThreadPool {
 
     void join();
 
+    size_t num_waiting_tasks() const;
     void remove_waiting_tasks();
 
     ~ThreadPool();

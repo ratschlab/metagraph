@@ -49,21 +49,6 @@ std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 
 
-/**
- * Construct a query graph and augment it with neighboring paths around it
- * if `config` is specified.
- * @param anno_graph annotated de Bruijn graph (the index)
- * @param call_sequences generate sequences to be queried against anno_graph
- * @param num_threads number of threads to use
- * @param config a pointer to a Config to determine parameters of the hull
- */
-std::unique_ptr<graph::AnnotatedDBG>
-construct_query_graph(const graph::AnnotatedDBG &anno_graph,
-                      StringGenerator call_sequences,
-                      size_t num_threads,
-                      const Config &config);
-
-
 // Simple struct to wrap a query sequence
 struct QuerySequence {
     size_t id;            // Sequence ID
@@ -142,11 +127,10 @@ class SeqSearchResult {
      * represented sequence.
      *
      * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
-     * @param anno_graph        reference to annotated dbg for kmer presence mask scoring
-     * @param verbose_output    do not collapse continuous ranges of coords (or counts)
+     * @param k                 k-mer length for kmer presence mask scoring
      * @return  Json::Value instance representing sequence result
      */
-    Json::Value to_json(bool verbose_output, const graph::AnnotatedDBG &anno_graph) const;
+    Json::Value to_json(bool verbose_output, size_t k) const;
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -157,12 +141,12 @@ class SeqSearchResult {
      * @param delimiter             the delimiter between labels for that sequence
      * @param suppress_unlabeled    do not print seq_name if sequence is unlabeled
      * @param verbose_output        do not collapse continuous ranges of coords or counts
-     * @param anno_graph            reference to annotated dbg for kmer presence mask scoring
+     * @param k                     k-mer length for kmer presence mask scoring
      */
     std::string to_string(std::string delimiter,
                           bool suppress_unlabeled,
                           bool verbose_output,
-                          const graph::AnnotatedDBG &anno_graph) const;
+                          size_t k) const;
 
   private:
     QuerySequence sequence_;             // query sequence this result represents
@@ -180,44 +164,25 @@ enum QueryMode {
     SIGNATURE
 };
 
-class QueryExecutor {
-  public:
-    QueryExecutor(const Config &config,
-                  const graph::AnnotatedDBG &anno_graph,
-                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config)
-      : config_(config), anno_graph_(anno_graph),
-        aligner_config_(std::move(aligner_config)) {}
-
-    /**
-     * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
-     *
-     * Provide a callback which receives a reference to a SeqSearchResult instance which the
-     * callback function should use as desired (typically generate a string/JSON output).
-     *
-     * @param file_path     path to FASTA file
-     * @param callback      callback function
-     *
-     * @return the number of base pairs (characters) in query file
-     */
-    size_t query_fasta(const std::string &file_path,
-                       const std::function<void(const SeqSearchResult &)> &callback);
-
-    static SeqSearchResult execute_query(QuerySequence&& sequence,
-                                         QueryMode query_mode,
-                                         size_t num_top_labels,
-                                         double discovery_fraction,
-                                         double presence_fraction,
-                                         const graph::AnnotatedDBG &anno_graph);
-
-  private:
-    const Config &config_;
-    const graph::AnnotatedDBG &anno_graph_;
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
-
-    size_t batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
-                               const std::function<void(const SeqSearchResult &)> &callback);
-};
-
+/**
+ * Query sequences from a FASTA files.
+ *
+ * Provide a callback which receives a reference to a SeqSearchResult instance which the
+ * callback function should use as desired (typically generate a string/JSON output).
+ *
+ * @param file_path     path to FASTA file
+ * @param callback      callback function
+ * @param config        config object
+ * @param anno_graph    annotated de Bruijn graph
+ * @param aligner_config alignment config
+ *
+ * @return the number of base pairs (characters) in query file
+ */
+size_t query_fasta(const std::string &file_path,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config);
 
 int query_graph(Config *config);
 
