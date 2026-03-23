@@ -5,9 +5,11 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
+#include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
@@ -87,6 +89,40 @@ load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
     return annotation_temp;
 }
 
+std::unique_ptr<annot::CoordToHeader>
+load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
+                     const Config &config) {
+    std::unique_ptr<annot::CoordToHeader> coord_to_header;
+
+    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&annotation.get_matrix())
+            && !config.no_coord_mapping && config.identity != Config::ANNOTATE) {
+        // Load CoordToHeader mapping if exists
+        auto cth_fname = utils::remove_suffix(config.infbase_annotators.at(0),
+                                              annotation.file_extension())
+                                        + annot::CoordToHeader::kExtension;
+        if (std::filesystem::exists(cth_fname)) {
+            coord_to_header = std::make_unique<annot::CoordToHeader>();
+            if (!coord_to_header->load(cth_fname)) {
+                logger->error("Failed loading the CoordToHeader mapping from {}", cth_fname);
+                exit(1);
+            }
+            logger->trace("CoordToHeader mapping loaded successfully from {}. "
+                          "All queries will be performed against individual sequences.",
+                          cth_fname);
+        } else {
+            logger->warn("CoordToHeader mapping file not found at {}. Querying will be done "
+                         "against original labels indexed in annotation {}. Results will show "
+                         "file-based coordinates (e.g., '<file_37.fa>:0-1086-1090') instead of "
+                         "sequence-based coordinates (e.g., '<seq_9>:0-1-5'). For sequence-"
+                         "based queries, create a mapping with '--index-header-coords' during "
+                         "annotation, or pass '--no-coord-mapping' to suppress this warning.",
+                         cth_fname, config.infbase_annotators.at(0));
+        }
+    }
+
+    return coord_to_header;
+}
+
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config,
                                                        size_t max_chunks_open) {
@@ -96,9 +132,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     }
 
     auto annotation = load_annotation(graph, config, max_chunks_open);
-
-    auto anno_graph
-            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation));
+    auto coord_to_header = load_coord_to_header(*annotation, config);
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation),
+                                                     false, std::move(coord_to_header));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

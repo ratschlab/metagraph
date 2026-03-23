@@ -839,7 +839,7 @@ TEST(BOSS, AddSequence) {
         EXPECT_EQ(6u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN");
@@ -867,7 +867,7 @@ TEST(BOSS, AppendSequence) {
         EXPECT_EQ(7u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN", true);
@@ -1479,7 +1479,7 @@ TEST(BOSS, CallUnitigsDisconnected1) {
     }
 }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
     for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);

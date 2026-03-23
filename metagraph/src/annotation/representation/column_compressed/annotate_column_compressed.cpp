@@ -562,7 +562,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -580,7 +580,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading annotations from file {}", filename);
@@ -635,7 +635,7 @@ void ColumnCompressed<Label>
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -653,7 +653,7 @@ void ColumnCompressed<Label>
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading labels from {}", filename);
@@ -710,7 +710,7 @@ void ColumnCompressed<Label>
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -728,7 +728,7 @@ void ColumnCompressed<Label>
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);
@@ -804,7 +804,7 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -822,7 +822,7 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);

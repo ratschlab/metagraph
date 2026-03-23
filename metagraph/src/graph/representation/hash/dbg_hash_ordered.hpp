@@ -33,7 +33,7 @@ class DBGHashOrdered : public DeBruijnGraph {
     }
     void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      const std::function<void(size_t, node_index)> &on_insertion = [](size_t, node_index) {}) {
+                      const std::function<void(size_t, node_index)> &on_insertion) {
         hash_dbg_->add_sequence(sequence, skip, on_insertion);
     }
 

@@ -40,6 +40,9 @@ initialize_annotation(const std::string &filename, const Args &... args) {
     return initialize_annotation(parse_annotation_type(filename), args...);
 }
 
+// read annotation labels from a serialized annotation
+std::vector<std::string> read_labels(const std::string &anno_fname);
+
 } // namespace cli
 } // namespace mtg
 

@@ -16,8 +16,6 @@
 #include "common/vector.hpp"
 #include "graph/alignment/alignment.hpp"
 
-class ThreadPool;
-
 namespace mtg {
 
 namespace seq_io {
@@ -51,21 +49,6 @@ std::vector<std::string>
 collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 
 
-/**
- * Construct a query graph and augment it with neighboring paths around it
- * if `config` is specified.
- * @param anno_graph annotated de Bruijn graph (the index)
- * @param call_sequences generate sequences to be queried against anno_graph
- * @param num_threads number of threads to use
- * @param config a pointer to a Config to determine parameters of the hull
- */
-std::unique_ptr<graph::AnnotatedDBG>
-construct_query_graph(const graph::AnnotatedDBG &anno_graph,
-                      StringGenerator call_sequences,
-                      size_t num_threads,
-                      const Config *config = nullptr);
-
-
 // Simple struct to wrap a query sequence
 struct QuerySequence {
     size_t id;            // Sequence ID
@@ -95,7 +78,7 @@ class SeqSearchResult {
     typedef std::string Label;
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
-    typedef std::vector<std::pair<Label, sdsl::bit_vector>> LabelSigVec;
+    typedef std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> LabelSigVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> LabelCountCoordsVec;
 
@@ -145,7 +128,6 @@ class SeqSearchResult {
      *
      * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
      * @param k                 k-mer length for kmer presence mask scoring
-     * @param verbose_output    do not collapse continuous ranges of coords (or counts)
      * @return  Json::Value instance representing sequence result
      */
     Json::Value to_json(bool verbose_output, size_t k) const;
@@ -193,7 +175,6 @@ enum QueryMode {
  * @param config        config object
  * @param anno_graph    annotated de Bruijn graph
  * @param aligner_config alignment config
- * @param thread_pool   thread pool to use for parallel processing
  *
  * @return the number of base pairs (characters) in query file
  */
@@ -201,8 +182,7 @@ size_t query_fasta(const std::string &file_path,
                    const std::function<void(const SeqSearchResult &)> &callback,
                    const Config &config,
                    const graph::AnnotatedDBG &anno_graph,
-                   const graph::align::DBGAlignerConfig *aligner_config,
-                   ThreadPool &thread_pool);
+                   const graph::align::DBGAlignerConfig *aligner_config);
 
 int query_graph(Config *config);
 

@@ -49,9 +49,7 @@ UniqueRowBinmat
             throw std::runtime_error("There must be less than 2^32 unique rows");
     });
 
-    unique_rows_ = const_cast<std::vector<SetBitPositions>&&>(
-        unique_rows.values_container()
-    );
+    unique_rows_ = to_vector(std::move(unique_rows));
 }
 
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {

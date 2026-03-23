@@ -1,6 +1,7 @@
 #include "string_utils.hpp"
 
 #include <cmath>
+#include <regex>
 #include <cassert>
 #include <algorithm>
 
@@ -20,6 +21,18 @@ bool ends_with(const std::string &str, const std::string &suffix) {
                     - static_cast<int>(suffix.size()))
     );
     return actual_suffix == suffix;
+}
+
+// Try to parse ka:f:[abundance] or km:f:[abundance] from header
+// https://github.com/IndexThePlanet/Logan/blob/main/Unitigs.md
+std::optional<uint64_t> parse_abundance(const std::string &comment) {
+    std::smatch match;
+    std::regex abundance_regex(R"((ka|km):f:([0-9.eE+-]+))");
+    if (std::regex_search(comment, match, abundance_regex) && match.size() > 2) {
+        return std::max<uint64_t>(1, std::llround(std::stod(match[2].str())));
+    } else {
+        return std::nullopt;
+    }
 }
 
 std::string remove_suffix(const std::string &str, const std::string &suffix) {

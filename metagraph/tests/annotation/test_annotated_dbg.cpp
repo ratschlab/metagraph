@@ -364,7 +364,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -487,7 +487,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -606,7 +606,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -735,7 +735,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -851,7 +851,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -979,7 +979,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1057,7 +1057,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
         check_labels(*anno_graph, std::string(100, 'G'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(*anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1158,7 +1158,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
-    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+    typedef std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1173,13 +1173,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
         );
 
         const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
-        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
-                        const std::pair<std::string, sdsl::bit_vector> &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+        auto comp = [&](const std::tuple<std::string, size_t, sdsl::bit_vector> &a,
+                        const std::tuple<std::string, size_t, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(std::get<2>(a));
+            size_t b_cnt = sdsl::util::cnt_one_bits(std::get<2>(b));
             return a_cnt > b_cnt
                 || (a_cnt == b_cnt
-                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+                        && label_encoder.encode(std::get<0>(a)) < label_encoder.encode(std::get<0>(b)));
         };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
@@ -1203,23 +1203,23 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 
         std::vector<VectorSignature> results {
             {
-                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
-                std::make_pair("Third", to_sdsl(temps[0]))
+                { "First", 0, sdsl::bit_vector((100 + k) - (k + 1) + 1, true) },
+                { "Third", 0, to_sdsl(temps[0]) }
             },
             {
 #if _DNA_GRAPH
-                std::make_pair("Second", to_sdsl(temps[1]))
+                { "Second", 0, to_sdsl(temps[1]) }
 #else
-                std::make_pair("Second", sdsl::bit_vector(202 - (k + 1) + 1, true))
+                { "Second", 0, sdsl::bit_vector(202 - (k + 1) + 1, true) }
 #endif
             },
             {
 #if _DNA_GRAPH
-                std::make_pair("Third", to_sdsl(temps[2])),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, to_sdsl(temps[2]) },
+                { "First", 0, to_sdsl(temps[3]) }
 #else
-                std::make_pair("Third", sdsl::bit_vector(202 - (k + 1) + 1, true)),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, sdsl::bit_vector(202 - (k + 1) + 1, true) },
+                { "First", 0, to_sdsl(temps[3]) }
 #endif
             }
         };
@@ -1232,8 +1232,8 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             temps[5].assign(100 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
 #else
             temps[4].assign(100 - (k + 1) + 1 + 1, false);
             temps[4].insert(temps[4].end(), 102 - (k + 1) + 1, true);
@@ -1242,13 +1242,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             temps[5].assign(102 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (102 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
             std::swap(results[2][1], results[2][2]);
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 temps[4].assign(100 - (k + 1) + 1 + 2, false);
@@ -1259,8 +1259,8 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 temps[5].insert(temps[5].end(), 2, true);
                 temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1) - 2, false);
 
-                results[1].emplace_back("Third", to_sdsl(temps[4]));
-                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+                results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
                 break;
             case 3:
                 temps[4].assign(100 - (k + 1) + 1 + 3, false);
@@ -1271,19 +1271,24 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 temps[5].insert(temps[5].end(), 1, true);
                 temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 2) - 1, false);
 
-                results[1].emplace_back("Third", to_sdsl(temps[4]));
-                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+                results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
                 break;
         }
 #endif
-
+        // set all counts in expected results correctly
+        for (auto &v : results) {
+            for (auto &res : v) {
+                std::get<1>(res) = sdsl::util::cnt_one_bits(std::get<2>(res));
+            }
+        }
         std::vector<double> percentages;
         for (size_t i = 0; i < results.size(); ++i) {
             percentages.clear();
             std::transform(results[i].begin(), results[i].end(),
                            std::back_inserter(percentages),
-                           [&](const auto &pair) {
-                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                           [&](const auto &t) {
+                               return 1. * sdsl::util::cnt_one_bits(std::get<2>(t))
                                    / (sequences[i].size() - (k + 1) + 1);
                            });
             percentages.emplace_back(0.0);
@@ -1296,9 +1301,9 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 if (k == 1 && i == 2 && j == 2) {
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
-                    EXPECT_EQ(results[i][1].second, label_counts[1].second);
-                    EXPECT_TRUE(results[i][1].first == "First"
-                        || results[i][1].first == "Second");
+                    EXPECT_EQ(std::get<2>(results[i][1]), std::get<2>(label_counts[1]));
+                    EXPECT_TRUE(std::get<0>(results[i][1]) == "First"
+                        || std::get<0>(results[i][1]) == "Second");
                 } else {
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
                               label_counts) << k << " " << i << " " << j;
@@ -1309,7 +1314,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1328,7 +1333,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1347,7 +1352,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;
@@ -1424,7 +1429,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
-    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+    typedef std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1439,13 +1444,13 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
         );
 
         const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
-        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
-                        const std::pair<std::string, sdsl::bit_vector> &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+        auto comp = [&](const std::tuple<std::string, size_t, sdsl::bit_vector> &a,
+                        const std::tuple<std::string, size_t, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(std::get<2>(a));
+            size_t b_cnt = sdsl::util::cnt_one_bits(std::get<2>(b));
             return a_cnt > b_cnt
                 || (a_cnt == b_cnt
-                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+                        && label_encoder.encode(std::get<0>(a)) < label_encoder.encode(std::get<0>(b)));
         };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
@@ -1469,15 +1474,15 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
 
         std::vector<VectorSignature> results {
             {
-                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
-                std::make_pair("Third", to_sdsl(temps[0]))
+                { "First", 0, sdsl::bit_vector((100 + k) - (k + 1) + 1, true) },
+                { "Third", 0, to_sdsl(temps[0]) }
             },
             {
-                std::make_pair("Second", to_sdsl(temps[1]))
+                { "Second", 0, to_sdsl(temps[1]) }
             },
             {
-                std::make_pair("Third", to_sdsl(temps[2])),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, to_sdsl(temps[2]) },
+                { "First", 0, to_sdsl(temps[3]) }
             }
         };
 
@@ -1489,22 +1494,29 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             temps[5].assign(100 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
+        }
+
+        // set all counts in expected results correctly
+        for (auto &v : results) {
+            for (auto &res : v) {
+                std::get<1>(res) = sdsl::util::cnt_one_bits(std::get<2>(res));
+            }
         }
 
         std::vector<double> percentages;
         for (size_t i = 0; i < results.size(); ++i) {
             percentages.clear();
             for (size_t j = 0; j < results[i].size(); ++j) {
-                ASSERT_EQ(sequences[i].size() - (k + 1) + 1, results[i][j].second.size())
+                ASSERT_EQ(sequences[i].size() - (k + 1) + 1, std::get<2>(results[i][j]).size())
                     << k << " " << i << " " << j;
             }
 
             std::transform(results[i].begin(), results[i].end(),
                            std::back_inserter(percentages),
-                           [&](const auto &pair) {
-                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                           [&](const auto &t) {
+                               return 1. * sdsl::util::cnt_one_bits(std::get<2>(t))
                                    / (sequences[i].size() - (k + 1) + 1);
                            });
             percentages.emplace_back(0.0);
@@ -1516,10 +1528,10 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
                 if (k == 1 && i == 2 && j == 2) {
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
-                    EXPECT_EQ(results[i][1].second, label_counts[1].second)
-                        << results[i][1].second << " " << label_counts[1].second;
-                    EXPECT_TRUE(results[i][1].first == "First"
-                        || results[i][1].first == "Second");
+                    EXPECT_EQ(std::get<2>(results[i][1]), std::get<2>(label_counts[1]))
+                        << std::get<2>(results[i][1]) << " " << std::get<2>(label_counts[1]);
+                    EXPECT_TRUE(std::get<0>(results[i][1]) == "First"
+                        || std::get<0>(results[i][1]) == "Second");
                 } else {
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
                               label_counts) << k << " " << i << " " << j;
@@ -1651,7 +1663,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 results[1].emplace_back("Third", 2);
@@ -1696,7 +1708,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1713,7 +1725,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1729,7 +1741,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;

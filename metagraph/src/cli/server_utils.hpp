@@ -11,7 +11,16 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
-                     const std::function<std::string(const std::string &)> &process);
+                     size_t request_id,
+                     const std::function<Json::Value(const std::string &)> &process);
+
+// An exception that may be thrown inside the callback `process` to indicate that the response
+// is already sent by the caller and no additional action in `process_request` is required.
+class CustomResponse : public std::exception {
+    const char* what() const noexcept override {
+        return "Response already sent by callback";
+    }
+};
 
 Json::Value parse_json_string(const std::string &msg);
 

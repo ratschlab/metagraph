@@ -72,5 +72,6 @@ def test_workflow_invocation_additional_args(sample_list_path, output_dir):
     proc = run_wrapper(base_args + [output_dir])
 
     assert proc.returncode == 0
-    assert 'missing\tupdate' in proc.stdout.decode('UTF-8')
-    assert not output_dir.exists() # workflow should not run in snakemake 'summary' mode
+    assert output_dir.exists()
+    assert (output_dir / "config.yaml").exists()
+    assert len([f for f in output_dir.listdir() if f.check(file=1)]) == 1

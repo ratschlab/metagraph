@@ -3,12 +3,14 @@ import importlib
 import logging
 import shlex
 import sys
+import subprocess
 from pathlib import Path
 from typing import Iterable, Optional, Dict, Any
 
 import snakemake
 import snakemake.io
 import snakemake.utils
+import yaml
 
 from .workflow_configs import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH, \
     AnnotationLabelsSource, AnnotationFormats
@@ -43,7 +45,8 @@ def run_build_workflow(
 
     snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
 
-    config = snakemake.io.load_configfile(default_path)
+    with open(default_path, 'r') as f:
+        config = yaml.safe_load(f)
 
     if not seqs_file_list_path and not seqs_dir_path:
         raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
@@ -78,16 +81,41 @@ def run_build_workflow(
 
     additional_args = additional_snakemake_args if additional_snakemake_args else {}
 
-    was_successful = snakemake.snakemake(str(snakefile_path), config=config,
-                                         scheduler='greedy',
-                                         forceall=force,
-                                         dryrun=dryrun,
-                                         **additional_args
-                                         )
+    # Build snakemake command
+    cmd = ['python', '-m', 'snakemake', '--snakefile', str(snakefile_path)]
 
-    if not was_successful:
-        raise RuntimeError("The snakemake workflow did not terminate correctly. "
-                           "See output or log files in the output directory for more details.")
+    # Add config file
+    output_dir_path = Path(output_dir)
+    config_file = output_dir_path / 'config.yaml'
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_file, 'w') as f:
+        yaml.dump(config, f)
+    cmd.extend(['--configfile', str(config_file)])
+
+    # Add other arguments
+    if force:
+        cmd.append('--forceall')
+    if dryrun:
+        cmd.append('--dry-run')
+    if threads:
+        cmd.extend(['--cores', str(threads)])
+    else:
+        # Add default cores if not specified
+        cmd.extend(['--cores', str(snakemake.utils.available_cpu_count())])
+
+    # Add additional arguments
+    for key, value in additional_args.items():
+        if isinstance(value, bool):
+            if value:
+                cmd.append(f'--{key}')
+        else:
+            cmd.extend([f'--{key}', str(value)])
+
+    # Run snakemake
+    result = subprocess.run([' '.join(cmd)], shell=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"The snakemake workflow did not terminate correctly")
 
 
 def setup_build_parser(parser):

@@ -13,4 +13,12 @@ template <typename T,
           class Container = std::vector<T, Allocator>>
 using VectorSet = tsl::ordered_set<T, Hash, EqualTo, Allocator, Container, IndexType>;
 
+// Use when the set is no longer needed and you want to extract the underlying container
+template <typename T, class Hash, typename IndexType, class EqualTo, class Allocator, class Container>
+Container to_vector(VectorSet<T, Hash, IndexType, EqualTo, Allocator, Container> &&set) {
+    Container container;
+    container.swap(const_cast<Container &>(set.values_container()));
+    return container;
+}
+
 #endif // __VECTOR_SET_HPP__

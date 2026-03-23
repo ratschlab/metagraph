@@ -197,7 +197,7 @@ void DBGSuccinct::call_nodes(const std::function<void(node_index)> &callback,
                              size_t num_threads,
                              size_t batch_size) const {
     if (valid_edges_) {
-        size_t block_size = max_index() / num_threads;
+        size_t block_size = std::max<size_t>(1, max_index() / num_threads);
 
         #pragma omp parallel for num_threads(num_threads) schedule(static)
         for (size_t begin = 1; begin <= max_index(); begin += block_size) {
@@ -839,9 +839,7 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out = utils::open_new_ofstream(fname);
-    boss::BOSS::serialize(std::move(chunk), out, state);
-    serialize_number(out, static_cast<int>(mode));
-    serialize_number(out, 0); // suffix ranges are not indexed
+    boss::BOSS::serialize(std::move(chunk), out, state, static_cast<int>(mode), true);
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
 }

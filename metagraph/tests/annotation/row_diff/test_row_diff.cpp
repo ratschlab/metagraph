@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -16,12 +17,62 @@ using namespace testing;
 using ::testing::_;
 using mtg::annot::matrix::RowDiff;
 using mtg::annot::matrix::ColumnMajor;
+using mtg::annot::matrix::BinaryMatrix;
 
 static auto graph_to_anno_index(graph::DeBruijnGraph::node_index node) {
     return graph::AnnotatedDBG::graph_to_anno_index(node);
 }
 
 typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
+
+class UnsortedRowMatrix : public BinaryMatrix {
+  public:
+    UnsortedRowMatrix() = default;
+
+    UnsortedRowMatrix(std::vector<SetBitPositions> rows, uint64_t num_columns)
+          : rows_(std::move(rows)), num_columns_(num_columns) {}
+
+    uint64_t num_columns() const override { return num_columns_; }
+    uint64_t num_rows() const override { return rows_.size(); }
+
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override {
+        std::vector<SetBitPositions> result;
+        result.reserve(row_ids.size());
+        for (Row row_id : row_ids) {
+            result.push_back(rows_.at(row_id));
+        }
+        return result;
+    }
+
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids,
+                                          size_t) const override {
+        return get_rows(row_ids);
+    }
+
+    std::vector<Row> get_column(Column column) const override {
+        std::vector<Row> result;
+        for (size_t row = 0; row < rows_.size(); ++row) {
+            if (std::find(rows_[row].begin(), rows_[row].end(), column) != rows_[row].end())
+                result.push_back(row);
+        }
+        return result;
+    }
+
+    bool load(std::istream&) override { return false; }
+    void serialize(std::ostream&) const override {}
+
+    uint64_t num_relations() const override {
+        size_t num_relations = 0;
+        for (const auto &row : rows_) {
+            num_relations += row.size();
+        }
+        return num_relations;
+    }
+
+  private:
+    std::vector<SetBitPositions> rows_;
+    uint64_t num_columns_ = 0;
+};
 
 TEST(RowDiff, Empty) {
     RowDiff<ColumnMajor> rowdiff;
@@ -124,6 +175,41 @@ TEST(RowDiff, GetRows) {
     ASSERT_THAT(rows[11], ElementsAre(0));
 }
 
+TEST(RowDiff, GetRowsFromUnsortedBackingRows) {
+    graph::DBGSuccinct graph(3);
+    graph.add_sequence("AAAT");
+    graph.mask_dummy_kmers(1, false);
+
+    auto first_node = graph.kmer_to_node("AAA");
+    auto second_node = graph.kmer_to_node("AAT");
+    ASSERT_NE(graph::DeBruijnGraph::npos, first_node);
+    ASSERT_NE(graph::DeBruijnGraph::npos, second_node);
+
+    auto first = graph_to_anno_index(first_node);
+    auto second = graph_to_anno_index(second_node);
+
+    sdsl::bit_vector anchors(graph.max_index(), false);
+    anchors[second] = true;
+    anchor_bv_type anchor(anchors);
+    utils::TempFile anchor_temp;
+    std::ofstream anchor_out(anchor_temp.name(), ios::binary);
+    anchor.serialize(anchor_out);
+    anchor_out.flush();
+
+    std::vector<BinaryMatrix::SetBitPositions> diff_rows(graph.max_index());
+    diff_rows[first] = { 3, 1 };
+    diff_rows[second] = { 2, 0 };
+
+    RowDiff<UnsortedRowMatrix> annot(&graph, UnsortedRowMatrix(std::move(diff_rows), 4));
+    annot.load_anchor(anchor_temp.name());
+
+    auto rows = annot.get_rows({ first, second, first });
+
+    ASSERT_THAT(rows[0], ElementsAre(0, 1, 2, 3));
+    ASSERT_THAT(rows[1], ElementsAre(0, 2));
+    ASSERT_THAT(rows[2], ElementsAre(0, 1, 2, 3));
+}
+
 /**
  * Tests annotations on the graph in
  * https://docs.google.com/document/d/1e0MFgZRJfmDUSvmDPuC_lvnnWA0VKm5hPdzM8mdrHMM/edit#bookmark=id.ciri4266pkc4
@@ -192,14 +278,14 @@ TEST(RowDiff, GetAnnotationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal_masked = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::bit_vector bterminal(graph.max_index() + 1);
+    sdsl::bit_vector bterminal(graph.max_index());
     sdsl::bit_vector cols_masked[2] = {
         { 1, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 0, 0, 0, 1, 0, 1, 1 }
     };
     sdsl::bit_vector cols_concrete[2];
-    cols_concrete[0].resize(graph.max_index() + 1);
-    cols_concrete[1].resize(graph.max_index() + 1);
+    cols_concrete[0].resize(bterminal.size());
+    cols_concrete[1].resize(bterminal.size());
     graph.call_nodes([&](auto i) {
         auto rank = graph_to_anno_index(graph.rank_node(i));
         bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];
@@ -323,14 +409,14 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal_masked = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::bit_vector bterminal(graph.max_index() + 1);
+    sdsl::bit_vector bterminal(graph.max_index());
     sdsl::bit_vector cols_masked[2] = {
         {0, 0, 1, 0, 0, 0, 1, 0, 1, 0 },
         {0, 1, 1, 0, 0, 0, 0, 0, 1, 0 }
     };
     sdsl::bit_vector cols_concrete[2];
-    cols_concrete[0].resize(graph.max_index() + 1);
-    cols_concrete[1].resize(graph.max_index() + 1);
+    cols_concrete[0].resize(bterminal.size());
+    cols_concrete[1].resize(bterminal.size());
     graph.call_nodes([&](auto i) {
         auto rank = graph_to_anno_index(graph.rank_node(i));
         bterminal[graph_to_anno_index(i)] = bterminal_masked[rank];

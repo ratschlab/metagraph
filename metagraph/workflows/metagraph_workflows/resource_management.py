@@ -2,7 +2,7 @@ import json
 import math
 import os
 from pathlib import Path
-
+from snakemake.common.tbdstring import TBDString
 
 
 from metagraph_workflows import workflow_configs
@@ -15,10 +15,6 @@ FALLBACK_MAX_MEM = 4 * 1024
 FALLBACK_MAX_DISK = 10 * 1024
 
 
-# obviously wrong value to work around --dryrun issues when the resources requirements
-# and other values depend on the input of rule (can be removed once is fixed
-# https://github.com/snakemake/snakemake/issues/927)
-TBD_VALUE = -1
 
 def _get_max_memory(config):
     return config.get(workflow_configs.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
@@ -91,10 +87,10 @@ class SupportsMemBufferSize(ResourceConfig):
                                                   MEM_BUFFER_MB_KEY, self.config)
 
             if not mem_cap_mb:
-                mem_cap_mb = min(self._mem_buf_estimate(wildcards, resources, input, threads), self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
-
-                if mem_cap_mb == TBD_VALUE:
-                    return TBD_VALUE
+                mem_cap_mb = self._mem_buf_estimate(wildcards, resources, input, threads)
+                if mem_cap_mb == TBDString():
+                    return TBDString()
+                mem_cap_mb = min(mem_cap_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
 
             return int(math.ceil(mem_cap_mb / 1024.0))
 
@@ -110,6 +106,8 @@ class SupportsMemBufferSize(ResourceConfig):
         if not avail_mem_mb:
             avail_mem_mb = resources.get('mem_mb', _get_max_memory(self.config))
 
+        if avail_mem_mb == TBDString():
+            return TBDString()
         return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), 1024) # TODO: parametrize constant?
 
 
@@ -123,8 +121,8 @@ class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
     def _get_mem_estimate(self, wildcards, input, threads):
         mem_cap = self.get_mem_buffer_gib()(wildcards, input, threads, None)
 
-        if mem_cap == TBD_VALUE:
-            return TBD_VALUE
+        if mem_cap == TBDString():
+            return TBDString()
 
         mem_cap_mib = mem_cap*1024
 
@@ -153,7 +151,7 @@ class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, 
         kmc_json_path = Path(input['kmer'])
 
         if not kmc_json_path.exists():
-            return TBD_VALUE
+            return TBDString()
 
         with open(kmc_json_path, 'r') as f:
             kmc_data = json.load(f)
@@ -183,7 +181,7 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
             # In most cases factor 1.3 to 1.5 would be enough, however, there are outliers
             return 2*file_size_mib
 
-        return TBD_VALUE
+        return TBDString()
 
 
 class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
@@ -193,7 +191,7 @@ class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
     def _mem_buf_estimate(self, wildcards, resources, input, threads):
         if Path(input.columns_file).exists():
             return int(columns_size_mb(input.columns_file) + BASE_MEM)
-        return TBD_VALUE
+        return TBDString()
 
 
 class TransformRdStage1Resources(SupportsMemBufferSize):

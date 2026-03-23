@@ -34,35 +34,40 @@ bool BRWT::get(Row row, Column column) const {
     return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
 }
 
+template <typename T>
+T make_delim() {
+    T delim = {};
+    utils::get_first(delim) = std::numeric_limits<BRWT::Column>::max();
+    return delim;
+}
+
+template <class Slice, class Callback>
+void call_sliced_rows(Slice &slice, Callback call_row) {
+    const auto delim = make_delim<typename Slice::value_type>();
+    for (auto row_begin = slice.begin(); row_begin != slice.end(); ) {
+        // every row in `slice` ends with the delimiter
+        auto row_end = std::find(row_begin, slice.end(), delim);
+        assert(row_end != slice.end());
+        call_row(row_begin, row_end);
+        row_begin = row_end + 1;
+    }
+}
+
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
     Vector<Column> slice;
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
 
     slice_rows(row_ids, &slice);
 
-    assert(slice.size() >= row_ids.size());
-
-    auto row_begin = slice.begin();
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        // every row in `slice` ends with `-1`
-        auto row_end = std::find(row_begin, slice.end(),
-                                 std::numeric_limits<Column>::max());
-        rows[i].assign(row_begin, row_end);
-        row_begin = row_end + 1;
-    }
-
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+        rows.emplace_back(row_begin, row_end);
+    });
+    assert(rows.size() == row_ids.size());
     return rows;
-}
-
-void BRWT::slice_rows(Row begin, Row end, Vector<Column> *slice) const {
-    // TODO: It may be faster if index columns are queried in ranges instead of with element-wise
-    // access queries.
-    slice_rows(utils::arange<Row>(begin, end - begin), slice);
 }
 
 void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
@@ -77,97 +82,50 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
         assert(begin <= end);
 
         slice.resize(0);
-        slice_rows(begin, end, &slice);
+        slice_rows(utils::arange<Row>(begin, end - begin), &slice);
+
+        call_sliced_rows(slice, [](auto row_begin, auto row_end) { std::sort(row_begin, row_end); });
+
+        SetBitPositions row;
+        row.reserve(num_columns());
 
         #pragma omp ordered
         {
-            SetBitPositions row;
-            for (auto row_begin = slice.begin(); row_begin < slice.end(); ) {
-                // every row in `slice` ends with `-1`
-                auto row_end = std::find(row_begin, slice.end(),
-                                         std::numeric_limits<Column>::max());
+            call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
                 row.assign(row_begin, row_end);
-                std::sort(row.begin(), row.end());
                 callback(row);
                 ++progress_bar;
-                row_begin = row_end + 1;
-            }
+            });
         }
     }
 }
-
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
-BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
-    std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
+BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) const {
+    return get_row_data_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads,
+                [this](const std::vector<Row> &row_ids) {
+        Vector<std::pair<Column, uint64_t>> slice;
+        // expect at least 3 relations per row
+        slice.reserve(row_ids.size() * 4);
 
-    Vector<std::pair<Column, uint64_t>> slice;
-    // expect at least 3 relations per row
-    slice.reserve(row_ids.size() * 4);
+        slice_rows(row_ids, &slice);
 
-    slice_rows(row_ids, &slice);
-
-    assert(slice.size() >= row_ids.size());
-
-    auto row_begin = slice.begin();
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        // every row in `slice` ends with `-1`
-        auto row_end = row_begin;
-        while (row_end->first != std::numeric_limits<Column>::max()) {
-            ++row_end;
-            assert(row_end != slice.end());
-        }
-        rows[i].assign(row_begin, row_end);
-        row_begin = row_end + 1;
-    }
-
-    return rows;
+        std::vector<Vector<std::pair<Column, uint64_t>>> rows;
+        rows.reserve(rows.size());
+        call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+            rows.emplace_back(row_begin, row_end);
+        });
+        assert(rows.size() == row_ids.size());
+        return rows;
+    });
 }
 
-// If T = Column
-//      return positions of set bits.
-// If T = std::pair<Column, uint64_t>
-//      return positions of set bits with their column ranks.
-// Appends to `slice`
-template <typename T>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
-    T delim;
-    if constexpr(utils::is_pair_v<T>) {
-        delim = std::make_pair(std::numeric_limits<Column>::max(), 0);
-    } else {
-        delim = std::numeric_limits<Column>::max();
-    }
-
-    // check if this is a leaf
-    if (!child_nodes_.size()) {
-        assert(assignments_.size() == 1);
-
-        for (Row i : row_ids) {
-            assert(i < num_rows());
-
-            if constexpr(utils::is_pair_v<T>) {
-                if (uint64_t rank = nonzero_rows_->conditional_rank1(i)) {
-                    // only a single column is stored in leaves
-                    slice->emplace_back(0, rank);
-                }
-            } else {
-                if ((*nonzero_rows_)[i]) {
-                    // only a single column is stored in leaves
-                    slice->push_back(0);
-                }
-            }
-            slice->push_back(delim);
-        }
-
-        return;
-    }
-
-    // construct indexing for children and the inverse mapping
+std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
+BRWT::get_nonzero_rows(const std::vector<Row> &row_ids) const {
+    std::vector<size_t> nonzero_indices;
     std::vector<Row> child_row_ids;
+    nonzero_indices.reserve(row_ids.size());
     child_row_ids.reserve(row_ids.size());
-
-    std::vector<bool> skip_row(row_ids.size(), true);
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         assert(row_ids[i] < num_rows());
@@ -195,7 +153,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
                     // map index from parent's to children's coordinate system
                     child_row_ids.push_back(rank + sdsl::bits::cnt(word & sdsl::bits::lo_set[offset + 1]) - 1);
-                    skip_row[i] = false;
+                    nonzero_indices.push_back(i);
                 }
             } while (++i < row_ids.size()
                         && row_ids[i] < global_offset + 64
@@ -207,12 +165,49 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
             if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
                 // map index from parent's to children's coordinate system
                 child_row_ids.push_back(rank - 1);
-                skip_row[i] = false;
+                nonzero_indices.push_back(i);
             }
         }
     }
+    return { std::move(nonzero_indices), std::move(child_row_ids) };
+}
 
-    if (!child_row_ids.size()) {
+// If T = Column
+//      return positions of set bits.
+// If T = std::pair<Column, uint64_t>
+//      return positions of set bits with their column ranks.
+// Appends to `slice`
+template <typename T>
+void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
+    const T delim = make_delim<T>();
+
+    // check if this is a leaf
+    if (child_nodes_.empty()) {
+        assert(assignments_.size() == 1);
+
+        for (Row i : row_ids) {
+            assert(i < num_rows());
+
+            if constexpr(utils::is_pair_v<T>) {
+                if (uint64_t rank = nonzero_rows_->conditional_rank1(i)) {
+                    // only a single column is stored in leaves
+                    slice->emplace_back(0, rank);
+                }
+            } else {
+                if ((*nonzero_rows_)[i]) {
+                    // only a single column is stored in leaves
+                    slice->push_back(0);
+                }
+            }
+            slice->push_back(delim);
+        }
+
+        return;
+    }
+
+    // construct indexing for children and the inverse mapping
+    auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids);
+    if (child_row_ids.empty()) {
         for (size_t i = 0; i < row_ids.size(); ++i) {
             slice->push_back(delim);
         }
@@ -226,16 +221,25 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
     // query all children subtrees and get relations from them
     size_t slice_start = slice->size();
 
-    std::vector<size_t> pos(child_nodes_.size());
+    std::vector<size_t> pos;
+    pos.reserve(child_nodes_.size());
 
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
-        pos[j] = slice->size();
+        const size_t offset = slice->size();
+
         child_nodes_[j]->slice_rows<T>(child_row_ids, slice);
 
-        assert(slice->size() >= pos[j] + child_row_ids.size());
+        if (slice->size() == offset + child_row_ids.size()) {
+            // no non-empty rows in this child
+            slice->resize(offset);
+            continue;
+        }
+        assert(slice->size() > offset + child_row_ids.size());
+
+        pos.push_back(offset);
 
         // transform column indexes
-        for (size_t i = pos[j]; i < slice->size(); ++i) {
+        for (size_t i = offset; i < slice->size(); ++i) {
             auto &v = (*slice)[i];
             if (v != delim) {
                 auto &col = utils::get_first(v);
@@ -246,19 +250,21 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice) const {
 
     size_t slice_offset = slice->size();
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (!skip_row[i]) {
-            // merge rows from child submatrices
-            for (size_t &p : pos) {
-                while ((*slice)[p++] != delim) {
-                    slice->push_back((*slice)[p - 1]);
-                }
+    // merge rows from children
+    size_t last_nz = 0;
+    for (size_t nz : nonzero_indices) {
+        slice->insert(slice->end(), nz - last_nz, delim);
+        // merge rows from child submatrices
+        for (size_t &p : pos) {
+            while ((*slice)[p++] != delim) {
+                slice->push_back((*slice)[p - 1]);
             }
         }
-        slice->push_back(delim);
+        last_nz = nz;
     }
 
     slice->erase(slice->begin() + slice_start, slice->begin() + slice_offset);
+    slice->insert(slice->end(), row_ids.size() - last_nz, delim);
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {

@@ -28,6 +28,7 @@ source ${VENV_DIR}/bin/activate
 echo "Installing required packages"
 pip install -e ${API_DIR}
 pip install parameterized==0.7.4
+pip install psutil
 
 # signalling, that the environment set up was successful
 touch ${VENV_DIR}/DONE

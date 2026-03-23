@@ -3,6 +3,7 @@
 #include <server_http.hpp>
 
 #include "common/logger.hpp"
+#include "common/unix_tools.hpp"
 #include "server_utils.hpp"
 
 
@@ -86,7 +87,7 @@ Json::Value parse_json_string(const std::string &msg) {
     std::string errors;
 
     if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &errors))
-        throw std::domain_error("Bad json received: " + errors);
+        throw std::invalid_argument("Bad json received: " + errors);
 
     return json;
 }
@@ -99,25 +100,32 @@ std::string json_str_with_error_msg(const std::string &msg) {
 
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
-                     const std::function<std::string(const std::string &)> &process) {
+                     size_t request_id,
+                     const std::function<Json::Value(const std::string &)> &process) {
+    logger->info("[Server] {} request {} from {}", request->path, request_id,
+                 request->remote_endpoint().address().to_string());
+    Timer timer;
     // Retrieve string:
     std::string content = request->content.string();
-    logger->info("[Server] {} request from {}", request->path,
-                 request->remote_endpoint().address().to_string());
 
     try {
-        std::string ret = process(content);
+        // Return JSON string
+        Json::StreamWriterBuilder builder;
+        std::string ret = Json::writeString(builder, process(content));
         write_response(SimpleWeb::StatusCode::success_ok, ret, response,
                        is_compression_requested(request));
+    } catch (const CustomResponse &) {
+        // Do nothing — response already handled by the callback `process`
     } catch (const std::exception &e) {
-        logger->info("[Server] Error on request\n{}", e.what());
+        logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         response->write(SimpleWeb::StatusCode::client_error_bad_request,
                         json_str_with_error_msg(e.what()));
     } catch (...) {
-        logger->info("[Server] Error on request");
+        logger->warn("[Server] Error on request {}", request_id);
         response->write(SimpleWeb::StatusCode::server_error_internal_server_error,
                         json_str_with_error_msg("Internal server error"));
     }
+    logger->info("[Server] Request {} finished in {} sec", request_id, timer.elapsed());
 }
 
 } // namespace cli

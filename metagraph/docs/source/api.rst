@@ -6,6 +6,10 @@ Python API
 The MetaGraph API provides a simple way to query indexes (running on a remote server or locally) in Python and supports both exact k-mer
 matching as well as inexact search (alignment).
 
+.. attention:: The API described here was used in the internal implementation of :ref:`metagraph_online`
+    and can also be used to query indexes hosted **locally**. For the API of MetaGraph Online, refer to
+    `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_.
+
 .. _install api:
 
 Installation
@@ -26,8 +30,8 @@ The method accepts a single sequence or a list of sequences represented with str
         :type       sequence:             Union[str, Iterable[str]]
         :param      top_labels:           The maximum number of matched labels to retrieve [default: 100]
         :type       top_labels:           int
-        :param      discovery_threshold:  The minimum fraction (between 0.0 and 1.0) of k-mers from the query required to match a label (occur in a sample) in order for that label to show up in the result [default: 0.0]
-        :type       discovery_threshold:  float
+        :param      discovery_fraction:   The minimum fraction (between 0.0 and 1.0) of k-mers from the query required to match a label (occur in a sample) in order for that label to show up in the result [default: 0.0]
+        :type       discovery_fraction:   float
         :param      with_signature:       Return the signature of k-mer matches
         :type       with_signature:       bool
         :param      abundance_sum:        Compute the sum of abundances for all k-mers matched
@@ -53,7 +57,7 @@ It is possible to first align a sequence to the joint graph and use the aligned 
 This can be done by setting ``align=True`` (default False).
 If the ``align`` flag is set, all the alignment options (explained in the :ref:`Sequence alignment <alignment>` section below) are accepted::
 
-    metasub.search(query, discovery_threshold=0.0, top_labels=200,
+    metasub.search(query, discovery_fraction=0.0, top_labels=200,
                    align=True, min_exact_match=0.8, max_num_nodes_per_seq_char=10.0)
 
 Querying k-mer abundance and coordinates
@@ -132,7 +136,7 @@ Example of search in MetaSUB
             GCTTAACCTTCGGGAGGGCGCTTACCACTTTGTGATTCATGACTGGGGTGAAGTCGTAAC\
             AAGGTAACCGTAGGGGAAC'
 
-    metasub.search(query, discovery_threshold=0.0, top_labels=200)
+    metasub.search(query, discovery_fraction=0.0, top_labels=200)
 
     metasub.align(query, min_exact_match=0.8)
 
@@ -186,7 +190,7 @@ be instances of ``pandas.DataFrame``.
             AAGGTAACCGTAGGGGAAC'
 
     # Search in parallel
-    futures = multi.search(query, discovery_threshold=0.0, top_labels=100)
+    futures = multi.search(query, discovery_fraction=0.0, top_labels=100)
     # {'metasub': <Future at 0x116dbed10 state=running>,
        'uhgg': <Future at 0x116dad8d0 state=running>}
 

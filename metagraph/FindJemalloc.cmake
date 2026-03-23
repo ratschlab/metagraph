@@ -11,6 +11,17 @@
 find_package(PkgConfig)
 pkg_check_modules(PC_JEMALLOC QUIET libjemalloc)
 
+# Try to use jemalloc-config if available
+find_program(JEMALLOC_CONFIG jemalloc-config)
+
+if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm64")
+  set(HOMEBREW_DIR /opt/homebrew)
+elseif(${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
+  set(HOMEBREW_DIR /usr/local)
+else()
+  set(HOMEBREW_DIR ~/.linuxbrew)
+endif()
+
 unset(JEMALLOC_INCLUDE_DIR CACHE)
 find_path(JEMALLOC_INCLUDE_DIR jemalloc/jemalloc.h
   HINTS
@@ -19,7 +30,7 @@ find_path(JEMALLOC_INCLUDE_DIR jemalloc/jemalloc.h
     ${PC_JEMALLOC_MINIMAL_INCLUDE_DIRS}
     ${PC_JEMALLOC_INCLUDEDIR}
     ${PC_JEMALLOC_INCLUDE_DIRS}
-    ~/.linuxbrew/
+    ${HOMEBREW_DIR}/include
   PATH_SUFFIXES include)
 
 unset(JEMALLOC_LIBRARY CACHE)
@@ -30,8 +41,28 @@ find_library(JEMALLOC_LIBRARY NAMES jemalloc libjemalloc
     ${PC_JEMALLOC_MINIMAL_LIBRARY_DIRS}
     ${PC_JEMALLOC_LIBDIR}
     ${PC_JEMALLOC_LIBRARY_DIRS}
-    ~/.linuxbrew/
+    ${HOMEBREW_DIR}/lib
   PATH_SUFFIXES lib lib64)
+
+# If jemalloc-config is available, use it as additional hint
+if(JEMALLOC_CONFIG)
+  execute_process(COMMAND ${JEMALLOC_CONFIG} --prefix
+    OUTPUT_VARIABLE JEMALLOC_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  # Add jemalloc-config prefix to search paths if not already found
+  if(NOT JEMALLOC_INCLUDE_DIR)
+    find_path(JEMALLOC_INCLUDE_DIR jemalloc/jemalloc.h
+      HINTS ${JEMALLOC_PREFIX}
+      PATH_SUFFIXES include)
+  endif()
+
+  if(NOT JEMALLOC_LIBRARY)
+    find_library(JEMALLOC_LIBRARY NAMES jemalloc libjemalloc
+      HINTS ${JEMALLOC_PREFIX}
+      PATH_SUFFIXES lib lib64)
+  endif()
+endif()
 
 if(JEMALLOC_INCLUDE_DIR)
   set(_version_regex "^#define[ \t]+JEMALLOC_VERSION[ \t]+\"([^\"]+)\".*")

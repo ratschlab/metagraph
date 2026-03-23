@@ -22,8 +22,12 @@ void remove_temp_dir(std::filesystem::path dir_name);
 
 bool check_if_writable(const std::string &filename);
 
-// Call with_mmap() to check and with_mmap(true) to set. Off by default.
-bool with_mmap(bool set_bit = false);
+// Rename a file, overwriting the target if exists. Also works for cross-device moves.
+void rename_or_move_file(const std::string &old_fname, const std::string &new_fname);
+
+// Returns true if mmap mode is enabled. Use set_mmap() to change.
+bool with_mmap();
+void set_mmap(bool set_bit);
 
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());

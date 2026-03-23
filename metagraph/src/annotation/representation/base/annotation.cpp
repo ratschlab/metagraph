@@ -9,20 +9,30 @@ namespace annot {
 
 using mtg::common::logger;
 
-
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
-    auto [it, inserted] = encode_label_.emplace(label, decode_label_.size());
-    if (inserted)
-        decode_label_.push_back(label);
+    // if it's a static encoder, copy the data to a local mutable object
+    if (remote_data_) {
+        encode_label_ = *remote_data_;
+        remote_data_ = nullptr;
+    }
+    auto it = encode_label_.emplace(label).first;
+    return it - encode_label_.begin();
+}
 
-    return it->second;
+template <typename Label>
+size_t LabelEncoder<Label>::encode(const Label &label) const {
+    auto it = data().find(label);
+    if (it == data().end())
+        throw std::out_of_range("Label not found");
+    return it - data().begin();
 }
 
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
-    serialize_string_number_map(outstream, encode_label_);
-    serialize_string_vector(outstream, decode_label_);
+    outstream.write("LE-v2.0", 7);
+    Serializer serializer(outstream);
+    data().serialize(serializer);
 }
 
 template<typename Label>
@@ -34,20 +44,48 @@ void LabelEncoder<Label>::merge(const LabelEncoder<Label> &other) {
 
 template<>
 bool LabelEncoder<std::string>::load(std::istream &instream) {
+    clear();
+
     if (!instream.good())
         return false;
 
     try {
-        if (!load_string_number_map(instream, &encode_label_))
+        auto pos = instream.tellg();
+        std::string version(7, '\0');
+        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
+            Deserializer deserializer(instream);
+            encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
+            return instream.good();
+        }
+        // backward compatibility
+        if (!instream.seekg(pos)) {
+            logger->error("Couldn't seek in the input stream when reading label encoder");
             return false;
-
-        if (!load_string_vector(instream, &decode_label_))
+        }
+        {
+            std::vector<std::string> labels;
+            if (!load_string_vector(instream, &labels))
+                return false;
+            std::vector<uint64_t> values;
+            if (!load_number_vector(instream, &values))
+                return false;
+        }
+        std::vector<std::string> labels;
+        if (!load_string_vector(instream, &labels))
             return false;
-
+        encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
+                                               std::make_move_iterator(labels.end()));
         return instream.good();
     } catch (...) {
         return false;
     }
+}
+
+template<typename Label>
+LabelEncoder<Label> LabelEncoder<Label>::make_static_copy() const {
+    LabelEncoder<Label> static_copy;
+    static_copy.remote_data_ = &data();
+    return static_copy;
 }
 
 

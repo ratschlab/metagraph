@@ -7,16 +7,10 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
+from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
 """Test graph construction"""
-
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
 
 build_params = {'succinct': ('succinct', '""'),
                 'succinct_disk': ('succinct', '/tmp/'),  # build with disk swap
@@ -24,6 +18,11 @@ build_params = {'succinct': ('succinct', '""'),
                 'hash': ('hash', '""'),
                 'hashfast': ('hashfast', '""'),
                 'hashstr': ('hashstr', '""')}
+
+# Also test with swap in shm but only if it exists (Linux but not MacOS)
+# (shm has a different filesystem, hence we're testing cross-device moves here)
+if os.path.isdir("/dev/shm"):
+    build_params['succinct_shm'] = ('succinct', '/dev/shm/')
 
 BUILDS = [name for name, _ in build_params.items()]
 
@@ -362,6 +361,24 @@ class TestBuildWeighted(TestingBase):
         self.assertEqual(stats_graph['nnz weights'], '2')
         self.assertEqual(stats_graph['avg weight'], str(avg_count_expected))
 
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
+    def test_header_abundance_counts(self, build):
+        """Test --count-kmers with k-mer abundances from FASTA headers (Logan format) for all graph types"""
+        representation, tmp_dir = build_params[build]
+        fasta_path = os.path.join(TEST_DATA_DIR, 'logan_30.fa')
+        outbase = os.path.join(self.tempdir.name, f'logan_graph_{representation}')
+        cmd = f'{METAGRAPH} build --graph {representation} --count-kmers -k 31 -o {outbase} {fasta_path}'
+        res = subprocess.run(cmd, shell=True)
+        self.assertEqual(res.returncode, 0)
+        weights_file = outbase + graph_file_extension[representation] + '.weights'
+        self.assertTrue(os.path.exists(weights_file))
+        stats_graph = self._get_stats(outbase + graph_file_extension[representation])
+        self.assertEqual(stats_graph['returncode'], 0)
+        self.assertEqual(stats_graph['k'], '31')
+        self.assertEqual(stats_graph['nnz weights'], '728')
+        self.assertEqual(stats_graph['avg weight'], '7.74863')
+        self.assertEqual(stats_graph['mode'], 'basic')
+        self.assertIn(stats_graph['nodes (k)'], ['728', '1079'])
 
 if __name__ == '__main__':
     unittest.main()

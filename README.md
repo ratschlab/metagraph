@@ -30,6 +30,31 @@ At the same time, the provided workflows and their careful implementation, combi
 ## Documentation
 Online documentation is available at https://metagraph.ethz.ch/static/docs/index.html. Offline sources are [here](metagraph/docs/source).
 
+## Citation
+
+If you are using MetaGraph or the index resources for your work, please cite:
+
+> Karasikov M, Mustafa H, Danciu D, Kulkov O, Zimmermann M, Barber C, Rätsch G, Kahles A. Efficient and accurate search in petabase-scale sequence repositories. *Nature*. 2025;647: 1036–1044.  
+> https://www.nature.com/articles/s41586-025-09603-w
+
+<details>
+<summary>BibTeX</summary>
+
+```bibtex
+@article{karasikov2025metagraph,
+  title={Efficient and accurate search in petabase-scale sequence repositories},
+  author={Karasikov, Mikhail and Mustafa, Harun and Danciu, Daniel and Kulkov, Oleksandr and Zimmermann, Marc and Barber, Christopher and R{\"a}tsch, Gunnar and Kahles, Andr{\'e}},
+  journal={Nature},
+  volume={647},
+  number={8091},
+  pages={1036--1044},
+  year={2025},
+  publisher={Nature Publishing Group},
+  doi={10.1038/s41586-025-09603-w}
+}
+```
+</details>
+
 ## Install
 
 ### Conda
@@ -47,19 +72,28 @@ If docker is available on the system, immediately get started with
 ```
 docker pull ghcr.io/ratschlab/metagraph:master
 docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
-    build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+    metagraph build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 ```
 and replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.
 
-To run the binary compiled for the `Protein` alphabet, just add `--entrypoint metagraph_Protein`:
+By default, it executes the binary compiled for the `DNA` alphabet {A,C,G,T}.
+To run the binary compiled for the `DNA5` or `Protein` alphabet, just replace `metagraph` with `metagraph_DNA5` or `metagraph_Protein`, respectively, e.g.:
 ```
-docker run -v ${HOME}:/mnt --entrypoint metagraph_Protein ghcr.io/ratschlab/metagraph:master \
-    build -v -k 10 -o /mnt/graph /mnt/protein.fa
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
+    metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 ```
 
-As you see, running MetaGraph from docker containers is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container or other sort of debugging of the command:
+One can see that running MetaGraph with docker is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container:
 ```
-docker run -v ${HOME}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
+```
+
+For more complex workflows, consider running docker in the interactive mode:
+```
+$ docker run -it --entrypoint /bin/bash -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master
+
+root@5c42291cc9cf:/# ls /mnt/
+root@5c42291cc9cf:/# metagraph --version
 ```
 
 All different versions of the container image are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
@@ -194,6 +228,10 @@ Stats for both
 ```
 
 ## Developer Notes
+
+### Build a docker container
+
+Simply run `docker build .`
 
 ### Makefile
 

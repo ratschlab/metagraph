@@ -169,9 +169,31 @@ void parse_sequences(const std::string &file,
             );
 
         } else {
+            if (config.count_kmers) {
+                mtg::common::logger->warn("k-mer counts file not found for '{}', "
+                                          "will try reading counts from headers",
+                                          file);
+            }
+            bool parse_counts_from_headers = config.count_kmers, parsed_first_header = false;
             read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                // add read to the graph constructor as a callback
-                call_sequence(std::string_view(read_stream->seq.s, read_stream->seq.l), 1);
+                uint64_t abundance = 1;
+                
+                if (parse_counts_from_headers) {
+                    if (auto count = read_stream->comment.s ? utils::parse_abundance(read_stream->comment.s) : std::nullopt) {
+                        abundance = *count;
+                        parsed_first_header = true;
+                    } else if (parsed_first_header) {
+                        mtg::common::logger->error("Inconsistent k-mer count headers in file '{}'", file);
+                        exit(1);
+                    } else {
+                        parse_counts_from_headers = false;
+                        mtg::common::logger->warn("No k-mer count found in header '{}', "
+                                                  "will treat all sequences as having k-mer count 1",
+                                                  read_stream->name.s);
+                    }
+                }
+
+                call_sequence(std::string_view(read_stream->seq.s, read_stream->seq.l), abundance);
             }, config.forward_and_reverse);
         }
     } else {

@@ -3,40 +3,78 @@
 Quick start
 ===========
 
-MetaGraph constructs indexes composed of two main elements: a k-mer index and an annotation matrix.
+MetaGraph constructs indexes with two main components: a **de Bruijn graph** and an **annotation matrix**.
 
-The k-mer index stores all k-mers from the input sequences and represents a de Bruijn graph.
+**De Bruijn Graph**
+
+The de Bruijn graph serves as a k-mer index and stores all k-mers from the input sequences.
 This index serves as a dictionary mapping k-mers to their unique positive identifiers.
 
-.. It can also be used to map sub-k-mers (or spaced k-mers) to ranges of their identifiers (see TODO).
 
-The second element is a matrix encoding the relation between the k-mers and their attributes.
-These relations may represent, for instance:
+One of the main representations for de Bruijn graphs implemented in MetaGraph is the `BOSS table <https://doi.org/10.1007/978-3-642-33122-0_18>`_. It represents de Bruijn graphs succinctly, using only 2-4 bits per k-mer (for the DNA alphabet) and
 
+* Stores all k-mers from input sequences
+* Enables efficient k-mer lookups and graph traversal
+* Supports sub-k-mer and k-mer range queries for alignment
+
+**Annotation Matrix**
+
+The annotation matrix encodes relations between k-mers and their metadata.
+Even with the simplest binary representation can encode:
+
+* k-mer ``i`` is present in file/sample ``j``
 * k-mer ``i`` is present in sequence/genome ``j``
-* k-mer ``i`` is present in SRA sample ``j``
-* k-mer ``i`` is present in file ``j``
-* k-mer ``i`` is present in a collection of sequences/files marked by ``j``
-* k-mer ``i`` is highly expressed in sample ``j``
+* k-mer ``i`` is present in a *collection* of sequences/files marked by ``j``
+* k-mer ``i`` is *highly* expressed in sample ``j`` (a property)
 
 The annotation matrix can also be supplemented with additional attributes to represent such quantities as:
 
-* k-mer ``i`` occurs :math:`c_i` times in sample ``j`` (k-mer abundance)
-* k-mer ``i`` occurs at positions :math:`p_1,\dots,p_{c_i}` in genome ``j`` (k-mer coordinates)
+* **Counts (abundances):** k-mer ``i`` occurs :math:`c_i` times in sample ``j``
+* **Coordinates (positions):** k-mer ``i`` at positions :math:`p_1,\dots,p_{c_i}` in genome ``j``
 
-.. TODO: Describe counts/coordinate annotation
+
+**Workflow**
+
+A typical workflow in MetaGraph consists of these steps: 1. Construct graph, 2. Construct annotation, 3. Query/host for queries.
+For the full construction workflows on real large-scale datasets, see :ref:`large_scale_workflows`.
 
 In the following, you will find simplified instructions and examples for constructing a MetaGraph
 index and querying it.
 
-The indexing workflow in MetaGraph consists of two major steps: graph construction and annotation construction.
+Supported alphabets
+-------------------
+
+MetaGraph supports multiple sequence alphabets, each optimized for different types of biological sequences:
+
+**DNA alphabet (default)**
+    - Standard 4-letter DNA alphabet: A, C, G, T
+    - Default executable: ``metagraph_DNA`` (with ``metagraph`` symlink)
+    - Best for: Genomic DNA, RNA sequences, metagenomic data
+
+**DNA5 alphabet**
+    - DNA alphabet with N for unknown bases: A, C, G, T, N
+    - Executable: ``metagraph_DNA5``
+    - Best for: Sequences with ambiguous bases or low-quality regions
+
+**DNA case-sensitive alphabet**
+    - Case-sensitive DNA alphabet: A, C, G, T, N, a, c, g, t
+    - Executable: ``metagraph_DNA_CASE_SENSITIVE``
+    - Best for: Sequences where case information is meaningful
+
+**Protein alphabet**
+    - Standard amino acids and extra letters: A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X
+    - Executable: ``metagraph_Protein``
+    - Best for: Protein sequences, amino acid analysis
+
+.. note::
+    The alphabet is determined at compile time. For custom alphabets or to use different alphabets, compile MetaGraph from source with the appropriate ``-DCMAKE_DBG_ALPHABET`` flag.
 
 .. _construct graph:
 
 Construct graph
 ---------------
 
-The following workflow can be executed from the `metagraph/metagraph/tests/data` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
+The following workflow can be executed from the ``metagraph/tests/data`` subdirectory (relative to the repository root directory). If `metagraph` is not in your `$PATH` environment variable, replace `metagraph` in the following instructions with the path of the `metagraph` executable.
 
 Basics
 ^^^^^^
@@ -69,6 +107,10 @@ To see the list of all available flags, type ``metagraph build``.
 To check the statistics for a constructed graph, type::
 
     metagraph stats graph.dbg
+
+or with :ref:`memory mapping <memory_mapping>` for faster loading and lower RAM usage::
+
+    metagraph stats --mmap graph.dbg
 
 Construct with disk swap
 """"""""""""""""""""""""
@@ -421,7 +463,7 @@ then the second k-mer of the third read has coordinate 211). Depending on the ta
 both possible to consider each sequence of the input as a separate label and index the coordinates of its k-mers separately
 or, for the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
 of each indexed sequence in post-processing query results. In all cases, it is possible to reconstruct the original input
-from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://www.biorxiv.org/content/10.1101/2021.11.09.467907>`_).
+from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://pmc.ncbi.nlm.nih.gov/articles/PMC9528980>`_).
 
 .. TODO: mention trace-consistent alignment
 
@@ -527,19 +569,28 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 
 1.  Transform annotation columns ``*.column.annodbg`` to ``row_diff`` in three stages::
 
+        mkdir ./rd_columns
+
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 0 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 1 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                             --anno-type row_diff --row-diff-stage 2 \
-                                            -i graph.dbg --mem-cap-gb 300
+                                            -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out
 
     Note that this requires to pass the graph ``graph.dbg`` as well in order to derive the topology for the diff-transform.
+
+    The value for flag ``-o`` should contain a file name in a directory where the transformed columns
+    need to be written to. E.g., for ``./rd_columns/out`` as here, the outputs will be written to ``./rd_columns/``.
+    However, the exact filenames will be derived from the file names of the input columns.
+
+    .. tip::
+        We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
 
 2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
 
@@ -583,7 +634,36 @@ For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the s
 First, an additional flag ``--count-kmers`` has to be passed on step 1 (the row-diff transform).
 Second, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
 These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_int_brwt`` command.
-The corresponding transformed delta counts will be loaded automatically.
+The corresponding transformed delta counts will be loaded automatically::
+
+    metagraph annotate --count-kmers -o annotation ...
+
+    mkdir ./rd_columns
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 0 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 1 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 2 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --count-kmers
+
+    find ./rd_columns/ -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff_int_brwt \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./transformed
+
+.. tip::
+    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
+
+.. warning::
+    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
 
 For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
@@ -595,11 +675,46 @@ Conversion to ``column_coord`` is straightforward.
 
 Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 
-Conversion to ``row_diff_brwt_coord`` is analogous to ``row_diff_brwt`` and ``row_diff_int_brwt``, where an additional flag ``--coordinates`` has to be passed.
+Conversion to RowDiff<Tuple-Multi-BRWT> (``row_diff_brwt_coord``) is analogous to ``row_diff_brwt``, where an additional flag ``--coordinates`` has to be passed to the ``transform_anno`` stages. Also, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
+These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_brwt_coord`` command.
+The corresponding transformed delta counts will be loaded automatically::
+
+    metagraph annotate --coordinates -o annotation ...
+
+    mkdir ./rd_columns
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 0 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 1 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff --row-diff-stage 2 \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./rd_columns/out \
+                                        --coordinates
+
+    find ./rd_columns/ -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                        --anno-type row_diff_brwt_coord \
+                                        -i graph.dbg --mem-cap-gb 300 -o ./transformed
+
+.. tip::
+    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
+
+.. warning::
+    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
 
 Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
 directly to the ColumnCompressed format (``row_diff_coord``), equivalent to ``row_diff_brwt_coord`` with the arity set to infinity,
 that is, all leaves (original labels) directly connected to the root of the BRWT tree.
+
+For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
+
+.. _query_index:
 
 Query index
 -----------
@@ -691,3 +806,30 @@ For instance, consider the following example.
                              --max-value 10 out.column.annodbg
 
 which generates the final column ``rare_kmers.column.annodbg`` with the mask indicating all k-mers occurring in 10 or fewer input columns in the original file ``annotation.column.annodbg``.
+
+.. _memory_mapping:
+
+Memory mapping
+--------------
+
+When dealing with large graphs and annotations, they can be loaded with memory mapping -- just
+add the ``--mmap`` flag to any ``metagraph`` command, e.g.::
+
+    metagraph stats --mmap graph.dbg
+
+    metagraph transform_anno --mmap \
+                --rename-cols rename_rules.txt \
+                -o renamed \
+                annotation.row_diff_brwt.annodbg
+
+    metagraph query --mmap \
+                -i graph.dbg \
+                -a annotation.column.annodbg \
+                --min-kmers-fraction-label 0.1 \
+                transcripts_1000.fa
+
+Memory mapping is supported for most graph and annotation representations. This reduces the loading time and
+the RAM usage to practically zero.
+
+.. attention:: For the efficient use of memory mapping, the data needs to be stored on a fast SSD or
+    NVME disk. Spinning disks are not recommended (unless ``--mmap`` is used for simple stats checks).
