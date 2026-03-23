@@ -16,6 +16,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
+#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -323,8 +324,11 @@ template <class Container>
 std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
                                                const annot::LabelEncoder<> &label_encoder,
                                                size_t num_top_labels) {
+    Timer timer;
+    common::logger->trace("Starting to filter and decode top labels");
     if (code_counts.size() > num_top_labels)
         top_n_sorted(code_counts, num_top_labels);
+    common::logger->trace("Filtered and decoded top labels in {:.5f} sec", timer.elapsed());
 
     // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
     std::vector<StringCountPair> label_counts;
@@ -332,7 +336,7 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
     for (const auto &[j, count] : code_counts) {
         label_counts.emplace_back(label_encoder.decode(j), count);
     }
-
+    common::logger->trace("Decoded labels in {:.5f} sec", timer.elapsed());
     return label_counts;
 }
 
@@ -368,6 +372,9 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         return result;
     }
 
+    Timer timer;
+    logger->trace("Starting to count k-mer matches for sequence of length {} ({} bp)",
+                  sequence.size(), sequence.size() - dbg_.get_k() + 1);
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     VectorMap<row_index, size_t> index_counts;
@@ -382,12 +389,16 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         }
     });
 
+    logger->trace("Counted k-mer matches for sequence of length {} ({} bp) in {:.5f} sec",
+                  sequence.size(), sequence.size() - dbg_.get_k() + 1, timer.elapsed());
+
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, num_present_kmers);
     if (num_present_kmers < min_count)
         return {};
 
     std::vector<StringCountPair> result;
+    std::cerr << "with_kmer_counts: " << with_kmer_counts << std::endl;
     if (with_kmer_counts) {
         result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                         .sum_row_values(index_counts.values_container(), min_count),
@@ -397,6 +408,9 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                                         .sum_rows(index_counts.values_container(), min_count),
                                    annotator_->get_label_encoder(), num_top_labels);
     }
+
+    logger->trace("Filtered and decoded top labels for sequence of length {} ({} bp) in {:.5f} sec",
+                  sequence.size(), sequence.size() - dbg_.get_k() + 1, timer.elapsed());
 
     assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
                                     [&](const auto &pair) { return pair.second <= num_kmers; }));
@@ -418,6 +432,8 @@ Result filter_and_aggregate(Container&& rows,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
 
+    Timer timer;
+    common::logger->trace("Starting to filter and aggregate");
     auto call_bits = [&](const auto &callback) {
         for (const auto &row : rows) {
             for (const auto &j : row) {
@@ -427,39 +443,60 @@ Result filter_and_aggregate(Container&& rows,
     };
     std::vector<std::pair<Column, size_t>> counts
             = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
-
+    common::logger->trace("Accumulated counts in {:.5f} sec", timer.elapsed());
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
-
+    common::logger->trace("Sorted counts in {:.5f} sec", timer.elapsed());
+    if (counts.empty())
+        return {};
     // Aggregate results (group by labels)
     tsl::hopscotch_map<Column, ValueType> values;
-    values.reserve(counts.size());
-    for (const auto &[j, count] : counts) {
-        values.emplace(j, num_kmers);
+    Vector<std::unique_ptr<ValueType>> values_vec;
+    bool use_dense_vector = label_encoder.size() < utils::kDenseCountThreshold;
+    auto get_value = [&](Column j) {
+        if (use_dense_vector) {
+            return values_vec[j] ? values_vec[j].get() : nullptr;
+        } else {
+            auto it = values.find(j);
+            return it != values.end() ? &it.value() : nullptr;
+        }
+    };
+    if (use_dense_vector) {
+        // For a small universe size, using a dense vector is faster than a hash table
+        values_vec.resize(label_encoder.size());
+    } else {
+        values.reserve(counts.size());
     }
-
+    for (const auto &[j, count] : counts) {
+        if (use_dense_vector) {
+            values_vec[j].reset(new ValueType(num_kmers));
+        } else {
+            values.emplace(j, num_kmers);
+        }
+    }
+    common::logger->trace("Created values map in {:.5f} sec", timer.elapsed());
     for (size_t i = 0; i < rows.size(); ++i) {
         for (auto &item : rows[i]) {
             auto j = utils::get_first(item);
-            auto it = values.find(j);
-            if (it != values.end()) {
+            ValueType *value_p = get_value(j);
+            if (value_p) {
                 if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
-                    it.value()[kmer_positions[i]] = true;
+                    (*value_p)[kmer_positions[i]] = true;
                 } else {
-                    it.value()[kmer_positions[i]] = std::move(item.second);
+                    (*value_p)[kmer_positions[i]] = std::move(item.second);
                 }
             }
         }
         rows[i].clear();
     }
     rows.clear();
-
+    common::logger->trace("Cleared rows in {:.5f} sec", timer.elapsed());
     Result result;
     result.reserve(counts.size());
     for (const auto &[j, count] : counts) {
-        result.emplace_back(label_encoder.decode(j), count, std::move(values[j]));
+        result.emplace_back(label_encoder.decode(j), count, std::move(*get_value(j)));
     }
-
+    common::logger->trace("Created result in {:.5f} sec", timer.elapsed());
     return result;
 }
 

@@ -4,6 +4,7 @@
 #include <numeric>
 
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -39,12 +40,7 @@ uint64_t CSRMatrix::num_relations() const {
 
 CSRMatrix::SetBitPositions CSRMatrix::get_row(Row row) const {
     assert(row < vector_.size());
-    SetBitPositions result;
-    result.reserve(vector_[row].size());
-    for (const auto &[j, _] : vector_[row]) {
-        result.push_back(j);
-    }
-    return result;
+    return utils::get_firsts<SetBitPositions>(vector_[row]);
 }
 
 std::vector<CSRMatrix::Row> CSRMatrix::get_column(Column column) const {

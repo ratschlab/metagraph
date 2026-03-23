@@ -7,6 +7,8 @@
 #include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
+#include "common/logger.hpp"
+#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -67,6 +69,56 @@ std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
             result.push_back(i);
     }
     return result;
+}
+
+std::vector<UniqueRowBinmat::SetBitPositions>
+UniqueRowBinmat::get_rows(const std::vector<Row> &rows) const {
+    Timer timer;
+    common::logger->trace("Starting to get rows");
+    std::vector<SetBitPositions> result(rows.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        result[i] = unique_rows_[get_code(rows[i])];
+    }
+    common::logger->trace("Got rows in {:.5f} sec", timer.elapsed());
+    return result;
+}
+
+std::vector<std::pair<UniqueRowBinmat::Column, size_t /* count */>>
+UniqueRowBinmat::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+                          size_t min_count) const {
+    min_count = std::max<size_t>(min_count, 1);
+
+    std::vector<std::pair<uint64_t, size_t>> code_counts(index_counts.size());
+    size_t total_sum_count = 0;
+    for (auto &[i, count] : index_counts) {
+        code_counts[i] = { get_code(i), count };
+        total_sum_count += count;
+    }
+
+    if (index_counts.empty() || total_sum_count < min_count)
+        return {};
+
+    // deduplicate codes and accumulate counts
+    std::sort(code_counts.begin(), code_counts.end());
+    size_t last_i = 0;
+    for (size_t i = 1; i < code_counts.size(); ++i) {
+        if (code_counts[i].first == code_counts[last_i].first) {
+            code_counts[last_i].second += code_counts[i].second;
+        } else {
+            code_counts[++last_i] = code_counts[i];
+        }
+    }
+    code_counts.resize(last_i + 1);
+
+    auto call_bits = [&](const auto &callback) {
+        for (auto &[code, count] : code_counts) {
+            for (Column j : unique_rows_[code]) {
+                callback(j, count);
+            }
+        }
+    };
+
+    return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
 bool UniqueRowBinmat::load(std::istream &instream) {

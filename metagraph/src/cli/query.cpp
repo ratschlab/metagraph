@@ -1335,7 +1335,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
+            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic, 10)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move((*seq_batch)[i]), *query_graph, config_,
@@ -1350,9 +1350,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
                           " redundancy: {:.2f} bp/kmer,"
-                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
+                          " queried with {} threads in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                          threads_per_batch,
                           query_time, query_graph_construction + query_time,
                           num_bytes_read / (query_graph_construction + query_time));
         }

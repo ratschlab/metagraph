@@ -26,6 +26,11 @@ class UniqueRowBinmat : public RainbowMatrix {
     uint64_t num_distinct_rows() const { return unique_rows_.size(); }
 
     std::vector<Row> get_column(Column column) const;
+    // row is in [0, num_rows), column is in [0, num_columns)
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    // Return all columns for which counts are greater than or equal to |min_count|.
+    std::vector<std::pair<Column, size_t /* count */>>
+    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count = 1) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
