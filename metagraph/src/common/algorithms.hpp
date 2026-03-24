@@ -12,6 +12,8 @@
 #include <set>
 #include <stdexcept>
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
 
@@ -522,6 +524,38 @@ namespace utils {
         );
         return item_counts;
     }
+
+    template <typename T, typename ValueType>
+    struct ValueStore {
+        bool use_dense;
+        Vector<ValueType> dense_values;
+        tsl::hopscotch_map<T, ValueType> sparse_values;
+
+        ValueStore(size_t universe_size, size_t reserve_size)
+              : use_dense(universe_size < kDenseCountThreshold) {
+            if (use_dense) {
+                // For a small universe size, using a dense vector is faster than a hash table.
+                dense_values.resize(universe_size);
+            } else {
+                sparse_values.reserve(reserve_size);
+            }
+        }
+
+        void initialize(T j, size_t value_size) {
+            if (use_dense) {
+                dense_values[j] = ValueType(value_size);
+            } else {
+                sparse_values.emplace(j, value_size);
+            }
+        }
+
+        ValueType* get(T j) {
+            if (use_dense)
+                return dense_values[j].size() ? &dense_values[j] : nullptr;
+            auto it = sparse_values.find(j);
+            return it != sparse_values.end() ? &it.value() : nullptr;
+        }
+    };
 
 } // namespace utils
 

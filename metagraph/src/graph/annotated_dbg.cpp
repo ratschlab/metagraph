@@ -448,36 +448,16 @@ Result filter_and_aggregate(Container&& rows,
     common::logger->trace("Sorted counts in {:.5f} sec", timer.elapsed());
     if (counts.empty())
         return {};
-    // Aggregate results (group by labels)
-    tsl::hopscotch_map<Column, ValueType> values;
-    Vector<ValueType> values_vec;
-    bool use_dense_vector = label_encoder.size() < utils::kDenseCountThreshold;
-    auto get_value = [&](Column j) {
-        if (use_dense_vector) {
-            return values_vec[j].size() ? &values_vec[j] : nullptr;
-        } else {
-            auto it = values.find(j);
-            return it != values.end() ? &it.value() : nullptr;
-        }
-    };
-    if (use_dense_vector) {
-        // For a small universe size, using a dense vector is faster than a hash table
-        values_vec.resize(label_encoder.size());
-    } else {
-        values.reserve(counts.size());
-    }
+
+    utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
-        if (use_dense_vector) {
-            values_vec[j] = ValueType(num_kmers);
-        } else {
-            values.emplace(j, num_kmers);
-        }
+        value_store.initialize(j, num_kmers);
     }
     common::logger->trace("Created values map in {:.5f} sec", timer.elapsed());
     for (size_t i = 0; i < rows.size(); ++i) {
         for (auto &item : rows[i]) {
             auto j = utils::get_first(item);
-            ValueType *value_p = get_value(j);
+            ValueType *value_p = value_store.get(j);
             if (value_p) {
                 if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
                     (*value_p)[kmer_positions[i]] = true;
@@ -493,7 +473,7 @@ Result filter_and_aggregate(Container&& rows,
     Result result;
     result.reserve(counts.size());
     for (const auto &[j, count] : counts) {
-        result.emplace_back(label_encoder.decode(j), count, std::move(*get_value(j)));
+        result.emplace_back(label_encoder.decode(j), count, std::move(*value_store.get(j)));
     }
     common::logger->trace("Created result in {:.5f} sec", timer.elapsed());
     return result;
