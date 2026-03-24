@@ -398,7 +398,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         return {};
 
     std::vector<StringCountPair> result;
-    std::cerr << "with_kmer_counts: " << with_kmer_counts << std::endl;
     if (with_kmer_counts) {
         result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                         .sum_row_values(index_counts.values_container(), min_count),
@@ -451,11 +450,11 @@ Result filter_and_aggregate(Container&& rows,
         return {};
     // Aggregate results (group by labels)
     tsl::hopscotch_map<Column, ValueType> values;
-    Vector<std::unique_ptr<ValueType>> values_vec;
+    Vector<ValueType> values_vec;
     bool use_dense_vector = label_encoder.size() < utils::kDenseCountThreshold;
     auto get_value = [&](Column j) {
         if (use_dense_vector) {
-            return values_vec[j] ? values_vec[j].get() : nullptr;
+            return values_vec[j].size() ? &values_vec[j] : nullptr;
         } else {
             auto it = values.find(j);
             return it != values.end() ? &it.value() : nullptr;
@@ -469,7 +468,7 @@ Result filter_and_aggregate(Container&& rows,
     }
     for (const auto &[j, count] : counts) {
         if (use_dense_vector) {
-            values_vec[j].reset(new ValueType(num_kmers));
+            values_vec[j] = ValueType(num_kmers);
         } else {
             values.emplace(j, num_kmers);
         }

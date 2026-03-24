@@ -271,7 +271,6 @@ RowMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size
     if (total_sum_count < min_count)
         return {};
 
-    std::cerr << "Summing rows with " << index_counts.size() << " counts" << std::endl;
     auto call_bits = [&](const auto &callback) {
         for (size_t i = 0; i < index_counts.size(); ++i) {
             for (Column j : get_row(index_counts[i].first)) {
