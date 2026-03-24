@@ -86,16 +86,19 @@ UniqueRowBinmat::get_rows(const std::vector<Row> &rows) const {
 std::vector<std::pair<UniqueRowBinmat::Column, size_t /* count */>>
 UniqueRowBinmat::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {
+    if (index_counts.empty())
+        return {};
+
     min_count = std::max<size_t>(min_count, 1);
 
-    std::vector<std::pair<uint64_t, size_t>> code_counts(index_counts.size());
+    std::vector<std::pair<uint64_t, size_t>> code_counts;
+    code_counts.reserve(index_counts.size());
     size_t total_sum_count = 0;
-    for (auto &[i, count] : index_counts) {
-        code_counts[i] = { get_code(i), count };
+    for (auto &[row, count] : index_counts) {
+        code_counts.emplace_back(get_code(row), count);
         total_sum_count += count;
     }
-
-    if (index_counts.empty() || total_sum_count < min_count)
+    if (total_sum_count < min_count)
         return {};
 
     // deduplicate codes and accumulate counts
