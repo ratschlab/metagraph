@@ -71,18 +71,6 @@ std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     return result;
 }
 
-std::vector<UniqueRowBinmat::SetBitPositions>
-UniqueRowBinmat::get_rows(const std::vector<Row> &rows) const {
-    Timer timer;
-    common::logger->trace("Starting to get rows");
-    std::vector<SetBitPositions> result(rows.size());
-    for (size_t i = 0; i < rows.size(); ++i) {
-        result[i] = unique_rows_[get_code(rows[i])];
-    }
-    common::logger->trace("Got rows in {:.5f} sec", timer.elapsed());
-    return result;
-}
-
 std::vector<std::pair<UniqueRowBinmat::Column, size_t /* count */>>
 UniqueRowBinmat::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {
@@ -91,30 +79,17 @@ UniqueRowBinmat::sum_rows(const std::vector<std::pair<Row, size_t>> &index_count
 
     min_count = std::max<size_t>(min_count, 1);
 
-    std::vector<std::pair<uint64_t, size_t>> code_counts;
-    code_counts.reserve(index_counts.size());
+    tsl::hopscotch_map<size_t, size_t> code_counts;
     size_t total_sum_count = 0;
-    for (auto &[row, count] : index_counts) {
-        code_counts.emplace_back(get_code(row), count);
+    for (const auto &[row, count] : index_counts) {
+        code_counts[get_code(row)] += count;
         total_sum_count += count;
     }
     if (total_sum_count < min_count)
         return {};
 
-    // deduplicate codes and accumulate counts
-    std::sort(code_counts.begin(), code_counts.end());
-    size_t last_i = 0;
-    for (size_t i = 1; i < code_counts.size(); ++i) {
-        if (code_counts[i].first == code_counts[last_i].first) {
-            code_counts[last_i].second += code_counts[i].second;
-        } else {
-            code_counts[++last_i] = code_counts[i];
-        }
-    }
-    code_counts.resize(last_i + 1);
-
     auto call_bits = [&](const auto &callback) {
-        for (auto &[code, count] : code_counts) {
+        for (const auto &[code, count] : code_counts) {
             for (Column j : unique_rows_[code]) {
                 callback(j, count);
             }

@@ -10,7 +10,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class UniqueRowBinmat : public RainbowMatrix {
+class UniqueRowBinmat : public RowMajor {
   public:
     explicit UniqueRowBinmat(uint64_t num_rows = 0);
 
@@ -26,8 +26,7 @@ class UniqueRowBinmat : public RainbowMatrix {
     uint64_t num_distinct_rows() const { return unique_rows_.size(); }
 
     std::vector<Row> get_column(Column column) const;
-    // row is in [0, num_rows), column is in [0, num_columns)
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    SetBitPositions get_row(Row row) const { return unique_rows_[row_rank_[row]]; }
     // Return all columns for which counts are greater than or equal to |min_count|.
     std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count = 1) const;

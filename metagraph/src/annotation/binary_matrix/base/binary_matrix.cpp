@@ -262,6 +262,9 @@ RowMajor::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
 
 std::vector<std::pair<RowMajor::Column, size_t /* count */>>
 RowMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count) const {
+    if (index_counts.empty())
+        return {};
+
     min_count = std::max<size_t>(min_count, 1);
 
     size_t total_sum_count = 0;

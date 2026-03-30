@@ -102,7 +102,7 @@ class RowMajor : public BinaryMatrix {
     // Return all columns for which counts are greater than or equal to |min_count|.
     virtual std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-             size_t min_count = 1) const final;
+             size_t min_count = 1) const;
 };
 
 class GetEntrySupport {

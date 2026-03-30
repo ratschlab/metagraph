@@ -2,12 +2,15 @@
 
 #include <array>
 #include <cstdlib>
+#include <functional>
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
@@ -23,8 +26,12 @@ namespace mtg {
 namespace graph {
 
 using mtg::common::logger;
+using mtg::annot::matrix::BinaryMatrix;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
+using mtg::annot::matrix::CSRMatrix;
+using mtg::annot::matrix::RowMajor;
+using mtg::annot::matrix::UniqueRowBinmat;
 using Column = mtg::annot::matrix::BinaryMatrix::Column;
 using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
 
@@ -340,6 +347,35 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
     return label_counts;
 }
 
+template <class RowEnumerator>
+std::vector<std::pair<BinaryMatrix::Column, size_t>>
+get_top_labels_counts(const BinaryMatrix &matrix,
+                      const std::vector<BinaryMatrix::Row> &row_indices,
+                      const RowEnumerator &enumerate_rows,
+                      size_t min_count) {
+    Timer timer;
+    common::logger->trace("Starting to filter and aggregate");
+    std::vector<std::pair<BinaryMatrix::Column, size_t>> counts;
+    if (const auto *mat = dynamic_cast<const UniqueRowBinmat *>(&matrix)) {
+        std::vector<std::pair<BinaryMatrix::Row, size_t>> index_counts(row_indices.size());
+        for (size_t i = 0; i < row_indices.size(); ++i) {
+            index_counts[i] = std::make_pair(row_indices[i], 1);
+        }
+        counts = mat->sum_rows(index_counts, min_count);
+    } else {
+        auto call_bits = [&](const auto &callback) {
+            enumerate_rows([&](const auto &row) {
+                for (const auto &j : row) {
+                    callback(utils::get_first(j), 1);
+                }
+            });
+        };
+        counts = utils::accumulate_counts(call_bits, matrix.num_columns(), min_count);
+    }
+    common::logger->trace("Accumulated counts in {:.5f} sec", timer.elapsed());
+    return counts;
+}
+
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
@@ -418,10 +454,10 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 }
 
 
-template <class Result, class Container>
-Result filter_and_aggregate(Container&& rows,
+template <class Result, class RowEnumerator>
+Result filter_and_aggregate(std::vector<std::pair<BinaryMatrix::Column, size_t>> &counts,
+                            const RowEnumerator &enumerate_rows,
                             const annot::LabelEncoder<Label> &label_encoder,
-                            size_t min_count,
                             size_t num_top_labels,
                             const std::vector<size_t> &kmer_positions,
                             size_t num_kmers) {
@@ -429,33 +465,23 @@ Result filter_and_aggregate(Container&& rows,
                     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
-    using ValueType = std::tuple_element_t<2, typename Result::value_type>;
 
     Timer timer;
-    common::logger->trace("Starting to filter and aggregate");
-    auto call_bits = [&](const auto &callback) {
-        for (const auto &row : rows) {
-            for (const auto &j : row) {
-                callback(utils::get_first(j), 1);
-            }
-        }
-    };
-    std::vector<std::pair<Column, size_t>> counts
-            = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
-    common::logger->trace("Accumulated counts in {:.5f} sec", timer.elapsed());
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
     common::logger->trace("Sorted counts in {:.5f} sec", timer.elapsed());
     if (counts.empty())
         return {};
 
+    using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
         value_store.initialize(j, num_kmers);
     }
     common::logger->trace("Created values map in {:.5f} sec", timer.elapsed());
-    for (size_t i = 0; i < rows.size(); ++i) {
-        for (auto &item : rows[i]) {
+    size_t i = 0;
+    enumerate_rows([&](const auto &row) {
+        for (const auto &item : row) {
             auto j = utils::get_first(item);
             ValueType *value_p = value_store.get(j);
             if (value_p) {
@@ -466,10 +492,9 @@ Result filter_and_aggregate(Container&& rows,
                 }
             }
         }
-        rows[i].clear();
-    }
-    rows.clear();
-    common::logger->trace("Cleared rows in {:.5f} sec", timer.elapsed());
+        i++;
+    });
+    common::logger->trace("Aggregated rows in {:.5f} sec", timer.elapsed());
     Result result;
     result.reserve(counts.size());
     for (const auto &[j, count] : counts) {
@@ -545,10 +570,23 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         exit(1);
     }
 
-    auto row_values = int_matrix->get_row_values(row_indices);
-
+    using RowCallback = std::function<void(const IntMatrix::RowValues &)>;
+    std::function<void(const RowCallback &)> enumerate_row_values;
+    if (const auto *csr = dynamic_cast<const CSRMatrix *>(int_matrix)) {
+        enumerate_row_values = [csr, &row_indices](const auto &callback) {
+            for (row_index row : row_indices) {
+                callback(csr->get_row_values(row));
+            }
+        };
+    } else {
+        auto row_values = int_matrix->get_row_values(row_indices);
+        enumerate_row_values = [rows = std::move(row_values)](const auto &callback) {
+            std::for_each(rows.begin(), rows.end(), callback);
+        };
+    }
+    auto counts = get_top_labels_counts(int_matrix->get_binary_matrix(), row_indices, enumerate_row_values, min_count);
     return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
-        row_values, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        counts, enumerate_row_values, annotator_->get_label_encoder(), num_top_labels, kmer_positions, num_kmers);
 }
 
 std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
@@ -659,8 +697,13 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         return result;
     }
 
+    auto call_rows_tuples = [&](const auto &callback) {
+        std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
+    };
+    auto counts = get_top_labels_counts(tuple_matrix->get_binary_matrix(), row_indices, call_rows_tuples, min_count);
+
     return filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
-        rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        counts, call_rows_tuples, annotator_->get_label_encoder(), num_top_labels, kmer_positions, num_kmers);
 }
 
 #ifndef NDEBUG
@@ -738,10 +781,28 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     if (row_indices.size() < min_count)
         return {};
 
-    auto rows = annotator_->get_matrix().get_rows(row_indices);
+    const auto &matrix = annotator_->get_matrix();
+    using RowCallback = std::function<void(const BinaryMatrix::SetBitPositions &)>;
+    std::function<void(const RowCallback &)> enumerate_rows;
+    // Per-index get_row is cheap for these RowMajor types; other matrices use get_rows once.
+    if (dynamic_cast<const UniqueRowBinmat *>(&matrix)
+            || dynamic_cast<const CSRMatrix *>(&matrix)) {
+        const auto *row_major = dynamic_cast<const RowMajor *>(&matrix);
+        enumerate_rows = [row_major, &row_indices](const RowCallback &callback) {
+            for (row_index row : row_indices) {
+                callback(row_major->get_row(row));
+            }
+        };
+    } else {
+        auto rows = matrix.get_rows(row_indices);
+        enumerate_rows = [rows = std::move(rows)](const RowCallback &callback) {
+            std::for_each(rows.begin(), rows.end(), callback);
+        };
+    }
 
+    auto counts = get_top_labels_counts(matrix, row_indices, enumerate_rows, min_count);
     auto result = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
-        rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        counts, enumerate_rows, annotator_->get_label_encoder(), num_top_labels, kmer_positions, num_kmers);
 
     assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 
