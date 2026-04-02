@@ -340,6 +340,7 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
     for (const auto &[j, count] : code_counts) {
         label_counts.emplace_back(label_encoder.decode(j), count);
     }
+
     return label_counts;
 }
 
@@ -433,7 +434,8 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
             }
         });
     };
-    auto counts = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
+    std::vector<std::pair<Column, size_t>> counts
+            = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
     common::logger->trace("Accumulated counts in {:.5f} sec", timer.elapsed());
 
     if (counts.size() > num_top_labels)
@@ -751,7 +753,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     const auto &matrix = annotator_->get_matrix();
     using RowCallback = std::function<void(const BinaryMatrix::SetBitPositions &)>;
     std::function<void(const RowCallback &)> enumerate_rows;
-    // Per-index get_row is cheap for these RowMajor types; other matrices use get_rows once.
+    // Per-index get_row is cheap for these RowMajor types; other matrices get rows in a batch.
     if (dynamic_cast<const UniqueRowBinmat *>(&matrix)
             || dynamic_cast<const CSRMatrix *>(&matrix)) {
         const auto *row_major = dynamic_cast<const RowMajor *>(&matrix);
