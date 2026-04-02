@@ -331,11 +331,8 @@ template <class Container>
 std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
                                                const annot::LabelEncoder<> &label_encoder,
                                                size_t num_top_labels) {
-    Timer timer;
-    common::logger->trace("Starting to filter and decode top labels");
     if (code_counts.size() > num_top_labels)
         top_n_sorted(code_counts, num_top_labels);
-    common::logger->trace("Filtered and decoded top labels in {:.5f} sec", timer.elapsed());
 
     // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
     std::vector<StringCountPair> label_counts;
@@ -343,7 +340,6 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
     for (const auto &[j, count] : code_counts) {
         label_counts.emplace_back(label_encoder.decode(j), count);
     }
-    common::logger->trace("Decoded labels in {:.5f} sec", timer.elapsed());
     return label_counts;
 }
 
@@ -408,9 +404,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         return result;
     }
 
-    Timer timer;
-    logger->trace("Starting to count k-mer matches for sequence of length {} ({} bp)",
-                  sequence.size(), sequence.size() - dbg_.get_k() + 1);
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     VectorMap<row_index, size_t> index_counts;
@@ -424,9 +417,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
             num_present_kmers++;
         }
     });
-
-    logger->trace("Counted k-mer matches for sequence of length {} ({} bp) in {:.5f} sec",
-                  sequence.size(), sequence.size() - dbg_.get_k() + 1, timer.elapsed());
 
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, num_present_kmers);
@@ -443,9 +433,6 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                                         .sum_rows(index_counts.values_container(), min_count),
                                    annotator_->get_label_encoder(), num_top_labels);
     }
-
-    logger->trace("Filtered and decoded top labels for sequence of length {} ({} bp) in {:.5f} sec",
-                  sequence.size(), sequence.size() - dbg_.get_k() + 1, timer.elapsed());
 
     assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
                                     [&](const auto &pair) { return pair.second <= num_kmers; }));
@@ -469,7 +456,6 @@ Result filter_and_aggregate(std::vector<std::pair<BinaryMatrix::Column, size_t>>
     Timer timer;
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
-    common::logger->trace("Sorted counts in {:.5f} sec", timer.elapsed());
     if (counts.empty())
         return {};
 
@@ -478,7 +464,7 @@ Result filter_and_aggregate(std::vector<std::pair<BinaryMatrix::Column, size_t>>
     for (const auto &[j, count] : counts) {
         value_store.initialize(j, num_kmers);
     }
-    common::logger->trace("Created values map in {:.5f} sec", timer.elapsed());
+
     size_t i = 0;
     enumerate_rows([&](const auto &row) {
         for (const auto &item : row) {

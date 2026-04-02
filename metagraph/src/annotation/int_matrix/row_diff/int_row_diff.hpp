@@ -115,19 +115,19 @@ IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
+    std::vector<SetBitPositions> rows_dict;
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
         [&](size_t i, const RowValues &row) {
-            auto it = unique_rows.emplace(utils::get_firsts<SetBitPositions>(row)).first;
-            (*rows)[i] = it - unique_rows.begin();
+            rows_dict[i] = utils::get_firsts<SetBitPositions>(row);
+            (*rows)[i] = i;
         },
         num_threads
     );
-    return to_vector(std::move(unique_rows));
+    return rows_dict;
 }
 
 template <class BaseMatrix>

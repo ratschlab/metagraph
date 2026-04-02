@@ -113,6 +113,12 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
+    /**
+     * Return rows (in arbitrary order) and update the row indexes in |rows|
+     * to point to their respective rows in the vector returned.
+     * In contrast to get_rows_dict in most other classes, here the rows
+     * are not deduplicated.
+     */
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
 
@@ -208,16 +214,6 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
         RowType result;
         // accumulate and call results in small batches to avoid locking overhead
         std::vector<std::pair<size_t, RowType>> results;
-        results.reserve(100);
-        auto call_rows_batch = [&]() {
-            #pragma omp critical
-            {
-                for (const auto &[idx, result] : results) {
-                    call_row(idx, result);
-                }
-            }
-            results.resize(0);
-        };
         for (size_t i : groups[g]) {
             auto it = rd_paths_trunc[i].rbegin();
             result = rd_rows[*it];
@@ -231,11 +227,8 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
                     RowType().swap(rd_rows[*it]);
                 }
             }
-            results.emplace_back(i, result);
-            if (results.size() == results.capacity())
-                call_rows_batch();
+            call_row(i, result);
         }
-        call_rows_batch();
     }
 
     common::logger->trace("RD query [threads: {}, rows: {} -> {} ({:.1f}x)] -- "
@@ -267,19 +260,19 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
+    std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);
         },
         add_diff, [](SetBitPositions *row) {},
         [&](size_t i, const SetBitPositions &row) {
-            auto it = unique_rows.emplace(row).first;
-            (*rows)[i] = it - unique_rows.begin();
+            rows_dict[i] = row;
+            (*rows)[i] = i;
         },
         num_threads
     );
-    return to_vector(std::move(unique_rows));
+    return rows_dict;
 }
 
 template <class BaseMatrix>
