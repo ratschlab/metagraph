@@ -212,8 +212,6 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t g = 0; g < groups.size(); ++g) {
         RowType result;
-        // accumulate and call results in small batches to avoid locking overhead
-        std::vector<std::pair<size_t, RowType>> results;
         for (size_t i : groups[g]) {
             auto it = rd_paths_trunc[i].rbegin();
             result = rd_rows[*it];

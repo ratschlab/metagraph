@@ -100,7 +100,7 @@ TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 TupleRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    std::vector<SetBitPositions> rows_dict;
+    std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_tuples(rd_ids, num_threads);
