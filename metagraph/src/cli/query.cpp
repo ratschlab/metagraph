@@ -1335,7 +1335,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             auto query_graph_construction = batch_timer.elapsed();
             batch_timer.reset();
 
-            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic, 10)
+            #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
                 SeqSearchResult search_result
                     = query_sequence(std::move((*seq_batch)[i]), *query_graph, config_,
