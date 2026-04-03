@@ -626,8 +626,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
     if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 rows in this batch"
-                                 " (after get_rows_dict). Reduce the query batch size.");
+        throw std::runtime_error("There must be less than 2^32 rows in a batch."
+                                 " Reduce the query batch size.");
     }
 
     // insert one empty row for representing unmatched rows

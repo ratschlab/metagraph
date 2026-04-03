@@ -119,8 +119,8 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
      *
      * In contrast to get_rows_dict in most other classes, the rows here
      * are not deduplicated. Benchmarks on real queries showed that merging
-     * identical reconstructed rows rarely shrank the batch by much (often
-     * only a few percent on dense annotation rows; occasionally on the order
+     * identical reconstructed rows rarely shrinks the batch size by much
+     * (only a few percent on dense annotation rows; occasionally on the order
      * of ~40% when duplication was high), while hashing requires a critical
      * section that dominates the query time. Hence, we skip deduplication.
      */
