@@ -620,7 +620,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_indexes[i] = full_to_small[i].first;
     }
 
-    // One decoded row per entry; |row_indexes|[i] becomes an index into this vector.
+    // One decoded row per entry; row_indexes[i] becomes an index into this vector.
     // Row-diff matrices skip hash dedup here (see RowDiff::get_rows_dict); other
     // matrices still return deduplicated rows with remapped indexes.
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
