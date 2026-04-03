@@ -232,7 +232,6 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
             }
         }
     };
-
     return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 

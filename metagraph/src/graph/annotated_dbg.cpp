@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdlib>
-#include <functional>
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
@@ -19,7 +18,6 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
-#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -425,7 +423,6 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
 
-    Timer timer;
     auto call_bits = [&](const auto &callback) {
         enumerate_rows([&](const auto &row) {
             for (const auto &j : row) {
@@ -435,7 +432,6 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
     };
     std::vector<std::pair<Column, size_t>> counts
             = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
-    common::logger->trace("Accumulated counts in {:.5f} sec", timer.elapsed());
 
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
@@ -464,13 +460,12 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
         }
         i++;
     });
-    common::logger->trace("Aggregated rows in {:.5f} sec", timer.elapsed());
+
     Result result;
     result.reserve(counts.size());
     for (const auto &[j, count] : counts) {
         result.emplace_back(label_encoder.decode(j), count, std::move(*value_store.get(j)));
     }
-    common::logger->trace("Created result in {:.5f} sec", timer.elapsed());
     return result;
 }
 
@@ -786,17 +781,6 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
     return annotator_->get_label_encoder().label_exists(label);
-}
-
-void AnnotatedSequenceGraph
-::call_annotated_nodes(const Label &label,
-                       std::function<void(node_index)> callback) const {
-    assert(check_compatibility());
-
-    annotator_->call_objects(
-        label,
-        [&](row_index index) { callback(anno_to_graph_index(index)); }
-    );
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {

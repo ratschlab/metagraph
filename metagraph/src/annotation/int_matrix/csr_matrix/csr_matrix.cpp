@@ -4,7 +4,6 @@
 #include <numeric>
 
 #include "common/algorithms.hpp"
-#include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 
 
