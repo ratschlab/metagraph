@@ -30,6 +30,8 @@ class UniqueRowBinmat : public RowMajor {
     // Return all columns for which counts are greater than or equal to |min_count|.
     std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count = 1) const;
+    std::vector<SetBitPositions>
+    get_rows_dict(std::vector<Row> *rows, size_t num_threads) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -41,13 +43,6 @@ class UniqueRowBinmat : public RowMajor {
 
   private:
     uint64_t get_code(Row row) const { return row_rank_[row]; }
-    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const {
-        std::vector<SetBitPositions> result(rows.size());
-        for (size_t i = 0; i < rows.size(); ++i) {
-            result[i] = unique_rows_[rows[i]];
-        }
-        return result;
-    }
 
     uint32_t num_columns_ = 0;
     uint32_t num_relations_ = 0;

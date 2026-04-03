@@ -503,7 +503,7 @@ bool same_results(const std::vector<std::tuple<Label, size_t, ValueType>> &resul
         } else if constexpr(std::is_same_v<ValueType, std::vector<SmallVector<uint64_t>>>) {
             assert(count == (size_t)std::count_if(value.begin(), value.end(), [](const auto &v) { return v.size() > 0; }));
         } else {
-            static_assert(false, "Unsupported value type");
+            static_assert(utils::dependent_false<ValueType>::value, "Unsupported value type");
         }
         auto find = check.find(label);
         assert(find != check.end());

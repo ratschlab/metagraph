@@ -33,8 +33,8 @@ class BinaryMatrix {
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const = 0;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows,
                                                   size_t num_threads) const;
-    // Return rows (in arbitrary order) and update the row indexes in |rows|
-    // to point to their respective rows in the vector returned.
+    // Return unique rows (in arbitrary order) and update the row indexes
+    // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<SetBitPositions> get_rows_dict(std::vector<Row> *rows,
                                                        size_t num_threads = 1) const;
     virtual std::vector<Row> get_column(Column column) const = 0;

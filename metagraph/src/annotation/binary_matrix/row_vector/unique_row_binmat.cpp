@@ -3,9 +3,11 @@
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
 #include <sdsl/int_vector.hpp>
+#include <ips4o.hpp>
 
 #include "common/hashers/hash.hpp"
 #include "common/vector_set.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
@@ -95,6 +97,43 @@ UniqueRowBinmat::sum_rows(const std::vector<std::pair<Row, size_t>> &index_count
         }
     };
     return utils::accumulate_counts(call_bits, num_columns(), min_count);
+}
+
+std::vector<BinaryMatrix::SetBitPositions>
+UniqueRowBinmat::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
+    assert(rows);
+
+    std::vector<std::pair<uint64_t, /* code */
+                          uint64_t /* row */>> row_codes(rows->size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_codes[i] = { get_code((*rows)[i]), i };
+    }
+
+    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
+                          utils::LessFirst(), num_threads);
+
+    std::vector<uint64_t> codes;
+    codes.reserve(row_codes.size());
+    uint64_t last_code = std::numeric_limits<uint64_t>::max();
+    for (const auto &[code, i] : row_codes) {
+        if (code != last_code) {
+            codes.push_back(code);
+            last_code = code;
+        }
+        (*rows)[i] = codes.size() - 1;
+    }
+    decltype(row_codes)().swap(row_codes);
+
+    std::vector<SetBitPositions> unique_rows(codes.size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t r = 0; r < codes.size(); ++r) {
+        unique_rows[r] = unique_rows_[codes[r]];
+    }
+
+    return unique_rows;
 }
 
 bool UniqueRowBinmat::load(std::istream &instream) {

@@ -59,8 +59,8 @@ CSRMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, siz
 
     auto call_bits = [&](const auto &callback) {
         for (const auto &[row, count] : index_counts) {
-            for (const auto &j : vector_[row]) {
-                callback(utils::get_first(j), count);
+            for (const auto &[j, _] : vector_[row]) {
+                callback(j, count);
             }
         }
     };
