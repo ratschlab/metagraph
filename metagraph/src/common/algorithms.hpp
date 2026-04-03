@@ -526,35 +526,44 @@ namespace utils {
     }
 
     template <typename T, typename ValueType>
-    struct ValueStore {
-        bool use_dense;
-        Vector<ValueType> dense_values;
-        tsl::hopscotch_map<T, ValueType> sparse_values;
-
-        ValueStore(size_t universe_size, size_t reserve_size)
-              : use_dense(universe_size < kDenseCountThreshold) {
-            if (use_dense) {
+    class ValueStore {
+      public:
+        ValueStore(size_t universe_size, size_t reserve_size = 0)
+              : use_dense_(universe_size < kMaxDenseSize) {
+            if (use_dense_) {
                 // For a small universe size, using a dense vector is faster than a hash table.
-                dense_values.resize(universe_size);
+                ids_.resize(universe_size);
+                dense_values_.reserve(reserve_size);
             } else {
-                sparse_values.reserve(reserve_size);
+                sparse_values_.reserve(reserve_size);
             }
         }
 
-        void initialize(T j, size_t value_size) {
-            if (use_dense) {
-                dense_values[j] = ValueType(value_size);
+        template <typename... Args>
+        void emplace(T j, Args&&... args) {
+            if (use_dense_) {
+                dense_values_.emplace_back(std::forward<Args>(args)...);
+                ids_[j] = dense_values_.size();
             } else {
-                sparse_values.emplace(j, value_size);
+                sparse_values_.emplace(j, std::forward<Args>(args)...);
             }
         }
 
         ValueType* get(T j) {
-            if (use_dense)
-                return dense_values[j].size() ? &dense_values[j] : nullptr;
-            auto it = sparse_values.find(j);
-            return it != sparse_values.end() ? &it.value() : nullptr;
+            if (use_dense_)
+                return ids_[j] ? &dense_values_[ids_[j] - 1] : nullptr;
+            auto it = sparse_values_.find(j);
+            return it != sparse_values_.end() ? &it.value() : nullptr;
         }
+
+      private:
+        static constexpr size_t kMaxDenseSize = 1'000'000;
+        bool use_dense_;
+        // if dense, then dense_values_[ids_[j] - 1] is the value for j
+        Vector<ValueType> dense_values_;
+        std::vector<size_t> ids_;
+        // if sparse, then sparse_values_[j] is the value for j
+        tsl::hopscotch_map<T, ValueType> sparse_values_;
     };
 
 } // namespace utils

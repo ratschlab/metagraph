@@ -439,13 +439,14 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
 
     if (counts.size() > num_top_labels)
         top_n_sorted(counts, num_top_labels);
+
     if (counts.empty())
         return {};
 
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
     for (const auto &[j, count] : counts) {
-        value_store.initialize(j, num_kmers);
+        value_store.emplace(j, num_kmers);
     }
 
     size_t i = 0;
