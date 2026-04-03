@@ -763,7 +763,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
             }
         };
         return get_results(enumerate_rows);
-    } else if (auto *mat = dynamic_cast<const CSRMatrix *>(&matrix)) {
+    } else if (const auto *mat = dynamic_cast<const CSRMatrix *>(&matrix)) {
         auto enumerate_rows = [mat, &row_indices](const auto &callback) {
             for (row_index row : row_indices) {
                 callback(mat->get_row_values(row));

@@ -1,6 +1,7 @@
 #include "unique_row_binmat.hpp"
 
 #include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
 #include <sdsl/int_vector.hpp>
 
 #include "common/hashers/hash.hpp"

@@ -52,6 +52,7 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
     std::vector<Row> get_column(Column j) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
     // query integer values
@@ -114,6 +115,7 @@ IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
+// no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
 IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,

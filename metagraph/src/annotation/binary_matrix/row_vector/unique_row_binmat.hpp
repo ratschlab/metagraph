@@ -23,7 +23,6 @@ class UniqueRowBinmat : public RowMajor {
 
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return row_rank_.size(); }
-    uint64_t num_distinct_rows() const { return unique_rows_.size(); }
 
     std::vector<Row> get_column(Column column) const;
     SetBitPositions get_row(Row row) const { return unique_rows_[row_rank_[row]]; }
