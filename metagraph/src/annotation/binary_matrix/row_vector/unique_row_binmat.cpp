@@ -7,8 +7,6 @@
 #include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
-#include "common/logger.hpp"
-#include "common/unix_tools.hpp"
 
 
 namespace mtg {
