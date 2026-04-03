@@ -426,7 +426,6 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>);
 
     Timer timer;
-    common::logger->trace("Starting to filter and aggregate");
     auto call_bits = [&](const auto &callback) {
         enumerate_rows([&](const auto &row) {
             for (const auto &j : row) {
