@@ -121,8 +121,8 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
      * are not deduplicated. Benchmarks on real queries showed that merging
      * identical reconstructed rows rarely shrank the batch by much (often
      * only a few percent on dense annotation rows; occasionally on the order
-     * of ~40% when duplication was high), while VectorSet hashing and
-     * syncronization dominated the query time. Hence, we skip deduplication.
+     * of ~40% when duplication was high), while hashing requires a critical
+     * section that dominates the query time. Hence, we skip deduplication.
      */
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
@@ -262,7 +262,6 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
-// No deduplication: see class comment on get_rows_dict (speed vs limited size win).
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,

@@ -488,6 +488,32 @@ void map_to_rows(const DeBruijnGraph &graph, std::string_view sequence,
     assert(j == num_kmers);
 }
 
+#ifndef NDEBUG
+// A sanity check to ensure the same matches are for get_top_label_signatures and get_top_labels
+template <typename ValueType>
+bool same_results(const std::vector<std::tuple<Label, size_t, ValueType>> &result,
+                  const std::vector<StringCountPair> &top_labels) {
+    assert(top_labels.size() == result.size());
+    std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
+    for (const auto &[label, count, value] : result) {
+        if constexpr(std::is_same_v<ValueType, sdsl::bit_vector>) {
+            assert(count == sdsl::util::cnt_one_bits(value));
+        } else if constexpr(std::is_same_v<ValueType, std::vector<size_t>>) {
+            assert(count == (size_t)std::count_if(value.begin(), value.end(), [](const auto &v) { return v > 0; }));
+        } else if constexpr(std::is_same_v<ValueType, std::vector<SmallVector<uint64_t>>>) {
+            assert(count == (size_t)std::count_if(value.begin(), value.end(), [](const auto &v) { return v.size() > 0; }));
+        } else {
+            static_assert(false, "Unsupported value type");
+        }
+        auto find = check.find(label);
+        assert(find != check.end());
+        assert(find->second == count);
+        check.erase(find);
+    }
+    return check.empty();
+}
+#endif // NDEBUG
+
 std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
@@ -536,8 +562,10 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     }
 
     auto get_results = [&](const auto &enumerate_rows) {
-        return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
+        auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
+        return results;
     };
 
     // Per-index get_row_values is cheap for CSRMatrix; other matrices get rows in a batch.
@@ -670,26 +698,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
     };
 
-    return filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
+    auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
         call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+    assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
+    return results;
 }
-
-#ifndef NDEBUG
-// A sanity check to ensure the same matches are for get_top_label_signatures and get_top_labels
-bool same_results(const std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> &result,
-                  const std::vector<StringCountPair> &top_labels) {
-    assert(top_labels.size() == result.size());
-    std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
-    for (const auto &[label, count, mask] : result) {
-        assert(count == sdsl::util::cnt_one_bits(mask));
-        auto find = check.find(label);
-        assert(find != check.end());
-        assert(find->second == sdsl::util::cnt_one_bits(mask));
-        check.erase(find);
-    }
-    return check.empty();
-}
-#endif // NDEBUG
 
 std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
@@ -751,8 +764,10 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     const auto &matrix = annotator_->get_matrix();
     auto get_results = [&](const auto &enumerate_rows) {
-        return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
+        auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
+        return results;
     };
 
     // Per-index get_row is cheap for these RowMajor types; other matrices get rows in a batch.
