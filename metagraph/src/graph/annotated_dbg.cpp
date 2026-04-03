@@ -746,7 +746,6 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, kmer_positions.size());
-
     if (row_indices.size() < min_count)
         return {};
 
