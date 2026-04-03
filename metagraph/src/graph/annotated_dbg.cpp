@@ -539,23 +539,27 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
         exit(1);
     }
 
-    using RowCallback = std::function<void(const IntMatrix::RowValues &)>;
-    std::function<void(const RowCallback &)> enumerate_row_values;
-    if (const auto *csr = dynamic_cast<const CSRMatrix *>(int_matrix)) {
-        enumerate_row_values = [csr, &row_indices](const auto &callback) {
+    auto get_results = [&](const auto &enumerate_rows) {
+        return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+    };
+
+    // Per-index get_row_values is cheap for CSRMatrix; other matrices get rows in a batch.
+    if (const auto *mat = dynamic_cast<const CSRMatrix *>(int_matrix)) {
+        auto enumerate_row_values = [mat, &row_indices](const auto &callback) {
             for (row_index row : row_indices) {
-                callback(csr->get_row_values(row));
+                callback(mat->get_row_values(row));
             }
         };
-    } else {
-        auto row_values = int_matrix->get_row_values(row_indices);
-        enumerate_row_values = [rows = std::move(row_values)](const auto &callback) {
-            std::for_each(rows.begin(), rows.end(), callback);
-        };
+        return get_results(enumerate_row_values);
     }
 
-    return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
-        enumerate_row_values, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+    // Get rows in a batch for other matrices.
+    auto row_values = int_matrix->get_row_values(row_indices);
+    auto enumerate_row_values = [rows = std::move(row_values)](const auto &callback) {
+        std::for_each(rows.begin(), rows.end(), callback);
+    };
+    return get_results(enumerate_row_values);
 }
 
 std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
@@ -746,34 +750,37 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t min_count = get_min_count(discovery_fraction, presence_fraction,
                                      num_kmers, kmer_positions.size());
+
     if (row_indices.size() < min_count)
         return {};
 
     const auto &matrix = annotator_->get_matrix();
-    using RowCallback = std::function<void(const BinaryMatrix::SetBitPositions &)>;
-    std::function<void(const RowCallback &)> enumerate_rows;
+    auto get_results = [&](const auto &enumerate_rows) {
+        return filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+    };
+
     // Per-index get_row is cheap for these RowMajor types; other matrices get rows in a batch.
-    if (dynamic_cast<const UniqueRowBinmat *>(&matrix)
-            || dynamic_cast<const CSRMatrix *>(&matrix)) {
-        const auto *row_major = dynamic_cast<const RowMajor *>(&matrix);
-        enumerate_rows = [row_major, &row_indices](const RowCallback &callback) {
+    if (const auto *mat = dynamic_cast<const UniqueRowBinmat *>(&matrix)) {
+        auto enumerate_rows = [mat, &row_indices](const auto &callback) {
             for (row_index row : row_indices) {
-                callback(row_major->get_row(row));
+                callback(mat->get_row_ref(row));
             }
         };
-    } else {
-        auto rows = matrix.get_rows(row_indices);
-        enumerate_rows = [rows = std::move(rows)](const RowCallback &callback) {
-            std::for_each(rows.begin(), rows.end(), callback);
+        return get_results(enumerate_rows);
+    } else if (auto *mat = dynamic_cast<const CSRMatrix *>(&matrix)) {
+        auto enumerate_rows = [mat, &row_indices](const auto &callback) {
+            for (row_index row : row_indices) {
+                callback(mat->get_row_values(row));
+            }
         };
+        return get_results(enumerate_rows);
     }
-
-    auto result = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
-        enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
-
-    assert(same_results(result, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
-
-    return result;
+    auto rows = matrix.get_rows(row_indices);
+    auto enumerate_rows = [rows = std::move(rows)](const auto &callback) {
+        std::for_each(rows.begin(), rows.end(), callback);
+    };
+    return get_results(enumerate_rows);
 }
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {

@@ -27,6 +27,7 @@ class UniqueRowBinmat : public RowMajor {
 
     std::vector<Row> get_column(Column column) const;
     SetBitPositions get_row(Row row) const { return unique_rows_[row_rank_[row]]; }
+    const SetBitPositions& get_row_ref(Row row) const { return unique_rows_[row_rank_[row]]; }
     // Return all columns for which counts are greater than or equal to |min_count|.
     std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count = 1) const;
