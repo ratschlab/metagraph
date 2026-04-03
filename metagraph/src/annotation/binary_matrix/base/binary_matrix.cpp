@@ -208,8 +208,6 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
     std::vector<Row> row_ids;
     row_ids.reserve(index_counts.size());
-    Timer timer;
-    common::logger->trace("Starting to sum rows with {} threads", omp_get_max_threads());
 
     size_t total_sum_count = 0;
     for (auto [i, count] : index_counts) {
@@ -234,7 +232,7 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
             }
         }
     };
-    common::logger->trace("Summed rows in {:.5f} sec", timer.elapsed());
+
     return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
@@ -258,30 +256,6 @@ RowMajor::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
         rows[i] = get_row(row_ids[i]);
     }
     return rows;
-}
-
-std::vector<std::pair<RowMajor::Column, size_t /* count */>>
-RowMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count) const {
-    if (index_counts.empty())
-        return {};
-
-    min_count = std::max<size_t>(min_count, 1);
-
-    size_t total_sum_count = 0;
-    for (auto [i, count] : index_counts) {
-        total_sum_count += count;
-    }
-    if (total_sum_count < min_count)
-        return {};
-
-    auto call_bits = [&](const auto &callback) {
-        for (size_t i = 0; i < index_counts.size(); ++i) {
-            for (Column j : get_row(index_counts[i].first)) {
-                callback(j, index_counts[i].second);
-            }
-        }
-    };
-    return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
 } // namespace matrix

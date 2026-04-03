@@ -69,7 +69,7 @@ class RainbowMatrix : public BinaryMatrix {
     virtual ~RainbowMatrix() {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const final;
 
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
@@ -99,10 +99,6 @@ class RowMajor : public BinaryMatrix {
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const final;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows,
                                                   size_t num_threads) const final;
-    // Return all columns for which counts are greater than or equal to |min_count|.
-    virtual std::vector<std::pair<Column, size_t /* count */>>
-    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-             size_t min_count = 1) const;
 };
 
 class GetEntrySupport {
