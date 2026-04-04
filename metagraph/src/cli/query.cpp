@@ -620,11 +620,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_indexes[i] = full_to_small[i].first;
     }
 
-    // get unique rows and set pointers to them in |row_indexes|
+    // One decoded row per entry; row_indexes[i] becomes an index into this vector.
+    // Row-diff matrices skip hash dedup here (see RowDiff::get_rows_dict); other
+    // matrices still return deduplicated rows with remapped indexes.
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
     if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
+        throw std::runtime_error("There must be less than 2^32 rows in a batch."
                                  " Reduce the query batch size.");
     }
 
@@ -1350,9 +1352,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
                           " redundancy: {:.2f} bp/kmer,"
-                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
+                          " queried with {} threads in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                          threads_per_batch,
                           query_time, query_graph_construction + query_time,
                           num_bytes_read / (query_graph_construction + query_time));
         }

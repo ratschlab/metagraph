@@ -25,6 +25,8 @@ class CSRMatrix : public RowMajor, public IntMatrix {
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
                                           size_t num_threads = 1) const;
 
+    const RowValues& get_row_values(Row row) const { return vector_[row]; }
+
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
     uint64_t num_relations() const;
@@ -32,6 +34,9 @@ class CSRMatrix : public RowMajor, public IntMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    // Return all columns for which counts are greater than or equal to |min_count|.
+    std::vector<std::pair<Column, size_t /* count */>>
+    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count = 1) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
