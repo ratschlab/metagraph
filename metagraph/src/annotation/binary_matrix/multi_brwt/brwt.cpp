@@ -307,8 +307,10 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                       const BRWT *root, std::vector<size_t> call_stack,
                       size_t max_columns_cutoff, ThreadPool &thread_pool,
                       std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const {
+    if (row_ids.empty())
+        return;
+
     if (child_nodes_.size()
-            && row_ids.size()
             && call_stack.size() < kMaxParallelDepth
             && num_columns() > max_columns_cutoff) {
         // construct indexing for children and the inverse mapping
@@ -316,8 +318,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
         // Only for root the chunk size is adaptive, for lower-level nodes it's fixed to avoid creating too many tasks.
         bool adaptive_chunk_size = call_stack.empty();
         auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids, &thread_pool, adaptive_chunk_size);
-        if (call_stack.empty())
-            common::logger->trace("get_nonzero_rows took {} sec", timer.elapsed());
+        if (nonzero_indices.empty())
+            return;
         auto child_row_ids_ptr = std::make_shared<const std::vector<Row>>(std::move(child_row_ids));
 
         // keep only the indices of non-empty rows
@@ -326,13 +328,14 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             rows[i++] = rows[idx];
         }
         rows.resize(i);
+        auto rows_ptr = std::make_shared<const std::vector<size_t>>(std::move(rows));
 
         call_stack.push_back(0);
 
         for (size_t j = 0; j < child_nodes_.size(); ++j) {
             call_stack.back() = j;
             thread_pool.force_enqueue_front([=,&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(*child_row_ids_ptr, std::move(rows), root, std::move(call_stack),
+                this->child_nodes_[j]->slice_rows(*child_row_ids_ptr, *rows_ptr, root, call_stack,
                                                   max_columns_cutoff, thread_pool, call_slice);
             });
         }
@@ -351,8 +354,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
         for (int64_t i = call_stack.size() - 1; i >= 0; --i) {
             const auto &node = call_stack_nodes[i];
             size_t child_idx = call_stack[i];
-            for (size_t i = 0; i < slice.size(); ++i) {
-                auto &col = utils::get_first(slice[i]);
+            for (size_t s = 0; s < slice.size(); ++s) {
+                auto &col = utils::get_first(slice[s]);
                 if (col != std::numeric_limits<Column>::max())
                     col = node->assignments_.get(child_idx, col);
             }
