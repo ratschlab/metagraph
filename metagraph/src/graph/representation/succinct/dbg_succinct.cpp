@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <string>
 #include <filesystem>
-#include <sys/mman.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
@@ -707,9 +706,11 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         if (utils::with_madvise()) {
             if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
                 // hint random access for query-time traversal of the loaded data
-                madvise(mmap_in->get_mmap_context()->data(),
-                        mmap_in->get_mmap_context()->file_size_bytes(),
-                        MADV_RANDOM);
+                if (madvise(mmap_in->get_mmap_context()->data(),
+                            mmap_in->get_mmap_context()->file_size_bytes(),
+                            MADV_RANDOM)) {
+                    logger->warn("madvise(MADV_RANDOM) failed");
+                }
             }
         }
     }
