@@ -29,6 +29,10 @@ void rename_or_move_file(const std::string &old_fname, const std::string &new_fn
 bool with_mmap();
 void set_mmap(bool set_bit);
 
+// Returns true if madvise hints are enabled. Use set_madvise() to change.
+bool with_madvise();
+void set_madvise(bool set_bit);
+
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 

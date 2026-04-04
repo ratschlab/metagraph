@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <string>
 #include <filesystem>
+#include <sys/mman.h>
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
@@ -695,26 +696,22 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         std::unique_ptr<std::ifstream> in
             = utils::open_ifstream(utils::make_suffix(filename, kExtension));
 
-        if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
-            madvise(mmap_in->get_mmap_context()->data(),
-                    mmap_in->get_mmap_context()->file_size_bytes(),
-                    MADV_RANDOM);
-        }
-
         if (!boss_graph_->load(*in))
             return false;
 
         mode_ = static_cast<Mode>(load_number(*in));
 
-        if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
-            auto offset = in->tellg();
-            madvise(mmap_in->get_mmap_context()->data() + offset,
-                    mmap_in->get_mmap_context()->file_size_bytes() - offset,
-                    MADV_WILLNEED);
-        }
-
         if (!boss_graph_->load_suffix_ranges(*in))
             logger->warn("No index for node ranges could be loaded");
+
+        if (utils::with_madvise()) {
+            if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
+                // hint random access for query-time traversal of the loaded data
+                madvise(mmap_in->get_mmap_context()->data(),
+                        mmap_in->get_mmap_context()->file_size_bytes(),
+                        MADV_RANDOM);
+            }
+        }
     }
 
     return true;

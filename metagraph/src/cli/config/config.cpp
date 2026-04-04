@@ -118,6 +118,8 @@ Config::Config(int argc, char *argv[]) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--mmap")) {
             utils::set_mmap(true);
+        } else if (!strcmp(argv[i], "--madv-random")) {
+            utils::set_madvise(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
@@ -1414,6 +1416,8 @@ if (advanced) {
 
     fprintf(stderr, "\nGeneral options:\n");
     fprintf(stderr, "\t   --mmap \t\tuse memory mapping when loading to reduce RAM [off]\n");
+    if (identity == SERVER_QUERY)
+        fprintf(stderr, "\t   --madv-random \tenable MADV_RANDOM hints for graphs loaded with mmap (speeds up tiny queries, may slow down large ones) [off]\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
