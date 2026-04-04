@@ -41,11 +41,13 @@ void check_labels(const AnnotatedDBG &anno_graph,
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
-        anno_graph.call_annotated_nodes(
+        assert(anno_graph.check_compatibility());
+        anno_graph.get_annotator().call_objects(
             label,
             [&](const auto &index) {
-                ASSERT_NE(SequenceGraph::npos, index);
-                cur_indices.insert(index);
+                auto node = anno_graph.anno_to_graph_index(index);
+                ASSERT_NE(SequenceGraph::npos, node);
+                cur_indices.insert(node);
             }
         );
         std::vector<SequenceGraph::node_index> diff;
