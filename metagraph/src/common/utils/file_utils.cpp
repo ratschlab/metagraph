@@ -27,6 +27,7 @@ std::vector<std::string> TMP_DIRS;
 std::mutex TMP_DIRS_MUTEX;
 
 static bool WITH_MMAP = false;
+static bool WITH_MADVISE = false;
 
 void set_mmap(bool set_bit) {
     WITH_MMAP = set_bit;
@@ -34,6 +35,14 @@ void set_mmap(bool set_bit) {
 
 bool with_mmap() {
     return WITH_MMAP;
+}
+
+void set_madvise(bool set_bit) {
+    WITH_MADVISE = set_bit;
+}
+
+bool with_madvise() {
+    return WITH_MADVISE;
 }
 
 std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream) {
