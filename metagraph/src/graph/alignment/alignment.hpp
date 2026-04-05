@@ -21,6 +21,7 @@
 
 
 namespace mtg {
+namespace annot { class CoordToHeader; }
 namespace graph {
 namespace align {
 
@@ -282,6 +283,7 @@ class Alignment {
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
+    const annot::CoordToHeader *coord_to_header = nullptr;
 
     Columns label_columns;
 
@@ -368,9 +370,12 @@ class AlignmentResults {
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
+    Alignment& operator[](size_t i) { return alignments_[i]; }
 
     auto begin() const { return alignments_.begin(); }
     auto end() const { return alignments_.end(); }
+    auto begin() { return alignments_.begin(); }
+    auto end() { return alignments_.end(); }
 
   private:
     std::string query_;

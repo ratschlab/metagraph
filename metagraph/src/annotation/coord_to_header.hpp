@@ -56,6 +56,11 @@ class CoordToHeader {
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
     size_t num_headers(Column column) const { return headers_[column].size(); }
 
+    /**
+     * Map a single global coordinate in a column to (header_id, local_coord).
+     */
+    std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
+
     static constexpr auto kExtension = ".seqs";
 
   private:

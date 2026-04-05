@@ -56,6 +56,19 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     }
 }
 
+std::pair<size_t, uint64_t>
+CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
+    const auto &offsets = coord_offsets_.at(col);
+    if (coord >= offsets.size()) {
+        throw std::runtime_error("Coordinate " + std::to_string(coord) + " for column "
+                + std::to_string(col) + " out of range (CoordToHeader has "
+                + std::to_string(offsets.size()) + " coordinates for that column)");
+    }
+    size_t header = coord ? offsets.rank1(coord - 1) : 0;
+    uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
+    return { header, local_coord };
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
     std::unique_ptr<std::ifstream> in
         = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
