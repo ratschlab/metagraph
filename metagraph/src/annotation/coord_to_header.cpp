@@ -35,16 +35,8 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
         for (auto &[col, coords] : row) {
-            const auto &offsets = coord_offsets_.at(col);
             for (uint64_t &coord : coords) {
-                if (coord >= offsets.size()) {
-                    throw std::runtime_error("Querying coordinate " + std::to_string(coord) + " for"
-                            + " column " + std::to_string(col) + " while CoordToHeader has only "
-                            + std::to_string(offsets.size()) + " coordinates for that column");
-                }
-                size_t header = coord ? offsets.rank1(coord - 1) : 0;
-                // Convert global coordinate to local (sequence-based) coordinate
-                uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
+                auto [header, local_coord] = map_single_coord(col, coord);
                 if (local_coord > std::numeric_limits<uint64_t>::max() / num_headers(col)) {
                     throw std::runtime_error(fmt::format("Local coordinate {} is too large for the "
                             "given {} headers in column {} to encode both local_coord and header_id"

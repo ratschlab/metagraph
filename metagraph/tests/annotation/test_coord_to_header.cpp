@@ -77,6 +77,46 @@ TEST(CoordToHeader, MapSingleCoordMultipleColumns) {
     EXPECT_EQ(lc2, 2u);
 }
 
+TEST(CoordToHeader, MapSingleCoordThreeSequences) {
+    // Column 0: "a" (2 kmers), "b" (3 kmers), "c" (4 kmers) -> coords 0-1, 2-4, 5-8
+    CoordToHeader cth(
+        { { "a", "b", "c" } },
+        { { 2, 3, 4 } }
+    );
+
+    EXPECT_EQ(cth.num_headers(0), 3u);
+
+    // coord 0 -> a, local 0  (first seq, first coord)
+    auto [h0, lc0] = cth.map_single_coord(0, 0);
+    EXPECT_EQ(h0, 0u);
+    EXPECT_EQ(lc0, 0u);
+
+    // coord 1 -> a, local 1  (first seq, last coord)
+    auto [h1, lc1] = cth.map_single_coord(0, 1);
+    EXPECT_EQ(h1, 0u);
+    EXPECT_EQ(lc1, 1u);
+
+    // coord 2 -> b, local 0  (second seq boundary)
+    auto [h2, lc2] = cth.map_single_coord(0, 2);
+    EXPECT_EQ(h2, 1u);
+    EXPECT_EQ(lc2, 0u);
+
+    // coord 4 -> b, local 2  (second seq, last coord)
+    auto [h4, lc4] = cth.map_single_coord(0, 4);
+    EXPECT_EQ(h4, 1u);
+    EXPECT_EQ(lc4, 2u);
+
+    // coord 5 -> c, local 0  (third seq boundary)
+    auto [h5, lc5] = cth.map_single_coord(0, 5);
+    EXPECT_EQ(h5, 2u);
+    EXPECT_EQ(lc5, 0u);
+
+    // coord 8 -> c, local 3  (last valid coord in column)
+    auto [h8, lc8] = cth.map_single_coord(0, 8);
+    EXPECT_EQ(h8, 2u);
+    EXPECT_EQ(lc8, 3u);
+}
+
 TEST(CoordToHeader, MapSingleCoordOutOfRange) {
     CoordToHeader cth(
         { { "only" } },
@@ -118,6 +158,7 @@ TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
 TEST(AlignmentFormatCoords, WithCoordToHeader) {
     using namespace mtg::graph::align;
 
+    // accession_A: 10 kmers (coords 0-9), accession_B: 20 kmers (coords 10-29)
     CoordToHeader cth(
         { { "accession_A", "accession_B" } },
         { { 10, 20 } }
@@ -126,32 +167,23 @@ TEST(AlignmentFormatCoords, WithCoordToHeader) {
     Alignment aln(
         std::string_view{},
         {},
-        std::string("ACGT"),  // 4-char sequence for coordinate range calculation
+        std::string("ACGT"),  // 4-char sequence -> range width = 4
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0, 0 };
     aln.label_coordinates = {
-        { 3 },   // column 0, coord 3 -> accession_A (local 3)
-        { 12 },  // column 0, coord 12 -> accession_B (local 2)
+        { 3 },   // column 0, coord 3 -> accession_A, local 3 -> "4-7"
+        { 12 },  // column 0, coord 12 -> accession_B, local 2 -> "3-6"
     };
-
-    // Without coord_to_header, needs label_encoder (not set), falls back to column index
-    std::string without = aln.format_coords();
-    EXPECT_NE(without.find("0:"), std::string::npos);
-
-    // With coord_to_header
     aln.coord_to_header = &cth;
-    std::string with_cth = aln.format_coords();
 
-    EXPECT_NE(with_cth.find("accession_A"), std::string::npos);
-    EXPECT_NE(with_cth.find("accession_B"), std::string::npos);
-    EXPECT_EQ(with_cth.find("0:"), std::string::npos);  // no raw column index
+    EXPECT_EQ(aln.format_coords(), "accession_A:4-7;accession_B:3-6");
 }
 
 TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
     using namespace mtg::graph::align;
 
-    // Two sequences in column 0: "seqA" (5 kmers), "seqB" (5 kmers)
+    // seqA: 5 kmers (coords 0-4), seqB: 5 kmers (coords 5-9)
     CoordToHeader cth(
         { { "seqA", "seqB" } },
         { { 5, 5 } }
@@ -160,25 +192,58 @@ TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
     Alignment aln(
         std::string_view{},
         {},
-        std::string("ACG"),  // 3-char sequence
+        std::string("ACG"),  // 3-char sequence -> range width = 3
         0, {}, 0, false, 0
     );
     // One column entry with coords from different sequences
     aln.label_columns = { 0 };
     aln.label_coordinates = {
-        { 2, 7 },  // coord 2 -> seqA (local 2), coord 7 -> seqB (local 2)
+        { 2, 7 },  // coord 2 -> seqA local 2, coord 7 -> seqB local 2
     };
     aln.coord_to_header = &cth;
 
-    std::string result = aln.format_coords();
-
-    // Both headers should appear, separated by ;
-    EXPECT_NE(result.find("seqA"), std::string::npos);
-    EXPECT_NE(result.find("seqB"), std::string::npos);
-    EXPECT_NE(result.find(";"), std::string::npos);
+    EXPECT_EQ(aln.format_coords(), "seqA:3-5;seqB:3-5");
 }
 
-TEST(AlignmentFormatCoords, WithoutCoordToHeaderUnchanged) {
+TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
+    using namespace mtg::graph::align;
+
+    // Single sequence with 20 kmers
+    CoordToHeader cth(
+        { { "ref" } },
+        { { 20 } }
+    );
+
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("AC"),  // 2-char sequence -> range width = 2
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = {
+        { 3, 10 },  // two coords in the same header
+    };
+    aln.coord_to_header = &cth;
+
+    // Same header gets both ranges appended
+    EXPECT_EQ(aln.format_coords(), "ref:4-5:11-12");
+}
+
+TEST(AlignmentFormatCoords, EmptyCoordinates) {
+    using namespace mtg::graph::align;
+
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("ACGT"),
+        0, {}, 0, false, 0
+    );
+    // No coordinates -> empty string
+    EXPECT_EQ(aln.format_coords(), "");
+}
+
+TEST(AlignmentFormatCoords, WithoutCoordToHeaderUsesLabelEncoder) {
     using namespace mtg::graph::align;
 
     LabelEncoder<> encoder;
@@ -187,16 +252,87 @@ TEST(AlignmentFormatCoords, WithoutCoordToHeaderUnchanged) {
     Alignment aln(
         std::string_view{},
         {},
-        std::string("ACGT"),
+        std::string("ACGT"),  // 4-char sequence -> range width = 4
         0, {}, 0, false, 0
     );
     aln.label_encoder = &encoder;
     aln.label_columns = { 0 };
-    aln.label_coordinates = { { 42 } };
+    aln.label_coordinates = { { 42 } };  // coord 42 -> "43-46"
 
-    std::string result = aln.format_coords();
-    EXPECT_NE(result.find("/path/to/file.fa"), std::string::npos);
-    EXPECT_NE(result.find("43-46"), std::string::npos);
+    EXPECT_EQ(aln.format_coords(), "/path/to/file.fa:43-46");
+}
+
+TEST(AlignmentFormatCoords, WithoutCoordToHeaderOrEncoder) {
+    using namespace mtg::graph::align;
+
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("ACGT"),
+        0, {}, 0, false, 0
+    );
+    // No label_encoder, no coord_to_header -> falls back to column index
+    aln.label_columns = { 5 };
+    aln.label_coordinates = { { 0 } };
+
+    EXPECT_EQ(aln.format_coords(), "5:1-4");
+}
+
+// TODO: decide how to handle cross-boundary alignments (see also
+// test_align.py::test_align_cross_sequence_boundary).
+//
+// When the start coordinate maps to one header but the range
+// (coord + sequence_.size()) extends past that header into the next,
+// format_coords currently produces an out-of-bounds range.
+//
+// Key constraint: detecting the overflow requires knowing each sequence's
+// nucleotide length, which is num_kmers + k - 1.  CoordToHeader stores
+// k-mer counts but not k, so it cannot compute nucleotide lengths alone.
+// Any fix needs k passed in, or nucleotide lengths stored alongside k-mer
+// counts.  Additionally, with indels in the alignment, the reference-space
+// length differs from sequence_.size(), so the CIGAR would also be needed
+// for a correct split.
+//
+// Options:
+//   1. Split the range across headers (e.g. "seqA:8-N;seqB:1-M" where
+//      N = nucleotide length of seqA, M = remainder).
+//      Generalizes to 3+ sequences with a loop.
+//      Pro: most informative; the ";" separator is already used.
+//      Con: changes ";" semantics (independent matches vs. contiguous
+//      span); requires k and CIGAR access in format_coords.
+//   2. Fall back to the global file path for the whole label.
+//      Pro: honest, no misleading per-sequence coordinates.
+//      Con: loses header info; inconsistent output format.
+TEST(AlignmentFormatCoords, DISABLED_CrossSequenceBoundary) {
+    using namespace mtg::graph::align;
+
+    // seqA: 10 kmers (coords 0-9), seqB: 10 kmers (coords 10-19).
+    // With k=5, seqA would be 14 nt (positions 1-14 in 1-based).
+    // But format_coords doesn't know k, so it can't compute 14.
+    CoordToHeader cth(
+        { { "seqA", "seqB" } },
+        { { 10, 10 } }
+    );
+
+    // 8-char alignment starting at coord 7 in seqA (local 7).
+    // Range = 8 to 15 (1-based), but seqA is only 10+k-1 nt.
+    // For any k <= 6 this overflows into seqB.
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("ACGTACGT"),  // 8-char sequence
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 7 } };  // global coord 7 -> seqA, local 7
+    aln.coord_to_header = &cth;
+
+    // Current (broken) behaviour: "seqA:8-15" — out of bounds for seqA
+    // (e.g. with k=5, seqA has 14 nt, so position 15 is past its end).
+    //
+    // Option 1 (with k=5): EXPECT_EQ(aln.format_coords(), "seqA:8-14;seqB:1-1");
+    // Option 2: (would need label_encoder set up to produce file path)
+    EXPECT_EQ(aln.format_coords(), "seqA:8-15");  // documents current behaviour
 }
 
 } // namespace
