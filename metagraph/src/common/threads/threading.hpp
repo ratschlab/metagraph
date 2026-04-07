@@ -9,6 +9,7 @@
 #include <future>
 #include <functional>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 
 
@@ -67,15 +68,12 @@ class ThreadPool {
             std::function<void()> task;
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
-                if (tasks.empty()) {
-                    empty_condition.wait_for(lock, std::chrono::milliseconds(1), [this,&ready]() {
-                        return !tasks.empty() || ready();
-                    });
-                    if (ready())
-                        break;
-                    if (tasks.empty())
-                        continue;
-                }
+                help_condition.wait_for(lock, std::chrono::microseconds(100),
+                    [this,&ready]() { return !tasks.empty() || ready(); });
+                if (ready())
+                    break;
+                if (tasks.empty())
+                    continue;
 
                 task = std::move(tasks.front());
                 tasks.pop_front();
@@ -83,6 +81,7 @@ class ThreadPool {
 
             full_condition.notify_one();
             task();
+            help_condition.notify_all();
         }
 
         return future;
@@ -99,9 +98,9 @@ class ThreadPool {
   private:
     void initialize(size_t num_threads);
 
-    size_t num_threads_;
+    size_t num_threads_ = 0;
     std::vector<std::thread> workers;
-    size_t num_waiting_;
+    size_t num_waiting_ = 0;
     std::deque<std::function<void()>> tasks;
     size_t max_num_tasks_;
 
@@ -109,8 +108,9 @@ class ThreadPool {
     std::condition_variable empty_condition;
     std::condition_variable full_condition;
     std::condition_variable all_waiting;
+    std::condition_variable help_condition;
 
-    bool joining_;
+    bool joining_ = false;
     bool stop_;
 
     template <class F, typename... Args>
@@ -132,6 +132,7 @@ class ThreadPool {
             return future;
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
+            assert(!joining_);
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
@@ -143,6 +144,7 @@ class ThreadPool {
         }
 
         empty_condition.notify_one();
+        help_condition.notify_one();
 
         return future;
     }

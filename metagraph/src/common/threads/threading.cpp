@@ -49,7 +49,7 @@ void ThreadPool::join() {
 void ThreadPool::remove_waiting_tasks() {
     std::unique_lock<std::mutex> lock(this->queue_mutex);
     this->tasks = std::deque<std::function<void()>>();
-    this->empty_condition.notify_all();
+    this->full_condition.notify_all();
 }
 
 void ThreadPool::initialize(size_t num_workers) {
@@ -84,6 +84,7 @@ void ThreadPool::initialize(size_t num_workers) {
 
                 full_condition.notify_one();
                 task();
+                help_condition.notify_one();
             }
         });
     }

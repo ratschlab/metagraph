@@ -61,6 +61,9 @@ const size_t kMaxParallelDepth = 20;
 // Subtrees narrower than this are queried inline.
 const size_t kMinColumnsForParallel = 10;
 
+// Maximum number of columns per chunk when deciding the cutoff for parallel subtree traversal.
+const size_t kMaxColumnsChunkSize = 1000;
+
 template <typename RowT>
 std::vector<RowT>
 BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const {
@@ -69,7 +72,7 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     std::mutex mu;
     std::vector<RowT> rows(row_ids.size());
     slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()), this, {},
-        std::max(kMinColumnsForParallel, get_chunk_size(num_columns(), 1000 /* max_chunk_size */, num_threads)),
+        std::max(kMinColumnsForParallel, get_chunk_size(num_columns(), kMaxColumnsChunkSize, num_threads)),
         thread_pool,
         [&](std::vector<size_t> &&sliced_rows, Vector<T> &&slice) {
             auto rows_it = sliced_rows.begin();
