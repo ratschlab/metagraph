@@ -8,7 +8,6 @@
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/unix_tools.hpp"
 
 
 namespace mtg {
@@ -313,10 +312,9 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
     if (child_nodes_.size()
             && call_stack.size() < kMaxParallelDepth
             && num_columns() > max_columns_cutoff) {
-        // construct indexing for children and the inverse mapping
-        Timer timer;
         // Only for root the chunk size is adaptive, for lower-level nodes it's fixed to avoid creating too many tasks.
         bool adaptive_chunk_size = call_stack.empty();
+        // construct indexing for children and the inverse mapping
         auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids, &thread_pool, adaptive_chunk_size);
         if (nonzero_indices.empty())
             return;
