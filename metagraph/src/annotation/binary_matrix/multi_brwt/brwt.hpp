@@ -62,8 +62,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
                     ThreadPool *thread_pool = nullptr) const;
 
     template <typename RowT>
-    std::vector<RowT>
-    slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
+    std::vector<RowT> slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
 
     // `call_stack` tracks the child indexes at each level during parallel tree
     // traversal, so that column indices can be remapped when merging results from subtrees.

@@ -32,7 +32,8 @@ void ThreadPool::join() {
     } else {
         std::unique_lock<std::mutex> lock(this->queue_mutex);
         assert(!joining_);
-        all_waiting.wait(lock, [this]() { return num_waiting_ == workers.size(); });
+        all_waiting.wait(lock, [this]() { return num_waiting_ == workers.size()
+                                                    && this->tasks.empty(); });
         joining_ = true;
     }
     empty_condition.notify_all();
