@@ -14,6 +14,9 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+void set_one_pass_brwt(bool value);
+bool get_one_pass_brwt();
+
 // The Multi-BRWT compressed binary matrix representation
 class BRWT : public BinaryMatrix, public GetEntrySupport {
     friend class BRWTBuilder;

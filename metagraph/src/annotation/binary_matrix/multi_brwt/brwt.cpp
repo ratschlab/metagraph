@@ -16,6 +16,11 @@ namespace matrix {
 
 const size_t kNumRowsInBlock = 250'000;
 
+static bool ONE_PASS_BRWT = false;
+
+void set_one_pass_brwt(bool value) { ONE_PASS_BRWT = value; }
+bool get_one_pass_brwt() { return ONE_PASS_BRWT; }
+
 
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());
@@ -90,12 +95,27 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
 
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
-    return slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
+    if (get_one_pass_brwt())
+        return slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
+
+    return BinaryMatrix::get_rows(row_ids, num_threads);
 }
 
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids) const {
-    return get_rows(row_ids, 0);
+    Vector<Column> slice;
+    // expect at least 3 relations per row
+    slice.reserve(row_ids.size() * 4);
+
+    slice_rows(row_ids, &slice);
+
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+        rows.emplace_back(row_begin, row_end);
+    });
+    assert(rows.size() == row_ids.size());
+    return rows;
 }
 
 void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callback,
@@ -130,7 +150,25 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) const {
-    return slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
+    if (get_one_pass_brwt())
+        return slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
+
+    return get_row_data_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads,
+                [this](const std::vector<Row> &row_ids) {
+        Vector<std::pair<Column, uint64_t>> slice;
+        // expect at least 3 relations per row
+        slice.reserve(row_ids.size() * 4);
+
+        slice_rows(row_ids, &slice);
+
+        std::vector<Vector<std::pair<Column, uint64_t>>> rows;
+        rows.reserve(row_ids.size());
+        call_sliced_rows(slice, [&](auto row_begin, auto row_end) {
+            rows.emplace_back(row_begin, row_end);
+        });
+        assert(rows.size() == row_ids.size());
+        return rows;
+    });
 }
 
 std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
