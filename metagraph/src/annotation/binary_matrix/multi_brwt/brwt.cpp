@@ -98,7 +98,20 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     if (get_one_pass_brwt())
         return slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
 
-    return BinaryMatrix::get_rows(row_ids, num_threads);
+    auto result = BinaryMatrix::get_rows(row_ids, num_threads);
+
+#ifndef NDEBUG
+    auto check = slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        auto a = result[i];
+        auto b = check[i];
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        assert(a == b);
+    }
+#endif
+
+    return result;
 }
 
 std::vector<BRWT::SetBitPositions>
@@ -115,6 +128,18 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         rows.emplace_back(row_begin, row_end);
     });
     assert(rows.size() == row_ids.size());
+
+#ifndef NDEBUG
+    auto check = slice_rows_parallel<SetBitPositions>(row_ids, 0);
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        auto a = rows[i];
+        auto b = check[i];
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        assert(a == b);
+    }
+#endif
+
     return rows;
 }
 
@@ -153,7 +178,7 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
     if (get_one_pass_brwt())
         return slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
 
-    return get_row_data_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads,
+    auto result = get_row_data_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads,
                 [this](const std::vector<Row> &row_ids) {
         Vector<std::pair<Column, uint64_t>> slice;
         // expect at least 3 relations per row
@@ -169,6 +194,19 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
         assert(rows.size() == row_ids.size());
         return rows;
     });
+
+#ifndef NDEBUG
+    auto check = slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        auto a = result[i];
+        auto b = check[i];
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        assert(a == b);
+    }
+#endif
+
+    return result;
 }
 
 std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
