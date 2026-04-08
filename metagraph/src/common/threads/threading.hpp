@@ -69,7 +69,7 @@ class ThreadPool {
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
                 help_condition.wait_for(lock, std::chrono::microseconds(100),
-                    [this,&ready]() { return !tasks.empty() || ready(); });
+                                        [this,&ready]() { return !tasks.empty() || ready(); });
                 if (ready())
                     break;
                 if (tasks.empty())
@@ -98,9 +98,9 @@ class ThreadPool {
   private:
     void initialize(size_t num_threads);
 
-    size_t num_threads_ = 0;
+    size_t num_threads_;
     std::vector<std::thread> workers;
-    size_t num_waiting_ = 0;
+    size_t num_waiting_;
     std::deque<std::function<void()>> tasks;
     size_t max_num_tasks_;
 
@@ -110,7 +110,7 @@ class ThreadPool {
     std::condition_variable all_waiting;
     std::condition_variable help_condition;
 
-    bool joining_ = false;
+    bool joining_;
     bool stop_;
 
     template <class F, typename... Args>
