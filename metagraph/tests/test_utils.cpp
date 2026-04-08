@@ -856,7 +856,7 @@ TEST(ThreadPool, HelpWhileWaitingTimeoutEmptyQueue) {
 
     // Queue is empty, future not ready (worker still sleeping for 50ms).
     // help_while_waiting enters wait_for(100μs), times out, predicate false.
-    // BUG: falls through to tasks.front() on empty deque → crash.
+    // Without the tasks.empty() guard, this would access an empty deque.
     EXPECT_EQ(42, pool.help_while_waiting(future).get());
 }
 
@@ -885,11 +885,11 @@ TEST(ThreadPool, HelpWhileWaitingTimeoutEmptyQueueMultiWorker) {
 // Multiple workers call help_while_waiting simultaneously (as happens in BRWT
 // when workers execute slice_rows tasks that call get_nonzero_rows).
 // Each enqueues a chunk task and waits for it. Cross-stealing occurs when
-// worker A executes worker B's chunk. Worker B must be notified that its
-// future is ready. Without notification from the HWW code path, B is stuck.
+// worker A executes worker B's chunk. Worker B discovers its future is ready
+// on the next wait_for timeout (100μs).
 //
 // The spin on all_done prevents workers from returning to the worker loop,
-// eliminating the "rescue notification" that would mask the bug.
+// so only the timeout (not the worker loop's notify) resolves the cross-steal.
 TEST(ThreadPool, HelpWhileWaitingCrossStealNotification) {
     for (int iter = 0; iter < 50; ++iter) {
         const int N = 4;
@@ -995,19 +995,15 @@ TEST(ThreadPool, RemoveWaitingTasksUnblocksEnqueue) {
 // ---------------------------------------------------------------------------
 
 // Measures the latency of help_while_waiting when the future is completed by
-// a worker (not stolen). Without help_condition notification after task
-// completion, HWW relies on the wait_for timeout (~100μs) to notice. With the
-// notification, it wakes immediately (~5-20μs).
+// a worker (not stolen). The worker loop's help_condition.notify_one() wakes
+// HWW promptly; without it, HWW would rely on the 100μs poll timeout.
 TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
     const int num_iters = 200;
     ThreadPool pool(1);
 
-    // Measures wake-up latency of help_while_waiting after the worker
-    // completes the future's task. A releaser thread ensures the worker
-    // doesn't start until HWW is blocking — isolating notification latency.
-    //
-    // With help_condition notify after task completion: ~200μs/iter (gate delay)
-    // Without (100μs timeout): ~250-300μs/iter (gate delay + up to 100μs)
+    // A releaser thread opens the gate after 200μs, ensuring HWW is already
+    // blocking when the worker completes. The "above 200μs gate" number in
+    // the output isolates wake-up overhead from the gate delay.
     long long total_us = 0;
     for (int i = 0; i < num_iters; ++i) {
         std::promise<void> gate;
