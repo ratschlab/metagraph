@@ -81,7 +81,6 @@ class ThreadPool {
 
             full_condition.notify_one();
             task();
-            help_condition.notify_all();
         }
 
         return future;

@@ -990,6 +990,58 @@ TEST(ThreadPool, RemoveWaitingTasksUnblocksEnqueue) {
     pool.join();
 }
 
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — latency benchmark
+// ---------------------------------------------------------------------------
+
+// Measures the latency of help_while_waiting when the future is completed by
+// a worker (not stolen). Without help_condition notification after task
+// completion, HWW relies on the wait_for timeout (~100μs) to notice. With the
+// notification, it wakes immediately (~5-20μs).
+TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
+    const int num_iters = 200;
+    ThreadPool pool(1);
+
+    // Measures wake-up latency of help_while_waiting after the worker
+    // completes the future's task. A releaser thread ensures the worker
+    // doesn't start until HWW is blocking — isolating notification latency.
+    //
+    // With help_condition notify after task completion: ~200μs/iter (gate delay)
+    // Without (100μs timeout): ~250-300μs/iter (gate delay + up to 100μs)
+    long long total_us = 0;
+    for (int i = 0; i < num_iters; ++i) {
+        std::promise<void> gate;
+        auto gate_future = gate.get_future().share();
+
+        auto future = pool.enqueue([gate_future]() {
+            gate_future.wait();  // block until released
+            return 1;
+        });
+
+        // Give the worker time to pick up the task and block on the gate.
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+
+        // Release the worker from a separate thread after 200μs.
+        // By then, HWW is definitely in wait_for.
+        std::thread releaser([&gate]() {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            gate.set_value();
+        });
+
+        auto t0 = std::chrono::steady_clock::now();
+        pool.help_while_waiting(future).get();
+        auto t1 = std::chrono::steady_clock::now();
+
+        total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        releaser.join();
+    }
+
+    fprintf(stderr, "[BENCH] %d iterations: %lld μs total, %.1f μs/iter "
+                    "(%.1f μs above 200μs gate)\n",
+                    num_iters, total_us, (double)total_us / num_iters,
+                    (double)total_us / num_iters - 200.0);
+}
+
 TEST(AsyncActivity, RunUniqueOnly) {
     AsyncActivity async;
 
