@@ -93,24 +93,30 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     return rows;
 }
 
+template <typename T>
+bool check_equal(const std::vector<T> &first, const std::vector<T> &second) {
+    if (first.size() != second.size())
+        return false;
+    for (size_t i = 0; i < first.size(); ++i) {
+        auto a = first[i];
+        auto b = second[i];
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        if (a != b)
+            return false;
+    }
+    return true;
+}
+
 std::vector<BRWT::SetBitPositions>
 BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     if (get_one_pass_brwt())
         return slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
 
     auto result = BinaryMatrix::get_rows(row_ids, num_threads);
-
-#ifndef NDEBUG
-    auto check = slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        auto a = result[i];
-        auto b = check[i];
-        std::sort(a.begin(), a.end());
-        std::sort(b.begin(), b.end());
-        assert(a == b);
-    }
-#endif
-
+    // When running the default BRWT query method, check the result against
+    // the one-pass BRWT to avoid writing separate tests for the one-pass BRWT.
+    assert(check_equal(result, slice_rows_parallel<SetBitPositions>(row_ids, num_threads)));
     return result;
 }
 
@@ -128,18 +134,6 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
         rows.emplace_back(row_begin, row_end);
     });
     assert(rows.size() == row_ids.size());
-
-#ifndef NDEBUG
-    auto check = slice_rows_parallel<SetBitPositions>(row_ids, 0);
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        auto a = rows[i];
-        auto b = check[i];
-        std::sort(a.begin(), a.end());
-        std::sort(b.begin(), b.end());
-        assert(a == b);
-    }
-#endif
-
     return rows;
 }
 
@@ -195,16 +189,9 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids, size_t num_threads) cons
         return rows;
     });
 
-#ifndef NDEBUG
-    auto check = slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads);
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        auto a = result[i];
-        auto b = check[i];
-        std::sort(a.begin(), a.end());
-        std::sort(b.begin(), b.end());
-        assert(a == b);
-    }
-#endif
+    // When running the default BRWT query method, check the result against
+    // the one-pass BRWT to avoid writing separate tests for the one-pass BRWT.
+    assert(check_equal(result, slice_rows_parallel<Vector<std::pair<Column, uint64_t>>>(row_ids, num_threads)));
 
     return result;
 }
