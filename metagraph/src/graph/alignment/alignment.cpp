@@ -3,7 +3,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
+#include "common/vector_map.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/rc_dbg.hpp"
@@ -21,6 +23,35 @@ std::string Alignment::format_coords() const {
 
     assert(label_columns.size());
     assert(label_coordinates.size() == label_columns.size());
+
+    if (coord_to_header) {
+        // Map global coordinates to per-sequence (header) local coordinates,
+        // grouping by (column, header_id) since multiple global coordinates in
+        // the same column may belong to different sequences.
+        using Key = std::pair<Column, size_t>;
+        VectorMap<Key, std::vector<uint64_t>> header_coords;
+
+        for (size_t i = 0; i < label_columns.size(); ++i) {
+            Column col = label_columns[i];
+            for (uint64_t coord : label_coordinates[i]) {
+                auto [header_id, local_coord] = coord_to_header->map_single_coord(col, coord);
+                header_coords[{ col, header_id }].push_back(local_coord);
+            }
+        }
+
+        std::vector<std::string> decoded_labels;
+        decoded_labels.reserve(header_coords.size());
+        for (const auto &[key, coords] : header_coords) {
+            const auto &[col, header_id] = key;
+            decoded_labels.emplace_back(coord_to_header->get_headers(col)[header_id]);
+            for (uint64_t coord : coords) {
+                decoded_labels.back()
+                    += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
+            }
+        }
+
+        return fmt::format("{}", fmt::join(decoded_labels, ";"));
+    }
 
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(label_columns.size());

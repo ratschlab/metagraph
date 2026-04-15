@@ -5,8 +5,9 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
+import re
 
-from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS, MMAP_FLAG
 
 
 """Test graph construction and alignment"""
@@ -391,6 +392,315 @@ class TestProteinAlign(TestingBase):
     # @parameterized.expand(GRAPH_TYPES)
     # def test_simple_align_all_graphs(self, representation):
     #     pass
+
+
+coord_anno_file_extension = {
+    'column_coord': '.column_coord.annodbg',
+    'row_diff_brwt_coord': '.row_diff_brwt_coord.annodbg',
+}
+
+COORD_ANNO_TYPES = list(coord_anno_file_extension.keys())
+
+
+@unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
+class TestAlignCoordToHeader(TestingBase):
+    """Test that 'metagraph align' resolves coordinates via .seqs index."""
+
+    def setUp(self):
+        self.tempdir = TemporaryDirectory()
+
+    def tearDown(self):
+        if getattr(self, 'tempdir', None) is not None:
+            self.tempdir.cleanup()
+
+    def _setup_graph(self, fa_files, anno_repr, k=5):
+        """Build graph + coord annotation + .seqs index. Return (graph, anno) paths."""
+        if isinstance(fa_files, str):
+            fa_files = [fa_files]
+        fa_input = ' '.join(fa_files)
+
+        graph_base = self.tempdir.name + '/graph'
+        graph = graph_base + '.dbg'
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + coord_anno_file_extension[anno_repr]
+
+        self._build_graph(fa_input, graph_base, k=k, repr='succinct', mode='basic')
+        self._annotate_graph(fa_input, graph, anno_base, anno_repr, anno_type='filename')
+
+        # The annotation column order may differ from the input file order
+        # (e.g. due to parallel construction).  Query the actual column order
+        # so the .seqs index matches.
+        res = subprocess.run([f"{METAGRAPH} stats {anno} --print-col-names"],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        columns = [l.strip() for l in res.stdout.decode().split('\n')[2:] if l.strip()]
+        seqs_input = ' '.join(columns) if columns else fa_input
+
+        cmd = (f"{METAGRAPH} annotate --anno-filename --index-header-coords -v "
+               f"-i {graph} -o {anno_base} {seqs_input}" + MMAP_FLAG)
+        res = subprocess.run([cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0,
+                         f"Indexing headers failed: {res.stderr.decode()}")
+        self.assertTrue(os.path.exists(anno_base + '.seqs'))
+        return graph, anno
+
+    def _run_align(self, graph, anno, query_fa, extra_flags=''):
+        """Run align and return parsed output lines as lists of tab-separated fields."""
+        align_cmd = (f'{METAGRAPH} align --align-only-forwards {extra_flags} '
+                     f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
+        res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
+        output = res.stdout.decode().rstrip()
+        if not output:
+            return []
+        return [line.split('\t') for line in output.split('\n')]
+
+    def _write_fa(self, name, sequences):
+        """Write a FASTA file. sequences is a list of (header, seq) tuples."""
+        path = os.path.join(self.tempdir.name, name)
+        with open(path, 'w') as f:
+            for header, seq in sequences:
+                f.write(f'>{header}\n{seq}\n')
+        return path
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_with_seqs_maps_coords_to_headers(self, anno_repr):
+        """Core test: .seqs resolves global coords to per-sequence header:start-end."""
+        #   seq1: GTATCGATCG       (10 bp)
+        #   seq2: GCTAGCTAGCTAGCTA (16 bp)
+        #   seq3: ATCGATCGAAAAACCCCCGGGGGTTTTT (28 bp)
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('query1', 'TATCGATCG'),     # matches seq1
+            ('query2', 'GCTAGCTAGCTAG'), # matches seq2
+            ('query3', 'AAAAACCCCC'),    # matches seq3
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        rows = self._run_align(graph, anno, query_fa)
+        self.assertEqual(len(rows), 3)
+
+        # query1 -> seq1:2-10
+        self.assertEqual(rows[0][0], 'query1')
+        self.assertEqual(rows[0][1], 'TATCGATCG')
+        self.assertEqual(rows[0][3], 'TATCGATCG')
+        self.assertEqual(rows[0][6], '9=')
+        self.assertEqual(rows[0][7], '0')
+        self.assertEqual(rows[0][8], 'seq1:2-10')
+
+        # query2 -> seq2:1-13
+        self.assertEqual(rows[1][0], 'query2')
+        self.assertEqual(rows[1][1], 'GCTAGCTAGCTAG')
+        self.assertEqual(rows[1][3], 'GCTAGCTAGCTAG')
+        self.assertEqual(rows[1][6], '13=')
+        self.assertEqual(rows[1][7], '0')
+        self.assertEqual(rows[1][8], 'seq2:1-13')
+
+        # query3 -> seq3:9-18
+        self.assertEqual(rows[2][0], 'query3')
+        self.assertEqual(rows[2][1], 'AAAAACCCCC')
+        self.assertEqual(rows[2][3], 'AAAAACCCCC')
+        self.assertEqual(rows[2][6], '10=')
+        self.assertEqual(rows[2][7], '0')
+        self.assertEqual(rows[2][8], 'seq3:9-18')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_no_coord_mapping_flag(self, anno_repr):
+        """--no-coord-mapping disables header resolution, keeps global file offsets."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('query1', 'TATCGATCG'),
+            ('query2', 'GCTAGCTAGCTAG'),
+            ('query3', 'AAAAACCCCC'),
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        rows = self._run_align(graph, anno, query_fa, extra_flags='--no-coord-mapping')
+        self.assertEqual(len(rows), 3)
+
+        # With --no-coord-mapping, labels use global file path:offset format
+        self.assertEqual(rows[0][0], 'query1')
+        self.assertEqual(rows[0][6], '9=')
+        self.assertEqual(rows[0][8], f'{test_fa}:2-10')
+
+        self.assertEqual(rows[1][0], 'query2')
+        self.assertEqual(rows[1][6], '13=')
+        self.assertEqual(rows[1][8], f'{test_fa}:7-19')
+
+        self.assertEqual(rows[2][0], 'query3')
+        self.assertEqual(rows[2][6], '10=')
+        self.assertEqual(rows[2][8], f'{test_fa}:27-36')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_shared_kmers_multiple_labels(self, anno_repr):
+        """Query matching k-mers shared between sequences produces semicolon-separated labels."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ])
+        # ATCGATCG appears in both seq1 (pos 3-10) and seq3 (pos 1-8)
+        query_fa = self._write_fa('query.fa', [('shared_query', 'ATCGATCG')])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        rows = self._run_align(graph, anno, query_fa)
+        self.assertEqual(len(rows), 1)
+
+        self.assertEqual(rows[0][0], 'shared_query')
+        self.assertEqual(rows[0][1], 'ATCGATCG')
+        self.assertEqual(rows[0][3], 'ATCGATCG')
+        self.assertEqual(rows[0][6], '8=')
+        self.assertEqual(rows[0][7], '0')
+        # Both sequences reported, separated by ;
+        self.assertEqual(rows[0][8], 'seq1:3-10;seq3:1-8')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_multiple_input_files(self, anno_repr):
+        """Sequences from separate FASTA files get correct per-file header mapping."""
+        fa1 = self._write_fa('file1.fa', [
+            ('alpha', 'GTATCGATCGACGT'),
+            ('beta', 'GCTAGCTAGCTAGCTA'),
+        ])
+        fa2 = self._write_fa('file2.fa', [
+            ('gamma', 'ATCGATCGAAAAACCCCC'),
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('q_alpha', 'TATCGATCG'),
+            ('q_gamma', 'AAAAACCCCC'),
+        ])
+
+        graph, anno = self._setup_graph([fa1, fa2], anno_repr)
+        rows = self._run_align(graph, anno, query_fa)
+        self.assertEqual(len(rows), 2)
+
+        # q_alpha -> alpha:2-10 (in file1.fa)
+        self.assertEqual(rows[0][0], 'q_alpha')
+        self.assertEqual(rows[0][3], 'TATCGATCG')
+        self.assertEqual(rows[0][6], '9=')
+        self.assertEqual(rows[0][8], 'alpha:2-10')
+
+        # q_gamma -> gamma:9-18 (in file2.fa)
+        self.assertEqual(rows[1][0], 'q_gamma')
+        self.assertEqual(rows[1][3], 'AAAAACCCCC')
+        self.assertEqual(rows[1][6], '10=')
+        self.assertEqual(rows[1][8], 'gamma:9-18')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_with_mismatch(self, anno_repr):
+        """Non-trivial CIGAR (substitution) still gets correct coord mapping."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCGACGTACGT'),
+        ])
+        # Position 12: G->A mismatch
+        query_fa = self._write_fa('query.fa', [
+            ('mismatch_q', 'GTATCGATCGACATACGT'),
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        rows = self._run_align(graph, anno, query_fa, extra_flags='--align-min-exact-match 0.0')
+        self.assertEqual(len(rows), 1)
+
+        self.assertEqual(rows[0][0], 'mismatch_q')
+        self.assertEqual(rows[0][1], 'GTATCGATCGACATACGT')
+        self.assertEqual(rows[0][3], 'GTATCGATCGACGTACGT')
+        self.assertEqual(rows[0][6], '12=1X5=')
+        self.assertEqual(rows[0][8], 'seq1:1-18')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_sequence_boundaries(self, anno_repr):
+        """Matches at very start (coord 1) and very end of a sequence."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'ACGTACGTACGT'),
+            ('seq2', 'TTTTTAAAAATTTTT'),
+        ])
+        query_start = self._write_fa('q_start.fa', [('q_start', 'ACGTACGTA')])
+        query_end = self._write_fa('q_end.fa', [('q_end', 'GTACGTACGT')])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+
+        # Match at start of seq1 -> coord starts at 1
+        rows = self._run_align(graph, anno, query_start)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], 'q_start')
+        self.assertEqual(rows[0][6], '9=')
+        self.assertEqual(rows[0][8], 'seq1:1-9')
+
+        # Match at end of seq1 -> coord ends at len(seq1)=12
+        rows = self._run_align(graph, anno, query_end)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], 'q_end')
+        self.assertEqual(rows[0][6], '10=')
+        self.assertEqual(rows[0][8], 'seq1:3-12')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    @unittest.skip("TODO: decide how to handle cross-boundary alignments")
+    def test_align_cross_sequence_boundary(self, anno_repr):
+        """Alignment path crosses from one indexed sequence into the next.
+
+        When two sequences share k-mers at their boundary, the graph has a
+        path that crosses from one into the other.  The aligner may follow
+        that path, producing a single alignment whose coordinate range
+        extends past the end of the first sequence.
+
+        Current behaviour: the start coordinate is mapped to the first
+        sequence and the range is naively extended, producing an
+        out-of-bounds label like ``seq1:5-20`` when seq1 is only 12 bp.
+
+        TODO: choose a strategy:
+          1. Split the range across headers (``seq1:5-12;seq2:1-8``).
+             Generalizes to 3+ sequences with a loop.
+             Pro: most informative.  The ``;`` separator and per-header
+             ranges are already used for shared-kmer matches.
+             Con: changes the semantics of ``;`` (independent matches vs.
+             contiguous span).  Requires k to compute per-sequence
+             nucleotide lengths (``num_kmers + k - 1``), since
+             ``CoordToHeader`` only stores k-mer counts.  Also needs
+             reference-space alignment length (from the CIGAR) to split
+             correctly when indels are present, since
+             ``sequence_.size()`` is the query-space length.
+          2. Fall back to the global file path for the whole label
+             (``file.fa:5-20``).
+             Pro: honest — no misleading per-sequence coordinates.
+             Con: loses header info entirely; output format becomes
+             inconsistent (some lines use headers, others file paths).
+        """
+        # seq1 ends with ...ACGTACGT, seq2 starts with ACGT... — they share
+        # k-mers at the boundary, so the graph connects them.
+        #   seq1: AAAAACGTACGT  (12 bp, k-mer coords 0-7)
+        #   seq2: ACGTTTTTTTTT  (12 bp, k-mer coords 8-15)
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'AAAAACGTACGT'),
+            ('seq2', 'ACGTTTTTTTTT'),
+        ])
+        # Full concatenation — the aligner finds a 16bp path crossing the boundary
+        query_fa = self._write_fa('query.fa', [
+            ('q_concat', 'AAAAACGTACGTACGTTTTTTTTT'),
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        rows = self._run_align(graph, anno, query_fa)
+        self.assertEqual(len(rows), 1)
+
+        self.assertEqual(rows[0][0], 'q_concat')
+        self.assertEqual(rows[0][6], '8S16=')
+
+        # Replace with the chosen strategy once decided.
+        # Option 1 would give:
+        #   self.assertEqual(rows[0][8], 'seq1:5-12;seq2:1-8')
+        # Option 2 would give:
+        #   self.assertIn(self.tempdir.name, rows[0][8])  # file path
+        #
+        # Current (broken) behaviour:
+        #   rows[0][8] == 'seq1:5-20'  (out-of-bounds for 12 bp seq1)
+        self.fail("Placeholder — expected output not yet decided")
 
 
 if __name__ == '__main__':
