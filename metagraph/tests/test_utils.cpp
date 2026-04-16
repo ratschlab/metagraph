@@ -956,6 +956,90 @@ TEST(ThreadPool, HelpWhileWaitingCrossStealNotification) {
     }
 }
 
+// Multiple threads each enqueue a batch of work and call help_while_waiting.
+// All threads cooperatively execute each other's tasks. Verifies correctness
+// of concurrent HWW when many tasks are in-flight (similar to BRWT traversal).
+TEST(ThreadPool, HelpWhileWaitingMultipleHelpers) {
+    const int num_workers = 4;
+    const int chunks_per_worker = 20;
+    ThreadPool pool(num_workers);
+
+    std::atomic<int> total_executed{0};
+    std::atomic<int> helpers_done{0};
+
+    for (int w = 0; w < num_workers; ++w) {
+        pool.force_enqueue([&]() {
+            // Each worker enqueues a batch of chunk tasks and waits for the last one.
+            std::shared_future<int> last_future;
+            for (int c = 0; c < chunks_per_worker; ++c) {
+                last_future = pool.force_enqueue_front([&]() {
+                    total_executed.fetch_add(1, std::memory_order_relaxed);
+                    return 1;
+                });
+            }
+            // Help execute tasks (own and others') while waiting.
+            pool.help_while_waiting(last_future).get();
+            helpers_done.fetch_add(1, std::memory_order_release);
+        });
+    }
+
+    pool.join();
+    EXPECT_EQ(num_workers, helpers_done.load());
+    EXPECT_EQ(num_workers * chunks_per_worker, total_executed.load());
+}
+
+// Block all pool workers with promises, then spawn two external threads that
+// each call help_while_waiting. The external threads are the only ones that
+// can execute tasks, so HWW is deterministically called from exactly 2 threads.
+TEST(ThreadPool, HelpWhileWaitingTwoExternalHelpers) {
+    const int num_workers = 4;
+    const int tasks_per_helper = 50;
+    ThreadPool pool(num_workers);
+
+    // Block every worker with a promise so they can't pick up any more tasks.
+    std::promise<void> unblock;
+    auto gate = unblock.get_future().share();
+    std::atomic<int> workers_blocked{0};
+    for (int i = 0; i < num_workers; ++i) {
+        pool.force_enqueue([&]() {
+            workers_blocked.fetch_add(1, std::memory_order_release);
+            gate.wait();
+        });
+    }
+    // Wait until all workers are blocked.
+    while (workers_blocked.load(std::memory_order_acquire) < num_workers) {
+        std::this_thread::yield();
+    }
+
+    // Enqueue work that only external HWW callers can execute.
+    std::atomic<int> total_executed{0};
+    auto make_future = [&]() {
+        std::shared_future<int> last;
+        for (int i = 0; i < tasks_per_helper; ++i) {
+            last = pool.force_enqueue([&]() {
+                total_executed.fetch_add(1, std::memory_order_relaxed);
+                return 1;
+            });
+        }
+        return last;
+    };
+    auto future_a = make_future();
+    auto future_b = make_future();
+
+    // Two external threads call help_while_waiting concurrently.
+    std::thread helper_a([&]() { pool.help_while_waiting(future_a).get(); });
+    std::thread helper_b([&]() { pool.help_while_waiting(future_b).get(); });
+
+    helper_a.join();
+    helper_b.join();
+
+    EXPECT_EQ(2 * tasks_per_helper, total_executed.load());
+
+    // Release workers so the pool can shut down.
+    unblock.set_value();
+    pool.join();
+}
+
 // ---------------------------------------------------------------------------
 //  ThreadPool: remove_waiting_tasks unblocks enqueue
 // ---------------------------------------------------------------------------
