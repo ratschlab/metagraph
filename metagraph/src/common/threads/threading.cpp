@@ -36,7 +36,7 @@ void ThreadPool::join() {
                                                     && this->tasks.empty(); });
         joining_ = true;
     }
-    empty_condition.notify_all();
+    has_work.notify_all();
 
     for (std::thread &worker : workers) {
         worker.join();
@@ -49,8 +49,8 @@ void ThreadPool::join() {
 
 void ThreadPool::remove_waiting_tasks() {
     std::unique_lock<std::mutex> lock(this->queue_mutex);
-    this->tasks = std::deque<std::function<void()>>();
-    this->full_condition.notify_all();
+    this->tasks = {};
+    this->not_full.notify_all();
 }
 
 void ThreadPool::initialize(size_t num_workers) {
@@ -72,7 +72,7 @@ void ThreadPool::initialize(size_t num_workers) {
                     std::unique_lock<std::mutex> lock(this->queue_mutex);
                     num_waiting_++;
                     all_waiting.notify_one();
-                    this->empty_condition.wait(lock, [this]() {
+                    this->has_work.wait(lock, [this]() {
                         return this->joining_ || !this->tasks.empty();
                     });
                     num_waiting_--;
@@ -83,11 +83,11 @@ void ThreadPool::initialize(size_t num_workers) {
                     this->tasks.pop_front();
                 }
 
-                full_condition.notify_one();
+                not_full.notify_one();
                 task();
                 // Performance only: wakes help_while_waiting immediately
                 // instead of waiting for its 100μs poll timeout.
-                help_condition.notify_one();
+                helper_wakeup.notify_one();
             }
         });
     }

@@ -14,8 +14,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      size_t request_id,
                      const std::function<Json::Value(const std::string &)> &process);
 
-// An exception that may be thrown inside the callback `process` to indicate that the response
-// is already sent by the caller and no additional action in `process_request` is required.
 class CurrentlyInitializingError : public std::exception {};
 
 Json::Value parse_json_string(const std::string &msg);

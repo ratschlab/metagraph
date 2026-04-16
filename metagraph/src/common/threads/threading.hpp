@@ -46,17 +46,17 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        return emplace(false, false, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false /*front*/, false /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class F, typename... Args>
     auto force_enqueue(F&& f, Args&&... args) {
-        return emplace(false, true, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class F, typename... Args>
     auto force_enqueue_front(F&& f, Args&&... args) {
-        return emplace(true, true, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(true /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class T>
@@ -68,8 +68,9 @@ class ThreadPool {
             std::function<void()> task;
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
-                help_condition.wait_for(lock, std::chrono::microseconds(100),
-                                        [this,&ready]() { return !tasks.empty() || ready(); });
+                helper_wakeup.wait_for(lock, std::chrono::microseconds(100), [this, &ready]() {
+                    return !tasks.empty() || ready();
+                });
                 if (ready())
                     break;
                 if (tasks.empty())
@@ -79,7 +80,7 @@ class ThreadPool {
                 tasks.pop_front();
             }
 
-            full_condition.notify_one();
+            not_full.notify_one();
             task();
         }
 
@@ -104,10 +105,10 @@ class ThreadPool {
     size_t max_num_tasks_;
 
     std::mutex queue_mutex;
-    std::condition_variable empty_condition;
-    std::condition_variable full_condition;
-    std::condition_variable all_waiting;
-    std::condition_variable help_condition;
+    std::condition_variable has_work; // task available or joining
+    std::condition_variable not_full; // queue has space
+    std::condition_variable all_waiting; // all workers are idle
+    std::condition_variable helper_wakeup; // task available for the helper or future is ready
 
     bool joining_;
     bool stop_;
@@ -132,7 +133,7 @@ class ThreadPool {
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
             assert(!joining_);
-            full_condition.wait(lock, [this,force]() {
+            not_full.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
             if (front) {
@@ -142,8 +143,8 @@ class ThreadPool {
             }
         }
 
-        empty_condition.notify_one();
-        help_condition.notify_one();
+        has_work.notify_one();
+        helper_wakeup.notify_one();
 
         return future;
     }
