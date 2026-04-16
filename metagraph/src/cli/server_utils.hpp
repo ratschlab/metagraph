@@ -14,7 +14,11 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      size_t request_id,
                      const std::function<Json::Value(const std::string &)> &process);
 
-class CurrentlyInitializingError : public std::exception {};
+class CurrentlyInitializingError : public std::exception {
+    const char* what() const noexcept override {
+        return "Server is currently initializing";
+    }
+};
 
 Json::Value parse_json_string(const std::string &msg);
 
