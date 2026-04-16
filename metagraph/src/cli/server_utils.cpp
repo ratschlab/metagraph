@@ -1,7 +1,6 @@
 #include <zlib.h>
 #include <json/json.h>
 #include <server_http.hpp>
-#include <limits>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"

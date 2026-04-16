@@ -436,9 +436,13 @@ TEST(ThreadPool, MultiThreadFuture) {
 TEST(ThreadPool, MultiThreadException) {
     for (size_t num_workers : { 1, 10 }) {
         ASSERT_DEATH({
-            ThreadPool pool(num_workers);
-            pool.enqueue([]() { throw std::runtime_error("test exception"); });
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            try {
+                ThreadPool pool(num_workers);
+                pool.enqueue([]() { throw std::runtime_error("test exception"); });
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            } catch (...) {
+                FAIL() << "all exceptions must be thrown in workers";
+            }
         }, "");
     }
 }
