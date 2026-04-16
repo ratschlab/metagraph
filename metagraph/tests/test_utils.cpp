@@ -431,34 +431,49 @@ TEST(ThreadPool, MultiThreadFuture) {
 }
 
 #ifndef _NO_DEATH_TEST
-void throw_from_worker() {
-    for (size_t i = 2; i < 20; ++i) {
-        try {
-            ThreadPool pool(i);
-
-            std::vector<std::shared_future<size_t>> result;
-            for (size_t t = 0; t < 1000; ++t) {
-                result.emplace_back(pool.enqueue([&](size_t i) {
-                    // This exception will be thrown in a worker thread, which
-                    // should kill the main thread and the whole process as well
-                    throw std::runtime_error("test exception");
-                    return i;
-                }, 1));
-            }
-
-        } catch (...) {
-            FAIL() << "all exceptions must be thrown in workers";
-        }
-    }
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-}
-
+// Exceptions thrown in worker threads must kill the process (via std::terminate)
+// even if the caller never calls future.get().
 TEST(ThreadPool, MultiThreadException) {
-    // check that a worker throws even if we don't
-    // wait for the result in the returned 'future'
-    ASSERT_DEATH(throw_from_worker(), "");
+    for (size_t num_workers : { 1, 10 }) {
+        ASSERT_DEATH({
+            ThreadPool pool(num_workers);
+            pool.enqueue([]() { throw std::runtime_error("test exception"); });
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }, "");
+    }
 }
 #endif // ifndef _NO_DEATH_TEST
+
+// With 0 workers (synchronous), exceptions propagate back to the caller.
+TEST(ThreadPool, SynchronousException) {
+    ThreadPool pool(0);
+    EXPECT_THROW(
+        pool.enqueue([]() -> int { throw std::runtime_error("sync throw"); }),
+        std::runtime_error
+    );
+}
+
+// When help_while_waiting steals a throwing task, the exception propagates
+// to the caller rather than crashing a worker thread.
+TEST(ThreadPool, HelpWhileWaitingStealedException) {
+    ThreadPool pool(1);
+
+    // Block the only worker so it can't pick up subsequent tasks.
+    std::promise<void> unblock;
+    pool.enqueue([&]() { unblock.get_future().wait(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    // Enqueue a task that throws — it stays in the queue since the worker is busy.
+    pool.force_enqueue([]() -> int { throw std::runtime_error("stolen throw"); });
+
+    // Enqueue the task we actually wait for — also stays in the queue.
+    auto future = pool.force_enqueue([]() { return 42; });
+
+    // help_while_waiting will steal the throwing task first, propagating the exception.
+    EXPECT_THROW(pool.help_while_waiting(future).get(), std::runtime_error);
+
+    unblock.set_value();
+}
 
 TEST(ThreadPool, DummyEmptyJoin) {
     ThreadPool pool(0);

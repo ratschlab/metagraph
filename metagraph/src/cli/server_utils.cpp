@@ -91,7 +91,7 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     Timer timer;
     // Retrieve string:
     std::string content = request->content.string();
-    SimpleWeb::CaseInsensitiveMultimap header;
+    SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
     SimpleWeb::StatusCode status;
     std::string ret;
 
@@ -99,7 +99,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
         // Return JSON string
         status = SimpleWeb::StatusCode::success_ok;
         ret = Json::writeString(Json::StreamWriterBuilder(), process(content));
-        header = SimpleWeb::CaseInsensitiveMultimap({ { "Content-Type", "application/json" } });
         if (is_compression_requested(request)) {
             ret = compress_string(ret);
             header.insert(std::make_pair("Content-Encoding", "deflate"));
@@ -108,7 +107,8 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     } catch (const CurrentlyInitializingError& e) {
         logger->info("[Server] Got a request during initialization. Asked to come back later");
         status = SimpleWeb::StatusCode::server_error_service_unavailable;
-        ret = "Server is currently initializing, please come back later.";
+        header.insert(std::make_pair("Retry-After", "60")); // ask to come back in 60 seconds
+        ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
     } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         status = SimpleWeb::StatusCode::client_error_bad_request;
