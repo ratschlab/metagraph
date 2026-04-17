@@ -96,17 +96,12 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
 #ifndef NDEBUG
 template <typename T>
 bool check_equal(const std::vector<T> &first, const std::vector<T> &second) {
-    if (first.size() != second.size())
-        return false;
-    for (size_t i = 0; i < first.size(); ++i) {
-        auto a = first[i];
-        auto b = second[i];
+    auto same_rows = [](T a, T b) {
         std::sort(a.begin(), a.end());
         std::sort(b.begin(), b.end());
-        if (a != b)
-            return false;
-    }
-    return true;
+        return a == b;
+    };
+    return std::equal(first.begin(), first.end(), second.begin(), second.end(), same_rows);
 }
 #endif // NDEBUG
 
@@ -199,7 +194,7 @@ std::vector<ColRanks> BRWT::get_column_ranks(const std::vector<Row>& row_ids,
     return result;
 }
 
-// Returns a pair (`nonzero_indices`, `child_row_ids`): indices into `rows` for
+// Returns a pair (`nonzero_indices`, `child_row_ids`): indices into `row_ids` for
 // the rows with the set bit in `nonzero_rows_`, and their recalculated
 // (via rank) row indices for the respective rows in the children.
 using NonzeroAndChildRows = std::pair<std::vector<size_t>, std::vector<BRWT::Row>>;
@@ -375,11 +370,11 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
     slice->insert(slice->end(), row_ids.size() - last_nz, delim);
 }
 
-template <typename T>
+template <typename T, class CallSlice>
 void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                       const BRWT *root, std::vector<size_t> call_stack,
                       size_t max_columns_cutoff, ThreadPool &thread_pool,
-                      std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const {
+                      CallSlice call_slice) const {
     if (row_ids.empty())
         return;
 
@@ -408,8 +403,8 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             // Each lambda captures `rows` and `call_stack` by value, giving each
             // child its own copy to modify independently.
             thread_pool.force_enqueue_front([=,&thread_pool]() {
-                this->child_nodes_[j]->slice_rows(*child_row_ids_ptr, std::move(rows), root, call_stack,
-                                                  max_columns_cutoff, thread_pool, call_slice);
+                this->child_nodes_[j]->slice_rows<T>(*child_row_ids_ptr, std::move(rows), root, call_stack,
+                                                     max_columns_cutoff, thread_pool, call_slice);
             });
         }
     } else {

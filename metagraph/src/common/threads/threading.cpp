@@ -85,9 +85,10 @@ void ThreadPool::initialize(size_t num_workers) {
 
                 not_full.notify_one();
                 task();
-                // Performance only: wakes help_while_waiting immediately
-                // instead of waiting for its 100μs poll timeout.
-                helper_wakeup.notify_one();
+                // Performance only: wake every help_while_waiting caller so
+                // each can check whether its own future is now ready without
+                // waiting for the 100μs poll timeout.
+                helper_wakeup.notify_all();
             }
         });
     }

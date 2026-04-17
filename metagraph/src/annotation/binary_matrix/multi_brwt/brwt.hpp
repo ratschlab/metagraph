@@ -69,11 +69,11 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     // `call_stack` tracks the child indexes at each level during parallel tree
     // traversal, so that column indices can be remapped when merging results from subtrees.
-    template <typename T>
+    template <typename T, class CallSlice>
     void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
                     const BRWT *root, std::vector<size_t> call_stack,
                     size_t max_columns_cutoff, ThreadPool &thread_pool,
-                    std::function<void(std::vector<size_t>&&, Vector<T>&&)> call_slice) const;
+                    CallSlice call_slice) const;
 
     // Returns (`nonzero_indices`, `child_row_ids`): indices into `rows` for
     // the rows with the set bit in `nonzero_rows_`, and their recalculated

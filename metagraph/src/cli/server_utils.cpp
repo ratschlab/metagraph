@@ -119,10 +119,9 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     }
     double processing_time = timer.elapsed();
     response->write(status, ret, header);
-    double transfer_time = timer.elapsed() - processing_time;
     logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
-                 "transfer time: {:.3f} sec, finished in {:.3f} sec", request_id,
-                 processing_time, (double)ret.size() / 1000, transfer_time, timer.elapsed());
+                 "finished in {:.3f} sec",
+                 request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
 }
 
 } // namespace cli

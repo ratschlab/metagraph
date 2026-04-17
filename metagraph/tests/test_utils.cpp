@@ -439,6 +439,10 @@ TEST(ThreadPool, MultiThreadException) {
             try {
                 ThreadPool pool(num_workers);
                 pool.enqueue([]() { throw std::runtime_error("test exception"); });
+                // A plain sleep (rather than a promise signal) is deliberate:
+                // ASSERT_DEATH runs this block in a forked subprocess that is
+                // expected to abort; we only need to stay alive long enough
+                // for the worker to pick up the task and terminate the process.
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             } catch (...) {
                 FAIL() << "all exceptions must be thrown in workers";
@@ -463,9 +467,13 @@ TEST(ThreadPool, HelpWhileWaitingStealedException) {
     ThreadPool pool(1);
 
     // Block the only worker so it can't pick up subsequent tasks.
+    std::promise<void> worker_started;
     std::promise<void> unblock;
-    pool.enqueue([&]() { unblock.get_future().wait(); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
 
     // Enqueue a task that throws — it stays in the queue since the worker is busy.
     pool.force_enqueue([]() -> int { throw std::runtime_error("stolen throw"); });
@@ -1139,6 +1147,12 @@ TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
                     "(%.1f μs above 200μs gate)\n",
                     num_iters, total_us, (double)total_us / num_iters,
                     (double)total_us / num_iters - 200.0);
+
+    // Loose upper bound: the 100μs HWW poll is the worst-case wake path when
+    // the worker notify is missed. Anything much above 200μs (gate) + 100μs
+    // (poll) + scheduling slack indicates the notify mechanism has regressed.
+    // Bound is generous for busy CI runners.
+    EXPECT_LT((double)total_us / num_iters, 5000.0);
 }
 
 TEST(AsyncActivity, RunUniqueOnly) {

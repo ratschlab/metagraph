@@ -59,6 +59,13 @@ class ThreadPool {
         return emplace(true /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
+    // Exception behavior differs between the two execution paths:
+    //   * Tasks run on a worker thread: if they throw, `future.get()` inside
+    //     `wrapped_task` rethrows on the worker, which escapes the worker
+    //     lambda and calls std::terminate (covered by MultiThreadException).
+    //   * Tasks stolen by `help_while_waiting` (below) run on the caller, so
+    //     an exception propagates out to the caller instead
+    //     (covered by HelpWhileWaitingStealedException).
     template <class T>
     std::shared_future<T>& help_while_waiting(std::shared_future<T> &future) {
         auto ready = [&]() {
