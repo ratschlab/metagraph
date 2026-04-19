@@ -626,11 +626,16 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
-        if (to_row_diff && !infbase.size()) {
+        // For row_diff_brwt inputs, the anchor and fork-succ bitmaps are
+        // embedded in the .annodbg, so no graph is needed when re-formatting
+        // to another row_diff representation.
+        const bool input_has_embedded_anchor = fnames.size()
+                && utils::ends_with(fnames.front(), ".row_diff_brwt.annodbg");
+        if (to_row_diff && !infbase.size() && !input_has_embedded_anchor) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
-        } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+        } else if ((!to_row_diff || input_has_embedded_anchor) && infbase.size()) {
+            std::cerr << "Graph is not needed for this transform" << std::endl;
             print_usage_and_exit = true;
         }
     }
