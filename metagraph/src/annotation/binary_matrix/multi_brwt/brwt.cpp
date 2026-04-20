@@ -77,7 +77,8 @@ BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) c
     std::mutex mu;
     std::vector<RowT> rows(row_ids.size());
     slice_rows<T>(row_ids, utils::arange<size_t>(0, row_ids.size()), this, {},
-        std::max(kMinColumnsForParallel, get_chunk_size(num_columns(), kMaxColumnsChunkSize, num_threads)),
+        std::max(kMinColumnsForParallel,
+                 get_chunk_size(num_columns(), kMaxColumnsChunkSize, num_threads)),
         thread_pool,
         [&](std::vector<size_t> &&sliced_rows, Vector<T> &&slice) {
             auto rows_it = sliced_rows.begin();
@@ -381,10 +382,12 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
     if (child_nodes_.size()
             && call_stack.size() < kMaxParallelDepth
             && num_columns() > max_columns_cutoff) {
-        // Only for root the chunk size is adaptive, for lower-level nodes it's fixed to avoid creating too many tasks.
+        // Only for root the chunk size is adaptive.
+        // For lower-level nodes, it's fixed to avoid creating too many tasks.
         bool adaptive_chunk_size = call_stack.empty();
         // construct indexing for children and the inverse mapping
-        auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids, &thread_pool, adaptive_chunk_size);
+        auto [nonzero_indices, child_row_ids] = get_nonzero_rows(row_ids, &thread_pool,
+                                                                 adaptive_chunk_size);
         if (nonzero_indices.empty())
             return;
         auto child_row_ids_ptr = std::make_shared<const std::vector<Row>>(std::move(child_row_ids));
