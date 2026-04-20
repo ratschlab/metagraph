@@ -106,6 +106,9 @@ void RowCompressed<Label>::serialize(const std::string &filename) const {
 template <typename Label>
 bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     const auto &fname = make_suffix(filenames.at(0), kExtension);
+    // DEBUG: trace load path — remove once corrupt-annotation test flake is diagnosed.
+    logger->warn("[DEBUG RowCompressed::merge_load] fname='{}' n_files={}",
+                 fname, filenames.size());
     std::ifstream instream(fname, std::ios::binary);
     if (!instream.good()) {
         logger->error("Cannot open annotation file '{}': {}", fname,
@@ -114,8 +117,17 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
     }
 
     try {
-        bool is_successfully_loaded = label_encoder_.load(instream)
-                                            && matrix_->load(instream);
+        bool le_ok = label_encoder_.load(instream);
+        logger->warn("[DEBUG RowCompressed::merge_load] label_encoder.load={} size={} "
+                     "tellg={} good={} eof={}",
+                     le_ok, label_encoder_.size(),
+                     (long)instream.tellg(), instream.good(), instream.eof());
+        bool mat_ok = le_ok && matrix_->load(instream);
+        logger->warn("[DEBUG RowCompressed::merge_load] matrix_->load={} "
+                     "tellg={} good={} eof={}",
+                     mat_ok, (long)instream.tellg(),
+                     instream.good(), instream.eof());
+        bool is_successfully_loaded = le_ok && mat_ok;
         if (!is_successfully_loaded) {
             logger->error("Cannot load annotation from '{}': {}", fname,
                           utils::file_read_failure_detail(fname));

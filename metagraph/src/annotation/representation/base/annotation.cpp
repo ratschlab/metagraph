@@ -46,17 +46,31 @@ template<>
 bool LabelEncoder<std::string>::load(std::istream &instream) {
     clear();
 
+    // DEBUG: trace load path — remove once corrupt-annotation test flake is diagnosed.
+    logger->warn("[DEBUG LabelEncoder::load] enter, good={}", instream.good());
     if (!instream.good())
         return false;
 
     try {
         auto pos = instream.tellg();
         std::string version(7, '\0');
-        if (instream.read(version.data(), 7) && version == "LE-v2.0") {
+        bool read_ok = (bool)instream.read(version.data(), 7);
+        std::string hex;
+        for (unsigned char c : version) {
+            char buf[4]; std::snprintf(buf, sizeof(buf), "%02x ", c);
+            hex += buf;
+        }
+        logger->warn("[DEBUG LabelEncoder::load] read_header read_ok={} gcount={} hex={}",
+                     read_ok, (long)instream.gcount(), hex);
+        if (read_ok && version == "LE-v2.0") {
+            logger->warn("[DEBUG LabelEncoder::load] v2 branch");
             Deserializer deserializer(instream);
             encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
+            logger->warn("[DEBUG LabelEncoder::load] v2 done good={} size={}",
+                         instream.good(), encode_label_.size());
             return instream.good();
         }
+        logger->warn("[DEBUG LabelEncoder::load] legacy branch");
         // backward compatibility
         if (!instream.seekg(pos)) {
             logger->error("Couldn't seek in the input stream when reading label encoder");
@@ -64,19 +78,33 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         }
         {
             std::vector<std::string> labels;
-            if (!load_string_vector(instream, &labels))
+            if (!load_string_vector(instream, &labels)) {
+                logger->warn("[DEBUG LabelEncoder::load] legacy first load_string_vector failed");
                 return false;
+            }
+            logger->warn("[DEBUG LabelEncoder::load] legacy 1st string_vector size={}", labels.size());
             std::vector<uint64_t> values;
-            if (!load_number_vector(instream, &values))
+            if (!load_number_vector(instream, &values)) {
+                logger->warn("[DEBUG LabelEncoder::load] legacy load_number_vector failed");
                 return false;
+            }
+            logger->warn("[DEBUG LabelEncoder::load] legacy number_vector size={}", values.size());
         }
         std::vector<std::string> labels;
-        if (!load_string_vector(instream, &labels))
+        if (!load_string_vector(instream, &labels)) {
+            logger->warn("[DEBUG LabelEncoder::load] legacy 2nd load_string_vector failed");
             return false;
+        }
+        logger->warn("[DEBUG LabelEncoder::load] legacy 2nd string_vector size={} final good={}",
+                     labels.size(), instream.good());
         encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
                                                std::make_move_iterator(labels.end()));
         return instream.good();
+    } catch (const std::exception &e) {
+        logger->warn("[DEBUG LabelEncoder::load] std::exception: {}", e.what());
+        return false;
     } catch (...) {
+        logger->warn("[DEBUG LabelEncoder::load] unknown exception");
         return false;
     }
 }

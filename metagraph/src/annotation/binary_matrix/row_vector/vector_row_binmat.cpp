@@ -7,6 +7,7 @@
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
 #include "common/algorithms.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
@@ -94,30 +95,49 @@ void VectorRowBinMat<RowType>::insert_rows(const std::vector<Row> &rows) {
 
 template <typename RowType>
 bool VectorRowBinMat<RowType>::load(std::istream &instream) {
+    // DEBUG: trace load path — remove once corrupt-annotation test flake is diagnosed.
+    mtg::common::logger->warn("[DEBUG VectorRowBinMat::load] enter, good={}",
+                              instream.good());
     if (!instream.good())
         return false;
 
     try {
         size_t num_rows = load_number(instream);
         num_columns_ = load_number(instream);
+        mtg::common::logger->warn(
+            "[DEBUG VectorRowBinMat::load] num_rows={} num_columns={} good_after_hdr={}",
+            num_rows, num_columns_, instream.good());
         vector_ = decltype(vector_)();
         vector_.resize(num_rows);
 
         sdsl::int_vector<> full_vector;
         full_vector.load(instream);
+        mtg::common::logger->warn(
+            "[DEBUG VectorRowBinMat::load] full_vector size={} width={} good={} eof={}",
+            full_vector.size(), (int)full_vector.width(),
+            instream.good(), instream.eof());
 
         for (size_t k = 0, i = 0; k < full_vector.size(); ++k) {
             if (full_vector[k]) {
                 vector_[i].push_back(full_vector[k] - 1);
-                if (vector_[i].back() >= num_columns_)
+                if (vector_[i].back() >= num_columns_) {
+                    mtg::common::logger->warn(
+                        "[DEBUG VectorRowBinMat::load] col {} >= num_columns {}, returning false",
+                        vector_[i].back(), num_columns_);
                     return false;
+                }
             } else {
                 i++;
             }
         }
 
+        mtg::common::logger->warn("[DEBUG VectorRowBinMat::load] success");
         return true;
+    } catch (const std::exception &e) {
+        mtg::common::logger->warn("[DEBUG VectorRowBinMat::load] std::exception: {}", e.what());
+        return false;
     } catch (...) {
+        mtg::common::logger->warn("[DEBUG VectorRowBinMat::load] unknown exception");
         return false;
     }
 }
