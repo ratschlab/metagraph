@@ -11,7 +11,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::graph::boss;
 
-const std::string test_data_dir = TEST_DATA_DIR;
+const std::string test_data_dir = "../tests/data";
 
 
 TEST(BOSSMerge, TraversalMergeWithEmpty) {
