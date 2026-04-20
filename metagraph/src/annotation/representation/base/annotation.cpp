@@ -1,5 +1,7 @@
 #include "annotation.hpp"
 
+#include <iostream>
+
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 
@@ -83,8 +85,15 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
                 return false;
             }
             logger->warn("[DEBUG LabelEncoder::load] legacy 1st string_vector size={}", labels.size());
+            std::cerr << "[DEBUG cerr] about to call load_number_vector, tellg="
+                      << (long)instream.tellg() << " good=" << instream.good() << std::endl;
             std::vector<uint64_t> values;
-            if (!load_number_vector(instream, &values)) {
+            bool nv_ok = load_number_vector(instream, &values);
+            std::cerr << "[DEBUG cerr] load_number_vector returned " << nv_ok
+                      << " values.size()=" << values.size()
+                      << " tellg=" << (long)instream.tellg()
+                      << " good=" << instream.good() << std::endl;
+            if (!nv_ok) {
                 logger->warn("[DEBUG LabelEncoder::load] legacy load_number_vector failed");
                 return false;
             }
