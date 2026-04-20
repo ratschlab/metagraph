@@ -403,8 +403,9 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             // Each lambda captures `rows` and `call_stack` by value, giving each
             // child its own copy to modify independently.
             thread_pool.force_enqueue_front([=,&thread_pool]() {
-                this->child_nodes_[j]->slice_rows<T>(*child_row_ids_ptr, std::move(rows), root, call_stack,
-                                                     max_columns_cutoff, thread_pool, call_slice);
+                this->child_nodes_[j]->slice_rows<T>(*child_row_ids_ptr, std::move(rows), root,
+                                                     std::move(call_stack), max_columns_cutoff,
+                                                     thread_pool, std::move(call_slice));
             });
         }
     } else {
