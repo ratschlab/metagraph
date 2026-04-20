@@ -42,29 +42,31 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
 namespace matrix {
 
 void IRowDiff::load_anchor(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read anchor file: {}", filename);
-        std::exit(1);
-    }
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
-        common::logger->error("Could not open anchor file {}", filename);
+        logger->error("Cannot open anchor file '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
         std::exit(1);
     }
-    anchor_.load(*f);
+    if (!anchor_.load(*f)) {
+        logger->error("Cannot load anchor from '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
+        std::exit(1);
+    }
 }
 
 void IRowDiff::load_fork_succ(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read fork successor file: {}", filename);
-        std::exit(1);
-    }
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
-        common::logger->error("Could not open fork successor file {}", filename);
+        logger->error("Cannot open fork successor file '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
         std::exit(1);
     }
-    fork_succ_.load(*f);
+    if (!fork_succ_.load(*f)) {
+        logger->error("Cannot load fork successor bitmap from '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
+        std::exit(1);
+    }
 }
 
 std::tuple<std::vector<BinaryMatrix::Row>,

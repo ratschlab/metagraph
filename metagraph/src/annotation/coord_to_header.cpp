@@ -1,7 +1,9 @@
 #include "annotation/coord_to_header.hpp"
 
+#include "common/logger.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
@@ -9,6 +11,7 @@ namespace mtg {
 namespace annot {
 
 using Tuple = CoordToHeader::Tuple;
+using mtg::common::logger;
 
 CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                              std::vector<std::vector<uint64_t>> &&num_kmers)
@@ -57,10 +60,13 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
 }
 
 bool CoordToHeader::load(const std::string &filename_base) {
-    std::unique_ptr<std::ifstream> in
-        = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
-    if (!in)
+    const std::string path = utils::make_suffix(filename_base, kExtension);
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);
+    if (!in->good()) {
+        logger->error("Cannot open CoordToHeader file '{}': {}", path,
+                      utils::file_read_failure_detail(path));
         return false;
+    }
 
     try {
         uint64_t num_columns = load_number(*in);
@@ -73,7 +79,13 @@ bool CoordToHeader::load(const std::string &filename_base) {
         }
         return true;
 
+    } catch (const std::exception &e) {
+        logger->error("Cannot load CoordToHeader from '{}': {} [{}]", path, e.what(),
+                      utils::file_read_failure_detail(path));
+        return false;
     } catch (...) {
+        logger->error("Cannot load CoordToHeader from '{}': [{}]", path,
+                      utils::file_read_failure_detail(path));
         return false;
     }
 }
