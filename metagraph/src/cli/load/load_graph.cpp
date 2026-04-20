@@ -67,8 +67,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
         case Config::GraphType::SSHASH:
             return load_critical_graph_from_file<graph::DBGSSHash>(filename);
         case Config::GraphType::INVALID:
-            logger->error("Cannot load graph from file '{}', needs a valid file extension",
-                          filename);
+            logger->error("Cannot load graph from '{}': unrecognized file extension "
+                          "(expected .dbg, .orhashdbg, .hashstrdbg, .hashfastdbg, .bitmapdbg, "
+                          "or .sshashdbg)", filename);
             exit(1);
     }
     assert(false);

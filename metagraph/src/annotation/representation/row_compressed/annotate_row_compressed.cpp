@@ -5,7 +5,9 @@
 #include <stdexcept>
 #include <set>
 
+#include "common/logger.hpp"
 #include "common/serialization.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "annotation/binary_matrix/row_vector/eigen_spmat.hpp"
@@ -14,6 +16,7 @@
 namespace mtg {
 namespace annot {
 
+using mtg::common::logger;
 using utils::make_suffix;
 using matrix::BinaryMatrix;
 
@@ -102,15 +105,24 @@ void RowCompressed<Label>::serialize(const std::string &filename) const {
 
 template <typename Label>
 bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
-    std::ifstream instream(make_suffix(filenames.at(0), kExtension), std::ios::binary);
-    if (!instream.good())
+    const auto &fname = make_suffix(filenames.at(0), kExtension);
+    std::ifstream instream(fname, std::ios::binary);
+    if (!instream.good()) {
+        logger->error("Cannot open annotation file '{}': {}", fname,
+                      utils::file_read_failure_detail(fname));
         return false;
+    }
 
     try {
         bool is_successfully_loaded = label_encoder_.load(instream)
                                             && matrix_->load(instream);
-        if (filenames.size() == 1 || !is_successfully_loaded)
-            return is_successfully_loaded;
+        if (!is_successfully_loaded) {
+            logger->error("Cannot load annotation from '{}': {}", fname,
+                          utils::file_read_failure_detail(fname));
+            return false;
+        }
+        if (filenames.size() == 1)
+            return true;
 
         assert(filenames.size() > 1);
 
@@ -127,15 +139,22 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
             if (filename == filenames[0])
                 continue;
 
-            std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
-            if (!instream.good())
+            const auto &next_fname = make_suffix(filename, kExtension);
+            std::ifstream instream(next_fname, std::ios::binary);
+            if (!instream.good()) {
+                logger->error("Cannot open annotation file '{}': {}", next_fname,
+                              utils::file_read_failure_detail(next_fname));
                 return false;
+            }
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream)
                     || !next_block->load(instream)
-                    || next_block->num_rows() != matrix_->num_rows())
+                    || next_block->num_rows() != matrix_->num_rows()) {
+                logger->error("Cannot load annotation from '{}': {}", next_fname,
+                              utils::file_read_failure_detail(next_fname));
                 return false;
+            }
 
             // add new columns
             std::vector<uint64_t> new_column_positions(label_encoder_load.size());
