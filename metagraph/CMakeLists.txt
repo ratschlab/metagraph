@@ -889,4 +889,17 @@ if(METAGRAPH_BUILD_EXECUTABLE)
                      WORLD_READ WORLD_EXECUTE
   )
 
+  # --- parallel unit-tests runner (Google Test sharding + per-shard workdir) ---
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel" "#!/bin/bash\n")
+  file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
+    "\nUNIT_TESTS=\"${PROJECT_BINARY_DIR}/unit_tests\" TESTS_DATA=\"${PROJECT_SOURCE_DIR}/tests/data\" "
+    "exec ${PROJECT_SOURCE_DIR}/scripts/unit_tests_parallel.sh \"$@\""
+  )
+  file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
+    DESTINATION "${PROJECT_BINARY_DIR}"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                     GROUP_READ GROUP_EXECUTE
+                     WORLD_READ WORLD_EXECUTE
+  )
+
 endif() # CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME

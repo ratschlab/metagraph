@@ -30,7 +30,7 @@ using namespace mtg::graph::boss;
 
 using mtg::kmer::KmerExtractorBOSS;
 
-const std::string test_data_dir = TEST_DATA_DIR;
+const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
