@@ -3,6 +3,7 @@
 #include <cassert>
 #include <vector>
 #include <functional>
+#include <future>
 #include <filesystem>
 
 #include <ips4o.hpp>
@@ -406,27 +407,276 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &an
     logger->trace("Annotation converted");
 }
 
+// Streaming, multi-threaded RowDiffBRWT -> RowDiff<RowDisk> conversion.
+//
+// The naive call_rows-based path serializes on a single writer because
+// RowDisk's int_vector_buffer and the sd_vector_builder for the boundary
+// bitmap both need monotonically-ordered input. Here we partition the row
+// range into contiguous per-thread shards, have each thread write its
+// shard's deltas + boundary positions to its own pair of temp int_vector
+// files, and then merge shards serially at the end (a streaming I/O pass).
+// Shard state is on disk, not in RAM — no vector-of-size-num_rows anywhere.
 template <>
 void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffBRWTAnnotator &anno,
                                                const std::string &outfbase) {
     const auto &fname = utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension);
-    std::ofstream out = utils::open_new_ofstream(fname);
-    if (!out.good())
-        throw std::ofstream::failure("Can't write to " + fname);
+    const size_t T = std::max<size_t>(1, get_num_threads());
+    Timer phase_timer;
 
-    anno.get_label_encoder().serialize(out);
+    logger->trace("[brwt -> row_diff_disk] (1/4) writing header to {} "
+                  "(in parallel with phase 2)", fname);
+    // --- 1. Write annotation header (label encoder + v2.0 + anchor + fork_succ).
+    //        Launched asynchronously so it overlaps with phase 2 (the BRWT
+    //        traversal + shard writes). Phase 3 (merge) waits for it before
+    //        reopening the main file for appending. ---
+    Timer header_timer;
+    std::future<void> header_future = std::async(std::launch::async, [&, fname]() {
+        Timer step_timer;
+        std::ofstream out = utils::open_new_ofstream(fname);
+        if (!out.good())
+            throw std::ofstream::failure("Can't write to " + fname);
+        logger->trace("[brwt -> row_diff_disk]   output file opened ({:.2f} sec)",
+                      step_timer.elapsed());
+        step_timer.reset();
+        anno.get_label_encoder().serialize(out);
+        logger->trace("[brwt -> row_diff_disk]   label_encoder serialized ({:.2f} sec)",
+                      step_timer.elapsed());
+        out.write("v2.0", 4);
+        step_timer.reset();
+        anno.get_matrix().anchor().serialize(out);
+        logger->trace("[brwt -> row_diff_disk]   anchor serialized ({:.2f} sec)",
+                      step_timer.elapsed());
+        step_timer.reset();
+        anno.get_matrix().fork_succ().serialize(out);
+        logger->trace("[brwt -> row_diff_disk]   fork_succ serialized ({:.2f} sec)",
+                      step_timer.elapsed());
+    });
 
-    // serialize RowDiff<RowDisk>
-    out.write("v2.0", 4);
-    anno.get_matrix().anchor().serialize(out);
-    anno.get_matrix().fork_succ().serialize(out);
-    out.close();
+    phase_timer.reset();
+    const auto &brwt = anno.get_matrix().diffs();
+    const uint64_t num_rows = brwt.num_rows();
+    const uint64_t num_columns = brwt.num_columns();
+    const uint64_t num_set_bits = brwt.num_relations();
+    const uint8_t data_width = sdsl::bits::hi(num_columns) + 1;
+    logger->trace("[brwt -> row_diff_disk]   BRWT stats computed in {:.2f} sec "
+                  "(rows={}, cols={}, set_bits={}, data_width={})",
+                  phase_timer.elapsed(), num_rows, num_columns, num_set_bits,
+                  (unsigned)data_width);
 
-    RowDisk::serialize(fname,
-        [&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
-        anno.get_matrix().diffs().num_columns(),
-        anno.get_matrix().diffs().num_rows(),
-        anno.get_matrix().diffs().num_relations());
+    // --- 2. Parallel shards. Each thread writes its data + boundary positions
+    //        to its own temp int_vector files (both in their own streaming buffers).
+    //        Oversubscribe shards (4× threads) with dynamic scheduling so slow
+    //        shards — dense subtrees, deeper tree paths — don't hold up fast ones.
+    const size_t num_shards = 4 * T;
+    const uint64_t shard_rows = (num_rows + num_shards - 1) / num_shards;
+    logger->trace("[brwt -> row_diff_disk] (2/4) parallel write: {} threads, "
+                  "{} shards × {} rows", T, num_shards, shard_rows);
+    phase_timer.reset();
+
+    // Pre-size each shard's in-RAM boundary bitmap from the global average
+    // bits/row, with a 30% safety margin. Grown dynamically (memset new range)
+    // if the estimate is too low.
+    const double avg_bnd_bits_per_row = num_rows
+            ? 1.0 + static_cast<double>(num_set_bits) / num_rows
+            : 1.0;
+    const uint64_t expected_shard_bnd_size = static_cast<uint64_t>(
+            shard_rows * avg_bnd_bits_per_row * 1.3);
+
+    std::vector<std::string> data_files(num_shards);
+    std::vector<std::string> pos_files(num_shards);
+    std::vector<uint64_t>    num_values(num_shards, 0);
+    std::vector<uint64_t>    num_boundaries(num_shards, 0);
+
+    struct TempFileCleanup {
+        std::vector<std::string> &data;
+        std::vector<std::string> &pos;
+        ~TempFileCleanup() {
+            std::error_code ec;
+            for (const auto &f : data) { if (!f.empty()) fs::remove(f, ec); }
+            for (const auto &f : pos)  { if (!f.empty()) fs::remove(f, ec); }
+        }
+    } cleanup{data_files, pos_files};
+
+    ProgressBar progress_bar(num_rows, "BRWT -> RowDiff<RowDisk>", std::cerr,
+                             !common::get_verbose());
+
+    #pragma omp parallel for num_threads(T) schedule(dynamic, 1)
+    for (size_t s = 0; s < num_shards; ++s) {
+        const uint64_t begin = s * shard_rows;
+        const uint64_t end = std::min(begin + shard_rows, num_rows);
+        if (begin >= end)
+            continue;
+
+        data_files[s] = fname + ".shard" + std::to_string(s) + ".data";
+        pos_files[s]  = fname + ".shard" + std::to_string(s) + ".bnd";
+
+        sdsl::int_vector_buffer<> data_buf(data_files[s],
+            std::ios::out | std::ios::binary | std::ios::trunc,
+            1024 * 1024, data_width, /*is_plain=*/false, /*offset=*/0);
+        // Shard-local boundary bitmap: 1 bit per position in the
+        // (data + delimiters) stream, 1 = delimiter, 0 = data.
+        // Built in RAM, then compressed to bit_vector_small (RRR for dense,
+        // SD for sparse) and serialized. This compresses the ~275 MB/shard
+        // raw bitmap down to ~38 MB/shard on disk for typical row_diff
+        // workloads (98% density → RRR ~14% of raw size).
+        sdsl::bit_vector bnd_bits(expected_shard_bnd_size, 0);
+        uint64_t bnd_pos = 0;
+
+        auto ensure_space = [&](uint64_t need_pos) {
+            if (need_pos < bnd_bits.size())
+                return;
+            const uint64_t old_size = bnd_bits.size();
+            const uint64_t old_words = (old_size + 63) / 64;
+            const uint64_t new_size = std::max(need_pos + 1, old_size * 2);
+            bnd_bits.resize(new_size);
+            const uint64_t new_words = (new_size + 63) / 64;
+            // Zero the new underlying storage so unset bits are known 0.
+            if (new_words > old_words) {
+                std::memset(bnd_bits.data() + old_words, 0,
+                            (new_words - old_words) * sizeof(uint64_t));
+            }
+        };
+
+        std::vector<BRWT::Row> row_ids;
+        for (uint64_t i = begin; i < end; i += kNumRowsInBlock) {
+            const uint64_t block_end = std::min(i + kNumRowsInBlock, end);
+            row_ids.resize(block_end - i);
+            std::iota(row_ids.begin(), row_ids.end(), i);
+            auto rows = brwt.get_rows(row_ids);
+            for (auto &row : rows) {
+                std::sort(row.begin(), row.end());
+                uint64_t last = 0;
+                for (auto v : row) {
+                    data_buf.push_back(v - last);
+                    ensure_space(bnd_pos);
+                    // data slot — bit stays 0
+                    ++bnd_pos;
+                    last = v;
+                }
+                ensure_space(bnd_pos);
+                bnd_bits[bnd_pos++] = 1;  // row delimiter
+                ++progress_bar;
+            }
+        }
+
+        num_values[s] = data_buf.size();
+        num_boundaries[s] = bnd_pos - data_buf.size();  // = rows in shard
+        data_buf.close();
+
+        // Truncate to actual size, then compress and serialize.
+        bnd_bits.resize(bnd_pos);
+        bit_vector_small bvs(std::move(bnd_bits));
+        std::ofstream bnd_out(pos_files[s], std::ios::binary);
+        if (!bnd_out.good())
+            throw std::ofstream::failure("Can't write shard boundary file: "
+                                          + pos_files[s]);
+        bvs.serialize(bnd_out);
+    }
+    logger->trace("[brwt -> row_diff_disk]   parallel phase done in {:.2f} sec",
+                  phase_timer.elapsed());
+
+    uint64_t total_values = 0;
+    uint64_t total_boundaries = 0;
+    for (size_t s = 0; s < num_shards; ++s) {
+        total_values += num_values[s];
+        total_boundaries += num_boundaries[s];
+    }
+    logger->trace("[brwt -> row_diff_disk]   shard totals: {} values, {} boundaries",
+                  total_values, total_boundaries);
+
+    // Wait for the async header write before we start appending to the main file.
+    {
+        Timer wait_timer;
+        header_future.get();  // rethrows any exception from the header task
+        logger->trace("[brwt -> row_diff_disk]   header write completed "
+                      "(async total {:.2f} sec, wait after phase 2: {:.2f} sec)",
+                      header_timer.elapsed(), wait_timer.elapsed());
+    }
+
+    // --- 3a. Append num_columns + boundary_start placeholder to the main file. ---
+    std::streampos boundary_start_pos;
+    uint64_t iv_offs;
+    {
+        std::ofstream out(fname, std::ios::binary | std::ios::app);
+        if (!out.good())
+            throw std::ofstream::failure("Can't reopen " + fname);
+        serialize_number(out, num_columns);
+        boundary_start_pos = out.tellp();
+        std::streampos boundary_start_placeholder = 0;
+        serialize_number(out, boundary_start_placeholder);
+        iv_offs = out.tellp();
+    }
+
+    logger->trace("[brwt -> row_diff_disk] (3/4) merging {} shards into main file",
+                  num_shards);
+    phase_timer.reset();
+    // --- 3b. Stream-merge shard data files into the main int_vector at iv_offs. ---
+    {
+        sdsl::int_vector_buffer<> sink(fname,
+            std::ios::out | std::ios::binary,
+            1024 * 1024, data_width, /*is_plain=*/false, iv_offs);
+        for (size_t s = 0; s < num_shards; ++s) {
+            if (data_files[s].empty())
+                continue;
+            sdsl::int_vector_buffer<> src(data_files[s], std::ios::in,
+                1024 * 1024, data_width, /*is_plain=*/false, 0);
+            const uint64_t n = src.size();
+            for (uint64_t i = 0; i < n; ++i)
+                sink.push_back(src[i]);
+        }
+    }
+    logger->trace("[brwt -> row_diff_disk]   merge done in {:.2f} sec", phase_timer.elapsed());
+
+    logger->trace("[brwt -> row_diff_disk] (4/4) writing boundary bitmap");
+    phase_timer.reset();
+    // --- 3c. Build the global boundary bitmap by streaming shard bitmap files
+    //         with per-shard offset. Each shard file is a compressed
+    //         bit_vector_small where each 1-bit marks a row delimiter.
+    //         call_bit must receive global positions in strictly ascending
+    //         order — which it does: intra-shard positions are ascending,
+    //         and `global` grows monotonically between shards. ---
+    auto call_bits = [&](const std::function<void(uint64_t)> &call_bit) {
+        uint64_t global = 0;
+        for (size_t s = 0; s < num_shards; ++s) {
+            if (pos_files[s].empty())
+                continue;
+            bit_vector_small shard_bnd;
+            std::ifstream in(pos_files[s], std::ios::binary);
+            if (!in.good())
+                throw std::ifstream::failure("Can't read shard boundary file: "
+                                             + pos_files[s]);
+            if (!shard_bnd.load(in))
+                throw std::runtime_error("Can't load shard boundary: "
+                                         + pos_files[s]);
+            shard_bnd.call_ones([&](uint64_t pos) {
+                call_bit(global + pos);
+            });
+            global += shard_bnd.size();
+        }
+    };
+
+    // Record current file size; the boundary will be appended starting there.
+    const uint64_t boundary_start = fs::file_size(fname);
+
+    // Use the static serialize — for the SD path it streams directly to disk
+    // without materializing the compressed vector in RAM. For RRR (dense
+    // boundary, rare here) it still builds in memory, matching the old behavior.
+    bit_vector_small::serialize(call_bits, num_rows + num_set_bits, num_rows,
+                                fname, /*append_file=*/true);
+
+    // Patch the boundary_start placeholder.
+    {
+        std::ofstream patch(fname,
+                            std::ios::in | std::ios::out | std::ios::binary);
+        if (!patch.good())
+            throw std::ofstream::failure("Can't reopen to patch boundary_start: " + fname);
+        patch.seekp(boundary_start_pos, std::ios_base::beg);
+        serialize_number(patch, boundary_start);
+    }
+    logger->trace("[brwt -> row_diff_disk]   boundary written in {:.2f} sec",
+                  phase_timer.elapsed());
+
+    // cleanup removes shard files via ~TempFileCleanup.
     logger->trace("Annotation converted");
 }
 
