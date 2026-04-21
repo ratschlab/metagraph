@@ -140,22 +140,29 @@ done
 
 FAILED=0
 declare -a STATUS_COLOR
+declare -A PID_TO_IDX
 for i in "${!PIDS[@]}"; do
-    if wait "${PIDS[$i]}"; then
-        STATUS_COLOR[$i]="${GREEN}PASSED${RST}"
-    else
-        STATUS_COLOR[$i]="${RED}FAILED${RST}"
-        FAILED=$((FAILED + 1))
-    fi
+    PID_TO_IDX["${PIDS[$i]}"]=$i
 done
 
-# Dump each shard's full output so test-level logs (timings, [ OK ] / [ FAILED ]
-# lines, any test stdout) are visible. Sequential dump keeps lines from
-# interleaving.
-for i in "${!PIDS[@]}"; do
+# Drain shards in completion order with `wait -n` so each shard's full log
+# lands in the output as soon as that shard finishes, instead of being
+# batched until the slowest shard is done.
+for ((done = 0; done < WORKERS; done++)); do
+    FINISHED_PID=
+    rc=0
+    wait -n -p FINISHED_PID || rc=$?
+    idx="${PID_TO_IDX[$FINISHED_PID]}"
+    secs=$(( $(date +%s) - START ))
+    if [[ $rc -eq 0 ]]; then
+        STATUS_COLOR[$idx]="${GREEN}PASSED${RST}"
+    else
+        STATUS_COLOR[$idx]="${RED}FAILED${RST}"
+        FAILED=$((FAILED + 1))
+    fi
     echo
-    echo "=============== Shard $i (${STATUS_COLOR[$i]}) ==============="
-    cat "${LOGS[$i]}"
+    echo "=============== Shard ${idx} (${STATUS_COLOR[$idx]}, ${secs}s, $((done+1))/${WORKERS}) ==============="
+    cat "${LOGS[$idx]}"
 done
 
 echo
