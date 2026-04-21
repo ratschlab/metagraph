@@ -75,7 +75,7 @@ TESTS_DATA="$(cd "$TESTS_DATA" && pwd)"
 
 # Per-shard workdir root. On normal exit, just clean up; on Ctrl-C/TERM,
 # also kill any still-running shards so they don't outlive the wrapper.
-ROOT="$(mktemp -d -t unit_tests_parallel.XXXXXX)"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/unit_tests_parallel.XXXXXX")"
 declare -a PIDS=()
 declare -a PREP_PIDS=()
 on_exit() { rm -rf "$ROOT"; }
@@ -140,29 +140,35 @@ done
 
 FAILED=0
 declare -a STATUS_COLOR
-declare -A PID_TO_IDX
-for i in "${!PIDS[@]}"; do
-    PID_TO_IDX["${PIDS[$i]}"]=$i
-done
+declare -a DONE
+for ((i = 0; i < WORKERS; i++)); do DONE[$i]=0; done
 
-# Drain shards in completion order with `wait -n` so each shard's full log
-# lands in the output as soon as that shard finishes, instead of being
-# batched until the slowest shard is done.
-for ((done = 0; done < WORKERS; done++)); do
-    FINISHED_PID=
-    rc=0
-    wait -n -p FINISHED_PID || rc=$?
-    idx="${PID_TO_IDX[$FINISHED_PID]}"
-    secs=$(( $(date +%s) - START ))
-    if [[ $rc -eq 0 ]]; then
-        STATUS_COLOR[$idx]="${GREEN}PASSED${RST}"
-    else
-        STATUS_COLOR[$idx]="${RED}FAILED${RST}"
-        FAILED=$((FAILED + 1))
-    fi
-    echo
-    echo "=============== Shard ${idx} (${STATUS_COLOR[$idx]}, ${secs}s, $((done+1))/${WORKERS}) ==============="
-    cat "${LOGS[$idx]}"
+# Drain shards in completion order so each shard's full log lands in the
+# output as soon as that shard finishes. Using `kill -0` + `sleep` polling
+# instead of `wait -n -p` so we stay compatible with stock macOS bash 3.2.
+remaining=$WORKERS
+while (( remaining > 0 )); do
+    progressed=0
+    for ((i = 0; i < WORKERS; i++)); do
+        [[ "${DONE[$i]}" == "1" ]] && continue
+        kill -0 "${PIDS[$i]}" 2>/dev/null && continue   # still running
+        rc=0
+        wait "${PIDS[$i]}" || rc=$?
+        DONE[$i]=1
+        remaining=$(( remaining - 1 ))
+        progressed=1
+        secs=$(( $(date +%s) - START ))
+        if [[ $rc -eq 0 ]]; then
+            STATUS_COLOR[$i]="${GREEN}PASSED${RST}"
+        else
+            STATUS_COLOR[$i]="${RED}FAILED${RST}"
+            FAILED=$((FAILED + 1))
+        fi
+        echo
+        echo "=============== Shard ${i} (${STATUS_COLOR[$i]}, ${secs}s, $((WORKERS - remaining))/${WORKERS}) ==============="
+        cat "${LOGS[$i]}"
+    done
+    (( progressed == 0 && remaining > 0 )) && sleep 1
 done
 
 echo
