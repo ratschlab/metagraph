@@ -1658,40 +1658,28 @@ class TestLoadErrorMessages(TestingBase):
     def test_corrupt_graph_fails(self, graph_ext):
         corrupt = self.tempdir.name + '/corrupt' + graph_ext
         with open(corrupt, 'wb') as f:
-            f.write(b'\x00' * 64)
+            f.write(b'\xff' * 1024)
         rc, stderr = self._run_expecting_failure(f'{METAGRAPH} stats {corrupt}')
         self.assertNotEqual(0, rc,
             msg=f"loading corrupt '{corrupt}' silently succeeded.\n{stderr}")
 
     @parameterized.expand([(ext,) for ext in set(anno_file_extension.values())])
     def test_corrupt_annotation_fails(self, anno_ext):
+        # 0xFF bytes (not zeros): every length-prefix in these formats reads
+        # as a uint64 of 0xFF…FF ~ 2^64, so the loader either tries an
+        # impossible allocation or trips an sdsl sanity check. A file full of
+        # zeros, by contrast, is a structurally valid "empty annotation" for
+        # several formats (ColumnCompressed, RowCompressed, RowDiff,
+        # ColumnCoord), and those loaders accept it cleanly on macOS — so the
+        # zero-byte payload would silently pass the test on one platform and
+        # fail on another depending on stdlib/sdsl behaviour.
         corrupt = self.tempdir.name + '/corrupt' + anno_ext
-        payload = b'\x00' * 64
         with open(corrupt, 'wb') as f:
-            f.write(payload)
-        cmd = f'{METAGRAPH} stats -a {corrupt} {self.graph_path}'
-        res = subprocess.run(cmd, shell=True, stdout=PIPE, stderr=PIPE, timeout=60)
-        rc = res.returncode
-        stdout = res.stdout.decode(errors='replace')
-        stderr = res.stderr.decode(errors='replace')
-
-        # Debug dump — printed on both pass and fail so macOS/Linux runs are
-        # trivially comparable. TODO: remove once the flake is diagnosed.
-        hex_head = ' '.join(f'{b:02x}' for b in payload[:32])
-        print(f"\n--- DEBUG {anno_ext} ---", flush=True)
-        print(f"platform: {platform.system()} {platform.machine()} "
-              f"python={platform.python_version()}", flush=True)
-        print(f"cmd: {cmd}", flush=True)
-        print(f"corrupt size: {os.path.getsize(corrupt)} bytes", flush=True)
-        print(f"corrupt head (first 32 bytes hex): {hex_head}", flush=True)
-        print(f"rc: {rc}", flush=True)
-        print(f"--- stdout ({len(stdout)} chars) ---\n{stdout}", flush=True)
-        print(f"--- stderr ({len(stderr)} chars) ---\n{stderr}", flush=True)
-        print(f"--- END DEBUG {anno_ext} ---", flush=True)
-
+            f.write(b'\xff' * 1024)
+        rc, stderr = self._run_expecting_failure(
+            f'{METAGRAPH} stats -a {corrupt} {self.graph_path}')
         self.assertNotEqual(0, rc,
-            msg=(f"loading corrupt '{corrupt}' silently succeeded.\n"
-                 f"rc={rc}\nstdout:\n{stdout}\nstderr:\n{stderr}"))
+            msg=f"loading corrupt '{corrupt}' silently succeeded.\n{stderr}")
 
     # Permission-denied tests: a valid file (copy of a working one) with its
     # read bits stripped. Loader must fail with an [error] line that both
