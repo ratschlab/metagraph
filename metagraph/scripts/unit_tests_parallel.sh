@@ -138,7 +138,7 @@ for ((i = 0; i < WORKERS; i++)); do
     PIDS[$i]=$!
 done
 
-FAILED=0
+SHARDS_FAILED=0
 declare -a STATUS_COLOR
 declare -a DONE
 for ((i = 0; i < WORKERS; i++)); do DONE[$i]=0; done
@@ -146,6 +146,9 @@ for ((i = 0; i < WORKERS; i++)); do DONE[$i]=0; done
 # Drain shards in completion order so each shard's full log lands in the
 # output as soon as that shard finishes. Using `kill -0` + `sleep` polling
 # instead of `wait -n -p` so we stay compatible with stock macOS bash 3.2.
+# Relies on bash's internal job table: once SIGCHLD marks a background child
+# dead, `kill -0 <pid>` returns non-zero even before we `wait` to reap it, so
+# we're not at risk of busy-looping on a zombie.
 remaining=$WORKERS
 while (( remaining > 0 )); do
     progressed=0
@@ -162,7 +165,7 @@ while (( remaining > 0 )); do
             STATUS_COLOR[$i]="${GREEN}PASSED${RST}"
         else
             STATUS_COLOR[$i]="${RED}FAILED${RST}"
-            FAILED=$((FAILED + 1))
+            SHARDS_FAILED=$((SHARDS_FAILED + 1))
         fi
         echo
         echo "=============== Shard ${i} (${STATUS_COLOR[$i]}, ${secs}s, $((WORKERS - remaining))/${WORKERS}) ==============="
@@ -243,5 +246,5 @@ if (( ${#CRASHED_SHARDS[@]} > 0 )); then
     echo "  (the test count above omits whatever these shards would have run)"
 fi
 
-[[ $FAILED -gt 0 ]] && exit 1
+[[ $SHARDS_FAILED -gt 0 ]] && exit 1
 exit 0

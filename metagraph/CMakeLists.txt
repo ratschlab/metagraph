@@ -891,7 +891,7 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   # --- parallel unit-tests runner (Google Test sharding + per-shard workdir) ---
   # `:=` preserves user-supplied UNIT_TESTS/TESTS_DATA overrides (handy for
   # driving the wrapper with a stub binary when testing the script itself).
-  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel" "#!/bin/bash\n")
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel" "#!/usr/bin/env bash\n")
   file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
     "\n: \"\${UNIT_TESTS:=${PROJECT_BINARY_DIR}/unit_tests}\""
     "\n: \"\${TESTS_DATA:=${PROJECT_SOURCE_DIR}/tests/data}\""

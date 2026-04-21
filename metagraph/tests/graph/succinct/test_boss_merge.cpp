@@ -11,6 +11,9 @@ namespace {
 using namespace mtg;
 using namespace mtg::graph::boss;
 
+// Relative path so the parallel-unit-tests wrapper can isolate each shard
+// under its own per-shard tests/data copy (scripts/unit_tests_parallel.sh).
+// Do not change to an absolute path — shards would then race on dump writes.
 const std::string test_data_dir = "../tests/data";
 
 
