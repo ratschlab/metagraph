@@ -113,29 +113,101 @@ for ((i = 0; i < WORKERS; i++)); do
     (
         cd "$SHARD_BUILD" \
             && GTEST_TOTAL_SHARDS="$WORKERS" GTEST_SHARD_INDEX="$i" \
-               "$UNIT_TESTS" "$@" > "$LOG" 2>&1
+               "$UNIT_TESTS" --gtest_color=yes "$@" > "$LOG" 2>&1
     ) &
     PIDS[$i]=$!
 done
 
+# ANSI colors for the wrapper's own status lines (gtest handles its own).
+GREEN=$'\033[0;32m'
+RED=$'\033[0;31m'
+RST=$'\033[0m'
+
 FAILED=0
+declare -a STATUS
+declare -a STATUS_COLOR
 for i in "${!PIDS[@]}"; do
     if wait "${PIDS[$i]}"; then
-        SUMMARY=$(grep -E '^\[==========\]' "${LOGS[$i]}" | tail -1)
-        echo "Shard $i: PASSED  $SUMMARY"
+        STATUS[$i]="PASSED"
+        STATUS_COLOR[$i]="${GREEN}PASSED${RST}"
     else
+        STATUS[$i]="FAILED"
+        STATUS_COLOR[$i]="${RED}FAILED${RST}"
         FAILED=$((FAILED + 1))
-        echo "Shard $i: FAILED  (see ${LOGS[$i]}):"
-        tail -40 "${LOGS[$i]}" | sed 's/^/    /'
     fi
 done
 
+# Dump each shard's full output so test-level logs (timings, [ OK ] / [ FAILED ]
+# lines, any test stdout) are visible. Sequential dump keeps lines from
+# interleaving.
+for i in "${!PIDS[@]}"; do
+    echo
+    echo "=============== Shard $i (${STATUS_COLOR[$i]}) ==============="
+    cat "${LOGS[$i]}"
+done
+
+echo
+echo "=== Per-shard summary ==="
+for i in "${!PIDS[@]}"; do
+    SUMMARY=$(grep -aE '\[==========\].*ran' "${LOGS[$i]}" | tail -1 \
+              | sed -E $'s/\x1b\\[[0-9;]*m//g; s/^\\[==========\\] //')
+    echo "Shard $i: ${STATUS_COLOR[$i]}  $SUMMARY"
+done
+
+# Aggregate gtest-style summary across all shards.
+TOTAL_TESTS=0
+TOTAL_PASSED=0
+TOTAL_FAILED=0
+declare -a FAILED_LIST
+for i in "${!PIDS[@]}"; do
+    PLAIN=$(sed -E $'s/\x1b\\[[0-9;]*m//g' "${LOGS[$i]}")
+
+    # "[==========] N tests from M test suites ran. (X ms total)"
+    RAN_LINE=$(echo "$PLAIN" | grep -E '^\[==========\].*ran\.' | tail -1)
+    if [[ -n "$RAN_LINE" ]]; then
+        N=$(echo "$RAN_LINE" | sed -E 's/^\[==========\] *([0-9]+).*/\1/')
+        TOTAL_TESTS=$((TOTAL_TESTS + N))
+    fi
+
+    # "[  PASSED  ] N tests."
+    P_LINE=$(echo "$PLAIN" | grep -E '^\[  PASSED  \] [0-9]+ tests?\.' | tail -1)
+    if [[ -n "$P_LINE" ]]; then
+        TOTAL_PASSED=$((TOTAL_PASSED + $(echo "$P_LINE" | sed -E 's/^\[  PASSED  \] *([0-9]+).*/\1/')))
+    fi
+
+    # "[  FAILED  ] N tests, listed below:" plus its "[  FAILED  ] Name..." lines
+    F_HDR=$(echo "$PLAIN" | grep -E '^\[  FAILED  \] [0-9]+ tests?, listed below:')
+    if [[ -n "$F_HDR" ]]; then
+        N_FAIL=$(echo "$F_HDR" | sed -E 's/^\[  FAILED  \] *([0-9]+).*/\1/' | head -1)
+        TOTAL_FAILED=$((TOTAL_FAILED + N_FAIL))
+        # Lines between the header and the "N FAILED TEST(S)" trailer.
+        while IFS= read -r line; do
+            FAILED_LIST+=("$line")
+        done < <(echo "$PLAIN" | awk '
+            /^\[  FAILED  \] [0-9]+ tests?, listed below:/ { cap=1; next }
+            /^[0-9]+ FAILED TESTS?/ { cap=0 }
+            cap && /^\[  FAILED  \] / { print }')
+    fi
+done
+
+# Match gtest's singular/plural.
+plural() { [[ "$1" -eq 1 ]] && echo test || echo tests; }
+
 ELAPSED=$(( $(date +%s) - START ))
 echo
-echo "Elapsed: ${ELAPSED}s across $WORKERS shards"
-if [[ $FAILED -gt 0 ]]; then
-    echo "$FAILED shard(s) failed"
-    exit 1
+echo "${GREEN}[==========]${RST} $TOTAL_TESTS $(plural $TOTAL_TESTS) ran. (${ELAPSED} s wall, across $WORKERS shards)"
+echo "${GREEN}[  PASSED  ]${RST} $TOTAL_PASSED $(plural $TOTAL_PASSED)."
+if [[ $TOTAL_FAILED -gt 0 ]]; then
+    echo "${RED}[  FAILED  ]${RST} $TOTAL_FAILED $(plural $TOTAL_FAILED), listed below:"
+    for line in "${FAILED_LIST[@]}"; do
+        # Re-colour the leading "[  FAILED  ]" on each listed name.
+        echo "${RED}[  FAILED  ]${RST}${line#\[  FAILED  \]}"
+    done
+    echo
+    [[ $TOTAL_FAILED -eq 1 ]] \
+        && echo "${RED}1 FAILED TEST${RST}" \
+        || echo "${RED}$TOTAL_FAILED FAILED TESTS${RST}"
 fi
-echo "All shards passed"
+
+[[ $FAILED -gt 0 ]] && exit 1
 exit 0
