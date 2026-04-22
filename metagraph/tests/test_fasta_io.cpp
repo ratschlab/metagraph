@@ -236,10 +236,10 @@ TEST(FastaFile, twice_iterator_read_empty_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(0u, num_records);
         EXPECT_EQ(0u, total_size);
 
@@ -271,10 +271,10 @@ TEST(FastaFile, twice_full_iterator_read_1K_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(1'000u, num_records);
         EXPECT_EQ(499'500u, total_size);
 
@@ -629,10 +629,10 @@ TEST(FastaFileWithCanonical, twice_iterator_read_empty_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(0u, num_records);
         EXPECT_EQ(0u, total_size);
 
@@ -664,10 +664,10 @@ TEST(FastaFileWithCanonical, twice_full_iterator_read_1K_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(1'000u * 2, num_records);
         EXPECT_EQ(499'500u * 2, total_size);
 
