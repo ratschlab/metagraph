@@ -38,13 +38,16 @@ class split_sink : public spdlog::sinks::sink {
     spdlog::sinks::stderr_color_sink_mt err_;
 };
 
-std::shared_ptr<spdlog::logger> make_logger() {
+static std::shared_ptr<spdlog::logger> make_logger() {
     spdlog::set_automatic_registration(false);
     auto sink = std::make_shared<split_sink>();
     return std::make_shared<spdlog::logger>("", sink);
 }
 
-std::shared_ptr<spdlog::logger> logger = make_logger();
+std::shared_ptr<spdlog::logger>& get_logger() {
+    static std::shared_ptr<spdlog::logger> instance = make_logger();
+    return instance;
+}
 
 } // namespace common
 } // namespace mtg

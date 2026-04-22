@@ -1,78 +1,33 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
-#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <set>
-#include <stdexcept>
 #include <string>
-#include <system_error>
-#include <vector>
-
-#include <unistd.h>
 
 #include <gtest/gtest.h>
 
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 
 
-// Per-process scratch directory for unit-test dump outputs. Created on first
-// call under $TEST_DUMP_DIR (or the system tempdir) and removed at exit.
-// Must live outside the anonymous namespace so the static local is shared
-// across translation units — so a serialize in one TU and load in another hit
-// the same path.
+// Per-process scratch directory for unit-test dump outputs. Shared across
+// translation units via the function-local static, so a serialize in one TU
+// and a load in another hit the same path.
 //
-// Note: uses mkdtemp directly rather than utils::create_temp_dir because
-// test_dump_basename-style constants at namespace scope in the test TUs
-// trigger this during static initialization, and create_temp_dir logs via
-// mtg::common::logger — which sits in another TU and may not be initialized
-// yet (classic SIOF). Direct mkdtemp has no such dependency.
-//
-// The atexit + signal handlers guard on pid to avoid wiping the directory
-// from forked children — gtest's threadsafe death-test style forks, and a
-// naive cleanup from the child would pull the dir out from under the
-// parent's later tests.
-//
-// When $TEST_DUMP_DIR is set, the caller (e.g. unit_tests_parallel.sh) owns
-// the dir's lifecycle, so neither atexit nor signal handlers are installed.
+// When $TEST_DUMP_DIR is set (e.g. by scripts/unit_tests_parallel.sh), the
+// caller owns the dir's lifecycle. Otherwise delegate to utils::create_temp_dir,
+// which installs the PID-guarded atexit + signal cleanup.
 inline const std::string& test_dump_dir() {
-    static const pid_t owner_pid = getpid();
     static const std::string dir = [] {
         namespace fs = std::filesystem;
         if (const char* env = std::getenv("TEST_DUMP_DIR"); env && *env) {
             fs::create_directories(env);
             return std::string(env);
         }
-        std::string tmpl = (fs::temp_directory_path() / "metagraph_tests_XXXXXX").string();
-        std::vector<char> buf(tmpl.begin(), tmpl.end());
-        buf.push_back('\0');
-        if (!mkdtemp(buf.data()))
-            throw std::runtime_error("mkdtemp failed: " + tmpl);
-        std::atexit([] {
-            if (getpid() != owner_pid)
-                return;
-            std::error_code ec;
-            fs::remove_all(test_dump_dir(), ec);
-        });
-        // Clean up on Ctrl+C / kill too — default signal actions terminate
-        // the process without running atexit, which would leak the tempdir.
-        // Only install where the disposition is still default, so we don't
-        // clobber handlers gtest or the death-test machinery installed.
-        auto handler = +[](int sig) {
-            if (getpid() == owner_pid) {
-                std::error_code ec;
-                std::filesystem::remove_all(test_dump_dir(), ec);
-            }
-            std::signal(sig, SIG_DFL);
-            std::raise(sig);
-        };
-        for (int sig : { SIGINT, SIGTERM, SIGHUP, SIGQUIT }) {
-            auto prev = std::signal(sig, handler);
-            if (prev != SIG_DFL)
-                std::signal(sig, prev);
-        }
-        return std::string(buf.data());
+        return utils::create_temp_dir(fs::temp_directory_path(),
+                                      "metagraph_tests").string();
     }();
     return dir;
 }
