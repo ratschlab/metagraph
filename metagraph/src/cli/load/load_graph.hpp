@@ -7,13 +7,10 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
-#include "cli/config/config.hpp"
 
 
 namespace mtg {
 namespace cli {
-
-Config::GraphType parse_graph_type(const std::string &filename);
 
 /** Loads |filename| with the graph type's extension (|.dbg|, |.orhashdbg|, etc.). On failure,
  *  logs the resolved path and likely causes (permissions, etc.); implementations may also log. */
