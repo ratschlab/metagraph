@@ -125,6 +125,7 @@ jobs:
           name: &artifact artifact-${{ env.DESCRIPTOR }}
           path: |
             metagraph/build/metagraph_${{ inputs.alphabet }}
+            metagraph/build/unit_tests_parallel
             metagraph/build/unit_tests
           include-hidden-files: true
           retention-days: 1
