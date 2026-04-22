@@ -6,6 +6,7 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 
+#include "../../test_helpers.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
@@ -23,7 +24,7 @@ using namespace mtg::graph::boss;
 // Do not change to an absolute path — shards would then race on dump writes.
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
-const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 
 
 uint64_t fwd(const BOSS &boss, uint64_t i) {

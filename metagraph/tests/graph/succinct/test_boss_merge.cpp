@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../../test_helpers.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 
@@ -10,11 +11,6 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::graph::boss;
-
-// Relative path so the parallel-unit-tests wrapper can isolate each shard
-// under its own per-shard tests/data copy (scripts/unit_tests_parallel.sh).
-// Do not change to an absolute path — shards would then race on dump writes.
-const std::string test_data_dir = "../tests/data";
 
 
 TEST(BOSSMerge, TraversalMergeWithEmpty) {
@@ -181,9 +177,9 @@ TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
             BOSS *merged = merge(graphs);
 
             BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 1, 1, 1);
-            chunk.serialize(test_data_dir + "/1");
+            chunk.serialize(test_dump_dir() + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-                { test_data_dir + "/1" }
+                { test_dump_dir() + "/1" }
             );
 
             first.merge(second, num_threads);
@@ -209,9 +205,9 @@ TEST(BOSSMerge, ParallelMergeTwoPaths) {
             BOSS *merged = merge(graphs);
 
             BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 1, 1, 1);
-            chunk.serialize(test_data_dir + "/1");
+            chunk.serialize(test_dump_dir() + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-                { test_data_dir + "/1" }
+                { test_dump_dir() + "/1" }
             );
 
             first.merge(second, num_threads);
@@ -238,9 +234,9 @@ TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
             BOSS *merged = merge(graphs);
 
             BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 1, 1, 1);
-            chunk.serialize(test_data_dir + "/1");
+            chunk.serialize(test_dump_dir() + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-                { test_data_dir + "/1" }
+                { test_dump_dir() + "/1" }
             );
 
             first.merge(second, num_threads);
@@ -271,9 +267,9 @@ TEST(BOSSMerge, ParallelMergeThreeGraphs) {
             BOSS *merged = merge(graphs);
 
             BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 1, 1, 1);
-            chunk.serialize(test_data_dir + "/1");
+            chunk.serialize(test_dump_dir() + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-                { test_data_dir + "/1" }
+                { test_dump_dir() + "/1" }
             );
 
             first.merge(second, num_threads);
@@ -306,20 +302,20 @@ TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
 
             {
                 BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 3, 1, 1);
-                chunk.serialize(test_data_dir + "/1");
+                chunk.serialize(test_dump_dir() + "/1");
             }
             {
                 BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 1, 3, 1, 1);
-                chunk.serialize(test_data_dir + "/2");
+                chunk.serialize(test_dump_dir() + "/2");
             }
             {
                 BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 2, 3, 1, 1);
-                chunk.serialize(test_data_dir + "/3");
+                chunk.serialize(test_dump_dir() + "/3");
             }
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-                { test_data_dir + "/1",
-                  test_data_dir + "/2",
-                  test_data_dir + "/3", }
+                { test_dump_dir() + "/1",
+                  test_dump_dir() + "/2",
+                  test_dump_dir() + "/3", }
             );
 
             first.merge(second, num_threads);
@@ -354,7 +350,7 @@ TEST(BOSSMerge, ParallelDumpedChunkedMergeThreeGraphs) {
             std::vector<std::string> files;
             for (size_t i = 0; i < num_chunks; ++i) {
                 BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, i, num_chunks, 1, 1);
-                files.push_back(test_data_dir + "/chunks_to_merge"
+                files.push_back(test_dump_dir() + "/chunks_to_merge"
                                   + "." + std::to_string(i)
                                   + "_" + std::to_string(num_chunks));
                 chunk.serialize(files.back());
@@ -405,9 +401,9 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
 
         BOSS::Chunk chunk = merge_blocks_to_chunk(graphs, 0, 1, num_threads,
                                                   num_bins_per_thread);
-        chunk.serialize(test_data_dir + "/1");
+        chunk.serialize(test_dump_dir() + "/1");
         BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
-            { test_data_dir + "/1" }
+            { test_dump_dir() + "/1" }
         );
 
         BOSS result(k);

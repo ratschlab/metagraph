@@ -1,11 +1,59 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <cstdlib>
+#include <filesystem>
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <vector>
+
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
 #include "common/logger.hpp"
+
+
+// Per-process scratch directory for unit-test dump outputs. Created on first
+// call under $TEST_DUMP_DIR (or the system tempdir) and removed at exit.
+// Must live outside the anonymous namespace so the static local is shared
+// across translation units — so a serialize in one TU and load in another hit
+// the same path.
+//
+// Note: uses mkdtemp directly rather than utils::create_temp_dir because
+// test_dump_basename-style constants at namespace scope in the test TUs
+// trigger this during static initialization, and create_temp_dir logs via
+// mtg::common::logger — which sits in another TU and may not be initialized
+// yet (classic SIOF). Direct mkdtemp has no such dependency.
+//
+// The atexit handler guards on pid to avoid wiping the directory from forked
+// children — gtest's threadsafe death-test style forks, and a naive cleanup
+// from the child would pull the dir out from under the parent's later tests.
+inline const std::string& test_dump_dir() {
+    static const pid_t owner_pid = getpid();
+    static const std::string dir = [] {
+        namespace fs = std::filesystem;
+        if (const char* env = std::getenv("TEST_DUMP_DIR"); env && *env) {
+            fs::create_directories(env);
+            return std::string(env);
+        }
+        std::string tmpl = (fs::temp_directory_path() / "metagraph_tests_XXXXXX").string();
+        std::vector<char> buf(tmpl.begin(), tmpl.end());
+        buf.push_back('\0');
+        if (!mkdtemp(buf.data()))
+            throw std::runtime_error("mkdtemp failed: " + tmpl);
+        std::atexit([] {
+            if (getpid() != owner_pid)
+                return;
+            std::error_code ec;
+            fs::remove_all(test_dump_dir(), ec);
+        });
+        return std::string(buf.data());
+    }();
+    return dir;
+}
 
 
 namespace {

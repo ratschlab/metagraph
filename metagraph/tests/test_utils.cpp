@@ -21,8 +21,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::seq_io;
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/dump_test";
 
 const std::vector<sdsl::bit_vector> vectors {
     { 0, 1, 1, 0, 0, 1, 0 },

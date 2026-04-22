@@ -1,6 +1,7 @@
 #include "test_dbg_helpers.hpp"
 
 #include "gtest/gtest.h"
+#include "../../test_helpers.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -171,7 +172,7 @@ build_graph<DBGSSHash>(uint64_t k,
     if (contigs.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    std::string dump_path = "../tests/data/sshash_sequences/contigs.fa";
+    std::string dump_path = test_dump_dir() + "/sshash_contigs.fa";
     writeFastaFile(contigs, dump_path);
 
     std::shared_ptr<DBGSSHash> graph;

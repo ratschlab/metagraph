@@ -11,6 +11,7 @@
 #define protected public
 #define private public
 
+#include "../../test_helpers.hpp"
 #include "common/algorithms.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
@@ -35,7 +36,7 @@ using mtg::kmer::KmerExtractorBOSS;
 // Do not change to an absolute path — shards would then race on dump writes.
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
-const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 
 #define kMaxK ( 256 / KmerExtractorBOSS::bits_per_char )
 

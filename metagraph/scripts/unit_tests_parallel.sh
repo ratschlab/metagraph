@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Parallel runner for metagraph unit_tests using Google Test sharding.
 #
-# Each shard runs in its own working directory with a private copy of
-# tests/data, so shards don't race on transient dump files written under
-# test_data_dir.
+# Each shard runs in its own CWD ($ROOT/shard$i) so that temp files written
+# to "." by third-party libs (sshash in particular dumps sshash.tmp.run_*
+# into tmp_dirname, which defaults to ".") don't collide across shards.
+# A shared $ROOT/tests symlink points at the real tests/ dir so the tests'
+# hardcoded "../tests/data" still resolves. Tests' own scratch output goes
+# to a per-process temp dir via test_dump_dir().
 #
 # Usage:
 #   unit_tests_parallel.sh [-j N] [--help] [unit_tests args...]
 #
 # Env vars:
 #   UNIT_TESTS       path to the unit_tests binary (default: ./unit_tests)
-#   TESTS_DATA       path to tests/data (default: ../tests/data relative to
-#                    the unit_tests binary's dir)
 
 set -u -o pipefail
 
@@ -25,7 +26,6 @@ print_help() {
 
 WORKERS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 UNIT_TESTS="${UNIT_TESTS:-}"
-TESTS_DATA="${TESTS_DATA:-}"
 
 # Parse our flags; everything else is forwarded to unit_tests.
 while [[ $# -gt 0 ]]; do
@@ -63,25 +63,28 @@ if [[ ! -x "$UNIT_TESTS" ]]; then
 fi
 UNIT_TESTS="$(cd "$(dirname "$UNIT_TESTS")" && pwd)/$(basename "$UNIT_TESTS")"
 
-# Resolve TESTS_DATA
-if [[ -z "$TESTS_DATA" ]]; then
-    TESTS_DATA="$(dirname "$UNIT_TESTS")/../tests/data"
-fi
-if [[ ! -d "$TESTS_DATA" ]]; then
-    echo "error: tests/data dir not found: $TESTS_DATA" >&2
+# Locate the tests/ dir relative to the binary (metagraph/build/unit_tests
+# -> metagraph/tests). Shards reference it via a shared symlink so hardcoded
+# "../tests/data" lookups still resolve from each per-shard CWD.
+TESTS_DIR="$(dirname "$UNIT_TESTS")/../tests"
+if [[ ! -d "$TESTS_DIR" ]]; then
+    echo "error: tests dir not found: $TESTS_DIR" >&2
     exit 2
 fi
-TESTS_DATA="$(cd "$TESTS_DATA" && pwd)"
+TESTS_DIR="$(cd "$TESTS_DIR" && pwd)"
 
-# Per-shard workdir root. On normal exit, just clean up; on Ctrl-C/TERM,
+# Per-shard workdirs and logs. On normal exit, clean up; on Ctrl-C/TERM,
 # also kill any still-running shards so they don't outlive the wrapper.
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/unit_tests_parallel.XXXXXX")"
+ln -s "$TESTS_DIR" "$ROOT/tests"
+for ((i = 0; i < WORKERS; i++)); do
+    mkdir -p "$ROOT/shard$i"
+done
 declare -a PIDS=()
-declare -a PREP_PIDS=()
 on_exit() { rm -rf "$ROOT"; }
 on_interrupt() {
     trap - EXIT INT TERM
-    for pid in "${PREP_PIDS[@]}" "${PIDS[@]}"; do
+    for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
     rm -rf "$ROOT"
@@ -91,35 +94,10 @@ trap on_exit EXIT
 trap on_interrupt INT TERM
 
 echo "unit_tests: $UNIT_TESTS"
-echo "tests/data: $TESTS_DATA"
+echo "tests dir:  $TESTS_DIR"
 echo "shards:     $WORKERS"
 echo "workdir:    $ROOT"
 echo
-
-# cp with reflink when the filesystem supports it (xfs/btrfs/apfs); falls back
-# to a regular copy on platforms that don't understand the flag (older cp,
-# macOS <13). Cheap on CI; near-free on reflink-capable dev boxes.
-shard_cp() {
-    cp -r --reflink=auto "$1" "$2" 2>/dev/null || cp -r "$1" "$2"
-}
-
-echo "Preparing shard working directories..."
-for ((i = 0; i < WORKERS; i++)); do
-    (
-        set -e
-        SHARD_BUILD="$ROOT/shard$i/build"
-        SHARD_DATA="$ROOT/shard$i/tests/data"
-        mkdir -p "$SHARD_BUILD" "$(dirname "$SHARD_DATA")"
-        shard_cp "$TESTS_DATA" "$SHARD_DATA"
-    ) &
-    PREP_PIDS+=($!)
-done
-for pid in "${PREP_PIDS[@]}"; do
-    if ! wait "$pid"; then
-        echo "error: shard prep failed (pid $pid)" >&2
-        exit 2
-    fi
-done
 
 # Launch shards.
 echo "Running $WORKERS shards in parallel..."
@@ -127,11 +105,10 @@ START=$(date +%s)
 
 declare -a LOGS
 for ((i = 0; i < WORKERS; i++)); do
-    SHARD_BUILD="$ROOT/shard$i/build"
     LOG="$ROOT/shard$i.log"
     LOGS[$i]="$LOG"
     (
-        cd "$SHARD_BUILD" \
+        cd "$ROOT/shard$i" \
             && GTEST_TOTAL_SHARDS="$WORKERS" GTEST_SHARD_INDEX="$i" \
                "$UNIT_TESTS" --gtest_color=yes "$@" > "$LOG" 2>&1
     ) &
