@@ -24,6 +24,7 @@ inline const std::string& test_dump_dir() {
         namespace fs = std::filesystem;
         if (const char* env = std::getenv("TEST_DUMP_DIR"); env && *env) {
             fs::create_directories(env);
+            mtg::common::logger->trace("Using TEST_DUMP_DIR={}", env);
             return std::string(env);
         }
         return utils::create_temp_dir(fs::temp_directory_path(),

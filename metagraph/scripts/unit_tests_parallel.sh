@@ -20,8 +20,37 @@ GREEN=$'\033[0;32m'
 RED=$'\033[0;31m'
 RST=$'\033[0m'
 
+# Best-effort resolve of the unit_tests binary. Sets $UNIT_TESTS on success.
+# Shared between --help (to chain into gtest's own --help) and the main path.
+resolve_unit_tests() {
+    if [[ -n "${UNIT_TESTS:-}" && -x "$UNIT_TESTS" ]]; then
+        return 0
+    fi
+    local dir
+    dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -x "$dir/unit_tests" ]]; then
+        UNIT_TESTS="$dir/unit_tests"
+    elif [[ -x "./unit_tests" ]]; then
+        UNIT_TESTS="$(pwd)/unit_tests"
+    else
+        return 1
+    fi
+}
+
 print_help() {
     sed -n '2,/^$/ { s/^# \{0,1\}//; p; }' "${BASH_SOURCE[0]}"
+    # Chain into unit_tests --help so gtest's own flags (--gtest_filter,
+    # --gtest_list_tests, etc.) are documented authoritatively and stay
+    # in sync with whatever gtest version is linked.
+    if resolve_unit_tests; then
+        echo
+        echo "---- forwarded to $(basename "$UNIT_TESTS") ----"
+        "$UNIT_TESTS" --help 2>&1 || true
+    else
+        echo
+        echo "(set UNIT_TESTS=<path> or run from the build dir to also list"
+        echo " the forwarded gtest flags)"
+    fi
 }
 
 # Default to 2x CPU count. With static sharding, oversubscribing by 2x reduces
@@ -33,36 +62,31 @@ CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 WORKERS=$(( CORES * 2 ))
 UNIT_TESTS="${UNIT_TESTS:-}"
 
-# Parse our flags; everything else is forwarded to unit_tests.
+# Parse our flags; everything else is collected and forwarded to unit_tests.
+# Don't stop on the first unknown arg — `-j` and `--help` should still be
+# picked up when they come after a gtest arg like `--gtest_filter=...`.
+FORWARD=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -j|--jobs)   WORKERS="$2"; shift 2 ;;
         -j*)         WORKERS="${1#-j}"; shift ;;
         --jobs=*)    WORKERS="${1#--jobs=}"; shift ;;
         -h|--help)   print_help; exit 0 ;;
-        --)          shift; break ;;
-        *)           break ;;
+        --)          shift; FORWARD+=("$@"); break ;;
+        *)           FORWARD+=("$1"); shift ;;
     esac
 done
+set -- "${FORWARD[@]+"${FORWARD[@]}"}"
 
 if ! [[ "$WORKERS" =~ ^[1-9][0-9]*$ ]]; then
     echo "error: invalid -j value: $WORKERS" >&2
     exit 2
 fi
 
-# Resolve UNIT_TESTS
-if [[ -z "$UNIT_TESTS" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [[ -x "$SCRIPT_DIR/unit_tests" ]]; then
-        UNIT_TESTS="$SCRIPT_DIR/unit_tests"
-    elif [[ -x "./unit_tests" ]]; then
-        UNIT_TESTS="$(pwd)/unit_tests"
-    else
-        echo "error: unit_tests binary not found; set UNIT_TESTS=<path>" >&2
-        exit 2
-    fi
+if ! resolve_unit_tests; then
+    echo "error: unit_tests binary not found; set UNIT_TESTS=<path>" >&2
+    exit 2
 fi
-
 if [[ ! -x "$UNIT_TESTS" ]]; then
     echo "error: not executable: $UNIT_TESTS" >&2
     exit 2
