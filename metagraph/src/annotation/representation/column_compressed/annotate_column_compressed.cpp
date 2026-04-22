@@ -476,11 +476,11 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
         }
 
     } catch (const std::exception &e) {
-        logger->error("Caught exception when loading columns from {}: {} [{}]", f, e.what(),
-                      utils::file_read_failure_detail(f));
+        logger->error("Cannot load columns from '{}': {} (caught: {})", f,
+                      utils::file_read_failure_detail(f), e.what());
         return false;
     } catch (...) {
-        logger->error("Unknown exception when loading columns from {} [{}]", f,
+        logger->error("Cannot load columns from '{}': {} (caught unknown exception)", f,
                       utils::file_read_failure_detail(f));
         return false;
     }
@@ -576,7 +576,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         try {
             offsets[i] = read_num_labels(fname);
         } catch (...) {
-            logger->error("Can't load label encoder from {} [{}]", fname,
+            logger->error("Cannot load label encoder from '{}': {}", fname,
                           utils::file_read_failure_detail(fname));
             error_occurred = true;
         }
@@ -623,11 +623,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                          std::move(new_column));
             }
         } catch (const std::exception &e) {
-            logger->error("Caught exception when loading columns from {}: {} [{}]",
-                          filename, e.what(), utils::file_read_failure_detail(filename));
+            logger->error("Cannot load columns from '{}': {} (caught: {})", filename,
+                          utils::file_read_failure_detail(filename), e.what());
             error_occurred = true;
         } catch (...) {
-            logger->error("Unknown exception when loading columns from {} [{}]",
+            logger->error("Cannot load columns from '{}': {} (caught unknown exception)",
                           filename, utils::file_read_failure_detail(filename));
             error_occurred = true;
         }

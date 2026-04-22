@@ -844,7 +844,8 @@ class TestAPIServerLoadErrors(TestingBase):
         except subprocess.TimeoutExpired:
             proc.kill()
             _, stderr = proc.communicate()
-            self.fail("Server did not exit within 30s on load failure")
+            self.fail(f"Server did not exit within 30s on load failure.\n"
+                      f"stderr so far:\n{stderr.decode(errors='replace')}")
         return proc.returncode, stderr.decode(errors='replace')
 
     def _assert_error_line_contains_path(self, stderr, path):

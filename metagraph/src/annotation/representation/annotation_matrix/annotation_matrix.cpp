@@ -59,12 +59,12 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
         }
         return true;
     } catch (const std::exception &e) {
-        logger->error("Cannot load annotation from '{}': {} [{}]", fname, e.what(),
-                      utils::file_read_failure_detail(fname));
+        logger->error("Cannot load annotation from '{}': {} (caught: {})", fname,
+                      utils::file_read_failure_detail(fname), e.what());
         return false;
     } catch (...) {
-        logger->error("Cannot load annotation from '{}': [{}]", fname,
-                      utils::file_read_failure_detail(fname));
+        logger->error("Cannot load annotation from '{}': {} (caught unknown exception)",
+                      fname, utils::file_read_failure_detail(fname));
         return false;
     }
 }

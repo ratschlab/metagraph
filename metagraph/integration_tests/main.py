@@ -199,13 +199,15 @@ def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size =
             for tid in error_ids:
                 print("\033[0;31;40m[  ERRORS  ]\033[0m {}".format(tid))
         # Chunks that failed without any per-test failure/error — e.g. the
-        # worker itself threw. The bare `error` key is set in that path.
+        # worker itself threw. Reported with the same [  FAILED  ] banner for
+        # consistency with gtest's end-of-run format; the chunk label makes
+        # clear it's a worker-level failure rather than a single test.
         crashed = [r for r in results if not r['success']
                    and not r.get('failed_ids') and not r.get('error_ids')]
         if crashed:
-            print("\033[0;31;40m[  CRASHED ]\033[0m {} chunk(s), listed below:".format(len(crashed)))
+            print("\033[0;31;40m[  FAILED  ]\033[0m {} chunk(s) crashed, listed below:".format(len(crashed)))
             for r in crashed:
-                print("\033[0;31;40m[  CRASHED ]\033[0m {} ({})".format(
+                print("\033[0;31;40m[  FAILED  ]\033[0m {} ({})".format(
                     r['test'], r.get('error', 'no test summary')))
 
         return failed == 0

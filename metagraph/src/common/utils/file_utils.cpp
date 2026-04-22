@@ -81,8 +81,7 @@ std::string file_read_failure_detail(const fs::path &path) {
                 + " (missing read permission on this file)";
     }
 #endif
-    return "the file could not be loaded; it may be corrupted, truncated, or incompatible "
-           "with this version of MetaGraph";
+    return "could not read contents (possibly corrupted or incompatible)";
 }
 
 std::ofstream open_new_ofstream(const std::string &filename) {

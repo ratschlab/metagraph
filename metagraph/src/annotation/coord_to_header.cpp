@@ -80,12 +80,12 @@ bool CoordToHeader::load(const std::string &filename_base) {
         return true;
 
     } catch (const std::exception &e) {
-        logger->error("Cannot load CoordToHeader from '{}': {} [{}]", path, e.what(),
-                      utils::file_read_failure_detail(path));
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught: {})", path,
+                      utils::file_read_failure_detail(path), e.what());
         return false;
     } catch (...) {
-        logger->error("Cannot load CoordToHeader from '{}': [{}]", path,
-                      utils::file_read_failure_detail(path));
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught unknown exception)",
+                      path, utils::file_read_failure_detail(path));
         return false;
     }
 }
