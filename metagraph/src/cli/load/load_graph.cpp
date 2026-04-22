@@ -1,7 +1,8 @@
 #include "load_graph.hpp"
 
-#include <string>
 #include <cassert>
+#include <string>
+#include <vector>
 
 #include "common/logger.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
@@ -21,28 +22,21 @@ using namespace mtg::graph;
 using mtg::common::logger;
 
 
+static const std::vector<std::pair<std::string, Config::GraphType>> kGraphExtToType = {
+    { DBGSuccinct::kExtension,    Config::GraphType::SUCCINCT  },
+    { DBGHashOrdered::kExtension, Config::GraphType::HASH      },
+    { DBGHashString::kExtension,  Config::GraphType::HASH_STR  },
+    { DBGHashFast::kExtension,    Config::GraphType::HASH_FAST },
+    { DBGBitmap::kExtension,      Config::GraphType::BITMAP    },
+    { DBGSSHash::kExtension,      Config::GraphType::SSHASH    },
+};
+
 Config::GraphType parse_graph_type(const std::string &filename) {
-    if (utils::ends_with(filename, DBGSuccinct::kExtension)) {
-        return Config::GraphType::SUCCINCT;
-
-    } else if (utils::ends_with(filename, DBGHashOrdered::kExtension)) {
-        return Config::GraphType::HASH;
-
-    } else if (utils::ends_with(filename, DBGHashString::kExtension)) {
-        return Config::GraphType::HASH_STR;
-
-    } else if (utils::ends_with(filename, DBGHashFast::kExtension)) {
-        return Config::GraphType::HASH_FAST;
-
-    } else if (utils::ends_with(filename, graph::DBGBitmap::kExtension)) {
-        return Config::GraphType::BITMAP;
-
-    } else if (utils::ends_with(filename, graph::DBGSSHash::kExtension)) {
-        return Config::GraphType::SSHASH;
-
-    } else {
-        return Config::GraphType::INVALID;
+    for (const auto &[ext, type] : kGraphExtToType) {
+        if (utils::ends_with(filename, ext))
+            return type;
     }
+    return Config::GraphType::INVALID;
 }
 
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
@@ -63,14 +57,15 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
         case Config::GraphType::HASH_FAST:
             return load_critical_graph_from_file<DBGHashFast>(filename);
         case Config::GraphType::BITMAP:
-            return load_critical_graph_from_file<graph::DBGBitmap>(filename);
+            return load_critical_graph_from_file<DBGBitmap>(filename);
         case Config::GraphType::SSHASH:
-            return load_critical_graph_from_file<graph::DBGSSHash>(filename);
-        case Config::GraphType::INVALID:
+            return load_critical_graph_from_file<DBGSSHash>(filename);
+        case Config::GraphType::INVALID: {
+            auto exts = utils::get_firsts<std::vector<std::string>>(kGraphExtToType);
             logger->error("Cannot load graph from '{}': unrecognized file extension "
-                          "(expected .dbg, .orhashdbg, .hashstrdbg, .hashfastdbg, .bitmapdbg, "
-                          "or .sshashdbg)", filename);
+                          "(expected one of {})", filename, fmt::join(exts, "/"));
             exit(1);
+        }
     }
     assert(false);
     exit(1);
