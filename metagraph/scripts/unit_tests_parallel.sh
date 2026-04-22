@@ -24,7 +24,13 @@ print_help() {
     sed -n '2,/^$/ { s/^# \{0,1\}//; p; }' "${BASH_SOURCE[0]}"
 }
 
-WORKERS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+# Default to 2x CPU count. With static sharding, oversubscribing by 2x reduces
+# the variance in per-shard runtime: each heavy test gets averaged against
+# fewer peers, so the slowest shard's walltime is closer to the mean. The OS
+# time-slices between the extra processes; the context-switch cost is cheap
+# compared to the variance reduction in practice.
+CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+WORKERS=$(( CORES * 2 ))
 UNIT_TESTS="${UNIT_TESTS:-}"
 
 # Parse our flags; everything else is forwarded to unit_tests.
