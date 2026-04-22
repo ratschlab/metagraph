@@ -169,7 +169,7 @@ jobs:
       - &run-unit-tests
         name: run unit tests
         run: |
-          cd metagraph/build && chmod +x unit_tests && ./unit_tests_parallel
+          cd metagraph/build && chmod +x unit_tests_parallel && ./unit_tests_parallel
 
 
   integration-tests:
