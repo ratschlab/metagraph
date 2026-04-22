@@ -75,19 +75,47 @@ TESTS_DIR="$(cd "$TESTS_DIR" && pwd)"
 
 # Per-shard workdirs and logs. On normal exit, clean up; on Ctrl-C/TERM,
 # also kill any still-running shards so they don't outlive the wrapper.
-ROOT="$(mktemp -d "${TMPDIR:-/tmp}/unit_tests_parallel.XXXXXX")"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/unit_tests_parallel.XXXXXX")" \
+    || { echo "error: mktemp -d failed" >&2; exit 2; }
+# Belt-and-suspenders guard for `rm -rf "$ROOT"`. Only ever delete paths that
+# still match the pattern we created. Catches a hypothetical scenario where
+# $ROOT somehow gets clobbered between creation and cleanup.
+safe_cleanup() {
+    case "$ROOT" in
+        */unit_tests_parallel.??????)
+            [[ -d "$ROOT" ]] && rm -rf "$ROOT"
+            ;;
+    esac
+}
 ln -s "$TESTS_DIR" "$ROOT/tests"
 for ((i = 0; i < WORKERS; i++)); do
     mkdir -p "$ROOT/shard$i"
 done
 declare -a PIDS=()
-on_exit() { rm -rf "$ROOT"; }
+on_exit() { safe_cleanup; }
 on_interrupt() {
     trap - EXIT INT TERM
+    # SIGTERM first, give them a moment, then SIGKILL anything still alive.
+    # Must fully reap before rm -rf — otherwise a slow-dying child can write
+    # new files into $ROOT after we walk it, leaving orphans behind.
     for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
+        kill -TERM "$pid" 2>/dev/null || true
     done
-    rm -rf "$ROOT"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        alive=0
+        for pid in "${PIDS[@]}"; do
+            kill -0 "$pid" 2>/dev/null && alive=1 && break
+        done
+        [[ $alive -eq 0 ]] && break
+        sleep 0.2
+    done
+    for pid in "${PIDS[@]}"; do
+        kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    done
+    for pid in "${PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+    safe_cleanup
     exit 130
 }
 trap on_exit EXIT
@@ -107,11 +135,18 @@ declare -a LOGS
 for ((i = 0; i < WORKERS; i++)); do
     LOG="$ROOT/shard$i.log"
     LOGS[$i]="$LOG"
+    # TEST_DUMP_DIR pins test_dump_dir() inside $ROOT so transient dump
+    # files get swept along with the rest of the shard workdir, including
+    # on Ctrl+C when C++ atexit handlers wouldn't have run.
+    # `exec` replaces the subshell with unit_tests so $! points at the real
+    # binary — otherwise `kill $!` just kills the subshell and orphans the
+    # child, which then reparents to init and keeps running.
     (
         cd "$ROOT/shard$i" \
             && GTEST_TOTAL_SHARDS="$WORKERS" GTEST_SHARD_INDEX="$i" \
-               "$UNIT_TESTS" --gtest_color=yes "$@" > "$LOG" 2>&1
-    ) &
+               TEST_DUMP_DIR="$ROOT/shard$i/dump" \
+               exec "$UNIT_TESTS" --gtest_color=yes "$@"
+    ) > "$LOG" 2>&1 &
     PIDS[$i]=$!
 done
 

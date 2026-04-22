@@ -1,6 +1,7 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <set>
@@ -28,9 +29,13 @@
 // mtg::common::logger — which sits in another TU and may not be initialized
 // yet (classic SIOF). Direct mkdtemp has no such dependency.
 //
-// The atexit handler guards on pid to avoid wiping the directory from forked
-// children — gtest's threadsafe death-test style forks, and a naive cleanup
-// from the child would pull the dir out from under the parent's later tests.
+// The atexit + signal handlers guard on pid to avoid wiping the directory
+// from forked children — gtest's threadsafe death-test style forks, and a
+// naive cleanup from the child would pull the dir out from under the
+// parent's later tests.
+//
+// When $TEST_DUMP_DIR is set, the caller (e.g. unit_tests_parallel.sh) owns
+// the dir's lifecycle, so neither atexit nor signal handlers are installed.
 inline const std::string& test_dump_dir() {
     static const pid_t owner_pid = getpid();
     static const std::string dir = [] {
@@ -50,6 +55,23 @@ inline const std::string& test_dump_dir() {
             std::error_code ec;
             fs::remove_all(test_dump_dir(), ec);
         });
+        // Clean up on Ctrl+C / kill too — default signal actions terminate
+        // the process without running atexit, which would leak the tempdir.
+        // Only install where the disposition is still default, so we don't
+        // clobber handlers gtest or the death-test machinery installed.
+        auto handler = +[](int sig) {
+            if (getpid() == owner_pid) {
+                std::error_code ec;
+                std::filesystem::remove_all(test_dump_dir(), ec);
+            }
+            std::signal(sig, SIG_DFL);
+            std::raise(sig);
+        };
+        for (int sig : { SIGINT, SIGTERM, SIGHUP, SIGQUIT }) {
+            auto prev = std::signal(sig, handler);
+            if (prev != SIG_DFL)
+                std::signal(sig, prev);
+        }
         return std::string(buf.data());
     }();
     return dir;
