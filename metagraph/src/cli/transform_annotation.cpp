@@ -943,6 +943,17 @@ int transform_annotation(Config *config) {
         }
         logger->trace("Serialized to {}", config->outfbase);
 
+    } else if (input_anno_type == Config::RowDiffRowFlat
+                    && config->anno_type == Config::RowDiffDisk) {
+        if (files.size() != 1) {
+            logger->error("Can only convert row_diff_flat annotations one at a time");
+            exit(1);
+        }
+        RowDiffRowFlatAnnotator annotator;
+        annotator.load(files[0]);
+        convert_to_row_diff<RowDiffDiskAnnotator>(annotator, config->outfbase);
+        logger->trace("Serialized to {}", config->outfbase);
+
     } else {
         logger->error(
                 "Conversion to other representations is not implemented for {} "
