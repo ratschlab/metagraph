@@ -12,6 +12,7 @@ from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, 
 import hashlib
 import platform
 import re
+import shutil
 import psutil
 
 
@@ -1689,7 +1690,6 @@ class TestLoadErrorMessages(TestingBase):
     @unittest.skipIf(os.geteuid() == 0, "chmod 000 has no effect when running as root")
     @parameterized.expand([(ext,) for ext in set(graph_file_extension.values())])
     def test_unreadable_graph_mentions_permissions(self, graph_ext):
-        import shutil
         unreadable = self.tempdir.name + '/unreadable' + graph_ext
         shutil.copy(self.graph_path, unreadable)
         os.chmod(unreadable, 0o000)
@@ -1703,7 +1703,6 @@ class TestLoadErrorMessages(TestingBase):
     @unittest.skipIf(os.geteuid() == 0, "chmod 000 has no effect when running as root")
     @parameterized.expand([(ext,) for ext in set(anno_file_extension.values())])
     def test_unreadable_annotation_mentions_permissions(self, anno_ext):
-        import shutil
         unreadable = self.tempdir.name + '/unreadable' + anno_ext
         shutil.copy(self.anno_path, unreadable)
         os.chmod(unreadable, 0o000)

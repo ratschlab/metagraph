@@ -57,7 +57,7 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
     return in;
 }
 
-std::string file_read_failure_detail(fs::path path) {
+std::string file_read_failure_detail(const fs::path &path) {
     std::error_code ec;
     fs::file_status st = fs::status(path, ec);
     // fs::status sets |ec| for errors it can observe via stat(2): nonexistent

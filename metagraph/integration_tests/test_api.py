@@ -824,9 +824,19 @@ class TestAPIServerLoadErrors(TestingBase):
         cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                             cls.graph_path, cls.anno_base, 'column')
 
+    @staticmethod
+    def _pick_free_port():
+        """Ask the OS for a free TCP port. There's a tiny race between close()
+        and the server's bind(), but irrelevant here: these tests expect the
+        server to exit during graph/annotation load, before it ever binds."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+
     def _run_server_expecting_failure(self, argv_tail):
         """Launch `metagraph server_query <argv_tail>` and return (exit_code, stderr_text)."""
-        cmd = f'{METAGRAPH} server_query {argv_tail} --port 23456 --address 127.0.0.1 -p 2'
+        cmd = (f'{METAGRAPH} server_query {argv_tail}'
+               f' --port {self._pick_free_port()} --address 127.0.0.1 -p 2')
         proc = subprocess.Popen(shlex.split(cmd), shell=False,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
