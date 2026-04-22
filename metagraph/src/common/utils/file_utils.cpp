@@ -25,6 +25,11 @@ namespace fs = std::filesystem;
 std::filesystem::path SWAP_PATH;
 std::vector<std::string> TMP_DIRS;
 std::mutex TMP_DIRS_MUTEX;
+// The pid of the process that first registered a temp dir. Used to skip
+// cleanup in forked children — e.g. gtest's threadsafe death-test style forks
+// the test process, and the child's atexit would otherwise wipe the parent's
+// temp dirs out from under it.
+pid_t TMP_DIRS_OWNER_PID = 0;
 
 static bool WITH_MMAP = false;
 static bool WITH_MADVISE = false;
@@ -87,6 +92,8 @@ void cleanup_temp_dir_nolock(const std::filesystem::path &tmp_dir) {
 }
 
 void cleanup_tmp_dir_on_exit() {
+    if (getpid() != TMP_DIRS_OWNER_PID)
+        return;
     std::for_each(TMP_DIRS.begin(), TMP_DIRS.end(), cleanup_temp_dir_nolock);
 }
 
@@ -104,6 +111,7 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
     std::lock_guard<std::mutex> lock(TMP_DIRS_MUTEX);
 
     if (TMP_DIRS.empty()) {
+        TMP_DIRS_OWNER_PID = getpid();
         if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
             logger->error("Couldn't reset the signal handler for SIGINT");
         if (std::signal(SIGTERM, cleanup_tmp_dir_on_signal) == SIG_ERR)
