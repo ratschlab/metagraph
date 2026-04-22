@@ -60,6 +60,12 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
 std::string file_read_failure_detail(fs::path path) {
     std::error_code ec;
     fs::file_status st = fs::status(path, ec);
+    // fs::status sets |ec| for errors it can observe via stat(2): nonexistent
+    // path, or a parent directory that we can't traverse (EACCES bubbles up
+    // as std::errc::permission_denied). It does NOT report the case where
+    // the file itself exists and is stat-able but isn't readable — stat
+    // checks directory-traversal perms, not file-read perms. The access()
+    // call below fills that gap.
     if (ec) {
         if (ec == std::errc::permission_denied)
             return std::string(ec.message())

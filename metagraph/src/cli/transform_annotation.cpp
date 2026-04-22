@@ -107,12 +107,8 @@ matrix::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     }
     subsampling_pool.join();
 
-    if (!success) {
-        if (anno_type != Config::ColumnCompressed) {
-            logger->error("Could not load annotations");
-        }
+    if (!success)
         exit(1);
-    }
 
     // arrange the columns in their original order
     std::vector<T> subcolumns(subcolumn_ptrs.size());

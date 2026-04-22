@@ -524,6 +524,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     decompress_bitmap(col) |= *column;
                 }
             } else {
+                logger->error("Cannot load column '{}': got {} rows, expected {}",
+                              label, column->size(), num_rows_);
                 no_errors = false;
             }
         },
