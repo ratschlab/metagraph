@@ -1,5 +1,8 @@
 #include "logger.hpp"
 
+#include <cstdlib>
+#include <string>
+
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 namespace mtg {
@@ -41,7 +44,16 @@ class split_sink : public spdlog::sinks::sink {
 static std::shared_ptr<spdlog::logger> make_logger() {
     spdlog::set_automatic_registration(false);
     auto sink = std::make_shared<split_sink>();
-    return std::make_shared<spdlog::logger>("", sink);
+    auto logger = std::make_shared<spdlog::logger>("", sink);
+    // Honor SPDLOG_LEVEL at construction time so any log calls made during
+    // static/dynamic init of other TUs (e.g. tests creating temp dirs) are
+    // filtered at the intended level, not the default of `info`.
+    if (const char* env = std::getenv("SPDLOG_LEVEL"); env && *env) {
+        auto lvl = spdlog::level::from_str(env);
+        if (lvl != spdlog::level::off || std::string(env) == "off")
+            logger->set_level(lvl);
+    }
+    return logger;
 }
 
 std::shared_ptr<spdlog::logger>& get_logger() {
