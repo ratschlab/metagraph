@@ -635,8 +635,14 @@ Config::Config(int argc, char *argv[]) {
         if (to_row_diff && !infbase.size() && !input_has_embedded_anchor) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
-        } else if ((!to_row_diff || input_has_embedded_anchor) && infbase.size()) {
-            std::cerr << "Graph is not needed for this transform" << std::endl;
+        } else if (!to_row_diff && infbase.size()) {
+            std::cerr << "Graph is only required for transform to row_diff types"
+                      << std::endl;
+            print_usage_and_exit = true;
+        } else if (input_has_embedded_anchor && infbase.size()) {
+            std::cerr << "Graph is not needed when the input annotation has "
+                         "embedded anchors (row_diff_brwt, row_diff_flat)"
+                      << std::endl;
             print_usage_and_exit = true;
         }
     }
