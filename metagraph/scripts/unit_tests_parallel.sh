@@ -53,18 +53,12 @@ print_help() {
     fi
 }
 
-# Default to 2x CPU count. With static sharding, oversubscribing by 2x reduces
-# the variance in per-shard runtime: each heavy test gets averaged against
-# fewer peers, so the slowest shard's walltime is closer to the mean. The OS
-# time-slices between the extra processes; the context-switch cost is cheap
-# compared to the variance reduction in practice.
+# Default to 2x CPU count to smooth shard imbalance.
 CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 WORKERS=$(( CORES * 2 ))
 UNIT_TESTS="${UNIT_TESTS:-}"
 
-# Parse our flags; everything else is collected and forwarded to unit_tests.
-# Don't stop on the first unknown arg — `-j` and `--help` should still be
-# picked up when they come after a gtest arg like `--gtest_filter=...`.
+# Parse wrapper flags and forward everything else to unit_tests.
 FORWARD=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -93,9 +87,7 @@ if [[ ! -x "$UNIT_TESTS" ]]; then
 fi
 UNIT_TESTS="$(cd "$(dirname "$UNIT_TESTS")" && pwd)/$(basename "$UNIT_TESTS")"
 
-# Locate the tests/ dir relative to the binary (metagraph/build/unit_tests
-# -> metagraph/tests). Shards reference it via a shared symlink so hardcoded
-# "../tests/data" lookups still resolve from each per-shard CWD.
+# Locate tests/ relative to the binary (build/unit_tests -> tests).
 TESTS_DIR="$(dirname "$UNIT_TESTS")/../tests"
 if [[ ! -d "$TESTS_DIR" ]]; then
     echo "error: tests dir not found: $TESTS_DIR" >&2
@@ -103,13 +95,10 @@ if [[ ! -d "$TESTS_DIR" ]]; then
 fi
 TESTS_DIR="$(cd "$TESTS_DIR" && pwd)"
 
-# Per-shard workdirs and logs. On normal exit, clean up; on Ctrl-C/TERM,
-# also kill any still-running shards so they don't outlive the wrapper.
+# Per-shard workdirs and logs.
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/unit_tests_parallel.XXXXXX")" \
     || { echo "error: mktemp -d failed" >&2; exit 2; }
-# Belt-and-suspenders guard for `rm -rf "$ROOT"`. Only ever delete paths that
-# still match the pattern we created. Catches a hypothetical scenario where
-# $ROOT somehow gets clobbered between creation and cleanup.
+# Guard rm -rf with the expected mktemp pattern.
 safe_cleanup() {
     case "$ROOT" in
         */unit_tests_parallel.??????)

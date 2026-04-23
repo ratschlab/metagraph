@@ -13,13 +13,8 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 
 
-// Per-process scratch directory for unit-test dump outputs. Shared across
-// translation units via the function-local static, so a serialize in one TU
-// and a load in another hit the same path.
-//
-// When $TEST_DUMP_DIR is set (e.g. by scripts/unit_tests_parallel.sh), the
-// caller owns the dir's lifecycle. Otherwise delegate to utils::create_temp_dir,
-// which installs the PID-guarded atexit + signal cleanup.
+// Per-process unit-test dump directory.
+// If TEST_DUMP_DIR is set, use it; otherwise use utils::create_temp_dir().
 inline const std::string& test_dump_dir() {
     static const std::string dir = [] {
         namespace fs = std::filesystem;
@@ -34,12 +29,7 @@ inline const std::string& test_dump_dir() {
     return dir;
 }
 
-// BOSSConstructor factory that pins swap_dir to test_dump_dir(). Every
-// BOSS::Chunk created during construction scribbles buffered int_vectors
-// (W/last/weights) into that swap_dir — including empty Chunks — because
-// those members are sdsl::int_vector_buffer and always disk-backed. Using
-// the production default "/tmp/" leaks dirs to /tmp on any abnormal exit;
-// routing through test_dump_dir() lets the atexit sweep pick them up.
+// BOSSConstructor factory that uses the test dump dir for swap files.
 inline mtg::graph::boss::BOSSConstructor make_test_boss_constructor(
         size_t k,
         bool both_strands = false,
