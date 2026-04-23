@@ -495,7 +495,7 @@ and the second run creates only the coordinate-to-header (``CoordToHeader``) map
     #     (e.g., row_diff_brwt_coord)
 
     # 2) build the CoordToHeader mapping
-    metagraph annotate -v -i graph.dbg --anno-filename --index-header-coords \
+    metagraph annotate -v -i graph.dbg --anno-filename --index-header-coords -p 4 \
                        -o annotation transcripts_1000.fa
 
 The second run requires the original sequence input files (FASTA/FASTQ) used for building the annotation.
