@@ -462,10 +462,12 @@ TEST(ThreadPool, SynchronousException) {
 
 // When help_while_waiting steals a throwing task, the exception propagates
 // to the caller rather than crashing a worker thread.
-TEST(ThreadPool, HelpWhileWaitingStealedException) {
+TEST(ThreadPool, HelpWhileWaitingStolenException) {
     ThreadPool pool(1);
 
-    // Block the only worker so it can't pick up subsequent tasks.
+    // Park the only worker for the whole test: as long as it's inside task(),
+    // it can't re-enter the worker loop and race the helper for the throwing
+    // task on the shared queue.
     std::promise<void> worker_started;
     std::promise<void> unblock;
     pool.enqueue([&]() {
@@ -474,16 +476,28 @@ TEST(ThreadPool, HelpWhileWaitingStealedException) {
     });
     worker_started.get_future().wait();
 
-    // Enqueue a task that throws — it stays in the queue since the worker is busy.
-    pool.force_enqueue([]() -> int { throw std::runtime_error("stolen throw"); });
-
-    // Enqueue the task we actually wait for — also stays in the queue.
+    // The task we actually wait for: stays in the queue because the worker is
+    // parked.
     auto future = pool.force_enqueue([]() { return 42; });
 
-    // help_while_waiting will steal the throwing task first, propagating the exception.
+    // The throwing task goes to the *front* so the helper pops it first
+    // regardless of enqueue order.
+    pool.force_enqueue_front([]() -> int {
+        throw std::runtime_error("stolen throw");
+    });
+
+    // With the worker parked, help_while_waiting() is the only thing that can
+    // drain the queue. It pops the throwing task, so the exception surfaces
+    // here instead of killing the parked worker.
     EXPECT_THROW(pool.help_while_waiting(future).get(), std::runtime_error);
 
+    // Release the worker and synchronously drain the pool *before* the locals
+    // it captures by reference (unblock, worker_started) go out of scope.
+    // Without the explicit join, ~pool runs last (it was declared first), so
+    // ~unblock would race against the worker still reading it.
     unblock.set_value();
+    pool.join();
+    EXPECT_EQ(42, future.get());
 }
 
 TEST(ThreadPool, DummyEmptyJoin) {

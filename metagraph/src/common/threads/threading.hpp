@@ -65,7 +65,7 @@ class ThreadPool {
     //     lambda and calls std::terminate (covered by MultiThreadException).
     //   * Tasks stolen by `help_while_waiting` (below) run on the caller, so
     //     an exception propagates out to the caller instead
-    //     (covered by HelpWhileWaitingStealedException).
+    //     (covered by HelpWhileWaitingStolenException).
     template <class T>
     std::shared_future<T>& help_while_waiting(std::shared_future<T> &future) {
         auto ready = [&]() {
