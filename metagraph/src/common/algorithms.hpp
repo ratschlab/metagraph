@@ -12,6 +12,8 @@
 #include <set>
 #include <stdexcept>
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
 
@@ -522,6 +524,47 @@ namespace utils {
         );
         return item_counts;
     }
+
+    template <typename T, typename ValueType>
+    class ValueStore {
+      public:
+        ValueStore(size_t universe_size, size_t reserve_size = 0)
+              : use_dense_(universe_size < kMaxDenseSize) {
+            if (use_dense_) {
+                // For a small universe size, using a dense vector is faster than a hash table.
+                ids_.resize(universe_size);
+                dense_values_.reserve(reserve_size);
+            } else {
+                sparse_values_.reserve(reserve_size);
+            }
+        }
+
+        template <typename... Args>
+        void emplace(T j, Args&&... args) {
+            if (use_dense_) {
+                dense_values_.emplace_back(std::forward<Args>(args)...);
+                ids_[j] = dense_values_.size();
+            } else {
+                sparse_values_.emplace(j, std::forward<Args>(args)...);
+            }
+        }
+
+        ValueType* get(T j) {
+            if (use_dense_)
+                return ids_[j] ? &dense_values_[ids_[j] - 1] : nullptr;
+            auto it = sparse_values_.find(j);
+            return it != sparse_values_.end() ? &it.value() : nullptr;
+        }
+
+      private:
+        static constexpr size_t kMaxDenseSize = 1'000'000;
+        bool use_dense_;
+        // if dense, then dense_values_[ids_[j] - 1] is the value for j
+        Vector<ValueType> dense_values_;
+        std::vector<size_t> ids_;
+        // if sparse, then sparse_values_[j] is the value for j
+        tsl::hopscotch_map<T, ValueType> sparse_values_;
+    };
 
 } // namespace utils
 

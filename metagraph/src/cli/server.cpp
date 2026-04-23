@@ -219,18 +219,6 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
-template<typename T>
-bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
-    if (data.wait_for(0s) != std::future_status::ready) {
-        logger->info("[Server] Got a request during initialization. Asked to come back later");
-        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
-                        "Server is currently initializing, please come back later.");
-        return false;
-    }
-
-    return true;
-}
-
 std::vector<std::string> filter_graphs_from_list(
         const tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> &indexes,
         const Json::Value &content_json,
@@ -373,9 +361,9 @@ int run_server(Config *config) {
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        process_request(response, request, request_id, [&](const std::string &content) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, request_id, [&](const std::string& content) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();  // the index is not loaded yet, so we can't process the request
 
             Json::Value content_json = parse_json_string(content);
             logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
@@ -497,8 +485,8 @@ int run_server(Config *config) {
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
         process_request(response, request, num_requests++, [&](const std::string &content) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             if (!config->fnames.size())
                 return process_align_request(content, anno_graph.get()->get_graph(), *config);
@@ -510,9 +498,9 @@ int run_server(Config *config) {
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, num_requests++, [&](const std::string &) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             Json::Value root(Json::arrayValue);
             if (!config->fnames.size()) {
@@ -536,9 +524,9 @@ int run_server(Config *config) {
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, num_requests++, [&](const std::string &) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             auto get_num_labels = [](const AnnotatedDBG &anno_dbg) {
                 uint64_t num_labels = 0;

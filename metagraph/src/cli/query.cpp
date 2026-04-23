@@ -747,11 +747,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_indexes[i] = full_to_small[i].first;
     }
 
-    // get unique rows and set pointers to them in |row_indexes|
+    // One decoded row per entry; row_indexes[i] becomes an index into this vector.
+    // Row-diff matrices skip hash dedup here (see RowDiff::get_rows_dict); other
+    // matrices still return deduplicated rows with remapped indexes.
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
     if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
+        throw std::runtime_error("There must be less than 2^32 rows in a batch."
                                  " Reduce the query batch size.");
     }
 
@@ -1054,9 +1056,7 @@ construct_contigs(const DeBruijnGraph &full_dbg,
         static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
     );
 
-    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
-                  " and constructed in {} sec",
-                  graph_init->num_nodes(), timer.elapsed());
+    double construction_time = timer.elapsed();
     timer.reset();
 
     // pull contigs from query graph
@@ -1071,7 +1071,9 @@ construct_contigs(const DeBruijnGraph &full_dbg,
                                full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
                                false);
 
-    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Batch graph with {} k-mers constructed in {} "
+                  "sec, contig extraction took {} sec",
+                  graph_init->num_nodes(), construction_time, timer.elapsed());
     timer.reset();
 
     if (num_threads > 1) {
@@ -1635,10 +1637,11 @@ size_t batched_query_fasta(const std::string &file,
 
             logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
                           " redundancy: {:.2f} bp/kmer, total bp/k-mers in contigs: {}/{},"
-                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
+                          " queried with {} threads in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
                           contigs_total_bp, contigs_total_kmers,
+                          threads_per_batch,
                           query_time, query_graph_construction + query_time,
                           num_bytes_read / (query_graph_construction + query_time));
         };
