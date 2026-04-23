@@ -318,7 +318,7 @@ int run_server(Config *config) {
         for (const auto &[name, _] : indexes) {
             names.push_back(name);
         }
-        logger->info("[Server] Loaded paths for {} graphs for {} names: {}",
+        logger->info("[Server] Loaded a list of {} graphs for {} names: {}",
                      num_indexes, indexes.size(), fmt::join(names, ", "));
         if (loaded_with_mmap) {
             logger->info("[Server] Graphs will be loaded with mmap (--mmap set)."
@@ -349,8 +349,7 @@ int run_server(Config *config) {
         }
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
-        // Dynamic per-request loads (in_ram path) should always materialize in RAM,
-        // regardless of how the startup cache was loaded.
+        // Dynamic per-request loads (in_ram path) should always be in RAM.
         utils::set_mmap(false);
     }
 
