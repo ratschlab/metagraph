@@ -64,6 +64,20 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     return { header, local_coord };
 }
 
+uint64_t CoordToHeader::num_kmers_in_header(Column col, size_t header) const {
+    const auto &offsets = coord_offsets_.at(col);
+    if (header >= num_headers(col)) {
+        throw std::runtime_error(fmt::format("Header {} out of range for column {} "
+                "({} headers)", header, col, num_headers(col)));
+    }
+    // Each header's end is marked by a set bit at position partial_sum[h] - 1
+    // (1-based select1). For h == 0 the run starts at 0; otherwise it starts
+    // right after the previous header's last coord.
+    uint64_t end = offsets.select1(header + 1);
+    uint64_t start = header ? offsets.select1(header) + 1 : 0;
+    return end - start + 1;
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
     const std::string path = utils::make_suffix(filename_base, kExtension);
     std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);

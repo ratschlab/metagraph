@@ -284,6 +284,10 @@ class Alignment {
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
     const annot::CoordToHeader *coord_to_header = nullptr;
+    // k-mer length of the graph the coordinates refer to. When set together
+    // with coord_to_header, format_coords() splits ranges that cross sequence
+    // boundaries into per-header ranges joined by ';'.
+    size_t coord_to_header_k = 0;
 
     Columns label_columns;
 

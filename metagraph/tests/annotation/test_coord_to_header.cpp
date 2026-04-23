@@ -278,61 +278,82 @@ TEST(AlignmentFormatCoords, WithoutCoordToHeaderOrEncoder) {
     EXPECT_EQ(aln.format_coords(), "5:1-4");
 }
 
-// TODO: decide how to handle cross-boundary alignments (see also
-// test_align.py::test_align_cross_sequence_boundary).
-//
-// When the start coordinate maps to one header but the range
-// (coord + sequence_.size()) extends past that header into the next,
-// format_coords currently produces an out-of-bounds range.
-//
-// Key constraint: detecting the overflow requires knowing each sequence's
-// nucleotide length, which is num_kmers + k - 1.  CoordToHeader stores
-// k-mer counts but not k, so it cannot compute nucleotide lengths alone.
-// Any fix needs k passed in, or nucleotide lengths stored alongside k-mer
-// counts.  Additionally, with indels in the alignment, the reference-space
-// length differs from sequence_.size(), so the CIGAR would also be needed
-// for a correct split.
-//
-// Options:
-//   1. Split the range across headers (e.g. "seqA:8-N;seqB:1-M" where
-//      N = nucleotide length of seqA, M = remainder).
-//      Generalizes to 3+ sequences with a loop.
-//      Pro: most informative; the ";" separator is already used.
-//      Con: changes ";" semantics (independent matches vs. contiguous
-//      span); requires k and CIGAR access in format_coords.
-//   2. Fall back to the global file path for the whole label.
-//      Pro: honest, no misleading per-sequence coordinates.
-//      Con: loses header info; inconsistent output format.
-TEST(AlignmentFormatCoords, DISABLED_CrossSequenceBoundary) {
+// When coord_to_header_k is set and a range extends past the starting
+// sequence's boundary, format_coords splits it across consecutive headers
+// (joined by ';').  Without coord_to_header_k, the legacy unsplit behaviour
+// is retained (nucleotide length is unknown).
+TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     using namespace mtg::graph::align;
 
     // seqA: 10 kmers (coords 0-9), seqB: 10 kmers (coords 10-19).
-    // With k=5, seqA would be 14 nt (positions 1-14 in 1-based).
-    // But format_coords doesn't know k, so it can't compute 14.
+    // With k=5, each sequence has 10+k-1 = 14 nt.
     CoordToHeader cth(
         { { "seqA", "seqB" } },
         { { 10, 10 } }
     );
 
-    // 8-char alignment starting at coord 7 in seqA (local 7).
-    // Range = 8 to 15 (1-based), but seqA is only 10+k-1 nt.
-    // For any k <= 6 this overflows into seqB.
+    // 8-nt alignment starting at coord 7 in seqA (local 7).
+    // seqA has 14 nt, so available from local 7 is 14-7 = 7 nt.
+    // Remaining 1 nt spills into seqB starting at local 0.
     Alignment aln(
         std::string_view{},
         {},
-        std::string("ACGTACGT"),  // 8-char sequence
+        std::string("ACGTACGT"),  // 8-char reference spelling
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
-    aln.label_coordinates = { { 7 } };  // global coord 7 -> seqA, local 7
+    aln.label_coordinates = { { 7 } };
     aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 5;
 
-    // Current (broken) behaviour: "seqA:8-15" — out of bounds for seqA
-    // (e.g. with k=5, seqA has 14 nt, so position 15 is past its end).
-    //
-    // Option 1 (with k=5): EXPECT_EQ(aln.format_coords(), "seqA:8-14;seqB:1-1");
-    // Option 2: (would need label_encoder set up to produce file path)
-    EXPECT_EQ(aln.format_coords(), "seqA:8-15");  // documents current behaviour
+    EXPECT_EQ(aln.format_coords(), "seqA:8-14;seqB:1-1");
+}
+
+TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithoutKUsesLegacy) {
+    using namespace mtg::graph::align;
+
+    CoordToHeader cth(
+        { { "seqA", "seqB" } },
+        { { 10, 10 } }
+    );
+
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("ACGTACGT"),
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 7 } };
+    aln.coord_to_header = &cth;
+    // coord_to_header_k left as 0 -> legacy unsplit output
+
+    EXPECT_EQ(aln.format_coords(), "seqA:8-15");
+}
+
+TEST(AlignmentFormatCoords, CrossThreeSequences) {
+    using namespace mtg::graph::align;
+
+    // Three sequences each with 5 kmers.  With k=3 each is 7 nt, so coords:
+    //   seqA: global 0-4 (7 nt), seqB: global 5-9 (7 nt), seqC: global 10-14 (7 nt)
+    CoordToHeader cth(
+        { { "seqA", "seqB", "seqC" } },
+        { { 5, 5, 5 } }
+    );
+
+    Alignment aln(
+        std::string_view{},
+        {},
+        std::string("ACGTACGTACGTACGT"),  // 16 nt spelling
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 3 } };  // start in seqA at local 3
+    aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 3;
+
+    // seqA: local 3 to 6 (4 nt), seqB: local 0 to 6 (7 nt), seqC: local 0 to 4 (5 nt)
+    EXPECT_EQ(aln.format_coords(), "seqA:4-7;seqB:1-7;seqC:1-5");
 }
 
 } // namespace

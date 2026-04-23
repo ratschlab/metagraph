@@ -61,6 +61,11 @@ class CoordToHeader {
      */
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
 
+    /**
+     * Number of k-mers covered by a single header in a column.
+     */
+    uint64_t num_kmers_in_header(Column col, size_t header) const;
+
     static constexpr auto kExtension = ".seqs";
 
   private:

@@ -641,46 +641,25 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][8], 'seq1:3-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
-    @unittest.skip("TODO: decide how to handle cross-boundary alignments")
     def test_align_cross_sequence_boundary(self, anno_repr):
         """Alignment path crosses from one indexed sequence into the next.
 
-        When two sequences share k-mers at their boundary, the graph has a
-        path that crosses from one into the other.  The aligner may follow
-        that path, producing a single alignment whose coordinate range
-        extends past the end of the first sequence.
-
-        Current behaviour: the start coordinate is mapped to the first
-        sequence and the range is naively extended, producing an
-        out-of-bounds label like ``seq1:5-20`` when seq1 is only 12 bp.
-
-        TODO: choose a strategy:
-          1. Split the range across headers (``seq1:5-12;seq2:1-8``).
-             Generalizes to 3+ sequences with a loop.
-             Pro: most informative.  The ``;`` separator and per-header
-             ranges are already used for shared-kmer matches.
-             Con: changes the semantics of ``;`` (independent matches vs.
-             contiguous span).  Requires k to compute per-sequence
-             nucleotide lengths (``num_kmers + k - 1``), since
-             ``CoordToHeader`` only stores k-mer counts.  Also needs
-             reference-space alignment length (from the CIGAR) to split
-             correctly when indels are present, since
-             ``sequence_.size()`` is the query-space length.
-          2. Fall back to the global file path for the whole label
-             (``file.fa:5-20``).
-             Pro: honest — no misleading per-sequence coordinates.
-             Con: loses header info entirely; output format becomes
-             inconsistent (some lines use headers, others file paths).
+        When two sequences share the boundary k-1-mer, the graph connects
+        them and the aligner follows a path whose coordinate range extends
+        past the end of the first sequence.  The label is split across
+        consecutive headers, joined by ';'.
         """
-        # seq1 ends with ...ACGTACGT, seq2 starts with ACGT... — they share
-        # k-mers at the boundary, so the graph connects them.
+        # seq1 ends with ...ACGT, seq2 starts with ACGT... — they share the
+        # k-1-mer 'ACGT' at the boundary, so the graph connects them.
         #   seq1: AAAAACGTACGT  (12 bp, k-mer coords 0-7)
         #   seq2: ACGTTTTTTTTT  (12 bp, k-mer coords 8-15)
         test_fa = self._write_fa('seqs.fa', [
             ('seq1', 'AAAAACGTACGT'),
             ('seq2', 'ACGTTTTTTTTT'),
         ])
-        # Full concatenation — the aligner finds a 16bp path crossing the boundary
+        # The aligner finds a 16bp path crossing the boundary (8bp soft
+        # clip at the start, since the first 8 query bp cannot extend into
+        # a longer run than the cross-boundary one).
         query_fa = self._write_fa('query.fa', [
             ('q_concat', 'AAAAACGTACGTACGTTTTTTTTT'),
         ])
@@ -691,16 +670,8 @@ class TestAlignCoordToHeader(TestingBase):
 
         self.assertEqual(rows[0][0], 'q_concat')
         self.assertEqual(rows[0][6], '8S16=')
-
-        # Replace with the chosen strategy once decided.
-        # Option 1 would give:
-        #   self.assertEqual(rows[0][8], 'seq1:5-12;seq2:1-8')
-        # Option 2 would give:
-        #   self.assertIn(self.tempdir.name, rows[0][8])  # file path
-        #
-        # Current (broken) behaviour:
-        #   rows[0][8] == 'seq1:5-20'  (out-of-bounds for 12 bp seq1)
-        self.fail("Placeholder — expected output not yet decided")
+        # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        self.assertEqual(rows[0][8], 'seq1:5-12;seq2:1-8')
 
 
 if __name__ == '__main__':

@@ -436,6 +436,7 @@ int align_to_graph(Config *config) {
                         if (anno_dbg && anno_dbg->get_coord_to_header()) {
                             for (auto &aln : paths) {
                                 aln.coord_to_header = anno_dbg->get_coord_to_header();
+                                aln.coord_to_header_k = graph->get_k();
                             }
                         }
                         const auto &res = format_alignment(header, paths, *graph, *config);

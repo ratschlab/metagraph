@@ -27,26 +27,61 @@ std::string Alignment::format_coords() const {
     if (coord_to_header) {
         // Map global coordinates to per-sequence (header) local coordinates,
         // grouping by (column, header_id) since multiple global coordinates in
-        // the same column may belong to different sequences.
+        // the same column may belong to different sequences. When k is known
+        // (coord_to_header_k > 0), a range that extends past the end of the
+        // starting sequence is split across subsequent headers.
         using Key = std::pair<Column, size_t>;
-        VectorMap<Key, std::vector<uint64_t>> header_coords;
+        // Each value is a list of local (start, end_inclusive) ranges in
+        // 0-based coordinates.
+        VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> header_ranges;
+
+        const uint64_t L = sequence_.size();
+        const size_t k = coord_to_header_k;
 
         for (size_t i = 0; i < label_columns.size(); ++i) {
             Column col = label_columns[i];
             for (uint64_t coord : label_coordinates[i]) {
                 auto [header_id, local_coord] = coord_to_header->map_single_coord(col, coord);
-                header_coords[{ col, header_id }].push_back(local_coord);
+                if (!k) {
+                    // Legacy behaviour: no cross-boundary splitting.
+                    header_ranges[{ col, header_id }]
+                        .emplace_back(local_coord, local_coord + L - 1);
+                    continue;
+                }
+                uint64_t remaining = L;
+                uint64_t cur_local = local_coord;
+                size_t cur_header = header_id;
+                while (remaining) {
+                    if (cur_header >= coord_to_header->num_headers(col)) {
+                        logger->warn("Alignment coord {} in column {} extends past the last "
+                                "indexed sequence; truncating output", coord, col);
+                        break;
+                    }
+                    uint64_t nt_len = coord_to_header->num_kmers_in_header(col, cur_header) + k - 1;
+                    uint64_t avail = nt_len > cur_local ? nt_len - cur_local : 0;
+                    uint64_t span = std::min(remaining, avail);
+                    if (!span) {
+                        logger->warn("Alignment coord {} in column {} maps past the end of "
+                                "sequence {}; truncating output", coord, col, cur_header);
+                        break;
+                    }
+                    header_ranges[{ col, cur_header }]
+                        .emplace_back(cur_local, cur_local + span - 1);
+                    remaining -= span;
+                    ++cur_header;
+                    cur_local = 0;
+                }
             }
         }
 
         std::vector<std::string> decoded_labels;
-        decoded_labels.reserve(header_coords.size());
-        for (const auto &[key, coords] : header_coords) {
+        decoded_labels.reserve(header_ranges.size());
+        for (const auto &[key, ranges] : header_ranges) {
             const auto &[col, header_id] = key;
             decoded_labels.emplace_back(coord_to_header->get_headers(col)[header_id]);
-            for (uint64_t coord : coords) {
-                decoded_labels.back()
-                    += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
+            for (auto [start, end] : ranges) {
+                // alignment coordinates are 1-based inclusive ranges
+                decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
             }
         }
 
