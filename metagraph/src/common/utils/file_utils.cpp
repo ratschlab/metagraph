@@ -22,9 +22,34 @@ namespace utils {
 using mtg::common::logger;
 namespace fs = std::filesystem;
 
-std::filesystem::path SWAP_PATH;
-std::vector<std::string> TMP_DIRS;
-std::mutex TMP_DIRS_MUTEX;
+// Function-local statics instead of namespace-scope globals to sidestep a
+// static-initialization-order hazard: test_dump_dir() in test_helpers.hpp
+// calls create_temp_dir() during a test TU's dynamic init, which push_backs
+// into tmp_dirs. If that push runs before this TU's own dynamic init, the
+// vector's default-member-initializers (_M_start = nullptr, ...) later
+// re-run via the default constructor and silently drop the pushed entry.
+// The mutex (constexpr default ctor) and pid_t were not strictly at risk;
+// they're wrapped here for consistency.
+static std::filesystem::path& swap_path() {
+    static std::filesystem::path instance;
+    return instance;
+}
+static std::vector<std::string>& tmp_dirs() {
+    static std::vector<std::string> instance;
+    return instance;
+}
+static std::mutex& tmp_dirs_mutex() {
+    static std::mutex instance;
+    return instance;
+}
+// The pid of the process that first registered a temp dir. Used to skip
+// cleanup in forked children — e.g. gtest's threadsafe death-test style forks
+// the test process, and the child's atexit would otherwise wipe the parent's
+// temp dirs out from under it.
+static pid_t& tmp_dirs_owner_pid() {
+    static pid_t instance = 0;
+    return instance;
+}
 
 static bool WITH_MMAP = false;
 static bool WITH_MADVISE = false;
@@ -64,11 +89,11 @@ std::ofstream open_new_ofstream(const std::string &filename) {
 }
 
 void set_swap_path(std::filesystem::path dir_path) {
-    SWAP_PATH = dir_path;
+    swap_path() = dir_path;
 }
 
 std::filesystem::path get_swap_path() {
-    return SWAP_PATH;
+    return swap_path();
 }
 
 void cleanup_tmp_dir_on_signal(int sig) {
@@ -87,7 +112,10 @@ void cleanup_temp_dir_nolock(const std::filesystem::path &tmp_dir) {
 }
 
 void cleanup_tmp_dir_on_exit() {
-    std::for_each(TMP_DIRS.begin(), TMP_DIRS.end(), cleanup_temp_dir_nolock);
+    if (getpid() != tmp_dirs_owner_pid())
+        return;
+    auto &dirs = tmp_dirs();
+    std::for_each(dirs.begin(), dirs.end(), cleanup_temp_dir_nolock);
 }
 
 std::filesystem::path create_temp_dir(std::filesystem::path path,
@@ -101,9 +129,11 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         exit(1);
     }
 
-    std::lock_guard<std::mutex> lock(TMP_DIRS_MUTEX);
+    std::lock_guard<std::mutex> lock(tmp_dirs_mutex());
 
-    if (TMP_DIRS.empty()) {
+    auto &dirs = tmp_dirs();
+    if (dirs.empty()) {
+        tmp_dirs_owner_pid() = getpid();
         if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
             logger->error("Couldn't reset the signal handler for SIGINT");
         if (std::signal(SIGTERM, cleanup_tmp_dir_on_signal) == SIG_ERR)
@@ -114,17 +144,18 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
 
     logger->trace("Registered temporary directory {}", tmp_dir_str);
 
-    TMP_DIRS.push_back(tmp_dir_str);
+    dirs.push_back(tmp_dir_str);
 
     return tmp_dir_str;
 }
 
 void remove_temp_dir(std::filesystem::path dir_name) {
     {
-        std::lock_guard<std::mutex> lock(TMP_DIRS_MUTEX);
-        auto it = std::find(TMP_DIRS.begin(), TMP_DIRS.end(), dir_name);
-        assert(it != TMP_DIRS.end());
-        TMP_DIRS.erase(it);
+        std::lock_guard<std::mutex> lock(tmp_dirs_mutex());
+        auto &dirs = tmp_dirs();
+        auto it = std::find(dirs.begin(), dirs.end(), dir_name);
+        assert(it != dirs.end());
+        dirs.erase(it);
     }
     cleanup_temp_dir_nolock(dir_name);
 }

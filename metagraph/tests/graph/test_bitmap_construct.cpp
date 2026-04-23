@@ -7,12 +7,11 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
-#include "../test_helpers.hpp"
-
 
 #define protected public
 #define private public
 
+#include "../test_helpers.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "common/utils/string_utils.hpp"
@@ -29,7 +28,7 @@ using mtg::kmer::KmerExtractor2Bit;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
-const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 
 typedef kmer::KMer<uint64_t, KmerExtractor2Bit::bits_per_char> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::bits_per_char - 1;
@@ -173,7 +172,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                     DBGBitmap::Chunk chunk = constructor->build_chunk();
 
                     chunk_filenames.push_back(
-                        utils::join_strings({ test_data_dir + "/chunks_to_merge", suffix }, ".")
+                        utils::join_strings({ test_dump_dir() + "/chunks_to_merge", suffix }, ".")
                             + DBGBitmap::kChunkFileExtension
                     );
 
@@ -333,7 +332,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 
         for (size_t i = 0; i < constructors.size(); ++i) {
             DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
-            files.push_back(test_data_dir + "/chunks_to_merge"
+            files.push_back(test_dump_dir() + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
@@ -389,7 +388,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
 
         for (size_t i = 0; i < constructors.size(); ++i) {
             DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
-            files.push_back(test_data_dir + "/chunks_to_merge"
+            files.push_back(test_dump_dir() + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
@@ -449,7 +448,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
         for (size_t i = 0; i < constructors.size(); ++i) {
             DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             chunk_size += chunk.num_set_bits();
-            files.push_back(test_data_dir + "/chunks_to_merge"
+            files.push_back(test_dump_dir() + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
@@ -510,7 +509,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         for (size_t i = 0; i < constructors.size(); ++i) {
             DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             chunk_size += chunk.num_set_bits();
-            files.push_back(test_data_dir + "/chunks_to_merge"
+            files.push_back(test_dump_dir() + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");

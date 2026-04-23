@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #include <fstream>
 
@@ -7,8 +8,7 @@
 
 namespace {
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/vector_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/vector_dump_test";
 
 
 TEST(Serialization, SerializationVectorBool) {

@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #include <string>
 #include <filesystem>
@@ -14,7 +15,7 @@ using namespace mtg::seq_io;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
-const std::string dump_filename_base = test_data_dir + "/dump.fasta";
+const std::string dump_filename_base = test_dump_dir() + "/dump.fasta";
 const std::vector<std::string> dump_filename_exts { ".gz", ".zst" };
 
 

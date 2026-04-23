@@ -26,8 +26,7 @@ static auto anno_to_graph_index(graph::AnnotatedDBG::row_index row) {
     return graph::AnnotatedDBG::anno_to_graph_index(row);
 }
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
 const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
 const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basename + "_row_compressed_to_rowflat";
