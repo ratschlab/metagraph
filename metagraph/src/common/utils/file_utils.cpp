@@ -3,9 +3,11 @@
 #include <cassert>
 #include <csignal>
 #include <cstdlib>
+#include <cerrno>
 #include <filesystem>
 #include <algorithm>
 #include <system_error>
+#include <string>
 
 #if defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
@@ -78,6 +80,33 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
         in.reset(new std::ifstream(filename, std::ios_base::binary));
     }
     return in;
+}
+
+std::string file_read_failure_detail(const fs::path &path) {
+    std::error_code ec;
+    fs::file_status st = fs::status(path, ec);
+    // fs::status sets |ec| for errors it can observe via stat(2): nonexistent
+    // path, or a parent directory that we can't traverse (EACCES bubbles up
+    // as std::errc::permission_denied). It does NOT report the case where
+    // the file itself exists and is stat-able but isn't readable — stat
+    // checks directory-traversal perms, not file-read perms. The access()
+    // call below fills that gap.
+    if (ec) {
+        if (ec == std::errc::permission_denied)
+            return std::string(ec.message())
+                    + " (check read permissions on this path and its parent directories)";
+        return ec.message();
+    }
+    if (!fs::exists(st))
+        return "no such file or directory";
+#if defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
+    if (::access(path.c_str(), R_OK) != 0) {
+        const char *err = std::strerror(errno);
+        return std::string(err ? err : "access failed")
+                + " (missing read permission on this file)";
+    }
+#endif
+    return "could not read contents (possibly corrupted or incompatible)";
 }
 
 std::ofstream open_new_ofstream(const std::string &filename) {
