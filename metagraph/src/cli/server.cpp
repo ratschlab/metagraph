@@ -320,11 +320,12 @@ int run_server(Config *config) {
         }
         logger->info("[Server] Loaded paths for {} graphs for {} names: {}",
                      num_indexes, indexes.size(), fmt::join(names, ", "));
-        if (!utils::with_mmap()) {
-            logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
-                         " Make sure they're on a fast disk.");
-            utils::set_mmap(true);
-            loaded_with_mmap = true;
+        if (loaded_with_mmap) {
+            logger->info("[Server] Graphs will be loaded with mmap (--mmap set)."
+                         " Make sure they're on a fast drive.");
+        } else {
+            logger->info("[Server] Graphs will be loaded into RAM (--mmap not set)."
+                         " Total memory ≈ sum of all graph+annotation file sizes.");
         }
 
         logger->info("[Server] Loading graphs...");
@@ -346,8 +347,10 @@ int run_server(Config *config) {
             logger->error("[Server] No graphs to serve. Exiting.");
             exit(1);
         }
-        logger->info("[Server] All graphs were loaded (with mmap). Ready to serve queries.");
-        // Reset so that dynamically loaded graphs (pulled into RAM for queries) don't use mmap.
+        logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
+                     loaded_with_mmap ? "with mmap" : "into RAM");
+        // Dynamic per-request loads (in_ram path) should always materialize in RAM,
+        // regardless of how the startup cache was loaded.
         utils::set_mmap(false);
     }
 
