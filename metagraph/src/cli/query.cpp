@@ -938,9 +938,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
     );
 
-    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
-                  " and constructed in {} sec",
-                  graph_init->num_nodes(), timer.elapsed());
+    double construction_time = timer.elapsed();
     timer.reset();
 
     // pull contigs from query graph
@@ -955,7 +953,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
                                false);
 
-    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Batch graph with {} k-mers constructed in {} "
+                  "sec, contig extraction took {} sec",
+                  graph_init->num_nodes(), construction_time, timer.elapsed());
     timer.reset();
 
     if (num_threads > 1) {
