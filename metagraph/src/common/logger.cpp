@@ -58,7 +58,10 @@ static std::shared_ptr<spdlog::logger> make_logger() {
         std::transform(level_env.begin(), level_env.end(), level_env.begin(),
                        [](unsigned char c) { return std::tolower(c); });
         auto lvl = spdlog::level::from_str(level_env);
-        if (lvl != spdlog::level::off || level_env == "off") {
+        // from_str returns `off` for unrecognized names, so distinguish a real
+        // "off" from a parse failure.
+        bool recognized = (lvl != spdlog::level::off) || (level_env == "off");
+        if (recognized) {
             logger->set_level(lvl);
         } else {
             std::fprintf(stderr, "Warning: failed to parse SPDLOG_LEVEL='%s'; "
