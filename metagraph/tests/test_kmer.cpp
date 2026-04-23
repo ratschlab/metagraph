@@ -1,14 +1,14 @@
-#include "gtest/gtest.h"
-#include "test_helpers.hpp"
-
 #include <vector>
 #include <functional>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "gtest/gtest.h"
+
 #define private public
 #define protected public
 
+#include "test_helpers.hpp"
 #include "kmer/kmer.hpp"
 #include "kmer/kmer_extractor.hpp"
 

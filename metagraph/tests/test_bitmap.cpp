@@ -1,11 +1,11 @@
 #include <random>
 
 #include "gtest/gtest.h"
-#include "test_helpers.hpp"
-
-#include "common/threads/threading.hpp"
 
 #define private public
+
+#include "test_helpers.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"

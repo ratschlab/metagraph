@@ -10,6 +10,7 @@
 
 #include "common/logger.hpp"
 #include "common/utils/file_utils.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 
 
 // Per-process scratch directory for unit-test dump outputs. Shared across
@@ -31,6 +32,27 @@ inline const std::string& test_dump_dir() {
                                       "metagraph_tests").string();
     }();
     return dir;
+}
+
+// BOSSConstructor factory that pins swap_dir to test_dump_dir(). Every
+// BOSS::Chunk created during construction scribbles buffered int_vectors
+// (W/last/weights) into that swap_dir — including empty Chunks — because
+// those members are sdsl::int_vector_buffer and always disk-backed. Using
+// the production default "/tmp/" leaks dirs to /tmp on any abnormal exit;
+// routing through test_dump_dir() lets the atexit sweep pick them up.
+inline mtg::graph::boss::BOSSConstructor make_test_boss_constructor(
+        size_t k,
+        bool both_strands = false,
+        uint8_t bits_per_count = 0,
+        const std::string &filter_suffix = "",
+        size_t indexed_suffix_length = 0,
+        size_t num_threads = 1,
+        double memory_preallocated = 0,
+        mtg::kmer::ContainerType container = mtg::kmer::ContainerType::VECTOR) {
+    return mtg::graph::boss::BOSSConstructor(
+        k, both_strands, bits_per_count, filter_suffix,
+        indexed_suffix_length, num_threads, memory_preallocated,
+        container, test_dump_dir());
 }
 
 

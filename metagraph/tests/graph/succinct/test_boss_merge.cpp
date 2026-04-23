@@ -140,18 +140,18 @@ TEST(BOSSMerge, TraversalMergeTwoGraphs) {
 TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 10; ++k) {
-            BOSSConstructor constructor_first(k);
+            auto constructor_first = make_test_boss_constructor(k);
             constructor_first.add_sequences({ std::string(100, 'A') });
             BOSS first(&constructor_first);
             ASSERT_EQ(2u, first.num_edges());
 
-            BOSSConstructor constructor_second(k);
+            auto constructor_second = make_test_boss_constructor(k);
             constructor_second.add_sequences({ std::string(50, 'C'),
                                                std::string(60, 'G') });
             BOSS second(&constructor_second);
             ASSERT_EQ(3u, second.num_edges());
 
-            BOSSConstructor constructor_third(k);
+            auto constructor_third = make_test_boss_constructor(k);
             constructor_third.add_sequences({ std::string(100, 'A'),
                                               std::string(50, 'C'),
                                               std::string(60, 'G') });

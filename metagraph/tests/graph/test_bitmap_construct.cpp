@@ -7,12 +7,11 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
-#include "../test_helpers.hpp"
-
 
 #define protected public
 #define private public
 
+#include "../test_helpers.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "common/utils/string_utils.hpp"

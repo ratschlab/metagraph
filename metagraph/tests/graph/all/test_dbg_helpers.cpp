@@ -372,7 +372,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     if (mode == DeBruijnGraph::PRIMARY)
         sequences = get_primary_contigs<DBGSuccinct>(k, sequences);
 
-    BOSSConstructor constructor(k - 1, mode == DeBruijnGraph::CANONICAL);
+    auto constructor = make_test_boss_constructor(k - 1, mode == DeBruijnGraph::CANONICAL);
     EXPECT_EQ(k - 1, constructor.get_k());
     constructor.add_sequences(std::vector<std::string>(sequences));
     auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), mode);
