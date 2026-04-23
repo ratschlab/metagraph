@@ -13,6 +13,8 @@
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+#include "../test_helpers.hpp"
+
 
 namespace {
 
@@ -37,7 +39,7 @@ size_t encode(const std::vector<std::pair<T, C>> &values, const std::string &fil
 }
 
 TYPED_TEST(EliasFanoTestPair, WriteEmpty) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 0);
     size_t file_size = encoder.finish();
     // 27 = 2*8 + 1; no data is written to the file except number of high bytes (8
@@ -47,7 +49,7 @@ TYPED_TEST(EliasFanoTestPair, WriteEmpty) {
 }
 
 TYPED_TEST(EliasFanoTestPair, ReadEmpty) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 0);
     encoder.finish();
 
@@ -56,7 +58,7 @@ TYPED_TEST(EliasFanoTestPair, ReadEmpty) {
 }
 
 TYPED_TEST(EliasFanoTestPair, WriteOne) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 1);
     encoder.add({ 1234, 5 });
     size_t total_size = encoder.finish();
@@ -72,7 +74,7 @@ TYPED_TEST(EliasFanoTestPair, WriteOne) {
 }
 
 TYPED_TEST(EliasFanoTestPair, ReadOne) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(file.name(), 1);
     encoder.add({ 1234, 5 });
     encoder.finish();
@@ -86,7 +88,7 @@ TYPED_TEST(EliasFanoTestPair, ReadOne) {
 }
 
 TYPED_TEST(EliasFanoTestPair, WriteTwo) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 2);
     encoder.add({ 1234, 5 });
     encoder.add({ 4321, 3 });
@@ -100,7 +102,7 @@ TYPED_TEST(EliasFanoTestPair, WriteTwo) {
 }
 
 TYPED_TEST(EliasFanoTestPair, ReadTwo) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(file.name(), 2);
     encoder.add({ 1234, 5 });
     encoder.add({ 4321, 3 });
@@ -123,7 +125,7 @@ TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementOne) {
     for (uint32_t i = 0; i < 100; ++i) {
         values[i] = { i, 100 + i };
     }
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 17 bytes overhead for the header
     EXPECT_EQ(17 + sizeof(TypeParam) + (2 * 100) / 8U + 100, file_size);
@@ -149,7 +151,7 @@ TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementTwo) {
         v = { 2 * i, i };
         i++;
     });
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     EXPECT_EQ(file_size,
               std::filesystem::file_size(file.name())
@@ -171,7 +173,7 @@ TYPED_TEST(EliasFanoTestPair, VariousSizes) {
         for (uint32_t i = 0; i < size; ++i) {
             values[i] = { i, size + i };
         }
-        utils::TempFile file;
+        utils::TempFile file(test_dump_dir());
         size_t file_size = encode(values, file.name());
         EXPECT_EQ(file_size,
                   std::filesystem::file_size(file.name())
@@ -201,7 +203,7 @@ TYPED_TEST(EliasFanoTestPair, ReadWriteRandom) {
                               i += dist10(rng);
                               v = { i, size };
                           });
-            utils::TempFile file;
+            utils::TempFile file(test_dump_dir());
             size_t file_size = encode(values, file.name());
             EXPECT_EQ(file_size,
                       std::filesystem::file_size(file.name())
@@ -225,7 +227,7 @@ class EliasFanoBufferedPairTest : public ::testing::Test {};
 TYPED_TEST_SUITE(EliasFanoBufferedPairTest, ValueTypes);
 
 TYPED_TEST(EliasFanoBufferedPairTest, Empty) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> under_test(file.name(), 100);
     under_test.finish();
     EliasFanoDecoder<std::pair<TypeParam, uint8_t>> decoder(file.name());
@@ -233,7 +235,7 @@ TYPED_TEST(EliasFanoBufferedPairTest, Empty) {
 }
 
 TYPED_TEST(EliasFanoBufferedPairTest, InsertOne) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> under_test(file.name(), 100);
     under_test.add({ 43, 15 });
     under_test.finish();
@@ -246,7 +248,7 @@ TYPED_TEST(EliasFanoBufferedPairTest, InsertOne) {
 }
 
 TYPED_TEST(EliasFanoBufferedPairTest, InsertFullChunk) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
         under_test.add({ 2 * i, i });
@@ -263,7 +265,7 @@ TYPED_TEST(EliasFanoBufferedPairTest, InsertFullChunk) {
 }
 
 TYPED_TEST(EliasFanoBufferedPairTest, InsertTwoChunks) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 4; ++i) {
         under_test.add({ 2 * i, i });
@@ -280,7 +282,7 @@ TYPED_TEST(EliasFanoBufferedPairTest, InsertTwoChunks) {
 }
 
 TYPED_TEST(EliasFanoBufferedPairTest, InsertManyChunks) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> under_test(file.name(), 10);
     for (uint32_t i = 0; i < 75; ++i) {
         under_test.add({ 2 * i, i });
@@ -309,7 +311,7 @@ TEST(EliasFanoTestPair128, ReadWriteRandom) {
                               i += dist10(rng);
                               v = { i, trial };
                           });
-            utils::TempFile file;
+            utils::TempFile file(test_dump_dir());
             size_t file_size = encode(values, file.name());
             EXPECT_EQ(file_size,
                       std::filesystem::file_size(file.name())
@@ -345,7 +347,7 @@ TEST(EliasFanoTestPair128, ReadWriteRandomLarge) {
                               }
                               v = { i, size };
                           });
-            utils::TempFile file;
+            utils::TempFile file(test_dump_dir());
             size_t file_size = encode(values, file.name());
             EXPECT_EQ(file_size,
                       std::filesystem::file_size(file.name())

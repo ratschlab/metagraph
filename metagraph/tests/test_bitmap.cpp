@@ -1,11 +1,11 @@
 #include <random>
 
 #include "gtest/gtest.h"
-#include "test_helpers.hpp"
-
-#include "common/threads/threading.hpp"
 
 #define private public
+
+#include "test_helpers.hpp"
+#include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -18,8 +18,7 @@ namespace {
 
 using namespace mtg;
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/bitmap_dump_test";
 
 
 void reference_based_test(const bitmap &vector,

@@ -138,8 +138,6 @@ int augment_graph(Config *config) {
     auto annotation = initialize_annotation(config->infbase_annotators.at(0), *config);
 
     if (!annotation->load(config->infbase_annotators.at(0))) {
-        logger->error("Cannot load graph annotation from '{}'",
-                      config->infbase_annotators.at(0));
         exit(1);
     } else {
         logger->trace("Annotation was loaded in {} sec", timer.elapsed());

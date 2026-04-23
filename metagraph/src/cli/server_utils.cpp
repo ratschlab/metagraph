@@ -62,23 +62,6 @@ bool is_compression_requested(const std::shared_ptr<HttpServer::Request> &reques
             && encoding_header->second.find("deflate") != std::string::npos;
 }
 
-void write_response(SimpleWeb::StatusCode status,
-                    const std::string &msg,
-                    std::shared_ptr<HttpServer::Response> response,
-                    bool compress) {
-    auto header = SimpleWeb::CaseInsensitiveMultimap(
-            { { "Content-Type", "application/json" } });
-
-    std::string msg_send = msg;
-    if (compress) {
-        msg_send = compress_string(msg);
-        header.insert(std::make_pair("Content-Encoding", "deflate"));
-        header.insert(std::make_pair("Content-Length", std::to_string(msg_send.size())));
-    }
-
-    response->write(status, msg_send, header);
-}
-
 Json::Value parse_json_string(const std::string &msg) {
     Json::Value json;
 
@@ -107,25 +90,38 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     Timer timer;
     // Retrieve string:
     std::string content = request->content.string();
+    SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
+    SimpleWeb::StatusCode status;
+    std::string ret;
 
     try {
         // Return JSON string
-        Json::StreamWriterBuilder builder;
-        std::string ret = Json::writeString(builder, process(content));
-        write_response(SimpleWeb::StatusCode::success_ok, ret, response,
-                       is_compression_requested(request));
-    } catch (const CustomResponse &) {
-        // Do nothing — response already handled by the callback `process`
-    } catch (const std::exception &e) {
+        status = SimpleWeb::StatusCode::success_ok;
+        ret = Json::writeString(Json::StreamWriterBuilder(), process(content));
+        if (is_compression_requested(request)) {
+            ret = compress_string(ret);
+            header.insert(std::make_pair("Content-Encoding", "deflate"));
+            header.insert(std::make_pair("Content-Length", std::to_string(ret.size())));
+        }
+    } catch (const CurrentlyInitializingError& e) {
+        logger->info("[Server] Got a request during initialization. Asked to come back later");
+        status = SimpleWeb::StatusCode::server_error_service_unavailable;
+        header.insert(std::make_pair("Retry-After", "60")); // ask to come back in 60 seconds
+        ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
+    } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
-        response->write(SimpleWeb::StatusCode::client_error_bad_request,
-                        json_str_with_error_msg(e.what()));
+        status = SimpleWeb::StatusCode::client_error_bad_request;
+        ret = json_str_with_error_msg(e.what());
     } catch (...) {
         logger->warn("[Server] Error on request {}", request_id);
-        response->write(SimpleWeb::StatusCode::server_error_internal_server_error,
-                        json_str_with_error_msg("Internal server error"));
+        status = SimpleWeb::StatusCode::server_error_internal_server_error;
+        ret = json_str_with_error_msg("Internal server error");
     }
-    logger->info("[Server] Request {} finished in {} sec", request_id, timer.elapsed());
+    double processing_time = timer.elapsed();
+    response->write(status, ret, header);
+    logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
+                 "finished in {:.3f} sec",
+                 request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
 }
 
 } // namespace cli

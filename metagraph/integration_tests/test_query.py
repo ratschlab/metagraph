@@ -12,6 +12,7 @@ from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, 
 import hashlib
 import platform
 import re
+import shutil
 import psutil
 
 
@@ -1541,6 +1542,177 @@ class TestCoordToHeader(TestingBase):
 
                 # Should have same results
                 self.assertEqual(output_with, output_without)
+
+
+class TestLoadErrorMessages(TestingBase):
+    """For every graph and annotation file extension, verify that when a
+    non-existent file is passed the CLI exits non-zero AND the offending
+    path appears in stderr. Regression guard for the class of bugs where a
+    loader fails silently or only prints a generic 'cannot load' message
+    with no path, leaving the user guessing which file is broken."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Build one valid graph + one valid column annotation that we can pair
+        # against a deliberately-bogus counterpart in each test case.
+        cls.graph_path = cls.tempdir.name + '/graph.dbg'
+        cls.anno_base = cls.tempdir.name + '/annotation'
+        cls.anno_path = cls.anno_base + '.column.annodbg'
+        cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa', cls.graph_path,
+                         6, 'succinct')
+        cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                            cls.graph_path, cls.anno_base, 'column')
+
+    def _run_expecting_failure(self, cmd):
+        res = subprocess.run(cmd, shell=True, stdout=PIPE, stderr=PIPE, timeout=60)
+        return res.returncode, res.stderr.decode(errors='replace')
+
+    def _assert_error_line_contains_path(self, stderr, path):
+        """The offending path must appear on a line tagged '[error]', not just
+        somewhere in the log. An info-level mention of the path doesn't count."""
+        error_lines = [l for l in stderr.splitlines() if '[error]' in l]
+        self.assertTrue(
+            any(path in l for l in error_lines),
+            msg=(f"no [error] line mentions path '{path}'.\n"
+                 f"[error] lines:\n" + '\n'.join(error_lines) + '\n'
+                 f"full stderr:\n{stderr}'"))
+
+    def _assert_error_line_mentions_permissions(self, stderr, path):
+        """For permission-denied failures, the [error] line that names the
+        file must also tell the user that the problem is about read rights."""
+        self._assert_error_line_contains_path(stderr, path)
+        error_lines = [l for l in stderr.splitlines()
+                       if '[error]' in l and path in l]
+        self.assertTrue(
+            any('permission' in l.lower() for l in error_lines),
+            msg=(f"no [error] line for '{path}' mentions permissions.\n"
+                 + '\n'.join(error_lines)))
+
+    @parameterized.expand([(ext,) for ext in set(graph_file_extension.values())])
+    def test_missing_graph_mentions_path(self, graph_ext):
+        missing = self.tempdir.name + '/does_not_exist' + graph_ext
+        rc, stderr = self._run_expecting_failure(f'{METAGRAPH} stats {missing}')
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, missing)
+
+    @parameterized.expand([(ext,) for ext in set(anno_file_extension.values())])
+    def test_missing_annotation_mentions_path(self, anno_ext):
+        missing = self.tempdir.name + '/does_not_exist' + anno_ext
+        rc, stderr = self._run_expecting_failure(
+            f'{METAGRAPH} stats -a {missing} {self.graph_path}')
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, missing)
+
+    # RowDiff<ColumnMajor> annotations keep their anchor bitmap and fork-
+    # successor bitmap in side-car files (.anchors and .rd_succ) next to
+    # the graph. If either is missing, the annotation load aborts via
+    # IRowDiff::load_anchor / load_fork_succ — we want the offending
+    # side-car path on an [error] line too.
+    def _prepare_row_diff_annotation(self):
+        """Build a RowDiff<ColumnMajor> annotation and return (graph, anno, anchor, rd_succ)."""
+        anno_base = self.tempdir.name + '/rd'
+        anno_path = anno_base + '.row_diff.annodbg'
+        anchor_path = self.graph_path + '.anchors'
+        rd_succ_path = self.graph_path + '.rd_succ'
+        # Build a column annotation and transform to row_diff (stages 0, 1, 2).
+        self._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                             self.graph_path, anno_base, 'column')
+        for stage in (0, 1, 2):
+            cmd = (f'{METAGRAPH} transform_anno -p 2 --anno-type row_diff '
+                   f'-i {self.graph_path} -o {anno_base} '
+                   f'{anno_base}.column.annodbg --row-diff-stage {stage}')
+            self._run_command(cmd, f'RowDiff stage {stage}', shell=True)
+        return anno_path, anchor_path, rd_succ_path
+
+    def _query_with_anno(self, anno_path):
+        query_fa = self.tempdir.name + '/q.fa'
+        with open(query_fa, 'w') as f:
+            f.write('>q\nACGTACGT\n')
+        return self._run_expecting_failure(
+            f'{METAGRAPH} query -i {self.graph_path} -a {anno_path} {query_fa}')
+
+    def test_missing_anchor_file_mentions_path(self):
+        anno_path, anchor_path, _ = self._prepare_row_diff_annotation()
+        os.remove(anchor_path)
+        rc, stderr = self._query_with_anno(anno_path)
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, anchor_path)
+
+    def test_missing_fork_succ_file_mentions_path(self):
+        anno_path, _, rd_succ_path = self._prepare_row_diff_annotation()
+        os.remove(rd_succ_path)
+        rc, stderr = self._query_with_anno(anno_path)
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, rd_succ_path)
+
+    # Corrupt-file coverage is intentionally weaker than the missing-file
+    # case: we only assert the process exits non-zero. Checking for a
+    # proper [error] line with the file path would fail today because
+    # several loaders mishandle garbage input (hash graphs call exit(1)
+    # from deep in `initialize_graph`, BRWT hits SIGFPE on certain byte
+    # patterns, and various annotation types let exceptions escape
+    # without a contextual log). Those defects warrant their own PR.
+    # The exit-code check at least guards against the worst failure
+    # mode — silently accepting garbage as a valid file.
+    @parameterized.expand([(ext,) for ext in set(graph_file_extension.values())])
+    def test_corrupt_graph_fails(self, graph_ext):
+        corrupt = self.tempdir.name + '/corrupt' + graph_ext
+        with open(corrupt, 'wb') as f:
+            f.write(b'\xff' * 1024)
+        rc, stderr = self._run_expecting_failure(f'{METAGRAPH} stats {corrupt}')
+        self.assertNotEqual(0, rc,
+            msg=f"loading corrupt '{corrupt}' silently succeeded.\n{stderr}")
+
+    @parameterized.expand([(ext,) for ext in set(anno_file_extension.values())])
+    def test_corrupt_annotation_fails(self, anno_ext):
+        # 0xFF bytes (not zeros): every length-prefix in these formats reads
+        # as a uint64 of 0xFF…FF ~ 2^64, so the loader either tries an
+        # impossible allocation or trips an sdsl sanity check. A file full of
+        # zeros, by contrast, is a structurally valid "empty annotation" for
+        # several formats (ColumnCompressed, RowCompressed, RowDiff,
+        # ColumnCoord), and those loaders accept it cleanly on macOS — so the
+        # zero-byte payload would silently pass the test on one platform and
+        # fail on another depending on stdlib/sdsl behaviour.
+        corrupt = self.tempdir.name + '/corrupt' + anno_ext
+        with open(corrupt, 'wb') as f:
+            f.write(b'\xff' * 1024)
+        rc, stderr = self._run_expecting_failure(
+            f'{METAGRAPH} stats -a {corrupt} {self.graph_path}')
+        self.assertNotEqual(0, rc,
+            msg=f"loading corrupt '{corrupt}' silently succeeded.\n{stderr}")
+
+    # Permission-denied tests: a valid file (copy of a working one) with its
+    # read bits stripped. Loader must fail with an [error] line that both
+    # names the file and mentions "permissions" so the user knows what to fix.
+    # Skipped when running as root since chmod 000 doesn't restrict root's
+    # access.
+    @unittest.skipIf(os.geteuid() == 0, "chmod 000 has no effect when running as root")
+    @parameterized.expand([(ext,) for ext in set(graph_file_extension.values())])
+    def test_unreadable_graph_mentions_permissions(self, graph_ext):
+        unreadable = self.tempdir.name + '/unreadable' + graph_ext
+        shutil.copy(self.graph_path, unreadable)
+        os.chmod(unreadable, 0o000)
+        try:
+            rc, stderr = self._run_expecting_failure(f'{METAGRAPH} stats {unreadable}')
+            self.assertNotEqual(0, rc, msg=stderr)
+            self._assert_error_line_mentions_permissions(stderr, unreadable)
+        finally:
+            os.chmod(unreadable, 0o644)
+
+    @unittest.skipIf(os.geteuid() == 0, "chmod 000 has no effect when running as root")
+    @parameterized.expand([(ext,) for ext in set(anno_file_extension.values())])
+    def test_unreadable_annotation_mentions_permissions(self, anno_ext):
+        unreadable = self.tempdir.name + '/unreadable' + anno_ext
+        shutil.copy(self.anno_path, unreadable)
+        os.chmod(unreadable, 0o000)
+        try:
+            rc, stderr = self._run_expecting_failure(
+                f'{METAGRAPH} stats -a {unreadable} {self.graph_path}')
+            self.assertNotEqual(0, rc, msg=stderr)
+            self._assert_error_line_mentions_permissions(stderr, unreadable)
+        finally:
+            os.chmod(unreadable, 0o644)
 
 
 if __name__ == '__main__':

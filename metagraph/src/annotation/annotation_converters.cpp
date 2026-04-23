@@ -500,10 +500,8 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
             },
             num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
     return convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                            tmp_path, get_columns, std::move(column_names));
@@ -531,10 +529,8 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
             },
             num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
 
     std::unique_ptr<MultiBRWTAnnotator> annotator
@@ -760,10 +756,8 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
             },
             num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
 
     auto matrix = convert_to_RainbowBRWT(call_columns, max_brwt_arity);
@@ -808,10 +802,8 @@ void convert_batch_to_row_disk(
             num_threads
     );
 
-    if (!success) {
-        logger->error("Can't load annotation columns");
+    if (!success)
         exit(1);
-    }
 
     // this must be done after loading all columns
     // to keep their order correct
@@ -1466,7 +1458,6 @@ void merge_brwt(const std::vector<std::string> &filenames,
     for (auto filename : filenames) {
         MultiBRWTAnnotator annotator;
         if (!annotator.load(filename)) {
-            logger->error("Cannot load annotations from file '{}'", filename);
             exit(1);
         }
 
