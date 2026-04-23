@@ -210,6 +210,11 @@ echo "=== Per-shard summary ==="
 for i in "${!PIDS[@]}"; do
     SUMMARY=$(grep -aE '\[==========\].*ran' "${LOGS[$i]}" | tail -1 \
               | sed -E $'s/\x1b\\[[0-9;]*m//g; s/^\\[==========\\] //' || true)
+    if [[ "$SUMMARY" =~ \(([0-9]+)\ ms\ total\) ]]; then
+        MS_TOTAL="${BASH_REMATCH[1]}"
+        S_TOTAL=$(( (MS_TOTAL + 500) / 1000 ))  # round to nearest second
+        SUMMARY="${SUMMARY/(${MS_TOTAL} ms total)/(${S_TOTAL} s total)}"
+    fi
     echo "Shard $i: ${STATUS_COLOR[$i]}  $SUMMARY"
 done
 
