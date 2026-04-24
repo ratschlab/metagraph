@@ -404,7 +404,18 @@ COORD_ANNO_TYPES = list(coord_anno_file_extension.keys())
 
 @unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
 class TestAlignCoordToHeader(TestingBase):
-    """Test that 'metagraph align' resolves coordinates via .seqs index."""
+    """Test that 'metagraph align' resolves coordinates via .seqs index.
+
+    Future work: the current `.seqs`-based mode produces one alignment row
+    per column/file (LabeledAligner treats the file as a single label), and
+    CoordToHeader splits the coord range into per-sequence headers at
+    display time. To make this mode truly equivalent to `--anno-header`
+    (per-sequence columns) even when sequences within a file have
+    divergent extension paths, the annotator could be sliced by
+    CoordToHeader into virtual per-sequence sub-columns before alignment
+    so LabeledAligner extends per-sequence and emits distinct CIGARs.
+    That is a larger change — design to be worked out separately.
+    """
 
     def setUp(self):
         self.tempdir = TemporaryDirectory()
@@ -716,6 +727,67 @@ class TestAlignCoordToHeader(TestingBase):
                              f"CIGAR mismatch for {row_a[0]}: "
                              f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
             # Normalize semicolon-separated labels (order may vary across modes).
+            labels_a = sorted(row_a[8].split(';'))
+            labels_b = sorted(row_b[8].split(';'))
+            self.assertEqual(labels_a, labels_b,
+                             f"label mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[8]!r} vs per-sequence={row_b[8]!r}")
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_coord_to_header_matches_per_sequence_columns_two_files(self, anno_repr):
+        """Same equivalence as above, but with sequences split across two files.
+
+        This produces two columns under --anno-filename (one per file), so a
+        query that hits sequences in both files gets an alignment row per file;
+        CoordToHeader then expands each file-label into its matched sequence.
+        Under --anno-header the same query gets a row per matching sequence.
+        Per-row CIGARs should match between the two modes on this fixture.
+
+        Scope: this equivalence assumes that sequences within the same file
+        do not produce divergent extension paths for the test queries. With
+        divergent paths, --anno-header would emit a row per sequence with
+        distinct CIGARs while --anno-filename + .seqs would emit one row
+        per file. See the "future work" note in the class docstring.
+        """
+        file1_fa = self._write_fa('file1.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+        ])
+        file2_fa = self._write_fa('file2.fa', [
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('q_seq1', 'TATCGATCG'),          # only-seq1 match; shares kmers with seq3
+            ('q_seq2', 'GCTAGCTAGCTAG'),      # only-seq2 match
+            ('q_seq3', 'AAAAACCCCC'),         # only-seq3 match (in file2)
+            ('q_seq2_rc', 'CTAGCTAGCTAGC'),   # rc of a seq2 substring
+        ])
+
+        # Mode A: CoordToHeader — one column per file (two columns total).
+        graph_a, anno_a = self._setup_graph([file1_fa, file2_fa], anno_repr)
+        rows_a = self._run_align(graph_a, anno_a, query_fa, only_forwards=False)
+
+        # Mode B: per-sequence columns from the combined input.
+        combined_fa = self._write_fa('combined.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ])
+        graph_b_base = self.tempdir.name + '/graph_b_two'
+        graph_b = graph_b_base + '.dbg'
+        anno_b_base = self.tempdir.name + '/anno_b_two'
+        anno_b = anno_b_base + coord_anno_file_extension[anno_repr]
+        self._build_graph(combined_fa, graph_b_base, k=5, repr='succinct', mode='basic')
+        self._annotate_graph(combined_fa, graph_b, anno_b_base, anno_repr, anno_type='header')
+        rows_b = self._run_align(graph_b, anno_b, query_fa, only_forwards=False)
+
+        # Per-row CIGAR + label equivalence, as in the single-file case.
+        self.assertEqual(len(rows_a), len(rows_b))
+        for row_a, row_b in zip(rows_a, rows_b):
+            self.assertEqual(row_a[0], row_b[0])
+            self.assertEqual(row_a[6], row_b[6],
+                             f"CIGAR mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
             labels_a = sorted(row_a[8].split(';'))
             labels_b = sorted(row_b[8].split(';'))
             self.assertEqual(labels_a, labels_b,
