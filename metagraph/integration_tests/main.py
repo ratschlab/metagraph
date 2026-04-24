@@ -176,24 +176,12 @@ def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size =
         total_tests = sum(r.get('tests_run', 0) for r in results)
         duration = time.time() - start_time
 
-        all_failures = [name for r in results for name in r.get('failures', [])]
-        all_errors = [name for r in results for name in r.get('errors', [])]
-
         print("\n" + "=" * 60)
         print(f"FINAL SUMMARY")
         print("=" * 60)
         print(f"Total: {len([f for f in test_files if os.path.basename(f)[:-3] != 'test_api'])} test files, {len(results)} chunks, {total_tests} tests")
-        print(f"\033[0;32;40m[  PASSED  ]\033[0m {passed} chunks.")
-        if all_failures:
-            print(f"\033[0;31;40m[  FAILED  ]\033[0m {len(all_failures)} test(s), listed below:")
-            for name in all_failures:
-                print(f"\033[0;31;40m[  FAILED  ]\033[0m {name}")
-        if all_errors:
-            print(f"\033[0;31;40m[  ERRORS  ]\033[0m {len(all_errors)} test(s), listed below:")
-            for name in all_errors:
-                print(f"\033[0;31;40m[  ERRORS  ]\033[0m {name}")
-        if not all_failures and not all_errors:
-            print(f"\033[0;32;40m[  PASSED  ]\033[0m All {total_tests} tests passed.")
+        print(f"Passed: {passed}")
+        print(f"Failed: {failed}")
         print(f"Total duration: {duration:.1f}s")
         print("=" * 60)
 
