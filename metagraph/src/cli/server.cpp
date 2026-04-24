@@ -328,12 +328,34 @@ int run_server(Config *config) {
                          " Total memory ≈ sum of all graph+annotation file sizes.");
         }
 
-        logger->info("[Server] Loading graphs...");
+        // Deduplicate graph paths so the same underlying graph file is loaded only
+        // once, even if it appears in multiple (graph, annotation) entries.
+        std::vector<std::string> unique_graph_paths;
+        tsl::hopscotch_map<std::string, size_t> graph_path_to_idx;
         for (const auto &[name, graphs] : indexes) {
             for (const auto &[graph_fname, anno_fname] : graphs) {
+                if (graph_path_to_idx.emplace(graph_fname, unique_graph_paths.size()).second)
+                    unique_graph_paths.push_back(graph_fname);
                 graphs_cache[{ graph_fname, anno_fname }] = nullptr;
             }
         }
+        if (graphs_cache.empty()) {
+            logger->error("[Server] No graphs to serve. Exiting.");
+            exit(1);
+        }
+        if (unique_graph_paths.size() < graphs_cache.size()) {
+            logger->info("[Server] Deduplicated {} graph references down to {} unique graph files.",
+                         graphs_cache.size(), unique_graph_paths.size());
+        }
+
+        logger->info("[Server] Loading {} unique graph(s)...", unique_graph_paths.size());
+        std::vector<std::shared_ptr<DeBruijnGraph>> loaded_graphs(unique_graph_paths.size());
+        #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
+        for (size_t i = 0; i < unique_graph_paths.size(); ++i) {
+            loaded_graphs[i] = load_critical_dbg(unique_graph_paths[i]);
+        }
+
+        logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
         #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
         for (size_t i = 0; i < graphs_cache.size(); ++i) {
             Config config_copy = *config;
@@ -341,11 +363,8 @@ int run_server(Config *config) {
             const auto &[graph_fname, anno_fname] = it.key();
             config_copy.infbase = graph_fname;
             config_copy.infbase_annotators = { anno_fname };
-            it.value() = initialize_annotated_dbg(config_copy);
-        }
-        if (graphs_cache.empty()) {
-            logger->error("[Server] No graphs to serve. Exiting.");
-            exit(1);
+            it.value() = initialize_annotated_dbg(loaded_graphs[graph_path_to_idx.at(graph_fname)],
+                                                  config_copy);
         }
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
