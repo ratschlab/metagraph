@@ -673,6 +673,53 @@ class TestAlignCoordToHeader(TestingBase):
         # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
         self.assertEqual(rows[0][8], 'seq1:5-12;seq2:1-8')
 
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_coord_to_header_matches_per_sequence_columns(self, anno_repr):
+        """CoordToHeader output matches per-sequence-column annotation output.
+
+        With CoordToHeader (one column + .seqs index) vs per-sequence columns
+        (each sequence its own label via --anno-header), the aligner should
+        produce the same labels with the same local coordinate ranges.
+        """
+        sequences = [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),
+        ]
+        test_fa = self._write_fa('seqs.fa', sequences)
+        query_fa = self._write_fa('query.fa', [
+            ('q1', 'TATCGATCG'),      # matches seq1 (and shared 'ATCGATCG' in seq3)
+            ('q2', 'GCTAGCTAGCTAG'),  # matches seq2
+            ('q3', 'AAAAACCCCC'),     # matches seq3
+        ])
+
+        # Mode A: CoordToHeader — one column (filename), headers via .seqs.
+        graph_a, anno_a = self._setup_graph(test_fa, anno_repr)
+        rows_a = self._run_align(graph_a, anno_a, query_fa)
+
+        # Mode B: per-sequence columns — each FASTA header is its own label.
+        graph_b_base = self.tempdir.name + '/graph_b'
+        graph_b = graph_b_base + '.dbg'
+        anno_b_base = self.tempdir.name + '/anno_b'
+        anno_b = anno_b_base + coord_anno_file_extension[anno_repr]
+        self._build_graph(test_fa, graph_b_base, k=5, repr='succinct', mode='basic')
+        self._annotate_graph(test_fa, graph_b, anno_b_base, anno_repr, anno_type='header')
+        rows_b = self._run_align(graph_b, anno_b, query_fa)
+
+        # The CIGAR (col 6) and label field (col 8) must match between modes.
+        self.assertEqual(len(rows_a), len(rows_b))
+        for row_a, row_b in zip(rows_a, rows_b):
+            self.assertEqual(row_a[0], row_b[0])  # query name
+            self.assertEqual(row_a[6], row_b[6],
+                             f"CIGAR mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
+            # Normalize semicolon-separated labels (order may vary across modes).
+            labels_a = sorted(row_a[8].split(';'))
+            labels_b = sorted(row_b[8].split(';'))
+            self.assertEqual(labels_a, labels_b,
+                             f"label mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[8]!r} vs per-sequence={row_b[8]!r}")
+
 
 if __name__ == '__main__':
     unittest.main()
