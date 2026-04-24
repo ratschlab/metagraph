@@ -444,9 +444,10 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertTrue(os.path.exists(anno_base + '.seqs'))
         return graph, anno
 
-    def _run_align(self, graph, anno, query_fa, extra_flags=''):
+    def _run_align(self, graph, anno, query_fa, extra_flags='', only_forwards=True):
         """Run align and return parsed output lines as lists of tab-separated fields."""
-        align_cmd = (f'{METAGRAPH} align --align-only-forwards {extra_flags} '
+        forwards = '--align-only-forwards ' if only_forwards else ''
+        align_cmd = (f'{METAGRAPH} align {forwards}{extra_flags} '
                      f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
         res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
@@ -688,14 +689,15 @@ class TestAlignCoordToHeader(TestingBase):
         ]
         test_fa = self._write_fa('seqs.fa', sequences)
         query_fa = self._write_fa('query.fa', [
-            ('q1', 'TATCGATCG'),      # matches seq1 (and shared 'ATCGATCG' in seq3)
-            ('q2', 'GCTAGCTAGCTAG'),  # matches seq2
-            ('q3', 'AAAAACCCCC'),     # matches seq3
+            ('q1', 'TATCGATCG'),         # matches seq1 (and shared 'ATCGATCG' in seq3)
+            ('q2', 'GCTAGCTAGCTAG'),     # matches seq2
+            ('q3', 'AAAAACCCCC'),        # matches seq3
+            ('q2_rc', 'CTAGCTAGCTAGC'),  # rc of a seq2 substring — hits on rev strand
         ])
 
         # Mode A: CoordToHeader — one column (filename), headers via .seqs.
         graph_a, anno_a = self._setup_graph(test_fa, anno_repr)
-        rows_a = self._run_align(graph_a, anno_a, query_fa)
+        rows_a = self._run_align(graph_a, anno_a, query_fa, only_forwards=False)
 
         # Mode B: per-sequence columns — each FASTA header is its own label.
         graph_b_base = self.tempdir.name + '/graph_b'
@@ -704,7 +706,7 @@ class TestAlignCoordToHeader(TestingBase):
         anno_b = anno_b_base + coord_anno_file_extension[anno_repr]
         self._build_graph(test_fa, graph_b_base, k=5, repr='succinct', mode='basic')
         self._annotate_graph(test_fa, graph_b, anno_b_base, anno_repr, anno_type='header')
-        rows_b = self._run_align(graph_b, anno_b, query_fa)
+        rows_b = self._run_align(graph_b, anno_b, query_fa, only_forwards=False)
 
         # The CIGAR (col 6) and label field (col 8) must match between modes.
         self.assertEqual(len(rows_a), len(rows_b))

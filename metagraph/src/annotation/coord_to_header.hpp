@@ -13,10 +13,27 @@ namespace annot {
 
 /**
  * An index mapping k-mer coordinates in annotation columns to sequence headers.
- * This mapping can be used to transform coordinates and labels in query results to show
- * sequence-based (e.g., "<seq1>:0-0-3\t<seq3>:0-1-5") instead of file-based coordinates
- * (e.g., "<file.fa>:0-0-3:0-23-27"). This allows showing results of querying coordinate
- * annotations as if sequences were annotated by their headers instead of source files.
+ * A column is typically the output of `annotate --anno-filename` (all sequences
+ * in a FASTA file are collapsed into one label, with consecutive global
+ * coordinates). This index remembers, for each column, the FASTA header of
+ * each sequence and how many k-mers it contributed, so downstream tools can
+ * report per-sequence labels instead of whole-file offsets:
+ *
+ *   metagraph query (coords): transforms
+ *       "<file.fa>:0-0-3:0-23-27"   (pos-first[-last], tab-separated labels)
+ *     into
+ *       "<seq1>:0-0-3\t<seq3>:0-1-5"
+ *
+ *   metagraph align (coord-aware): transforms
+ *       "file.fa:4-30"              (label:1-based-inclusive nt range)
+ *     into
+ *       "seq1:4-10;seq3:1-5"        (';'-separated per-sequence ranges)
+ *
+ * Terminology: a "header" is the sequence's label (FASTA header line), and
+ * `seq_id` is the 0-based index of a sequence within its column.
+ *
+ * Built by `annotate --index-header-coords` and stored alongside the column
+ * annotation as a ".seqs" file.
  */
 class CoordToHeader {
   public:
@@ -33,38 +50,38 @@ class CoordToHeader {
     void serialize(const std::string &filename_base) const;
 
     /**
-     * Transforms global coordinates to local (sequence-based) coordinates in-place.
+     * Batch variant of `map_single_coord` that replaces each global coord
+     * in `rows_tuples` with a packed `(seq_id, local_coord)` pair
+     * encoded as a single `uint64_t`. Used by the query pipeline to reuse
+     * the existing `uint64_t`-valued row/tuple data structures instead of
+     * introducing a parallel structure for pairs.
      *
-     * For each coordinate in `rows_tuples`, this function:
-     *   1. Determines which sequence (header) the coordinate belongs to within its column
-     *   2. Converts the global coordinate to a local coordinate within that sequence
-     *   3. Encodes both the local coordinate and header index into a single value
+     * Packing:   `packed = local_coord * num_headers[col] + seq_id`
+     * Unpacking: `seq_id   = packed % num_headers[col]`
+     *            `local_coord = packed / num_headers[col]`
      *
-     * Encoding scheme: For a coordinate in column `j`, the transformed value is:
-     *   `encoded_coord = local_coord * num_headers[j] + header_id`
-     *
-     * Decoding: To extract the header index and local coordinate from an encoded value:
-     *   `header_id = encoded_coord % num_headers[j]`
-     *   `local_coord = encoded_coord / num_headers[j]`
+     * For single-coord lookups prefer `map_single_coord`, which returns
+     * the pair directly without packing.
      */
     void map_to_local_coords(std::vector<RowTuples> *rows_tuples) const;
 
     uint64_t num_columns() const { return coord_offsets_.size(); }
-    uint64_t num_sequences(Column column) const { return headers_[column].size(); }
-    // Get number of k-mers/coordinates in a specific column
+    // Total number of k-mers / coordinates in a column (across all sequences).
     uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
-    const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
+    // Number of sequences in a column.
     size_t num_headers(Column column) const { return headers_[column].size(); }
+    // FASTA headers of the sequences in a column, indexed by seq_id.
+    const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
 
     /**
-     * Map a single global coordinate in a column to (header_id, local_coord).
+     * Map a single global coordinate in a column to (seq_id, local_coord).
      */
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
 
     /**
-     * Number of k-mers covered by a single header in a column.
+     * Number of k-mers covered by a single sequence in a column.
      */
-    uint64_t num_kmers_in_header(Column col, size_t header) const;
+    uint64_t num_kmers_in_sequence(Column col, size_t seq_id) const;
 
     static constexpr auto kExtension = ".seqs";
 

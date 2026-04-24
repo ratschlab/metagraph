@@ -17,6 +17,61 @@ namespace align {
 
 using mtg::common::logger;
 
+// Resolve the alignment's global coordinates to per-sequence labels via the
+// CoordToHeader index, splitting ranges that cross sequence boundaries.
+// See `Alignment::format_coords` for the output grammar and ordering.
+static std::string format_coords_with_header_map(const Alignment::Columns &label_columns,
+                                                 const Alignment::CoordinateSet &label_coordinates,
+                                                 uint64_t L,
+                                                 const annot::CoordToHeader &cth,
+                                                 size_t k) {
+    assert(k > 0 && "coord_to_header_k must be >0 when coord_to_header is in use");
+    using Key = std::pair<Alignment::Column, size_t>;  // (column, seq_id)
+    // Per-key list of local (start, end_inclusive) ranges, 0-based.
+    VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> seq_ranges;
+
+    for (size_t i = 0; i < label_columns.size(); ++i) {
+        Alignment::Column col = label_columns[i];
+        const size_t n_seqs = cth.num_headers(col);
+        for (uint64_t coord : label_coordinates[i]) {
+            auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
+            uint64_t remaining = L;
+            uint64_t cur_local = local_coord;
+            size_t cur_seq_id = seq_id;
+            while (remaining) {
+                if (cur_seq_id >= n_seqs) {
+                    // Alignment overflows the indexed column (stale or
+                    // inconsistent .seqs index). Log at trace, truncate.
+                    logger->trace("Alignment coord {} in column {} extends past the last "
+                            "indexed sequence; truncating output", coord, col);
+                    break;
+                }
+                uint64_t nt_len = cth.num_kmers_in_sequence(col, cur_seq_id) + k - 1;
+                assert(nt_len > cur_local && "local_coord must be a valid k-mer index");
+                uint64_t span = std::min(remaining, nt_len - cur_local);
+                seq_ranges[{ col, cur_seq_id }]
+                    .emplace_back(cur_local, cur_local + span - 1);
+                remaining -= span;
+                ++cur_seq_id;
+                cur_local = 0;
+            }
+        }
+    }
+
+    std::vector<std::string> decoded_labels;
+    decoded_labels.reserve(seq_ranges.size());
+    for (const auto &[key, ranges] : seq_ranges) {
+        const auto &[col, seq_id] = key;
+        decoded_labels.emplace_back(cth.get_headers(col)[seq_id]);
+        for (auto [start, end] : ranges) {
+            // 1-based inclusive ranges
+            decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
+        }
+    }
+
+    return fmt::format("{}", fmt::join(decoded_labels, ";"));
+}
+
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
@@ -25,67 +80,9 @@ std::string Alignment::format_coords() const {
     assert(label_coordinates.size() == label_columns.size());
 
     if (coord_to_header) {
-        // Map global coordinates to per-sequence (header) local coordinates,
-        // grouping by (column, header_id) since multiple global coordinates in
-        // the same column may belong to different sequences. When k is known
-        // (coord_to_header_k > 0), a range that extends past the end of the
-        // starting sequence is split across subsequent headers.
-        using Key = std::pair<Column, size_t>;
-        // Each value is a list of local (start, end_inclusive) ranges in
-        // 0-based coordinates.
-        VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> header_ranges;
-
-        const uint64_t L = sequence_.size();
-        const size_t k = coord_to_header_k;
-
-        for (size_t i = 0; i < label_columns.size(); ++i) {
-            Column col = label_columns[i];
-            for (uint64_t coord : label_coordinates[i]) {
-                auto [header_id, local_coord] = coord_to_header->map_single_coord(col, coord);
-                if (!k) {
-                    // Legacy behaviour: no cross-boundary splitting.
-                    header_ranges[{ col, header_id }]
-                        .emplace_back(local_coord, local_coord + L - 1);
-                    continue;
-                }
-                uint64_t remaining = L;
-                uint64_t cur_local = local_coord;
-                size_t cur_header = header_id;
-                while (remaining) {
-                    if (cur_header >= coord_to_header->num_headers(col)) {
-                        logger->warn("Alignment coord {} in column {} extends past the last "
-                                "indexed sequence; truncating output", coord, col);
-                        break;
-                    }
-                    uint64_t nt_len = coord_to_header->num_kmers_in_header(col, cur_header) + k - 1;
-                    uint64_t avail = nt_len > cur_local ? nt_len - cur_local : 0;
-                    uint64_t span = std::min(remaining, avail);
-                    if (!span) {
-                        logger->warn("Alignment coord {} in column {} maps past the end of "
-                                "sequence {}; truncating output", coord, col, cur_header);
-                        break;
-                    }
-                    header_ranges[{ col, cur_header }]
-                        .emplace_back(cur_local, cur_local + span - 1);
-                    remaining -= span;
-                    ++cur_header;
-                    cur_local = 0;
-                }
-            }
-        }
-
-        std::vector<std::string> decoded_labels;
-        decoded_labels.reserve(header_ranges.size());
-        for (const auto &[key, ranges] : header_ranges) {
-            const auto &[col, header_id] = key;
-            decoded_labels.emplace_back(coord_to_header->get_headers(col)[header_id]);
-            for (auto [start, end] : ranges) {
-                // alignment coordinates are 1-based inclusive ranges
-                decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
-            }
-        }
-
-        return fmt::format("{}", fmt::join(decoded_labels, ";"));
+        return format_coords_with_header_map(label_columns, label_coordinates,
+                                             sequence_.size(),
+                                             *coord_to_header, coord_to_header_k);
     }
 
     std::vector<std::string> decoded_labels;

@@ -381,7 +381,7 @@ void print_coord_to_header_stats(const std::string &fname) {
     size_t total_num_sequences = 0;
     for (uint64_t col = 0; col < coord_to_header.num_columns(); ++col) {
         total_num_kmers += coord_to_header.num_kmers(col);
-        total_num_sequences += coord_to_header.num_sequences(col);
+        total_num_sequences += coord_to_header.num_headers(col);
     }
 
     std::cout << "================ COORD-TO-HEADER STATS =================" << '\n';
@@ -401,11 +401,11 @@ void print_coord_to_header_stats(const std::string &fname) {
         };
         for (uint64_t col = 0; col < coord_to_header.num_columns(); ++col) {
             std::cout << "column " << col << ":\n";
-            std::cout << "  sequences: " << coord_to_header.num_sequences(col) << first_headers(col) << '\n';
+            std::cout << "  sequences: " << coord_to_header.num_headers(col) << first_headers(col) << '\n';
             std::cout << "  k-mers: " << coord_to_header.num_kmers(col) << '\n';
-            std::cout << "  k-mers per sequence: " << (coord_to_header.num_sequences(col)
+            std::cout << "  k-mers per sequence: " << (coord_to_header.num_headers(col)
                 ? fmt::format("{:.1f}", static_cast<double>(coord_to_header.num_kmers(col))
-                                            / coord_to_header.num_sequences(col))
+                                            / coord_to_header.num_headers(col))
                 : "NA") << '\n';
         }
     }

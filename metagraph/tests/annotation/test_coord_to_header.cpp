@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/alignment/alignment.hpp"
 #include "annotation/representation/base/annotation.hpp"
@@ -123,8 +124,74 @@ TEST(CoordToHeader, MapSingleCoordOutOfRange) {
         { { 5 } }
     );
 
-    EXPECT_THROW(cth.map_single_coord(0, 5), std::runtime_error);
-    EXPECT_THROW(cth.map_single_coord(0, 100), std::runtime_error);
+    // Out-of-range coord.
+    EXPECT_THROW(cth.map_single_coord(0, 5), std::out_of_range);
+    EXPECT_THROW(cth.map_single_coord(0, 100), std::out_of_range);
+    // Out-of-range column.
+    EXPECT_THROW(cth.map_single_coord(1, 0), std::out_of_range);
+    EXPECT_THROW(cth.map_single_coord(99, 0), std::out_of_range);
+}
+
+TEST(CoordToHeader, NumKmersInSequence) {
+    // Three columns with unequal sequence sizes, including singletons
+    // at the start, middle, and end of a column.
+    CoordToHeader cth(
+        { { "only" }, { "a", "b", "c" }, { "head", "mid", "tail" } },
+        { { 7 },      { 1, 4, 2 },       { 3, 1, 5 } }
+    );
+
+    // Column 0: single sequence, 7 k-mers.
+    EXPECT_EQ(7u, cth.num_kmers_in_sequence(0, 0));
+
+    // Column 1: singleton at start, then 4, then 2.
+    EXPECT_EQ(1u, cth.num_kmers_in_sequence(1, 0));
+    EXPECT_EQ(4u, cth.num_kmers_in_sequence(1, 1));
+    EXPECT_EQ(2u, cth.num_kmers_in_sequence(1, 2));
+
+    // Column 2: 3, singleton in the middle, then 5.
+    EXPECT_EQ(3u, cth.num_kmers_in_sequence(2, 0));
+    EXPECT_EQ(1u, cth.num_kmers_in_sequence(2, 1));
+    EXPECT_EQ(5u, cth.num_kmers_in_sequence(2, 2));
+
+    // Out-of-range inputs.
+    EXPECT_THROW(cth.num_kmers_in_sequence(0, 1), std::out_of_range);
+    EXPECT_THROW(cth.num_kmers_in_sequence(3, 0), std::out_of_range);
+}
+
+TEST(CoordToHeader, SerializeLoadRoundTrip) {
+    // Build a non-trivial index, serialize, load into a fresh instance,
+    // and verify every observable method returns the same value.
+    CoordToHeader src(
+        { { "only" },
+          { "a", "b", "c" },
+          { "head", "mid", "tail" } },
+        { { 7 },
+          { 1, 4, 2 },
+          { 3, 1, 5 } }
+    );
+
+    std::string path_base = test_dump_dir() + "/cth_roundtrip";
+    src.serialize(path_base);
+
+    CoordToHeader dst;
+    ASSERT_TRUE(dst.load(path_base));
+
+    ASSERT_EQ(src.num_columns(), dst.num_columns());
+    for (uint64_t col = 0; col < src.num_columns(); ++col) {
+        EXPECT_EQ(src.num_headers(col), dst.num_headers(col))  << "col " << col;
+        EXPECT_EQ(src.num_kmers(col),   dst.num_kmers(col))    << "col " << col;
+        EXPECT_EQ(src.get_headers(col), dst.get_headers(col))  << "col " << col;
+        for (size_t h = 0; h < src.num_headers(col); ++h) {
+            EXPECT_EQ(src.num_kmers_in_sequence(col, h),
+                      dst.num_kmers_in_sequence(col, h))
+                << "col " << col << " seq_id " << h;
+        }
+        for (uint64_t coord = 0; coord < src.num_kmers(col); ++coord) {
+            EXPECT_EQ(src.map_single_coord(col, coord),
+                      dst.map_single_coord(col, coord))
+                << "col " << col << " coord " << coord;
+        }
+    }
 }
 
 TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
@@ -145,8 +212,8 @@ TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     for (auto &[col, coords] : rows[0]) {
         size_t idx = 0;
         for (uint64_t global_coord : { 0u, 2u, 3u, 6u, 8u }) {
-            auto [header_id, local_coord] = cth.map_single_coord(col, global_coord);
-            uint64_t encoded = local_coord * cth.num_headers(col) + header_id;
+            auto [seq_id, local_coord] = cth.map_single_coord(col, global_coord);
+            uint64_t encoded = local_coord * cth.num_headers(col) + seq_id;
             EXPECT_EQ(encoded, coords[idx])
                 << "Mismatch at global coord " << global_coord;
             ++idx;
@@ -176,6 +243,9 @@ TEST(AlignmentFormatCoords, WithCoordToHeader) {
         { 12 },  // column 0, coord 12 -> accession_B, local 2 -> "3-6"
     };
     aln.coord_to_header = &cth;
+    // k must be >0 per format_coords's contract; its specific value doesn't
+    // affect this test since neither range crosses a sequence boundary.
+    aln.coord_to_header_k = 5;
 
     EXPECT_EQ(aln.format_coords(), "accession_A:4-7;accession_B:3-6");
 }
@@ -201,6 +271,7 @@ TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
         { 2, 7 },  // coord 2 -> seqA local 2, coord 7 -> seqB local 2
     };
     aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 5;
 
     EXPECT_EQ(aln.format_coords(), "seqA:3-5;seqB:3-5");
 }
@@ -225,6 +296,7 @@ TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
         { 3, 10 },  // two coords in the same header
     };
     aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 5;
 
     // Same header gets both ranges appended
     EXPECT_EQ(aln.format_coords(), "ref:4-5:11-12");
@@ -278,9 +350,8 @@ TEST(AlignmentFormatCoords, WithoutCoordToHeaderOrEncoder) {
     EXPECT_EQ(aln.format_coords(), "5:1-4");
 }
 
-// With coord_to_header_k > 0, a range that extends past the starting
-// sequence is split across consecutive headers (joined by ';'). Without k,
-// the legacy unsplit output is retained.
+// A range that extends past the starting sequence is split across
+// consecutive headers (joined by ';').
 TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     using namespace mtg::graph::align;
 
@@ -303,27 +374,6 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     EXPECT_EQ(aln.format_coords(), "seqA:8-14;seqB:1-1");
 }
 
-TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithoutKUsesLegacy) {
-    using namespace mtg::graph::align;
-
-    CoordToHeader cth(
-        { { "seqA", "seqB" } },
-        { { 10, 10 } }
-    );
-
-    Alignment aln(
-        std::string_view{}, {},
-        std::string("ACGTACGT"),
-        0, {}, 0, false, 0
-    );
-    aln.label_columns = { 0 };
-    aln.label_coordinates = { { 7 } };
-    aln.coord_to_header = &cth;
-    // coord_to_header_k = 0 -> no split, emits out-of-bounds range.
-
-    EXPECT_EQ(aln.format_coords(), "seqA:8-15");
-}
-
 TEST(AlignmentFormatCoords, CrossThreeSequences) {
     using namespace mtg::graph::align;
 
@@ -344,6 +394,34 @@ TEST(AlignmentFormatCoords, CrossThreeSequences) {
     aln.coord_to_header_k = 3;
 
     EXPECT_EQ(aln.format_coords(), "seqA:4-7;seqB:1-7;seqC:1-5");
+}
+
+TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
+    // Two starting coords that both spill from seqA into seqB. Each coord
+    // produces a range in seqA and a range in seqB; the per-header ranges
+    // are aggregated into insertion-ordered lists.
+    using namespace mtg::graph::align;
+
+    // seqA/seqB: 8 k-mers each -> 12 nt each with k=5.
+    CoordToHeader cth(
+        { { "seqA", "seqB" } },
+        { { 8, 8 } }
+    );
+
+    Alignment aln(
+        std::string_view{}, {},
+        std::string("ACGTACGT"),  // 8 nt
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    // Both coords are in seqA; both produce 8 nt ranges that cross into seqB.
+    //   coord 6 -> seqA local 6, avail=6, spills 2 nt into seqB
+    //   coord 7 -> seqA local 7, avail=5, spills 3 nt into seqB
+    aln.label_coordinates = { { 6, 7 } };
+    aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 5;
+
+    EXPECT_EQ(aln.format_coords(), "seqA:7-12:8-12;seqB:1-2:1-3");
 }
 
 TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
