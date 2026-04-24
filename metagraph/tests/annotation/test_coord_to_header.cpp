@@ -278,31 +278,25 @@ TEST(AlignmentFormatCoords, WithoutCoordToHeaderOrEncoder) {
     EXPECT_EQ(aln.format_coords(), "5:1-4");
 }
 
-// When coord_to_header_k is set and a range extends past the starting
-// sequence's boundary, format_coords splits it across consecutive headers
-// (joined by ';').  Without coord_to_header_k, the legacy unsplit behaviour
-// is retained (nucleotide length is unknown).
+// With coord_to_header_k > 0, a range that extends past the starting
+// sequence is split across consecutive headers (joined by ';'). Without k,
+// the legacy unsplit output is retained.
 TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     using namespace mtg::graph::align;
 
-    // seqA: 10 kmers (coords 0-9), seqB: 10 kmers (coords 10-19).
-    // With k=5, each sequence has 10+k-1 = 14 nt.
+    // seqA/seqB: 10 kmers each -> 14 nt with k=5.
     CoordToHeader cth(
         { { "seqA", "seqB" } },
         { { 10, 10 } }
     );
 
-    // 8-nt alignment starting at coord 7 in seqA (local 7).
-    // seqA has 14 nt, so available from local 7 is 14-7 = 7 nt.
-    // Remaining 1 nt spills into seqB starting at local 0.
     Alignment aln(
-        std::string_view{},
-        {},
-        std::string("ACGTACGT"),  // 8-char reference spelling
+        std::string_view{}, {},
+        std::string("ACGTACGT"),  // 8 nt
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
-    aln.label_coordinates = { { 7 } };
+    aln.label_coordinates = { { 7 } };  // seqA local 7; 7 nt fit + 1 spills
     aln.coord_to_header = &cth;
     aln.coord_to_header_k = 5;
 
@@ -318,15 +312,14 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithoutKUsesLegacy) {
     );
 
     Alignment aln(
-        std::string_view{},
-        {},
+        std::string_view{}, {},
         std::string("ACGTACGT"),
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 7 } };
     aln.coord_to_header = &cth;
-    // coord_to_header_k left as 0 -> legacy unsplit output
+    // coord_to_header_k = 0 -> no split, emits out-of-bounds range.
 
     EXPECT_EQ(aln.format_coords(), "seqA:8-15");
 }
@@ -334,26 +327,91 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithoutKUsesLegacy) {
 TEST(AlignmentFormatCoords, CrossThreeSequences) {
     using namespace mtg::graph::align;
 
-    // Three sequences each with 5 kmers.  With k=3 each is 7 nt, so coords:
-    //   seqA: global 0-4 (7 nt), seqB: global 5-9 (7 nt), seqC: global 10-14 (7 nt)
+    // Three headers x 5 kmers = 7 nt each with k=3.
     CoordToHeader cth(
         { { "seqA", "seqB", "seqC" } },
         { { 5, 5, 5 } }
     );
 
     Alignment aln(
-        std::string_view{},
-        {},
-        std::string("ACGTACGTACGTACGT"),  // 16 nt spelling
+        std::string_view{}, {},
+        std::string("ACGTACGTACGTACGT"),  // 16 nt, crosses both boundaries
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
-    aln.label_coordinates = { { 3 } };  // start in seqA at local 3
+    aln.label_coordinates = { { 3 } };
     aln.coord_to_header = &cth;
     aln.coord_to_header_k = 3;
 
-    // seqA: local 3 to 6 (4 nt), seqB: local 0 to 6 (7 nt), seqC: local 0 to 4 (5 nt)
     EXPECT_EQ(aln.format_coords(), "seqA:4-7;seqB:1-7;seqC:1-5");
+}
+
+TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
+    using namespace mtg::graph::align;
+
+    // Total column capacity = 14 nt; alignment of 20 nt overruns by 6 nt,
+    // exercising the warn+truncate branch.
+    CoordToHeader cth(
+        { { "seqA", "seqB" } },
+        { { 5, 5 } }
+    );
+
+    Alignment aln(
+        std::string_view{}, {},
+        std::string("ACGTACGTACGTACGTACGT"),  // 20 nt
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 0 } };
+    aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 3;
+
+    EXPECT_EQ(aln.format_coords(), "seqA:1-7;seqB:1-7");
+}
+
+TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
+    using namespace mtg::graph::align;
+
+    // L == available in the starting header: emit a single range and stop.
+    CoordToHeader cth(
+        { { "seqA", "seqB" } },
+        { { 5, 5 } }
+    );
+
+    Alignment aln(
+        std::string_view{}, {},
+        std::string("ACGTA"),  // 5 nt; seqA has 7 nt, local 2..6 fills to end
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 2 } };
+    aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 3;
+
+    EXPECT_EQ(aln.format_coords(), "seqA:3-7");
+}
+
+TEST(AlignmentFormatCoords, SpansEntireColumn) {
+    using namespace mtg::graph::align;
+
+    // L == total nt of the column; the walk must land on zero remaining
+    // after emitting every header exactly once.
+    CoordToHeader cth(
+        { { "seqA", "seqB", "seqC" } },
+        { { 3, 4, 2 } }  // 5 + 6 + 4 = 15 nt with k=3
+    );
+
+    Alignment aln(
+        std::string_view{}, {},
+        std::string("ACGTACGTACGTACG"),  // 15 nt
+        0, {}, 0, false, 0
+    );
+    aln.label_columns = { 0 };
+    aln.label_coordinates = { { 0 } };
+    aln.coord_to_header = &cth;
+    aln.coord_to_header_k = 3;
+
+    EXPECT_EQ(aln.format_coords(), "seqA:1-5;seqB:1-6;seqC:1-4");
 }
 
 } // namespace
