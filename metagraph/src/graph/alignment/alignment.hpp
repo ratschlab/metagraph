@@ -21,6 +21,7 @@
 
 
 namespace mtg {
+namespace annot { class CoordToHeader; }
 namespace graph {
 namespace align {
 
@@ -282,6 +283,11 @@ class Alignment {
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
+    const annot::CoordToHeader *coord_to_header = nullptr;
+    // k-mer length of the graph the coordinates refer to. Must be set (>0)
+    // when `coord_to_header` is set; format_coords() uses it to split ranges
+    // that cross sequence boundaries into per-header ranges joined by ';'.
+    size_t coord_to_header_k = 0;
 
     Columns label_columns;
 
@@ -294,6 +300,27 @@ class Alignment {
 
     score_t extra_score = 0;
 
+    /**
+     * Emit the alignment's labels and their 1-based inclusive coordinate
+     * ranges as a single string:
+     *
+     *   "<label>:<start>-<end>[:<start>-<end>...][;<label>:...]"
+     *
+     * Separators: ';' separates labels; ':' separates the label from its
+     * first range and subsequent ranges within the same label. Multiple
+     * ranges for one label occur when the alignment matches that label
+     * at several positions (shared-k-mer case).
+     *
+     * Ordering: labels appear in the order of first occurrence when
+     * walking `label_coordinates` (by column, then by starting coord).
+     * Ranges within a single label appear in the order their starting
+     * coords were processed, which is the order of the source coords in
+     * the alignment's tuple.
+     *
+     * When coord_to_header is set (coord_to_header_k must also be >0),
+     * a range that crosses a sequence boundary in the index is split
+     * across the consecutive sequences, each getting its own range.
+     */
     std::string format_coords() const;
 
   private:
@@ -368,9 +395,12 @@ class AlignmentResults {
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
+    Alignment& operator[](size_t i) { return alignments_[i]; }
 
     auto begin() const { return alignments_.begin(); }
     auto end() const { return alignments_.end(); }
+    auto begin() { return alignments_.begin(); }
+    auto end() { return alignments_.end(); }
 
   private:
     std::string query_;

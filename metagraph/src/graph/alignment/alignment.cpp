@@ -3,7 +3,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
+#include "common/vector_map.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/rc_dbg.hpp"
@@ -15,12 +17,73 @@ namespace align {
 
 using mtg::common::logger;
 
+// Resolve the alignment's global coordinates to per-sequence labels via the
+// CoordToHeader index, splitting ranges that cross sequence boundaries.
+// See `Alignment::format_coords` for the output grammar and ordering.
+static std::string format_coords_with_header_map(const Alignment::Columns &label_columns,
+                                                 const Alignment::CoordinateSet &label_coordinates,
+                                                 uint64_t L,
+                                                 const annot::CoordToHeader &cth,
+                                                 size_t k) {
+    assert(k > 0 && "coord_to_header_k must be >0 when coord_to_header is in use");
+    using Key = std::pair<Alignment::Column, size_t>;  // (column, seq_id)
+    // Per-key list of local (start, end_inclusive) ranges, 0-based.
+    VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> seq_ranges;
+
+    for (size_t i = 0; i < label_columns.size(); ++i) {
+        Alignment::Column col = label_columns[i];
+        const size_t n_seqs = cth.num_headers(col);
+        for (uint64_t coord : label_coordinates[i]) {
+            auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
+            uint64_t remaining = L;
+            uint64_t cur_local = local_coord;
+            size_t cur_seq_id = seq_id;
+            while (remaining) {
+                if (cur_seq_id >= n_seqs) {
+                    // Alignment overflows the indexed column (stale or
+                    // inconsistent .seqs index). Log at trace, truncate.
+                    logger->trace("Alignment coord {} in column {} extends past the last "
+                            "indexed sequence; truncating output", coord, col);
+                    break;
+                }
+                uint64_t nt_len = cth.num_kmers_in_sequence(col, cur_seq_id) + k - 1;
+                assert(nt_len > cur_local && "local_coord must be a valid k-mer index");
+                uint64_t span = std::min(remaining, nt_len - cur_local);
+                seq_ranges[{ col, cur_seq_id }]
+                    .emplace_back(cur_local, cur_local + span - 1);
+                remaining -= span;
+                ++cur_seq_id;
+                cur_local = 0;
+            }
+        }
+    }
+
+    std::vector<std::string> decoded_labels;
+    decoded_labels.reserve(seq_ranges.size());
+    for (const auto &[key, ranges] : seq_ranges) {
+        const auto &[col, seq_id] = key;
+        decoded_labels.emplace_back(cth.get_headers(col)[seq_id]);
+        for (auto [start, end] : ranges) {
+            // 1-based inclusive ranges
+            decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
+        }
+    }
+
+    return fmt::format("{}", fmt::join(decoded_labels, ";"));
+}
+
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
 
     assert(label_columns.size());
     assert(label_coordinates.size() == label_columns.size());
+
+    if (coord_to_header) {
+        return format_coords_with_header_map(label_columns, label_coordinates,
+                                             sequence_.size(),
+                                             *coord_to_header, coord_to_header_k);
+    }
 
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(label_columns.size());

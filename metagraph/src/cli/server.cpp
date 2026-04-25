@@ -554,7 +554,7 @@ int run_server(Config *config) {
                 uint64_t num_labels = 0;
                 if (const auto *coord_to_header = anno_dbg.get_coord_to_header()) {
                     for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
-                        num_labels += coord_to_header->num_sequences(col);
+                        num_labels += coord_to_header->num_headers(col);
                     }
                 } else {
                     num_labels = anno_dbg.get_annotator().num_labels();

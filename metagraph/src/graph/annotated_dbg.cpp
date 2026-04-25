@@ -628,10 +628,10 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         }
 
         coord_to_header_->map_to_local_coords(&rows_tuples);
-        // Now each coord in `rows_tuples` is `coord = local_coord * num_headers[j] + header_id`
+        // Now each coord in `rows_tuples` is `coord = local_coord * num_headers[j] + seq_id`
 
-        // Before splitting coords across headers, filter them by the number of k-mer matches
-        using Header = std::pair<Column, size_t>; // global header id
+        // Before splitting coords across sequences, filter them by the number of k-mer matches
+        using Header = std::pair<Column, size_t>; // (column, seq_id)
         using Count = size_t;
         std::vector<std::pair<Header, Count>> counts;
         {
@@ -652,16 +652,16 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
             counts = to_vector(std::move(counts_map));
         }
 
-        // remove headers with insufficient number of k-mer matches
+        // remove sequences with insufficient number of k-mer matches
         counts.erase(std::remove_if(counts.begin(), counts.end(),
                                     [&](const auto &pair) { return pair.second < min_count; }),
                      counts.end());
 
-        // keep only top-n headers
+        // keep only top-n sequences
         if (counts.size() > num_top_labels)
             top_n_sorted(counts, num_top_labels);
 
-        // split coordinates across headers
+        // split coordinates across sequences
         tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
         coords_map.reserve(counts.size());
         for (const auto &[h, count] : counts) {

@@ -23,7 +23,8 @@ build_anno_graph(uint64_t k,
                  const std::vector<std::string> &sequences = {},
                  const std::vector<std::string> &labels = {},
                  graph::DeBruijnGraph::Mode mode = graph::DeBruijnGraph::BASIC,
-                 bool coordinates = false);
+                 bool coordinates = false,
+                 const std::vector<uint64_t> &coord_starts = {});
 
 } // namespace test
 } // namespace mtg
