@@ -382,27 +382,66 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
 }
 
 
+// Writes the standard RowDiff serialization header to |fname|:
+// label_encoder + "v2.0" + anchor + fork_succ. The file is created (or
+// truncated if it already exists), written, and closed so subsequent
+// target-specific writers can reopen and append the body.
+template <class Anno>
+static void write_row_diff_header(const std::string &fname, const Anno &anno) {
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+    anno.get_label_encoder().serialize(out);
+    out.write("v2.0", 4);
+    anno.get_matrix().anchor().serialize(out);
+    anno.get_matrix().fork_succ().serialize(out);
+}
+
 template <>
 void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
                                                   const std::string &outfbase) {
     const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
-    std::ofstream out = utils::open_new_ofstream(fname);
-    if (!out.good())
-        throw std::ofstream::failure("Can't write to " + fname);
-
-    anno.get_label_encoder().serialize(out);
-
-    // serialize RowDiff<RowFlat<>>
-    out.write("v2.0", 4);
-    anno.get_matrix().anchor().serialize(out);
-    anno.get_matrix().fork_succ().serialize(out);
-    out.close();
+    write_row_diff_header(fname, anno);
 
     RowFlat<>::serialize([&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
                          anno.get_matrix().diffs().num_columns(),
                          anno.get_matrix().diffs().num_rows(),
                          anno.get_matrix().diffs().num_relations(),
                          fname, true);
+    logger->trace("Annotation converted");
+}
+
+template <>
+void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffBRWTAnnotator &anno,
+                                               const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension);
+    write_row_diff_header(fname, anno);
+
+    RowDisk::serialize(fname,
+        [&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
+        anno.get_matrix().diffs().num_columns(),
+        anno.get_matrix().diffs().num_rows(),
+        anno.get_matrix().diffs().num_relations());
+    logger->trace("Annotation converted");
+}
+
+// RowDiff<RowFlat> -> RowDiff<RowDisk>. Single-threaded: RowFlat's get_row is
+// cheap enough that streaming row-by-row keeps up with disk I/O.
+template <>
+void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffRowFlatAnnotator &anno,
+                                               const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension);
+    write_row_diff_header(fname, anno);
+
+    const auto &flat = anno.get_matrix().diffs();
+    RowDisk::serialize(fname,
+        [&](auto callback) {
+            const uint64_t num_rows = flat.num_rows();
+            for (uint64_t r = 0; r < num_rows; ++r) {
+                callback(flat.get_row(r));
+            }
+        },
+        flat.num_columns(), flat.num_rows(), flat.num_relations());
     logger->trace("Annotation converted");
 }
 
