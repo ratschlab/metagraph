@@ -166,6 +166,12 @@ bool CoordRowDisk::load(std::istream &f) {
         boundary_in.seekg(boundary_start, std::ios_base::beg);
         boundary_.load(boundary_in);
         num_attributes_ = load_number(boundary_in);
+        // boundary_ is accessed via select1, hint random access.
+        if (madvise(boundary_in.get_mmap_context()->data(),
+                    boundary_in.get_mmap_context()->file_size_bytes(),
+                    MADV_RANDOM)) {
+            logger->warn("madvise(MADV_RANDOM) on CoordRowDisk boundary failed");
+        }
 
         num_rows_ = boundary_.num_set_bits();
 

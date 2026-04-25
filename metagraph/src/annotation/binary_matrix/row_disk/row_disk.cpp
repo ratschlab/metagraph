@@ -65,6 +65,12 @@ bool RowDisk::load(std::istream &f) {
         sdsl::mmap_ifstream boundary_in(buffer_params_.filename);
         boundary_in.seekg(boundary_start, ios_base::beg);
         boundary_.load(boundary_in);
+        // boundary_ is accessed via select1, hint random access.
+        if (madvise(boundary_in.get_mmap_context()->data(),
+                    boundary_in.get_mmap_context()->file_size_bytes(),
+                    MADV_RANDOM)) {
+            logger->warn("madvise(MADV_RANDOM) on RowDisk boundary failed");
+        }
 
         num_rows_ = boundary_.num_set_bits();
         num_relations_ = boundary_.size() - num_rows_;
