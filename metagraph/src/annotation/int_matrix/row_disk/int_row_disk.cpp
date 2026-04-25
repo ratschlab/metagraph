@@ -107,9 +107,10 @@ bool IntRowDisk::load(std::istream &f) {
 
         assert(boundary_start >= buffer_params_.offset);
 
-        f.seekg(boundary_start, std::ios_base::beg);
-
-        boundary_.load(f);
+        // boundary_ is too large to load into RAM, always mmap it.
+        sdsl::mmap_ifstream boundary_in(buffer_params_.filename);
+        boundary_in.seekg(boundary_start, std::ios_base::beg);
+        boundary_.load(boundary_in);
 
         num_rows_ = boundary_.num_set_bits();
 
