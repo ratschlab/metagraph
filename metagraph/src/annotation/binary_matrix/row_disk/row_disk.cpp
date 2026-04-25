@@ -55,7 +55,6 @@ bool RowDisk::load(std::istream &f) {
 
         auto boundary_start = load_number(f);
 
-        // int_vector_buffer<> opens the row data by filename + offset.
         buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 

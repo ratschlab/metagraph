@@ -156,7 +156,6 @@ bool CoordRowDisk::load(std::istream &f) {
         bits_for_number_of_vals_ = load_number(f);
         bits_for_single_value_ = load_number(f);
 
-        // int_vector_buffer<> opens the row data by filename + offset.
         buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 

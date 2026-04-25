@@ -2045,4 +2045,46 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
     }
 }
 
+// `RowDiff<RowDisk>` previously forced mmap; now it loads via either
+// `sdsl::mmap_ifstream` or `utils::named_ifstream`. Verify both paths
+// produce the same query results.
+TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
+    const std::vector<std::string> sequences {
+        std::string(80, 'A') + std::string(5, 'C'),
+        std::string(80, 'T') + std::string(5, 'G'),
+        std::string(80, 'G') + std::string(5, 'A'),
+    };
+    const std::vector<std::string> labels { "First", "Second", "Third" };
+    constexpr size_t k = 7;
+
+    const bool mmap_orig = utils::with_mmap();
+
+    utils::set_mmap(true);
+    auto anno_mmap = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(false);
+    auto anno_plain = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(mmap_orig);
+
+    ASSERT_NE(nullptr, anno_mmap);
+    ASSERT_NE(nullptr, anno_plain);
+
+    auto labels_per_node = [](const AnnotatedDBG &g, const std::string &seq) {
+        std::vector<std::set<std::string>> result;
+        g.get_graph().map_to_nodes(seq, [&](auto idx) {
+            EXPECT_NE(SequenceGraph::npos, idx);
+            result.push_back(convert_to_set(g.get_labels(idx)));
+        });
+        return result;
+    };
+
+    for (const auto &seq : sequences) {
+        EXPECT_EQ(labels_per_node(*anno_mmap, seq),
+                  labels_per_node(*anno_plain, seq));
+    }
+}
+
 } // namespace
