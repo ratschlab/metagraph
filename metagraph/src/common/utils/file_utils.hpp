@@ -33,8 +33,25 @@ void set_mmap(bool set_bit);
 bool with_madvise();
 void set_madvise(bool set_bit);
 
+// `std::ifstream` that remembers the path it was opened from.
+// Mirrors `sdsl::mmap_ifstream` so loaders can recover the filename via cast.
+class named_ifstream : public std::ifstream {
+  public:
+    explicit named_ifstream(const std::string &filename,
+                            std::ios_base::openmode mode = std::ios_base::in)
+          : std::ifstream(filename, mode), filename_(filename) {}
+    const std::string& get_filename() const { return filename_; }
+
+  private:
+    std::string filename_;
+};
+
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
+
+// Returns the filename from a stream opened by `open_ifstream`
+// (i.e. `sdsl::mmap_ifstream` or `utils::named_ifstream`); throws otherwise.
+const std::string& get_filename(std::istream &f);
 
 // Explains likely reasons why a file could not be read (permissions, missing file, etc.).
 std::string file_read_failure_detail(const std::filesystem::path &path);

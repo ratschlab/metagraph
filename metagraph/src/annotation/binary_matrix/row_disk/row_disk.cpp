@@ -50,14 +50,13 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
 }
 
 bool RowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    assert(_f);
     try {
         num_columns_ = load_number(f);
 
         auto boundary_start = load_number(f);
 
-        buffer_params_.filename = _f->get_filename();
+        // int_vector_buffer<> opens the row data by filename + offset.
+        buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
