@@ -91,6 +91,21 @@ const std::string& get_filename(std::istream &f) {
             "get_filename: stream is neither sdsl::mmap_ifstream nor utils::named_ifstream");
 }
 
+void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length) {
+    if (!with_madvise())
+        return;
+    auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f);
+    if (!mmap_in)
+        return;
+    const std::streamoff pagesize = sysconf(_SC_PAGESIZE);
+    std::streamoff aligned_start = start - start % pagesize;
+    if (madvise(mmap_in->get_mmap_context()->data() + aligned_start,
+                length + (start - aligned_start),
+                MADV_RANDOM)) {
+        logger->warn("madvise(MADV_RANDOM) failed for range [{}, {})", start, start + length);
+    }
+}
+
 std::string file_read_failure_detail(const fs::path &path) {
     std::error_code ec;
     fs::file_status st = fs::status(path, ec);

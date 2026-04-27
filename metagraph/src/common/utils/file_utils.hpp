@@ -55,6 +55,12 @@ open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 // (e.g. `int_vector_buffer<>`) by filename + offset.
 const std::string& get_filename(std::istream &f);
 
+// Hint MADV_RANDOM on `[start, start + length)` of the file mmap'd by `f`.
+// No-op when `with_madvise()` is false or `f` is not an `sdsl::mmap_ifstream`.
+// The range is rounded out to enclosing page boundaries (madvise requires
+// page-aligned start).
+void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length);
+
 // Explains likely reasons why a file could not be read (permissions, missing file, etc.).
 std::string file_read_failure_detail(const std::filesystem::path &path);
 
