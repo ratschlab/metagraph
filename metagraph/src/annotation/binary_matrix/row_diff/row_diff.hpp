@@ -13,6 +13,7 @@
 #include "common/vector.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/hashers/hash.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -284,13 +285,17 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
     std::string version(4, '\0');
     if (f.read(version.data(), 4) && version == "v2.0") {
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            auto anchor_start = f.tellg();
             if (!anchor_.load(f) || !fork_succ_.load(f))
                 return false;
+            // anchor_ / fork_succ_ are accessed randomly, hint the kernel.
+            utils::madvise_random_range(f, anchor_start, f.tellg() - anchor_start);
         }
     } else {
         // backward compatibility
         f.seekg(pos);
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            auto anchor_start = f.tellg();
             if (!anchor_.load(f))
                 return false;
 
@@ -298,6 +303,8 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
                 "Loading old version of RowDiff without a fork routing bitmap."
                 " The last outgoing edges will be used as successors.");
             fork_succ_ = fork_succ_bv_type();
+            // anchor_ is accessed randomly, hint the kernel.
+            utils::madvise_random_range(f, anchor_start, f.tellg() - anchor_start);
         }
     }
     return diffs_.load(f);

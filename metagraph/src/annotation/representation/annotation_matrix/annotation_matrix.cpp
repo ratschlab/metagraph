@@ -34,11 +34,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
     const auto &fname = make_suffix(filename, kExtension);
-    using T = StaticBinRelAnnotator<BinaryMatrixType, Label>;
-    bool use_mmap = std::is_same_v<T, RowDiffDiskAnnotator>
-                        || std::is_same_v<T, IntRowDiffDiskAnnotator>
-                        || std::is_same_v<T, RowDiffDiskCoordAnnotator>;
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, use_mmap || utils::with_mmap());
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, utils::with_mmap());
     if (!in->good()) {
         logger->error("Cannot open annotation file '{}': {}", fname,
                       utils::file_read_failure_detail(fname));

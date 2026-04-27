@@ -50,22 +50,27 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
 }
 
 bool RowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    assert(_f);
     try {
         num_columns_ = load_number(f);
 
         auto boundary_start = load_number(f);
 
-        buffer_params_.filename = _f->get_filename();
+        buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
         iv_size_on_disk_ = boundary_start - buffer_params_.offset;
 
-        f.seekg(boundary_start, ios_base::beg);
-
-        boundary_.load(f);
+        // boundary_ is too large to load into RAM, always mmap it.
+        sdsl::mmap_ifstream boundary_in(buffer_params_.filename);
+        boundary_in.seekg(boundary_start, ios_base::beg);
+        boundary_.load(boundary_in);
+        // boundary_ is accessed via select1, hint random access.
+        if (madvise(boundary_in.get_mmap_context()->data(),
+                    boundary_in.get_mmap_context()->file_size_bytes(),
+                    MADV_RANDOM)) {
+            logger->warn("madvise(MADV_RANDOM) on RowDisk boundary failed");
+        }
 
         num_rows_ = boundary_.num_set_bits();
         num_relations_ = boundary_.size() - num_rows_;
