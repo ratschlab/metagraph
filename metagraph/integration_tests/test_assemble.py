@@ -318,3 +318,22 @@ class TestDiffAssembly(TestingBase):
         self.assertTrue('>metasub_by_kmer' in results)
         self.assertEqual(len(results['>metasub_by_kmer']), 1)
         self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
+
+    def test_diff_assembly_invalid_config_no_groups(self):
+        """A config without a 'groups' array must error out cleanly. The
+        previous behavior was a silent exit with no output file."""
+        bad_config = self.tempdir.name + '/no_groups.json'
+        with open(bad_config, 'w') as f:
+            f.write('{"experiments": [{"name": "x", "in": [], "out": []}]}')
+        cmd = (f'{METAGRAPH} assemble -p {NUM_THREADS} '
+               f'-a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} '
+               f'-o {self.tempdir.name}/should_not_exist '
+               f'--diff-assembly-rules {bad_config} '
+               f'{self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}')
+        res = subprocess.run([cmd], shell=True, stderr=subprocess.PIPE)
+        self.assertNotEqual(res.returncode, 0,
+            msg="expected non-zero exit for malformed config")
+        self.assertIn(b"groups", res.stderr,
+            msg=f"expected error to mention 'groups', got: {res.stderr.decode()}")
+        self.assertFalse(os.path.exists(self.tempdir.name + '/should_not_exist.fasta.gz'),
+            msg="output file should not have been created")

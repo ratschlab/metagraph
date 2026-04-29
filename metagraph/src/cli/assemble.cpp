@@ -81,6 +81,16 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     Json::Value diff_json;
     fin >> diff_json;
 
+    // Validate the JSON shape early. Without this, missing 'groups' silently
+    // produces an empty output.
+    if (!diff_json.isMember("groups") || !diff_json["groups"].isArray()
+            || diff_json["groups"].empty()) {
+        logger->error("'{}' has no 'groups' array. Expected: "
+                      "{{\"groups\": [{{\"experiments\": [...]}}]}}",
+                      config->assembly_config_file);
+        exit(1);
+    }
+
     tsl::hopscotch_set<std::string> foreground_labels;
     tsl::hopscotch_set<std::string> background_labels;
     tsl::hopscotch_set<std::string> shared_foreground_labels;
