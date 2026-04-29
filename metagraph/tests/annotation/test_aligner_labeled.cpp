@@ -334,7 +334,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundary) {
     build({ "AAAAACGTACGT", "ACGTTTTTTTTT" }, { 0, 8 });
 
     auto alignments = align("AAAAACGTACGTACGTTTTTTTTT");
-//                           SSSSSSSS================
+    //                       SSSSSSSS================
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("8S16=", aln.get_cigar().to_string());
@@ -383,7 +383,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequencesWithIndels) {
     config.min_exact_match = 0.0;
 
     auto alignments = align("TTCGACGTATGCAAAGCT"/*G*/"GGCGCAT");
-//                           =============II===   D   =======
+    //                       =============II===   D   =======
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("13=2I3=1D7=", aln.get_cigar().to_string());
@@ -451,7 +451,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     config.min_exact_match = 0.0;
 
     auto alignments = align("AAAAACGTACGTCACGTTTTTTTTT");
-//                           ============IIII========S
+    //                       ============IIII========S
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("12=4I8=1S", aln.get_cigar().to_string());
@@ -549,7 +549,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithMismatch) {
     config.min_exact_match = 0.0;
 
     auto alignments = align("EEEEMNPQKRRR");
-//                          ========X===
+    //                       ========X===
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("8=1X3=", aln.get_cigar().to_string());
@@ -569,7 +569,7 @@ TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
     build({ "EEEEEEEEMNPQ", "MNPQRRRRRRRR" }, { 0, 8 });
 
     auto alignments = align("CCCCEEEEMNPQRRRR");
-//                          SSSS============
+    //                       SSSS============
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("4S12=", aln.get_cigar().to_string());
@@ -592,7 +592,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
     config.min_exact_match = 0.0;
 
     auto alignments = align("EEEEEEEEMNPQCCCCCRRRRRRRR");
-//                          ============IIIII========
+    //                       ============IIIII========
     ASSERT_EQ(1u, alignments.size());
     const auto &aln = alignments[0];
     EXPECT_EQ("12=5I8=", aln.get_cigar().to_string());
