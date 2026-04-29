@@ -467,6 +467,81 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
 }
 #endif  // ! _PROTEIN_GRAPH
 
+// Protein-alphabet equivalents of the basic CoordToHeader cases. Use BLOSUM62
+// scoring and amino-acid sequences with letters not present in DNA so the
+// chainer's seed pattern differs from the DNA fixture's corner cases.
+#if _PROTEIN_GRAPH
+class LabeledAlignerProteinCoordTest : public ::testing::Test {
+  protected:
+    static constexpr size_t k = 5;
+    std::unique_ptr<AnnotatedDBG> anno_graph;
+    DBGAlignerConfig config;
+
+    void SetUp() override {
+        config.max_seed_length = std::numeric_limits<size_t>::max();
+        config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
+    }
+
+    void build(const std::vector<std::string> &sequences,
+               const std::vector<uint64_t> &coord_starts) {
+        std::vector<std::string> labels(sequences.size(), "file");
+        anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            k, sequences, labels, DeBruijnGraph::BASIC, /*coordinates=*/true, coord_starts
+        );
+    }
+
+    AlignmentResults align(const std::string &query) {
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        return aligner.align(query);
+    }
+
+    void attach(AlignmentResults &paths, const annot::CoordToHeader &cth) {
+        for (auto &aln : paths) {
+            aln.coord_to_header = &cth;
+            aln.coord_to_header_k = k;
+        }
+    }
+};
+
+TEST_F(LabeledAlignerProteinCoordTest, CrossBoundary) {
+    // Two amino-acid sequences sharing the boundary 4-mer 'MNPQ'. Exact-match
+    // query spans the seq1/seq2 boundary; format_coords splits it across
+    // both per-sequence ranges.
+    build({ "EEEEEEEEMNPQ", "MNPQRRRRRRRR" }, { 0, 8 });
+
+    auto alignments = align("EEEEMNPQRRRR");
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("12=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(1u, aln.label_coordinates[0].size());
+    EXPECT_EQ(4u, aln.label_coordinates[0][0]);
+
+    annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+}
+
+TEST_F(LabeledAlignerProteinCoordTest, SharedKmerMultipleLabels) {
+    // Two amino-acid sequences sharing an internal 5-mer 'MNPQR'. Query of
+    // exactly that 5-mer matches both sequences; the resulting alignment's
+    // coord tuple has two entries (one per occurrence) and format_coords
+    // emits a partial range for each header.
+    build({ "EEEMNPQRSSSS", "WWWMNPQRTTTT" }, { 0, 8 });
+
+    auto alignments = align("MNPQR");
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("5=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(2u, aln.label_coordinates[0].size());
+
+    annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:4-8;seq2:4-8", alignments[0].format_coords());
+}
+#endif  // _PROTEIN_GRAPH
+
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     // TODO: for now, not implemented for other annotators
     if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
