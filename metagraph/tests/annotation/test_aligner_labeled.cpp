@@ -286,11 +286,10 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
 // single label (simulating --anno-filename), with distinct coordinate
 // offsets so the k-mer coord axis spans the full column.
 //
-// Guarded for DNA-only: these tests use the DNA scoring matrix and short
-// ACGT sequences that exercise corner cases in the chainer; some of those
-// trip Debug-build assertions when run against the protein DBG (which has
-// a different alphabet and seed-extension behavior). The functionality
-// under test (CoordToHeader formatting) is alphabet-agnostic.
+// DNA-only: tests use the DNA scoring matrix and short ACGT sequences. The
+// functionality under test (CoordToHeader formatting) is alphabet-agnostic
+// and exercised separately by `LabeledAlignerProteinCoordTest` in protein
+// builds.
 #if ! _PROTEIN_GRAPH
 class LabeledAlignerCoordTest : public ::testing::Test {
   protected:
@@ -539,6 +538,94 @@ TEST_F(LabeledAlignerProteinCoordTest, SharedKmerMultipleLabels) {
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
     attach(alignments, cth);
     EXPECT_EQ("seq1:4-8;seq2:4-8", alignments[0].format_coords());
+}
+
+TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithMismatch) {
+    // Same graph as CrossBoundary, with a single R→K substitution after the
+    // boundary. R/K is +2 in BLOSUM62 (conservative substitution) but the
+    // CIGAR still reports it as a mismatch. format_coords output is
+    // unchanged from the exact case — coords are reference-relative.
+    build({ "EEEEEEEEMNPQ", "MNPQRRRRRRRR" }, { 0, 8 });
+    config.min_exact_match = 0.0;
+
+    auto alignments = align("EEEEMNPQKRRR");
+//                          ========X===
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("8=1X3=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(1u, aln.label_coordinates[0].size());
+    EXPECT_EQ(4u, aln.label_coordinates[0][0]);
+
+    annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+}
+
+TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
+    // Query has a 4-aa 'C' prefix that scores very poorly against the graph
+    // (BLOSUM62 C/E = -4), so the aligner soft-clips it instead of matching
+    // through. The remaining 12 aa span the seq1/seq2 boundary, exact match.
+    build({ "EEEEEEEEMNPQ", "MNPQRRRRRRRR" }, { 0, 8 });
+
+    auto alignments = align("CCCCEEEEMNPQRRRR");
+//                          SSSS============
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("4S12=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(1u, aln.label_coordinates[0].size());
+    EXPECT_EQ(4u, aln.label_coordinates[0][0]);
+
+    annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+}
+
+TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
+    // Same graph as CrossBoundary. Query inserts 5 'C' between the MNPQ
+    // boundary and the R-stretch. BLOSUM62 C/R = -3, so 5 mismatches
+    // (-15) score worse than gap-open + 4 ext (-5 + -8 = -13); the
+    // aligner picks the insertion. The reference path is unchanged
+    // (20 aa), so format_coords emits the full per-sequence ranges.
+    build({ "EEEEEEEEMNPQ", "MNPQRRRRRRRR" }, { 0, 8 });
+    config.min_exact_match = 0.0;
+
+    auto alignments = align("EEEEEEEEMNPQCCCCCRRRRRRRR");
+//                          ============IIIII========
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("12=5I8=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(1u, aln.label_coordinates[0].size());
+    EXPECT_EQ(0u, aln.label_coordinates[0][0]);
+
+    annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords());
+}
+
+TEST_F(LabeledAlignerProteinCoordTest, ThreeSequencesPartialCoverage) {
+    // Three sequences share the 5-mer 'MNPQR' at the same internal offset.
+    // A 5-aa query matches each of them; the alignment carries a 3-entry
+    // coord tuple that format_coords splits into one partial range per
+    // header (analog of the DNA `ThreeSequencesPartialCoverage`).
+    build({
+        "EEMNPQRSAYYY",
+        "VVMNPQRWLLLL",
+        "GGMNPQRDIIII",
+    }, { 0, 8, 16 });
+
+    auto alignments = align("MNPQR");
+    ASSERT_EQ(1u, alignments.size());
+    const auto &aln = alignments[0];
+    EXPECT_EQ("5=", aln.get_cigar().to_string());
+    ASSERT_EQ(1u, aln.label_coordinates.size());
+    ASSERT_EQ(3u, aln.label_coordinates[0].size());
+
+    annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
+    attach(alignments, cth);
+    EXPECT_EQ("seq1:3-7;seq2:3-7;seq3:3-7", alignments[0].format_coords());
 }
 #endif  // _PROTEIN_GRAPH
 
