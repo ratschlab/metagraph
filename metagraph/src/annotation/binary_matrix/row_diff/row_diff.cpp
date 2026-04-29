@@ -38,35 +38,6 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
     }
 }
 
-node_index row_diff_successor_char(
-        const graph::DeBruijnGraph &graph,
-        node_index node,
-        const bit_vector_small &rd_succ_needs_char,
-        const sdsl::int_vector<> &rd_succ_char) {
-    // Fast path: if the graph can trivially resolve the successor (e.g.,
-    // succ_is_next_ in SSHash), use it directly without any char lookup.
-    node_index trivial = graph.trivial_outgoing(node);
-    if (trivial != graph::DeBruijnGraph::npos)
-        return trivial;
-
-    // Slow path: look up stored character for this node
-    assert(node < rd_succ_needs_char.size());
-    assert(rd_succ_needs_char[node] && "node must have a stored char");
-    uint64_t rank = rd_succ_needs_char.rank1(node);
-    assert(rank > 0 && rank <= rd_succ_char.size());
-    uint8_t idx = rd_succ_char[rank - 1];
-    const auto &alphabet = graph.alphabet();
-    size_t offset = (alphabet[0] == '$') ? 1 : 0;
-    assert(idx + offset < alphabet.size());
-    char c = alphabet[idx + offset];
-    node_index succ = graph.traverse(node, c);
-    if (succ == graph::DeBruijnGraph::npos) {
-        common::logger->error("row_diff_successor_char: traverse({}, '{}') returned npos", node, c);
-        throw std::runtime_error("corrupt rd_succ_char: no valid successor");
-    }
-    return succ;
-}
-
 
 namespace matrix {
 
@@ -153,17 +124,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_t
             if (anchor_[row])
                 break;
 
-            switch (rd_mode_) {
-                case RowDiffMode::CharSucc:
-                    node = row_diff_successor_char(*graph_, node,
-                                                   rd_succ_needs_char_,
-                                                   rd_succ_char_);
-                    break;
-                case RowDiffMode::Standard:
-                default:
-                    node = row_diff_successor(*graph_, node, fork_succ_);
-                    break;
-            }
+            node = row_diff_successor(*graph_, node, fork_succ_);
         }
     }
 

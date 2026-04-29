@@ -206,7 +206,6 @@ class Config {
         RowDiffRowFlat,
         RowDiffRowSparse,
         RowDiffDisk,
-        RowDiffCharBRWT,
         RowFlat,
         RowSparse,
         RBFish,

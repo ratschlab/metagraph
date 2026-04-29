@@ -114,8 +114,6 @@ class DBGSSHash : public DeBruijnGraph {
 
     const std::string& alphabet() const override final { return alphabet_; }
 
-    node_index trivial_outgoing(node_index node) const override;
-
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;

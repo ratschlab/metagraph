@@ -213,10 +213,6 @@ class DeBruijnGraph : public SequenceGraph {
     virtual bool has_single_outgoing(node_index node) const { return outdegree(node) == 1; }
     virtual bool has_multiple_outgoing(node_index node) const { return outdegree(node) > 1; }
 
-    // Return the unique outgoing neighbor if it can be determined in O(1)
-    // without expensive lookups (e.g., MPHF). Returns npos otherwise.
-    virtual node_index trivial_outgoing(node_index) const { return npos; }
-
     virtual size_t indegree(node_index) const = 0;
     virtual bool has_no_incoming(node_index node) const { return indegree(node) == 0; }
     virtual bool has_single_incoming(node_index node) const { return indegree(node) == 1; }

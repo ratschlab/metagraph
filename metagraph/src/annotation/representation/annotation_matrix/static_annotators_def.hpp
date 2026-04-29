@@ -49,8 +49,6 @@ typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowSparse>, std::string> R
 
 typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowDisk>, std::string> RowDiffDiskAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::RowDiffChar<matrix::BRWT>, std::string> RowDiffCharBRWTAnnotator;
-
 typedef sdsl::dac_vector_dp<> CountsVector;
 
 typedef StaticBinRelAnnotator<matrix::CSCMatrix<matrix::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
@@ -96,8 +94,6 @@ template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>
 inline const std::string RowDiffDiskAnnotator::kExtension = ".row_diff_disk.annodbg";
-template <>
-inline const std::string RowDiffCharBRWTAnnotator::kExtension = ".row_diff_char_brwt.annodbg";
 template <>
 inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
 template <>

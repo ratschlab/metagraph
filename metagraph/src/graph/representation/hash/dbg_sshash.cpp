@@ -351,20 +351,6 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
     }
 }
 
-DBGSSHash::node_index DBGSSHash::trivial_outgoing(node_index node) const {
-    assert(in_graph(node));
-    if (node <= dict_size()) {
-        if (succ_is_next_[node])
-            return node + 1;
-    } else {
-        // RC node v: forward counterpart is v - dict_size()
-        // pred_is_prev_[fwd] means successor of RC node is node - 1
-        if (pred_is_prev_[node - dict_size()])
-            return node - 1;
-    }
-    return npos;
-}
-
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
     assert(in_graph(node));
     // Fast path: if successor is the next index, just check if the character matches
