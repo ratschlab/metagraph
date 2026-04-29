@@ -125,6 +125,7 @@ jobs:
           name: &artifact artifact-${{ env.DESCRIPTOR }}
           path: |
             metagraph/build/metagraph_${{ inputs.alphabet }}
+            metagraph/build/unit_tests_parallel
             metagraph/build/unit_tests
           include-hidden-files: true
           retention-days: 1
@@ -159,7 +160,7 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
-        run: cd metagraph/build && chmod +x unit_tests && ./unit_tests
+        run: cd metagraph/build && chmod +x unit_tests{,_parallel} && ./unit_tests_parallel
 
 
   integration-tests:

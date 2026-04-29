@@ -14,6 +14,9 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+void set_one_pass_brwt(bool value);
+bool get_one_pass_brwt();
+
 // The Multi-BRWT compressed binary matrix representation
 class BRWT : public BinaryMatrix, public GetEntrySupport {
     friend class BRWTBuilder;
@@ -58,18 +61,27 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // helper function for querying rows in batches
     // appends to `slice`
     template <typename T>
-    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice) const;
+    void slice_rows(const std::vector<Row> &rows, Vector<T> *slice,
+                    ThreadPool *thread_pool = nullptr) const;
 
-    void slice_rows(Row begin, Row end, Vector<Column> *slice) const;
+    template <typename RowT>
+    std::vector<RowT> slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const;
 
-    template <typename T>
+    // `call_stack` tracks the child indexes at each level during parallel tree
+    // traversal, so that column indices can be remapped when merging results from subtrees.
+    template <typename T, class CallSlice>
     void slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
-                    std::vector<std::pair<const BRWT*, size_t>> call_stack,
-                    size_t cutoff_depth, size_t max_columns_cutoff, ThreadPool &thread_pool,
-                    std::function<void(const std::vector<size_t>&, Vector<T>&&)> call_slice) const;
+                    const BRWT *root, std::vector<size_t> call_stack,
+                    size_t max_columns_cutoff, ThreadPool &thread_pool,
+                    CallSlice call_slice) const;
 
-    std::pair<std::vector<bool>, std::vector<BRWT::Row>>
-    get_zero_rows(const std::vector<Row> &rows) const;
+    // Returns (`nonzero_indices`, `child_row_ids`): indices into `rows` for
+    // the rows with the set bit in `nonzero_rows_`, and their recalculated
+    // (via rank) row indices for the respective rows in the children.
+    std::pair<std::vector<size_t>, std::vector<BRWT::Row>>
+    get_nonzero_rows(const std::vector<Row> &rows,
+                     ThreadPool *thread_pool = nullptr,
+                     bool adaptive_chunk_size = true) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;

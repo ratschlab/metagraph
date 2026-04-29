@@ -59,8 +59,8 @@ class BinaryMatrix {
   protected:
     // A helper function that calls `get_rows` in parallel for blocks of rows
     template <typename T>
-    static std::vector<T> get_rows_parallel(const std::vector<Row> &rows, size_t num_threads,
-                                            const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows);
+    static std::vector<T> get_row_data_parallel(const std::vector<Row> &rows, size_t num_threads,
+                                                const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows);
 };
 
 

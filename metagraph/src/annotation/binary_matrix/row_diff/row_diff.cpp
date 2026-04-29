@@ -3,19 +3,19 @@
 #include <filesystem>
 #include <fstream>
 
-#include <tsl/hopscotch_set.h>
 #include <ips4o.hpp>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/unix_tools.hpp"
+#include "common/vector_set.hpp"
 
 namespace mtg {
 namespace annot {
 
 using node_index = graph::DeBruijnGraph::node_index;
+using common::logger;
 
 node_index row_diff_successor(const graph::DeBruijnGraph &graph,
                               node_index node,
@@ -71,149 +71,153 @@ node_index row_diff_successor_char(
 namespace matrix {
 
 void IRowDiff::load_anchor(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read anchor file: {}", filename);
-        std::exit(1);
-    }
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
-        common::logger->error("Could not open anchor file {}", filename);
+        logger->error("Cannot open anchor file '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
         std::exit(1);
     }
-    anchor_.load(*f);
+    if (!anchor_.load(*f)) {
+        logger->error("Cannot load anchor from '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
+        std::exit(1);
+    }
 }
 
 void IRowDiff::load_fork_succ(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read fork successor file: {}", filename);
-        std::exit(1);
-    }
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
-        common::logger->error("Could not open fork successor file {}", filename);
+        logger->error("Cannot open fork successor file '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
         std::exit(1);
     }
-    fork_succ_.load(*f);
+    if (!fork_succ_.load(*f)) {
+        logger->error("Cannot load fork successor bitmap from '{}': {}", filename,
+                      utils::file_read_failure_detail(filename));
+        std::exit(1);
+    }
 }
 
-std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
+std::tuple<std::vector<BinaryMatrix::Row>,
+           std::vector<std::vector<size_t>>,
+           std::vector<size_t>,
+           std::vector<std::vector<size_t>>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+    num_threads = std::max<size_t>(1, num_threads);
 
     using Row = BinaryMatrix::Row;
 
-    Timer timer;
+    // Thread-local sets indexing rows.
+    std::vector<VectorSet<Row>> rows_visited_local(num_threads);
 
-    // map row index to its index in |rd_rows|
-    VectorMap<Row, size_t> node_to_rd;
-    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // Truncated row-diff paths, indexes to |rd_rows|.
+    // Truncated row-diff paths, store thread-local indexes of deduped rows.
     // The last index in each path points to an anchor or to a row which had
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
+    // Records which paths were traced by each thread (for offset remapping in Phase 2).
+    std::vector<std::vector<size_t>> groups(num_threads);
 
-    const size_t kMaxBlockSize = 1000;
-    const size_t block_size = get_chunk_size(row_ids.size(), kMaxBlockSize, num_threads);
+    const size_t block_size = get_chunk_size(row_ids.size(), 10000 /* max_chunk_size */, num_threads);
 
-    tsl::hopscotch_set<Row> visited_rows;
-    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic) private(visited_rows)
-    for (size_t begin = 0; begin < row_ids.size(); begin += block_size) {
-        size_t visited_before = visited_rows.size();
-        // Phase 1: Parallel path tracing.
-        // Thread-private node_to_rd provides intra-thread dedup (early path
-        // termination when a node was already visited by the same thread).
-        // Cross-thread dedup is handled in Phase 2.
-        const size_t end = std::min<size_t>(begin + block_size, row_ids.size());
-        for (size_t i = begin; i < end; ++i) {
-            Row row = row_ids[i];
+    // Phase 1: Parallel path tracing.
+    // |rows_visited_local| provides intra-thread dedup (early path termination
+    // when a node was already visited by the same thread).
+    // FYI: It's essential that the omp loop is ORDERED so that each thread gets rows in order.
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic, block_size)
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        const int t = omp_get_thread_num();
+        auto &rows_visited = rows_visited_local[t];
 
-            node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+        groups[t].push_back(i);
 
-            while (true) {
-                assert(graph_->in_graph(node));
-                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+        Row row = row_ids[i];
 
-                bool is_new = visited_rows.insert(row).second;
-                rd_paths_trunc[i].push_back(row);
+        node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
-                // If a node had been reached before, we interrupt the diff path.
-                // The annotation for that node will have been reconstructed earlier
-                // than for other nodes in this path as well. Thus, we will start
-                // reconstruction from that node and don't need its successors.
-                if (!is_new)
+        while (true) {
+            assert(graph_->in_graph(node));
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+
+            auto [it, is_new] = rows_visited.emplace(row);
+            rd_paths_trunc[i].push_back(it - rows_visited.begin());
+
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
+            if (!is_new)
+                break;
+
+            if (anchor_[row])
+                break;
+
+            switch (rd_mode_) {
+                case RowDiffMode::CharSucc:
+                    node = row_diff_successor_char(*graph_, node,
+                                                   rd_succ_needs_char_,
+                                                   rd_succ_char_);
                     break;
-
-                if (anchor_[row])
+                case RowDiffMode::Standard:
+                default:
+                    node = row_diff_successor(*graph_, node, fork_succ_);
                     break;
-
-                switch (rd_mode_) {
-                    case RowDiffMode::CharSucc:
-                        node = row_diff_successor_char(*graph_, node,
-                                                       rd_succ_needs_char_,
-                                                       rd_succ_char_);
-                        break;
-                    case RowDiffMode::Standard:
-                    default:
-                        node = row_diff_successor(*graph_, node, fork_succ_);
-                        break;
-                }
             }
-        }
-
-        // Phase 2: Serial index assignment with cross-thread deduplication.
-        // Re-processes stored row IDs through a global map to assign canonical
-        // indices and truncate paths that converge across thread boundaries.
-        #pragma omp ordered
-        {
-            // insert new rows visited by other threads during this thread's execution
-            for (auto it = node_to_rd.begin() + visited_before; it != node_to_rd.end(); ++it) {
-                visited_rows.insert(it->first);
-            }
-            for (size_t i = begin; i < end; ++i) {
-                for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
-                    auto [it, is_new] = node_to_rd.try_emplace(rd_paths_trunc[i][j],
-                                                               node_to_rd.size());
-                    rd_paths_trunc[i][j] = it.value();
-                    if (!is_new) {
-                        rd_paths_trunc[i].resize(j + 1);
-                        break;
-                    }
-                }
-            }
-            assert(visited_rows.size() == node_to_rd.size());  // this thread's cache is synced now
         }
     }
 
-    auto m = to_vector(std::move(node_to_rd));
+    // Phase 2: Merge thread-local maps and remap path indices.
+    //
+    // Note: We skip the cross-thread dedup because it has to be sequential
+    //       and that adds too much overhead. The intra-thread dedup already
+    //       significantly reduces redundant paths.
+    std::vector<size_t> offsets(groups.size() + 1);
+    for (size_t g = 0; g < groups.size(); ++g) {
+        offsets[g + 1] = offsets[g] + rows_visited_local[g].size();
+    }
+    // (rd_row_id, original_batch_index) pairs used for sorting/remapping
+    std::vector<std::pair<Row, size_t>> m(offsets.back());
+    // row-diff row IDs in sorted order (deduplicated only within each thread group)
+    std::vector<Row> rd_ids(offsets.back());
+    // map original batch indices to their positions in sorted rd_ids
+    std::vector<size_t> new_idx(offsets.back());
+    // multiplicity per sorted rd_ids entry (for repeated traversals)
+    std::vector<size_t> times_traversed(offsets.back());
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        const size_t offset = offsets[g];
+        const auto &vec = rows_visited_local[g].values_container();
+        for (size_t i = 0; i < vec.size(); ++i) {
+            m[offset + i] = { vec[i], offset + i };
+        }
+    }
+
     // sort by indexes of rd rows
     // the second value points to the index in batch
+    // (row_4, 4), (row_4, 0), (row_7, 2), ...
     ips4o::parallel::sort(m.begin(), m.end(), utils::LessFirst(), num_threads);
-    // collect an array of rd rows
-    std::vector<Row> rd_ids(m.size());
+
+    // map indexes in batch (used in `rd_paths_trunc`) to new indexes
+    // (where rows are sorted).
+    #pragma omp parallel for num_threads(num_threads) schedule(static)
     for (size_t i = 0; i < m.size(); ++i) {
         rd_ids[i] = m[i].first;
-    }
-    // make m[].first map indexes in batch to new indexes (where rows are sorted)
-    for (size_t i = 0; i < m.size(); ++i) {
-        m[m[i].second].first = i;
+        new_idx[m[i].second] = i;
     }
 
-    // keeps how many times rows in |rd_rows| will be queried
-    std::vector<size_t> times_traversed(rd_ids.size(), 0);
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        for (auto &j : rd_paths_trunc[i]) {
-            j = m[j].first;
-            times_traversed[j]++;
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        for (size_t i : groups[g]) {
+            for (auto &j : rd_paths_trunc[i]) {
+                j = new_idx[j + offsets[g]];
+                times_traversed[j]++;
+            }
         }
     }
 
-    common::logger->trace("RD paths traversed with {} threads in {} sec, chunk size: {}, rows to query: {} -> {}",
-                          num_threads, timer.elapsed(), block_size, row_ids.size(), rd_ids.size());
-
-    return { rd_ids, rd_paths_trunc, times_traversed };
+    return { std::move(rd_ids), std::move(rd_paths_trunc),
+             std::move(times_traversed), std::move(groups) };
 }
 
 } // namespace matrix

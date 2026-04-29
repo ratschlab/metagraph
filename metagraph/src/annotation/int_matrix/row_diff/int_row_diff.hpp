@@ -52,6 +52,7 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
     std::vector<Row> get_column(Column j) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
     // query integer values
@@ -100,14 +101,13 @@ std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) cons
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    rows.reserve(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowValues &row) { rows.push_back(utils::get_firsts<SetBitPositions>(row)); },
+        [&](size_t i, const RowValues &row) { rows[i] = utils::get_firsts<SetBitPositions>(row); },
         1
     );
     return rows;
@@ -116,33 +116,31 @@ IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
-    size_t i = 0;
+    std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowValues &row) {
-            auto it = unique_rows.emplace(utils::get_firsts<SetBitPositions>(row)).first;
-            (*rows)[i++] = it - unique_rows.begin();
+        [&](size_t i, const RowValues &row) {
+            rows_dict[i] = utils::get_firsts<SetBitPositions>(row);
+            (*rows)[i] = i;
         },
         num_threads
     );
-    return to_vector(std::move(unique_rows));
+    return rows_dict;
 }
 
 template <class BaseMatrix>
 std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
-    std::vector<RowValues> rows;
-    rows.reserve(row_ids.size());
+    std::vector<RowValues> rows(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowValues &row) { rows.push_back(row); },
+        [&](size_t i, const RowValues &row) { rows[i] = row; },
         num_threads
     );
     return rows;

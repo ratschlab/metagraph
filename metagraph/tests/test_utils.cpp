@@ -1,6 +1,8 @@
 #include "test_helpers.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <future>
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -21,8 +23,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::seq_io;
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/dump_test";
 
 const std::vector<sdsl::bit_vector> vectors {
     { 0, 1, 1, 0, 0, 1, 0 },
@@ -429,34 +430,75 @@ TEST(ThreadPool, MultiThreadFuture) {
 }
 
 #ifndef _NO_DEATH_TEST
-void throw_from_worker() {
-    for (size_t i = 2; i < 20; ++i) {
-        try {
-            ThreadPool pool(i);
-
-            std::vector<std::shared_future<size_t>> result;
-            for (size_t t = 0; t < 1000; ++t) {
-                result.emplace_back(pool.enqueue([&](size_t i) {
-                    // This exception will be thrown in a worker thread, which
-                    // should kill the main thread and the whole process as well
-                    throw std::runtime_error("test exception");
-                    return i;
-                }, 1));
-            }
-
-        } catch (...) {
-            FAIL() << "all exceptions must be thrown in workers";
-        }
-    }
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-}
-
+// Exceptions thrown in worker threads must kill the process (via std::terminate)
+// even if the caller never calls future.get().
 TEST(ThreadPool, MultiThreadException) {
-    // check that a worker throws even if we don't
-    // wait for the result in the returned 'future'
-    ASSERT_DEATH(throw_from_worker(), "");
+    for (size_t num_workers : { 1, 10 }) {
+        ASSERT_DEATH({
+            try {
+                ThreadPool pool(num_workers);
+                pool.enqueue([]() { throw std::runtime_error("test exception"); });
+                // A plain sleep (rather than a promise signal) is deliberate:
+                // ASSERT_DEATH runs this block in a forked subprocess that is
+                // expected to abort; we only need to stay alive long enough
+                // for the worker to pick up the task and terminate the process.
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            } catch (...) {
+                FAIL() << "all exceptions must be thrown in workers";
+            }
+        }, "");
+    }
 }
 #endif // ifndef _NO_DEATH_TEST
+
+// With 0 workers (synchronous), exceptions propagate back to the caller.
+TEST(ThreadPool, SynchronousException) {
+    ThreadPool pool(0);
+    EXPECT_THROW(
+        pool.enqueue([]() -> int { throw std::runtime_error("sync throw"); }),
+        std::runtime_error
+    );
+}
+
+// When help_while_waiting steals a throwing task, the exception propagates
+// to the caller rather than crashing a worker thread.
+TEST(ThreadPool, HelpWhileWaitingStolenException) {
+    ThreadPool pool(1);
+
+    // Park the only worker for the whole test: as long as it's inside task(),
+    // it can't re-enter the worker loop and race the helper for the throwing
+    // task on the shared queue.
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    // The task we actually wait for: stays in the queue because the worker is
+    // parked.
+    auto future = pool.force_enqueue([]() { return 42; });
+
+    // The throwing task goes to the *front* so the helper pops it first
+    // regardless of enqueue order.
+    pool.force_enqueue_front([]() -> int {
+        throw std::runtime_error("stolen throw");
+    });
+
+    // With the worker parked, help_while_waiting() is the only thing that can
+    // drain the queue. It pops the throwing task, so the exception surfaces
+    // here instead of killing the parked worker.
+    EXPECT_THROW(pool.help_while_waiting(future).get(), std::runtime_error);
+
+    // Release the worker and synchronously drain the pool *before* the locals
+    // it captures by reference (unblock, worker_started) go out of scope.
+    // Without the explicit join, ~pool runs last (it was declared first), so
+    // ~unblock would race against the worker still reading it.
+    unblock.set_value();
+    pool.join();
+    EXPECT_EQ(42, future.get());
+}
 
 TEST(ThreadPool, DummyEmptyJoin) {
     ThreadPool pool(0);
@@ -499,6 +541,632 @@ TEST(ThreadPool, DummyFuture) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: force_enqueue_front ordering
+// ---------------------------------------------------------------------------
+
+// With 1 worker blocked, queued tasks accumulate. force_enqueue_front should
+// place tasks at the head, so the worker processes them first after unblocking.
+TEST(ThreadPool, ForceEnqueueFrontOrdering) {
+    ThreadPool pool(1);
+
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    std::vector<int> order;
+    std::mutex mu;
+    auto make_task = [&](int id) {
+        return [&mu, &order, id]() {
+            std::lock_guard<std::mutex> lock(mu);
+            order.push_back(id);
+        };
+    };
+
+    // Queue: push 1 back, push 2 back, push 3 front → [3, 1, 2]
+    pool.force_enqueue(make_task(1));
+    pool.force_enqueue(make_task(2));
+    pool.force_enqueue_front(make_task(3));
+
+    unblock.set_value();
+    pool.join();
+
+    ASSERT_EQ(3u, order.size());
+    EXPECT_EQ(3, order[0]);
+    EXPECT_EQ(1, order[1]);
+    EXPECT_EQ(2, order[2]);
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: force_enqueue bypasses queue limit
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, ForceEnqueueBypassesQueueLimit) {
+    // max_num_tasks = 2
+    ThreadPool pool(1, 2);
+
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    // Fill the queue to max_num_tasks
+    pool.force_enqueue([]() {});
+    pool.force_enqueue([]() {});
+
+    // Queue is full. force_enqueue should still succeed (no deadlock).
+    std::atomic<bool> task_ran{false};
+    pool.force_enqueue([&]() { task_ran = true; });
+
+    unblock.set_value();
+    pool.join();
+
+    EXPECT_TRUE(task_ran.load());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — basic correctness
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, HelpWhileWaitingBasic) {
+    for (size_t num_threads : {1, 2, 4, 8}) {
+        ThreadPool pool(num_threads);
+        auto future = pool.enqueue([]() { return 42; });
+        EXPECT_EQ(42, pool.help_while_waiting(future).get());
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — caller must steal work to avoid deadlock
+// ---------------------------------------------------------------------------
+
+// The only worker is blocked. The future's task sits in the queue.
+// Without work-stealing in help_while_waiting, this would deadlock.
+TEST(ThreadPool, HelpWhileWaitingCallerStealsWork) {
+    ThreadPool pool(1);
+
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    // Worker is blocked. These tasks can only run if the caller steals them.
+    std::atomic<std::thread::id> executor_thread_id{};
+    pool.force_enqueue([&]() {
+        executor_thread_id = std::this_thread::get_id();
+    });
+
+    auto future = pool.force_enqueue([]() { return 99; });
+
+    // Must not deadlock — caller processes queued tasks.
+    EXPECT_EQ(99, pool.help_while_waiting(future).get());
+
+    // The intermediate task was executed on the calling thread, not a worker.
+    EXPECT_EQ(std::this_thread::get_id(), executor_thread_id.load());
+
+    unblock.set_value();
+    pool.join();
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — no lost wakeup with many idle workers
+// ---------------------------------------------------------------------------
+
+// Tests that help_while_waiting wakes up promptly when the future completes.
+// Queue is empty, many workers are idle, one worker is executing the future's
+// task. When it completes, help_while_waiting must be woken via help_condition
+// (the dedicated CV), not delayed by idle workers competing for notifications.
+TEST(ThreadPool, HelpWhileWaitingNoLostWakeup) {
+    for (int iter = 0; iter < 100; ++iter) {
+        ThreadPool pool(8);
+
+        std::promise<void> task_started;
+        std::promise<void> release;
+
+        // One task occupies one worker; the other 7 are idle.
+        auto future = pool.enqueue([&]() {
+            task_started.set_value();
+            release.get_future().wait();
+            return iter;
+        });
+
+        // Ensure the task is running (not still in the queue).
+        task_started.get_future().wait();
+
+        // Queue is now empty, 7 workers are idle. Release the task so
+        // the future completes while help_while_waiting is waiting.
+        release.set_value();
+
+        // Must not deadlock.
+        EXPECT_EQ(iter, pool.help_while_waiting(future).get());
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — chunked work pattern
+// ---------------------------------------------------------------------------
+
+// Mimics the BRWT get_nonzero_rows pattern: enqueue many chunks, then
+// call help_while_waiting for each future sequentially.
+TEST(ThreadPool, HelpWhileWaitingChunkedWork) {
+    ThreadPool pool(4);
+
+    const int num_chunks = 40;
+    std::vector<std::shared_future<int>> futures;
+    for (int i = 0; i < num_chunks; ++i) {
+        futures.push_back(pool.force_enqueue_front([i]() {
+            int sum = 0;
+            for (int j = 0; j < 1000; ++j) sum += i + j;
+            return sum;
+        }));
+    }
+
+    int total = 0;
+    for (auto &f : futures) {
+        total += pool.help_while_waiting(f).get();
+    }
+
+    int expected = 0;
+    for (int i = 0; i < num_chunks; ++i) {
+        for (int j = 0; j < 1000; ++j) expected += i + j;
+    }
+    EXPECT_EQ(expected, total);
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — dummy pool (0 workers)
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, HelpWhileWaitingDummyPool) {
+    ThreadPool pool(0);
+
+    // 0 workers → task is executed inline in emplace(), future is already ready.
+    auto future = pool.enqueue([]() { return 42; });
+    EXPECT_EQ(std::future_status::ready,
+              future.wait_for(std::chrono::seconds(0)));
+
+    // help_while_waiting returns immediately (workers.size() == 0).
+    EXPECT_EQ(42, pool.help_while_waiting(future).get());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: tasks that spawn subtasks — join must wait for all
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, JoinWaitsForDynamicallySpawnedTasks) {
+    ThreadPool pool(4);
+    std::atomic<int> completed{0};
+
+    for (int i = 0; i < 50; ++i) {
+        pool.enqueue([&pool, &completed]() {
+            // Each parent spawns 10 children.
+            for (int j = 0; j < 10; ++j) {
+                pool.force_enqueue([&completed]() { completed++; });
+            }
+            completed++;
+        });
+    }
+
+    pool.join();
+    EXPECT_EQ(550, completed.load());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: join-reinitialize cycle
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, JoinReinitializeCycle) {
+    ThreadPool pool(4);
+
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        std::atomic<int> counter{0};
+        for (int i = 0; i < 200; ++i) {
+            pool.enqueue([&counter]() { counter++; });
+        }
+        pool.join();
+        EXPECT_EQ(200, counter.load()) << "cycle " << cycle;
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: num_threads accessor
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, NumThreads) {
+    ThreadPool pool0(0);
+    EXPECT_EQ(0u, pool0.num_threads());
+
+    ThreadPool pool1(1);
+    EXPECT_EQ(1u, pool1.num_threads());
+
+    ThreadPool pool8(8);
+    EXPECT_EQ(8u, pool8.num_threads());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: remove_waiting_tasks cancels pending work
+// ---------------------------------------------------------------------------
+
+TEST(ThreadPool, RemoveWaitingTasksCancelsPendingWork) {
+    ThreadPool pool(1);
+
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    // Worker is blocked. Queue up 100 tasks.
+    std::atomic<int> counter{0};
+    for (int i = 0; i < 100; ++i) {
+        pool.force_enqueue([&counter]() { counter++; });
+    }
+
+    // Discard all pending tasks.
+    pool.remove_waiting_tasks();
+
+    unblock.set_value();
+    pool.join();
+
+    // The worker was busy, so none (or very few) of the 100 tasks ran.
+    EXPECT_LT(counter.load(), 100);
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting under contention — many futures, few workers
+// ---------------------------------------------------------------------------
+
+// All workers are occupied with slow tasks. The caller must steal and execute
+// fast tasks from the queue to complete quickly. Tests that the caller makes
+// forward progress rather than starving.
+TEST(ThreadPool, HelpWhileWaitingCallerMakesProgress) {
+    ThreadPool pool(2);
+
+    std::promise<void> workers_started;
+    std::atomic<int> started_count{0};
+    std::promise<void> unblock;
+    auto unblock_future = unblock.get_future().share();
+
+    // Occupy both workers with long tasks.
+    for (int w = 0; w < 2; ++w) {
+        pool.enqueue([&started_count, &workers_started, unblock_future]() {
+            if (++started_count == 2)
+                workers_started.set_value();
+            unblock_future.wait();
+        });
+    }
+    workers_started.get_future().wait();
+
+    // Both workers are blocked. Enqueue work that only the caller can process.
+    std::atomic<int> tasks_executed{0};
+    for (int i = 0; i < 20; ++i) {
+        pool.force_enqueue([&tasks_executed]() { tasks_executed++; });
+    }
+    auto future = pool.force_enqueue([]() { return true; });
+
+    EXPECT_TRUE(pool.help_while_waiting(future).get());
+
+    // The caller executed the future's task. It also processed tasks ahead of
+    // the future in the queue.
+    EXPECT_GT(tasks_executed.load(), 0);
+
+    unblock.set_value();
+    pool.join();
+
+    // All 20 tasks eventually complete (some by caller, rest by workers after unblock).
+    EXPECT_EQ(20, tasks_executed.load());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — timeout with empty queue must not crash
+// ---------------------------------------------------------------------------
+
+// When help_while_waiting's wait_for times out with an empty queue and the
+// future not yet ready, it must loop back — not access tasks.front() on an
+// empty deque (undefined behavior / crash).
+TEST(ThreadPool, HelpWhileWaitingTimeoutEmptyQueue) {
+    ThreadPool pool(1);
+
+    // The worker picks up this slow task immediately — queue becomes empty.
+    // The task takes much longer than the 100μs wait_for timeout.
+    auto future = pool.enqueue([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        return 42;
+    });
+
+    // Small delay so the worker dequeues the task before we call HWW.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    // Queue is empty, future not ready (worker still sleeping for 50ms).
+    // help_while_waiting enters wait_for(100μs), times out, predicate false.
+    // Without the tasks.empty() guard, this would access an empty deque.
+    EXPECT_EQ(42, pool.help_while_waiting(future).get());
+}
+
+// Same scenario but with multiple workers — the future's task is picked up
+// by one worker while others are idle. The queue is empty for extended time.
+TEST(ThreadPool, HelpWhileWaitingTimeoutEmptyQueueMultiWorker) {
+    ThreadPool pool(4);
+
+    auto future = pool.enqueue([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        return 99;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    // 4 workers, 3 idle, 1 executing the slow task. Queue empty.
+    // help_while_waiting will time out many times (~500x) before the future
+    // is ready. Each timeout must not access the empty deque.
+    EXPECT_EQ(99, pool.help_while_waiting(future).get());
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — cross-steal notification
+// ---------------------------------------------------------------------------
+
+// Multiple workers call help_while_waiting simultaneously (as happens in BRWT
+// when workers execute slice_rows tasks that call get_nonzero_rows).
+// Each enqueues a chunk task and waits for it. Cross-stealing occurs when
+// worker A executes worker B's chunk. Worker B discovers its future is ready
+// on the next wait_for timeout (100μs).
+//
+// The spin on all_done prevents workers from returning to the worker loop,
+// so only the timeout (not the worker loop's notify) resolves the cross-steal.
+TEST(ThreadPool, HelpWhileWaitingCrossStealNotification) {
+    for (int iter = 0; iter < 50; ++iter) {
+        const int N = 4;
+        ThreadPool pool(N);
+
+        std::atomic<int> chunks_enqueued{0};
+        std::atomic<int> finished_hww{0};
+        std::atomic<bool> all_done{false};
+
+        for (int i = 0; i < N; ++i) {
+            pool.force_enqueue([&]() {
+                // Each worker enqueues one chunk task.
+                auto f = pool.force_enqueue_front([]() { return 1; });
+
+                // Barrier: wait until all workers have enqueued their chunks
+                // before anyone starts stealing. This maximizes cross-steal
+                // probability — all N chunks sit in the queue when HWW begins.
+                chunks_enqueued.fetch_add(1, std::memory_order_release);
+                while (chunks_enqueued.load(std::memory_order_acquire) < N) {
+                    std::this_thread::yield();
+                }
+
+                pool.help_while_waiting(f).get();
+                finished_hww.fetch_add(1, std::memory_order_release);
+
+                // Spin here to prevent returning to the worker loop.
+                // Without this, the worker loop's help_condition.notify_one()
+                // would rescue stuck HWW callers, masking the bug.
+                while (!all_done.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+            });
+        }
+
+        // Wait for all workers to finish help_while_waiting (with timeout).
+        auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::seconds(5);
+        while (finished_hww.load(std::memory_order_acquire) < N) {
+            ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+                << "iter " << iter << ": only "
+                << finished_hww.load(std::memory_order_acquire) << "/" << N
+                << " workers completed help_while_waiting (deadlock from "
+                   "missing cross-steal notification)";
+            std::this_thread::yield();
+        }
+
+        all_done.store(true, std::memory_order_release);
+        pool.join();
+    }
+}
+
+// Multiple threads each enqueue a batch of work and call help_while_waiting.
+// All threads cooperatively execute each other's tasks. Verifies correctness
+// of concurrent HWW when many tasks are in-flight (similar to BRWT traversal).
+TEST(ThreadPool, HelpWhileWaitingMultipleHelpers) {
+    const int num_workers = 4;
+    const int chunks_per_worker = 20;
+    ThreadPool pool(num_workers);
+
+    std::atomic<int> total_executed{0};
+    std::atomic<int> helpers_done{0};
+
+    for (int w = 0; w < num_workers; ++w) {
+        pool.force_enqueue([&]() {
+            // Each worker enqueues a batch of chunk tasks and waits for the last one.
+            std::shared_future<int> last_future;
+            for (int c = 0; c < chunks_per_worker; ++c) {
+                last_future = pool.force_enqueue_front([&]() {
+                    total_executed.fetch_add(1, std::memory_order_relaxed);
+                    return 1;
+                });
+            }
+            // Help execute tasks (own and others') while waiting.
+            pool.help_while_waiting(last_future).get();
+            helpers_done.fetch_add(1, std::memory_order_release);
+        });
+    }
+
+    pool.join();
+    EXPECT_EQ(num_workers, helpers_done.load());
+    EXPECT_EQ(num_workers * chunks_per_worker, total_executed.load());
+}
+
+// Block all pool workers with promises, then spawn two external threads that
+// each call help_while_waiting. The external threads are the only ones that
+// can execute tasks, so HWW is deterministically called from exactly 2 threads.
+TEST(ThreadPool, HelpWhileWaitingTwoExternalHelpers) {
+    const int num_workers = 4;
+    const int tasks_per_helper = 50;
+    ThreadPool pool(num_workers);
+
+    // Block every worker with a promise so they can't pick up any more tasks.
+    std::promise<void> unblock;
+    auto gate = unblock.get_future().share();
+    std::atomic<int> workers_blocked{0};
+    for (int i = 0; i < num_workers; ++i) {
+        pool.force_enqueue([&]() {
+            workers_blocked.fetch_add(1, std::memory_order_release);
+            gate.wait();
+        });
+    }
+    // Wait until all workers are blocked.
+    while (workers_blocked.load(std::memory_order_acquire) < num_workers) {
+        std::this_thread::yield();
+    }
+
+    // Enqueue work that only external HWW callers can execute.
+    std::atomic<int> total_executed{0};
+    auto make_future = [&]() {
+        std::shared_future<int> last;
+        for (int i = 0; i < tasks_per_helper; ++i) {
+            last = pool.force_enqueue([&]() {
+                total_executed.fetch_add(1, std::memory_order_relaxed);
+                return 1;
+            });
+        }
+        return last;
+    };
+    auto future_a = make_future();
+    auto future_b = make_future();
+
+    // Two external threads call help_while_waiting concurrently.
+    std::thread helper_a([&]() { pool.help_while_waiting(future_a).get(); });
+    std::thread helper_b([&]() { pool.help_while_waiting(future_b).get(); });
+
+    helper_a.join();
+    helper_b.join();
+
+    EXPECT_EQ(2 * tasks_per_helper, total_executed.load());
+
+    // Release workers so the pool can shut down.
+    unblock.set_value();
+    pool.join();
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: remove_waiting_tasks unblocks enqueue
+// ---------------------------------------------------------------------------
+
+// If a thread is blocked in enqueue() because the queue is full,
+// remove_waiting_tasks() should unblock it by notifying full_condition.
+TEST(ThreadPool, RemoveWaitingTasksUnblocksEnqueue) {
+    ThreadPool pool(1, 2);  // 1 worker, max 2 tasks in queue
+
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+
+    pool.enqueue([&]() {
+        worker_started.set_value();
+        unblock.get_future().wait();
+    });
+    worker_started.get_future().wait();
+
+    // Fill the queue to max_num_tasks.
+    pool.force_enqueue([]() {});
+    pool.force_enqueue([]() {});
+
+    // A regular enqueue on another thread will block (queue full).
+    std::atomic<bool> enqueue_completed{false};
+    std::thread enqueuer([&]() {
+        pool.enqueue([]() {});
+        enqueue_completed.store(true, std::memory_order_release);
+    });
+
+    // Give the enqueuer time to block.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(enqueue_completed.load(std::memory_order_acquire));
+
+    // Clear the queue — should unblock the enqueuer via full_condition.
+    pool.remove_waiting_tasks();
+
+    auto deadline = std::chrono::steady_clock::now()
+                    + std::chrono::seconds(5);
+    while (!enqueue_completed.load(std::memory_order_acquire)) {
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+            << "enqueue() still blocked after remove_waiting_tasks()";
+        std::this_thread::yield();
+    }
+
+    enqueuer.join();
+    unblock.set_value();
+    pool.join();
+}
+
+// ---------------------------------------------------------------------------
+//  ThreadPool: help_while_waiting — latency benchmark
+// ---------------------------------------------------------------------------
+
+// Measures the latency of help_while_waiting when the future is completed by
+// a worker (not stolen). The worker loop's help_condition.notify_one() wakes
+// HWW promptly; without it, HWW would rely on the 100μs poll timeout.
+TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
+    const int num_iters = 200;
+    ThreadPool pool(1);
+
+    // A releaser thread opens the gate after 200μs, ensuring HWW is already
+    // blocking when the worker completes. The "above 200μs gate" number in
+    // the output isolates wake-up overhead from the gate delay.
+    long long total_us = 0;
+    for (int i = 0; i < num_iters; ++i) {
+        std::promise<void> gate;
+        auto gate_future = gate.get_future().share();
+
+        auto future = pool.enqueue([gate_future]() {
+            gate_future.wait();  // block until released
+            return 1;
+        });
+
+        // Give the worker time to pick up the task and block on the gate.
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+
+        // Release the worker from a separate thread after 200μs.
+        // By then, HWW is definitely in wait_for.
+        std::thread releaser([&gate]() {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            gate.set_value();
+        });
+
+        auto t0 = std::chrono::steady_clock::now();
+        pool.help_while_waiting(future).get();
+        auto t1 = std::chrono::steady_clock::now();
+
+        total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        releaser.join();
+    }
+
+    fprintf(stderr, "[BENCH] %d iterations: %lld μs total, %.1f μs/iter "
+                    "(%.1f μs above 200μs gate)\n",
+                    num_iters, total_us, (double)total_us / num_iters,
+                    (double)total_us / num_iters - 200.0);
+
+    // Loose upper bound: the 100μs HWW poll is the worst-case wake path when
+    // the worker notify is missed. Anything much above 200μs (gate) + 100μs
+    // (poll) + scheduling slack indicates the notify mechanism has regressed.
+    // Bound is generous for busy CI runners.
+    EXPECT_LT((double)total_us / num_iters, 5000.0);
+}
 
 TEST(AsyncActivity, RunUniqueOnly) {
     AsyncActivity async;

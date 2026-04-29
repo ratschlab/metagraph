@@ -620,11 +620,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         row_indexes[i] = full_to_small[i].first;
     }
 
-    // get unique rows and set pointers to them in |row_indexes|
+    // One decoded row per entry; row_indexes[i] becomes an index into this vector.
+    // Row-diff matrices skip hash dedup here (see RowDiff::get_rows_dict); other
+    // matrices still return deduplicated rows with remapped indexes.
     auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
     if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
+        throw std::runtime_error("There must be less than 2^32 rows in a batch."
                                  " Reduce the query batch size.");
     }
 
@@ -819,6 +821,30 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
     }
 }
 
+void split_contigs_for_rebalancing(size_t k,
+                                   size_t kmers_per_seq,
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
+    assert(k > 0);
+    assert(kmers_per_seq > 0);
+
+    std::vector<std::pair<std::string, std::vector<node_index>>> extra_contigs;
+    for (auto &[contig, path] : *contigs) {
+        assert(contig.size() >= k);
+        assert(path.empty());
+        const size_t segment_length = kmers_per_seq + k - 1;
+        const size_t orig_path_size = contig.size() - k + 1;
+        for (size_t offset = kmers_per_seq; offset < orig_path_size; offset += kmers_per_seq) {
+            extra_contigs.emplace_back(std::piecewise_construct,
+                std::forward_as_tuple(contig, offset, segment_length),
+                std::forward_as_tuple());
+        }
+        contig.resize(std::min(contig.size(), segment_length));
+    }
+    contigs->insert(contigs->end(),
+                    std::make_move_iterator(extra_contigs.begin()),
+                    std::make_move_iterator(extra_contigs.end()));
+}
+
 /**
  * Construct a de Bruijn graph from the query sequences
  * fetched in |call_sequences|.
@@ -912,9 +938,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
     );
 
-    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
-                  " and constructed in {} sec",
-                  graph_init->num_nodes(), timer.elapsed());
+    double construction_time = timer.elapsed();
     timer.reset();
 
     // pull contigs from query graph
@@ -929,39 +953,26 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
                                false);
 
-    logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Batch graph with {} k-mers constructed in {} "
+                  "sec, contig extraction took {} sec",
+                  graph_init->num_nodes(), construction_time, timer.elapsed());
     timer.reset();
 
     if (num_threads > 1) {
-        // break long contigs into shorter segments for better load balancing
-#ifndef NDEBUG
-        // to trigger the rebalancing of contigs on small tests
-        const size_t kMaxPathSize = 50;
-#else
+        // Break long contigs into shorter segments for better load balancing.
         // E.g., for k=31 and indexed node ranges with suffix length 12,
         // the overhead will be (31-12)/640 = 3% in the worst case.
         const size_t kMaxPathSize = 640;
-#endif
-        const size_t k = graph_init->get_k();
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            assert(contigs[i].first.size() >= k);
-            const size_t orig_path_size = contigs[i].first.size() - k + 1;
-            if (orig_path_size <= kMaxPathSize)
-                continue;
-            for (size_t offset = kMaxPathSize; offset < orig_path_size; offset += kMaxPathSize) {
-                contigs.emplace_back(std::piecewise_construct,
-                    std::forward_as_tuple(contigs[i].first, offset, kMaxPathSize + k - 1),
-                    std::forward_as_tuple());
-            }
-            contigs[i].first.resize(kMaxPathSize + k - 1);
-        }
+        split_contigs_for_rebalancing(graph_init->get_k(), kMaxPathSize, &contigs);
     }
 
     // map from nodes in query graph to full graph
     std::atomic<uint64_t> num_kmers = 0;
     std::atomic<uint64_t> num_found_kmers = 0;
     assert(num_threads);
-    size_t chunk_size = min<size_t>(max<size_t>(1, contigs.size() / (num_threads * 10)), 100);
+    size_t chunk_size = get_chunk_size(contigs.size(), 1000 /* max_chunk_size */, num_threads,
+                                       true /* one_chunk_if_single_thread */,
+                                       10 /* chunks_per_thread */);
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, chunk_size)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
@@ -1341,9 +1352,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             logger->trace("Batch of {} bp from '{}': Query graph constructed in {:.5f} sec,"
                           " redundancy: {:.2f} bp/kmer,"
-                          " queried in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
+                          " queried with {} threads in {:.5f} sec. Batch query time: {:.5f} sec, {:.1f} bp/s",
                           num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
                           (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                          threads_per_batch,
                           query_time, query_graph_construction + query_time,
                           num_bytes_read / (query_graph_construction + query_time));
         }

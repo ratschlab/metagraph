@@ -21,8 +21,8 @@ using Column = RainbowMatrix::Column;
 
 template <typename T>
 std::vector<T>
-BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads,
-                                const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
+BinaryMatrix::get_row_data_parallel(const std::vector<Row> &rows, size_t num_threads,
+                                    const std::function<std::vector<T>(const std::vector<Row> &)> &get_rows) {
     std::vector<T> result(rows.size());
 
     const size_t batch_size = get_chunk_size(rows.size(), kRowBatchSize, num_threads);
@@ -41,8 +41,8 @@ BinaryMatrix::get_rows_parallel(const std::vector<Row> &rows, size_t num_threads
 
 #define INSTANTIATE_GET_ROWS_PARALLEL(T) \
     template std::vector<T> \
-    BinaryMatrix::get_rows_parallel<T>(const std::vector<Row> &, size_t, \
-                                       const std::function<std::vector<T>(const std::vector<Row> &)> &)
+    BinaryMatrix::get_row_data_parallel<T>(const std::vector<Row> &, size_t, \
+                                           const std::function<std::vector<T>(const std::vector<Row> &)> &)
 
 INSTANTIATE_GET_ROWS_PARALLEL(BinaryMatrix::SetBitPositions);
 using RowWithCounts = Vector<std::pair<Column, uint64_t>>;
@@ -52,7 +52,7 @@ INSTANTIATE_GET_ROWS_PARALLEL(RowWithCoords);
 
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &rows, size_t num_threads) const {
-    return get_rows_parallel<SetBitPositions>(rows, num_threads,
+    return get_row_data_parallel<SetBitPositions>(rows, num_threads,
                 [&](const std::vector<Row> &rows) { return get_rows(rows); });
 }
 
@@ -65,17 +65,20 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
         row_to_index[i] = std::make_pair((*rows)[i], i);
     }
 
-    assert(!dynamic_cast<const IRowDiff *>(this) && "RowDiff must override get_rows_dict()");
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this)) {
+        ips4o::parallel::sort(row_to_index.begin(), row_to_index.end(),
+                              utils::LessFirst(), num_threads);
+    }
 
     const size_t batch_size = get_chunk_size(rows->size(), kRowBatchSize, num_threads, false);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t begin = 0; begin < row_to_index.size(); begin += batch_size) {
-        const uint64_t end = std::min(begin + batch_size,
-                                      static_cast<uint64_t>(row_to_index.size()));
+    for (size_t begin = 0; begin < row_to_index.size(); begin += batch_size) {
+        const size_t end = std::min(begin + batch_size, row_to_index.size());
 
         std::vector<Row> ids(end - begin);
-        for (uint64_t i = begin; i < end; ++i) {
+        for (size_t i = begin; i < end; ++i) {
             ids[i - begin] = row_to_index[i].first;
         }
 
@@ -83,7 +86,7 @@ BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
         #pragma omp critical
         {
-            for (uint64_t i = begin; i < end; ++i) {
+            for (size_t i = begin; i < end; ++i) {
                 auto it = unique_rows.emplace(std::move(batch[i - begin])).first;
                 (*rows)[row_to_index[i].second] = it - unique_rows.begin();
             }
@@ -183,7 +186,7 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
 
     std::vector<SetBitPositions> unique_rows(codes.size());
 
-    const size_t batch_size = std::max<size_t>(1, std::min(kRowBatchSize, codes.size() / num_threads));
+    const size_t batch_size = get_chunk_size(codes.size(), kRowBatchSize, num_threads, false);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < codes.size(); i += batch_size) {
@@ -242,6 +245,8 @@ RowMajor::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
+// Parallelized directly instead of via get_row_data_parallel to avoid
+// sub-vector allocation overhead — each get_row call is independent.
 std::vector<BinaryMatrix::SetBitPositions>
 RowMajor::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
     std::vector<SetBitPositions> rows(row_ids.size());

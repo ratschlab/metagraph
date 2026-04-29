@@ -21,13 +21,13 @@ CoordRowDisk::get_rows(const std::vector<Row> &row_ids) const {
 
 std::vector<CoordRowDisk::RowValues>
 CoordRowDisk::get_row_values(const std::vector<Row> &rows, size_t num_threads) const {
-    return get_rows_parallel<RowValues>(rows, num_threads,
+    return get_row_data_parallel<RowValues>(rows, num_threads,
                 [&](const auto &rows) { return get_view().get_row_values(rows); });
 }
 
 std::vector<CoordRowDisk::RowTuples>
 CoordRowDisk::get_row_tuples(const std::vector<Row> &rows, size_t num_threads) const {
-    return get_rows_parallel<RowTuples>(rows, num_threads,
+    return get_row_data_parallel<RowTuples>(rows, num_threads,
                 [&](const auto &rows) { return get_view().get_row_tuples(rows); });
 }
 

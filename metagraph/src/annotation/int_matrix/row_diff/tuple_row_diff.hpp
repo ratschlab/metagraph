@@ -35,6 +35,7 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
 
     std::vector<Row> get_column(Column j) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
@@ -85,14 +86,13 @@ std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) co
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    rows.reserve(row_ids.size());
+    std::vector<SetBitPositions> rows(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_tuples(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowTuples &row) { rows.push_back(utils::get_firsts<SetBitPositions>(row)); },
+        [&](size_t i, const RowTuples &row) { rows[i] = utils::get_firsts<SetBitPositions>(row); },
         1
     );
     return rows;
@@ -101,34 +101,32 @@ TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 TupleRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
-    size_t i = 0;
+    std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_tuples(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowTuples &row) {
-            auto it = unique_rows.emplace(utils::get_firsts<SetBitPositions>(row)).first;
-            (*rows)[i++] = it - unique_rows.begin();
+        [&](size_t i, const RowTuples &row) {
+            rows_dict[i] = utils::get_firsts<SetBitPositions>(row);
+            (*rows)[i] = i;
         },
         num_threads
     );
-    return to_vector(std::move(unique_rows));
+    return rows_dict;
 }
 
 template <class BaseMatrix>
 std::vector<MultiIntMatrix::RowValues>
 TupleRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
     std::vector<RowValues> rows(row_ids.size());
-    size_t i = 0;
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_tuples(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowTuples &row) {
-            RowValues &row_values = rows[i++];
+        [&](size_t i, const RowTuples &row) {
+            RowValues &row_values = rows[i];
             row_values.reserve(row.size());
             for (const auto &[j, tuple] : row) {
                 row_values.emplace_back(j, tuple.size());
@@ -142,14 +140,13 @@ TupleRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t
 template <class BaseMatrix>
 std::vector<MultiIntMatrix::RowTuples>
 TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids, size_t num_threads) const {
-    std::vector<RowTuples> rows;
-    rows.reserve(row_ids.size());
+    std::vector<RowTuples> rows(row_ids.size());
     call_rows(row_ids,
         [this](const std::vector<Row> &rd_ids, size_t num_threads) {
             return diffs_.get_row_tuples(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
-        [&](const RowTuples &row) { rows.push_back(row); },
+        [&](size_t i, const RowTuples &row) { rows[i] = row; },
         num_threads
     );
     return rows;
@@ -200,7 +197,8 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
-                    if (result.back().second.empty())  // just for safety, normally shouldn't happen
+                    // just for safety, normally rows without coordinates shouldn't be annotated
+                    if (result.back().second.empty())
                         result.pop_back();
                 }
                 ++it;

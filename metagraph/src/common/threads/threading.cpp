@@ -32,10 +32,11 @@ void ThreadPool::join() {
     } else {
         std::unique_lock<std::mutex> lock(this->queue_mutex);
         assert(!joining_);
-        all_waiting.wait(lock, [this]() { return num_waiting_ == workers.size(); });
+        all_waiting.wait(lock, [this]() { return num_waiting_ == workers.size()
+                                                    && this->tasks.empty(); });
         joining_ = true;
     }
-    empty_condition.notify_all();
+    has_work.notify_all();
 
     for (std::thread &worker : workers) {
         worker.join();
@@ -48,8 +49,8 @@ void ThreadPool::join() {
 
 void ThreadPool::remove_waiting_tasks() {
     std::unique_lock<std::mutex> lock(this->queue_mutex);
-    this->tasks = std::deque<std::function<void()>>();
-    this->empty_condition.notify_all();
+    this->tasks = {};
+    this->not_full.notify_all();
 }
 
 void ThreadPool::initialize(size_t num_workers) {
@@ -57,6 +58,7 @@ void ThreadPool::initialize(size_t num_workers) {
     assert(workers.size() == 0);
     joining_ = false;
 
+    num_threads_ = num_workers;
     if (!num_workers)
         return;
 
@@ -70,7 +72,7 @@ void ThreadPool::initialize(size_t num_workers) {
                     std::unique_lock<std::mutex> lock(this->queue_mutex);
                     num_waiting_++;
                     all_waiting.notify_one();
-                    this->empty_condition.wait(lock, [this]() {
+                    this->has_work.wait(lock, [this]() {
                         return this->joining_ || !this->tasks.empty();
                     });
                     num_waiting_--;
@@ -81,8 +83,12 @@ void ThreadPool::initialize(size_t num_workers) {
                     this->tasks.pop_front();
                 }
 
-                full_condition.notify_one();
+                not_full.notify_one();
                 task();
+                // Performance only: wake every help_while_waiting caller so
+                // each can check whether its own future is now ready without
+                // waiting for the 100μs poll timeout.
+                helper_wakeup.notify_all();
             }
         });
     }
