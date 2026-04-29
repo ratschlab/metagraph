@@ -113,7 +113,7 @@ void load_mmap_random(const std::string &filename, std::streamoff offset,
     sdsl::mmap_ifstream in(filename);
     in.seekg(offset, std::ios_base::beg);
     fn(in);
-    madvise_random_range(in);
+    madvise_random_range(in, offset);
 }
 
 std::string file_read_failure_detail(const fs::path &path) {
