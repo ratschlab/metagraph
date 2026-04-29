@@ -97,6 +97,8 @@ void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff 
     auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f);
     if (!mmap_in)
         return;
+    if (length < 0)
+        length = mmap_in->get_mmap_context()->file_size_bytes() - start;
     const std::streamoff pagesize = sysconf(_SC_PAGESIZE);
     std::streamoff aligned_start = start - start % pagesize;
     if (madvise(mmap_in->get_mmap_context()->data() + aligned_start,
@@ -111,7 +113,7 @@ void load_mmap_random(const std::string &filename, std::streamoff offset,
     sdsl::mmap_ifstream in(filename);
     in.seekg(offset, std::ios_base::beg);
     fn(in);
-    madvise_random_range(in, 0, in.get_mmap_context()->file_size_bytes());
+    madvise_random_range(in);
 }
 
 std::string file_read_failure_detail(const fs::path &path) {

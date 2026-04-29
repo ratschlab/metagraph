@@ -57,10 +57,12 @@ open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 const std::string& get_filename(std::istream &f);
 
 // Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
+// `length < 0` (the default) means "to end of file". `start` is rounded
+// down to a page boundary (madvise requires page-aligned start).
 // No-op when `with_madvise()` is false or `f` is not an `sdsl::mmap_ifstream`.
-// The range is rounded out to enclosing page boundaries (madvise requires
-// page-aligned start).
-void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length);
+void madvise_random_range(std::istream &f,
+                          std::streamoff start = 0,
+                          std::streamoff length = -1);
 
 // Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
 // `fn` so the caller can load from it, then (if `with_madvise()`) hint
