@@ -52,8 +52,6 @@ open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 
 // Returns the filename from a stream opened by `open_ifstream`
 // (i.e. `sdsl::mmap_ifstream` or `utils::named_ifstream`); throws otherwise.
-// Used by disk-resident loaders that need to open auxiliary readers
-// (e.g. `int_vector_buffer<>`) by filename + offset.
 const std::string& get_filename(std::istream &f);
 
 // Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
@@ -66,9 +64,7 @@ void madvise_random_range(std::istream &f,
 
 // Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
 // `fn` so the caller can load from it, then (if `with_madvise()`) hint
-// MADV_RANDOM on the whole file mapping. Used by disk-resident loaders
-// to bring up an auxiliary mmap reader (e.g. for `boundary_`) without
-// re-implementing the open/seek/advise dance at every callsite.
+// MADV_RANDOM on the whole file mapping.
 void load_mmap_random(const std::string &filename, std::streamoff offset,
                       const std::function<void(std::istream &)> &fn);
 
