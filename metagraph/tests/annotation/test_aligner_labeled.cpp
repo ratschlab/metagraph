@@ -417,6 +417,7 @@ TEST_F(LabeledAlignerCoordTest, ThreeSequencesPartialCoverage) {
     EXPECT_EQ("seq1:3-9;seq2:3-9;seq3:3-9", alignments[0].format_coords());
 }
 
+#if ! _PROTEIN_GRAPH
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     // rc of the CrossBoundary query. label_coordinates and sequence_
     // stay in fwd-strand space, so format_coords emits the same ranges
@@ -436,6 +437,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     attach(alignments, cth);
     EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords());
 }
+#endif
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     // Same graph as CrossBoundary. Query has extra bases inserted near
