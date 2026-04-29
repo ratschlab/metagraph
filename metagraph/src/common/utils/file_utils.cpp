@@ -106,6 +106,14 @@ void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff 
     }
 }
 
+void load_mmap_random(const std::string &filename, std::streamoff offset,
+                      const std::function<void(std::istream &)> &fn) {
+    sdsl::mmap_ifstream in(filename);
+    in.seekg(offset, std::ios_base::beg);
+    fn(in);
+    madvise_random_range(in, 0, in.get_mmap_context()->file_size_bytes());
+}
+
 std::string file_read_failure_detail(const fs::path &path) {
     std::error_code ec;
     fs::file_status st = fs::status(path, ec);

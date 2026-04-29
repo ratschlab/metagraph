@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <filesystem>
 #include <iostream>
@@ -55,11 +56,19 @@ open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 // (e.g. `int_vector_buffer<>`) by filename + offset.
 const std::string& get_filename(std::istream &f);
 
-// Hint MADV_RANDOM on `[start, start + length)` of the file mmap'd by `f`.
+// Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
 // No-op when `with_madvise()` is false or `f` is not an `sdsl::mmap_ifstream`.
 // The range is rounded out to enclosing page boundaries (madvise requires
 // page-aligned start).
 void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length);
+
+// Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
+// `fn` so the caller can load from it, then (if `with_madvise()`) hint
+// MADV_RANDOM on the whole file mapping. Used by disk-resident loaders
+// to bring up an auxiliary mmap reader (e.g. for `boundary_`) without
+// re-implementing the open/seek/advise dance at every callsite.
+void load_mmap_random(const std::string &filename, std::streamoff offset,
+                      const std::function<void(std::istream &)> &fn);
 
 // Explains likely reasons why a file could not be read (permissions, missing file, etc.).
 std::string file_read_failure_detail(const std::filesystem::path &path);

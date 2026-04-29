@@ -162,16 +162,11 @@ bool CoordRowDisk::load(std::istream &f) {
         assert(boundary_start >= buffer_params_.offset);
 
         // boundary_ is too large to load into RAM, always mmap it.
-        sdsl::mmap_ifstream boundary_in(buffer_params_.filename);
-        boundary_in.seekg(boundary_start, std::ios_base::beg);
-        boundary_.load(boundary_in);
-        num_attributes_ = load_number(boundary_in);
-        // boundary_ is accessed via select1, hint random access.
-        if (madvise(boundary_in.get_mmap_context()->data(),
-                    boundary_in.get_mmap_context()->file_size_bytes(),
-                    MADV_RANDOM)) {
-            logger->warn("madvise(MADV_RANDOM) on CoordRowDisk boundary failed");
-        }
+        utils::load_mmap_random(buffer_params_.filename, boundary_start,
+                                [&](std::istream &in) {
+            boundary_.load(in);
+            num_attributes_ = load_number(in);
+        });
 
         num_rows_ = boundary_.num_set_bits();
 
