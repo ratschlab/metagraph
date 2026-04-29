@@ -920,11 +920,8 @@ int transform_annotation(Config *config) {
                             || config->anno_type == Config::RowDiffDisk))
                 || (input_anno_type == Config::RowDiffRowFlat
                     && config->anno_type == Config::RowDiffDisk)) {
-        if (files.size() != 1) {
-            logger->error("Can only convert {} annotations one at a time",
-                          Config::annotype_to_string(input_anno_type));
-            exit(1);
-        }
+        // `files.size() == 1` is enforced earlier in Config::Config().
+        assert(files.size() == 1);
         if (input_anno_type == Config::RowDiffBRWT) {
             RowDiffBRWTAnnotator annotator;
             annotator.load(files[0]);

@@ -138,7 +138,7 @@ void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& anno
     annotator.get_label_encoder().serialize(out);
     out.close();
 
-    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
+    RowFlat<>::serialize(fname, call_rows, num_columns, num_rows, num_set_bits);
 }
 
 template <>
@@ -376,8 +376,8 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
-    RowFlat<>::serialize([&](auto callback) { utils::call_rows(columns, callback); },
-                         num_columns, num_rows, num_set_bits, fname, true);
+    RowFlat<>::serialize(fname, [&](auto callback) { utils::call_rows(columns, callback); },
+                         num_columns, num_rows, num_set_bits);
     logger->trace("Annotation converted");
 }
 
@@ -397,52 +397,39 @@ static void write_row_diff_header(const std::string &fname, const Anno &anno) {
     anno.get_matrix().fork_succ().serialize(out);
 }
 
+// Reformat an already-built `RowDiff<...>` annotator into another `RowDiff<...>`
+// representation. The on-disk header (label encoder + version + anchor +
+// fork_succ) is identical across `Target` types, so the body — produced by
+// `Source::base_matrix_type::call_rows` and consumed by
+// `Target::base_matrix_type::serialize` — is the only piece that varies.
+template <class Target, class Source>
+static void convert_row_diff_repr(const Source &anno, const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, Target::kExtension);
+    write_row_diff_header(fname, anno);
+
+    const auto &diffs = anno.get_matrix().diffs();
+    Target::binary_matrix_type::base_matrix_type::serialize(fname,
+        [&](auto callback) { diffs.call_rows(callback); },
+        diffs.num_columns(), diffs.num_rows(), diffs.num_relations());
+    logger->trace("Annotation converted");
+}
+
 template <>
 void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
                                                   const std::string &outfbase) {
-    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
-    write_row_diff_header(fname, anno);
-
-    RowFlat<>::serialize([&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
-                         anno.get_matrix().diffs().num_columns(),
-                         anno.get_matrix().diffs().num_rows(),
-                         anno.get_matrix().diffs().num_relations(),
-                         fname, true);
-    logger->trace("Annotation converted");
+    convert_row_diff_repr<RowDiffRowFlatAnnotator>(anno, outfbase);
 }
 
 template <>
 void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffBRWTAnnotator &anno,
                                                const std::string &outfbase) {
-    const auto &fname = utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension);
-    write_row_diff_header(fname, anno);
-
-    RowDisk::serialize(fname,
-        [&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
-        anno.get_matrix().diffs().num_columns(),
-        anno.get_matrix().diffs().num_rows(),
-        anno.get_matrix().diffs().num_relations());
-    logger->trace("Annotation converted");
+    convert_row_diff_repr<RowDiffDiskAnnotator>(anno, outfbase);
 }
 
-// RowDiff<RowFlat> -> RowDiff<RowDisk>. Single-threaded: RowFlat's get_row is
-// cheap enough that streaming row-by-row keeps up with disk I/O.
 template <>
 void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffRowFlatAnnotator &anno,
                                                const std::string &outfbase) {
-    const auto &fname = utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension);
-    write_row_diff_header(fname, anno);
-
-    const auto &flat = anno.get_matrix().diffs();
-    RowDisk::serialize(fname,
-        [&](auto callback) {
-            const uint64_t num_rows = flat.num_rows();
-            for (uint64_t r = 0; r < num_rows; ++r) {
-                callback(flat.get_row(r));
-            }
-        },
-        flat.num_columns(), flat.num_rows(), flat.num_relations());
-    logger->trace("Annotation converted");
+    convert_row_diff_repr<RowDiffDiskAnnotator>(anno, outfbase);
 }
 
 template <>

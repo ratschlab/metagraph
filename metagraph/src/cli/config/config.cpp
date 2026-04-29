@@ -7,6 +7,8 @@
 
 #include "common/threads/threading.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
@@ -633,8 +635,13 @@ Config::Config(int argc, char *argv[]) {
         // bitmaps are embedded in the .annodbg, so no graph is needed when
         // re-formatting to another row_diff representation.
         const bool input_has_embedded_anchor = fnames.size()
-                && (utils::ends_with(fnames.front(), ".row_diff_brwt.annodbg")
-                        || utils::ends_with(fnames.front(), ".row_diff_flat.annodbg"));
+                && (utils::ends_with(fnames.front(), annot::RowDiffBRWTAnnotator::kExtension)
+                        || utils::ends_with(fnames.front(), annot::RowDiffRowFlatAnnotator::kExtension));
+        if (input_has_embedded_anchor && fnames.size() != 1) {
+            std::cerr << "Can only convert " << fnames.front()
+                      << " annotations one at a time" << std::endl;
+            print_usage_and_exit = true;
+        }
         if (to_row_diff && !infbase.size() && !input_has_embedded_anchor) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
@@ -643,10 +650,11 @@ Config::Config(int argc, char *argv[]) {
                       << std::endl;
             print_usage_and_exit = true;
         } else if (input_has_embedded_anchor && infbase.size()) {
-            std::cerr << "Graph is not needed when the input annotation has "
-                         "embedded anchors (row_diff_brwt, row_diff_flat)"
-                      << std::endl;
-            print_usage_and_exit = true;
+            common::logger->warn(
+                    "Graph is not needed when the input annotation has embedded "
+                    "anchors (row_diff_brwt, row_diff_flat); ignoring '-i {}'",
+                    infbase);
+            infbase.clear();
         }
     }
 
