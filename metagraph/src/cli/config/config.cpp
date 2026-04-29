@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "common/threads/threading.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
@@ -120,6 +121,8 @@ Config::Config(int argc, char *argv[]) {
             utils::set_mmap(true);
         } else if (!strcmp(argv[i], "--madv-random")) {
             utils::set_madvise(true);
+        } else if (!strcmp(argv[i], "--one-pass-brwt")) {
+            annot::matrix::set_one_pass_brwt(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
@@ -1364,6 +1367,7 @@ if (advanced) {
             fprintf(stderr, "\t   --threads-each [INT]\tnumber of parallel batches [1]\n");
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
+            fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {
@@ -1419,6 +1423,7 @@ if (advanced) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
+            fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seq index exists [off]\n");

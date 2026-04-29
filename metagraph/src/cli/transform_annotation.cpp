@@ -3,6 +3,7 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
@@ -29,7 +30,6 @@ typedef matrix::TupleCSCMatrix<matrix::BRWT> TupleBRWT;
 
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
-
 
 template <class T>
 matrix::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
@@ -107,10 +107,8 @@ matrix::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     }
     subsampling_pool.join();
 
-    if (!success) {
-        logger->error("Could not load annotations");
+    if (!success)
         exit(1);
-    }
 
     // arrange the columns in their original order
     std::vector<T> subcolumns(subcolumn_ptrs.size());
@@ -324,13 +322,11 @@ int transform_annotation(Config *config) {
 
         if (input_anno_type == Config::ColumnCompressed) {
             if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
-                logger->error("Cannot load annotations");
                 exit(1);
             }
         } else {
             // Load annotation from disk
             if (!annotation->load(files.at(0))) {
-                logger->error("Cannot load annotations from file '{}'", files.at(0));
                 exit(1);
             }
         }
@@ -388,7 +384,6 @@ int transform_annotation(Config *config) {
         // TODO: rename columns without loading the full annotation
         if (input_anno_type == Config::ColumnCompressed) {
             if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
-                logger->error("Cannot load annotations");
                 exit(1);
             } else {
                 logger->info("Annotation #objects: {}\t#labels: {}",
@@ -397,7 +392,6 @@ int transform_annotation(Config *config) {
         } else {
             // Load annotation from disk
             if (!annotation->load(files.at(0))) {
-                logger->error("Cannot load annotations from file '{}'", files.at(0));
                 exit(1);
             }
         }
@@ -515,7 +509,6 @@ int transform_annotation(Config *config) {
             };
 
             if (!ColumnCompressed<>::merge_load(files, on_column, get_num_threads())) {
-                logger->error("Couldn't load annotations");
                 exit(1);
             }
         }
@@ -563,8 +556,6 @@ int transform_annotation(Config *config) {
     if (config->intersected_columns.size()) {
         ColumnCompressed<> base_columns(0);
         if (!base_columns.load(config->intersected_columns)) {
-            logger->error("Cannot load base columns from file '{}'",
-                          config->intersected_columns);
             exit(1);
         }
 
@@ -574,7 +565,6 @@ int transform_annotation(Config *config) {
             std::unique_ptr<MultiLabelAnnotation<std::string>> annotator
                     = initialize_annotation(file, *config);
             if (!annotator->load(file)) {
-                logger->error("Cannot load annotations from file '{}'", file);
                 exit(1);
             }
 
@@ -691,7 +681,6 @@ int transform_annotation(Config *config) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
             if (!annotator->merge_load(files)) {
-                logger->error("Cannot load annotations");
                 exit(1);
             }
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
@@ -978,7 +967,6 @@ int merge_annotation(Config *config) {
     if (anno_type == Config::ColumnCompressed) {
         ColumnCompressed<> annotation(0, config->num_columns_cached);
         if (!annotation.merge_load(files)) {
-            logger->error("Cannot load annotations");
             exit(1);
         }
         annotation.serialize(config->outfbase);
@@ -1039,7 +1027,6 @@ int relax_multi_brwt(Config *config) {
     logger->trace("Loading annotator...");
 
     if (!annotator->load(fname)) {
-        logger->error("Cannot load annotations from file '{}'", files.at(0));
         exit(1);
     }
     logger->trace("Annotator loaded in {} sec", timer.elapsed());

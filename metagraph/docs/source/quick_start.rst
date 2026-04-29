@@ -479,6 +479,31 @@ a new annotation label will be created for every sequence in the input, and the 
 will be re-set to 0 for every sequence. Note, however, that this assumes that all sequence headers in the FASTA file are unique
 and do not repeat. If this condition is not met, an error will be returned.
 
+Map file coordinates to sequence headers
+""""""""""""""""""""""""""""""""""""""""
+When indexing coordinates with ``--anno-filename``, one can additionally build a mapping from file-level coordinates
+to original sequence headers using ``--index-header-coords``.
+
+This is a second ``metagraph annotate`` run: the first run creates the annotation (``*.annodbg`` + ``*.coords``),
+and the second run creates only the coordinate-to-header (``CoordToHeader``) mapping (``*.seqs``)::
+
+    # 1) build coordinate-aware annotation
+    metagraph annotate -v -i graph.dbg --anno-filename --coordinates -p 4 \
+                       -o annotation transcripts_1000.fa
+
+    # ... optionally transform annotation to the final query representation
+    #     (e.g., row_diff_brwt_coord)
+
+    # 2) build the CoordToHeader mapping
+    metagraph annotate -v -i graph.dbg --anno-filename --index-header-coords -p 4 \
+                       -o annotation transcripts_1000.fa
+
+The second run requires the original sequence input files (FASTA/FASTQ) used for building the annotation.
+Pass these files in an order that is consistent with the final transformed annotation used for querying
+(for example, ``row_diff_brwt_coord``), so file labels and coordinate offsets stay aligned.
+During query, MetaGraph loads ``annotation.*.annodbg.seqs`` (where ``*`` is the final transformed annotation type)
+automatically and reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
+
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
 
 Query k-mer coordinates
@@ -490,6 +515,13 @@ querying (see :ref:`transform_coord_annotations` below) and then queried with::
 
 As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-mode counts`` instead of ``--query-mode coords``).
 Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
+
+.. note::
+    If a ``.seqs`` coordinate-to-header (``CoordToHeader``) mapping exists next to the loaded annotation, it is used
+    automatically by ``metagraph query`` and ``metagraph server_query``. To explicitly disable this
+    behavior and keep file-level coordinates in outputs, pass::
+
+        metagraph query --query-mode coords --no-coord-mapping ...
 
 .. _transform annotation:
 
