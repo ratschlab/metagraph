@@ -5,7 +5,6 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
-import re
 
 from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS, MMAP_FLAG
 
