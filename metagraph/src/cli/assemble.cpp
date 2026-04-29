@@ -86,7 +86,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     if (!diff_json.isMember("groups") || !diff_json["groups"].isArray()
             || diff_json["groups"].empty()) {
         logger->error("'{}' has no 'groups' array. Expected: "
-                      "{{\"groups\": [{{\"experiments\": [...]}}]}}",
+                      "{{\"groups\": [{{\"experiments\": [...]}}]}}. "
+                      "See metagraph/tests/data/example_simple.diff.json.",
                       config->assembly_config_file);
         exit(1);
     }

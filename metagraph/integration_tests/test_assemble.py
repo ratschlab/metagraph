@@ -319,15 +319,21 @@ class TestDiffAssembly(TestingBase):
         self.assertEqual(len(results['>metasub_by_kmer']), 1)
         self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
 
-    def test_diff_assembly_invalid_config_no_groups(self):
-        """A config without a 'groups' array must error out cleanly. The
-        previous behavior was a silent exit with no output file."""
-        bad_config = self.tempdir.name + '/no_groups.json'
+    @parameterized.expand([
+        ('top_level_experiments', '{"experiments": [{"name": "x", "in": [], "out": []}]}'),
+        ('empty_groups',          '{"groups": []}'),
+        ('groups_wrong_type',     '{"groups": "not_an_array"}'),
+    ])
+    def test_diff_assembly_invalid_config(self, _name, content):
+        """Configs without a non-empty 'groups' array must error out cleanly.
+        The previous behavior was a silent exit with no output file."""
+        bad_config = self.tempdir.name + f'/bad_{_name}.json'
         with open(bad_config, 'w') as f:
-            f.write('{"experiments": [{"name": "x", "in": [], "out": []}]}')
+            f.write(content)
+        out_base = self.tempdir.name + f'/should_not_exist_{_name}'
         cmd = (f'{METAGRAPH} assemble -p {NUM_THREADS} '
                f'-a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} '
-               f'-o {self.tempdir.name}/should_not_exist '
+               f'-o {out_base} '
                f'--diff-assembly-rules {bad_config} '
                f'{self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}')
         res = subprocess.run([cmd], shell=True, stderr=subprocess.PIPE)
@@ -335,5 +341,5 @@ class TestDiffAssembly(TestingBase):
             msg="expected non-zero exit for malformed config")
         self.assertIn(b"groups", res.stderr,
             msg=f"expected error to mention 'groups', got: {res.stderr.decode()}")
-        self.assertFalse(os.path.exists(self.tempdir.name + '/should_not_exist.fasta.gz'),
+        self.assertFalse(os.path.exists(out_base + '.fasta.gz'),
             msg="output file should not have been created")
