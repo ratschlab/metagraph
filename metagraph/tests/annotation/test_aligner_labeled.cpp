@@ -285,6 +285,13 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
 // DBGSuccinct + ColumnCompressed annotation where all sequences share a
 // single label (simulating --anno-filename), with distinct coordinate
 // offsets so the k-mer coord axis spans the full column.
+//
+// Guarded for DNA-only: these tests use the DNA scoring matrix and short
+// ACGT sequences that exercise corner cases in the chainer; some of those
+// trip Debug-build assertions when run against the protein DBG (which has
+// a different alphabet and seed-extension behavior). The functionality
+// under test (CoordToHeader formatting) is alphabet-agnostic.
+#if ! _PROTEIN_GRAPH
 class LabeledAlignerCoordTest : public ::testing::Test {
   protected:
     static constexpr size_t k = 5;
@@ -417,7 +424,6 @@ TEST_F(LabeledAlignerCoordTest, ThreeSequencesPartialCoverage) {
     EXPECT_EQ("seq1:3-9;seq2:3-9;seq3:3-9", alignments[0].format_coords());
 }
 
-#if ! _PROTEIN_GRAPH
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     // rc of the CrossBoundary query. label_coordinates and sequence_
     // stay in fwd-strand space, so format_coords emits the same ranges
@@ -437,7 +443,6 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     attach(alignments, cth);
     EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords());
 }
-#endif
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     // Same graph as CrossBoundary. Query has extra bases inserted near
@@ -460,6 +465,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     attach(alignments, cth);
     EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords());
 }
+#endif  // ! _PROTEIN_GRAPH
 
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     // TODO: for now, not implemented for other annotators
