@@ -51,6 +51,7 @@ class CoordToHeader {
 
     // global_coord -> (seq_id, local_coord)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
+
     /**
      * Batch variant of `map_single_coord` that replaces each global coord
      * in `rows_tuples` with a packed `(seq_id, local_coord)` pair
@@ -68,12 +69,11 @@ class CoordToHeader {
     void map_to_local_coords(std::vector<RowTuples> *rows_tuples) const;
 
     uint64_t num_columns() const { return coord_offsets_.size(); }
-    // Total number of k-mers / coordinates in a column (across all sequences).
-    uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
-    // Number of sequences in a column.
     size_t num_sequences(Column column) const { return headers_[column].size(); }
     // Number of k-mers in a sequence.
     uint64_t num_kmers_in_sequence(Column col, size_t seq_id) const;
+    // Total number of k-mers / coordinates in a column (across all sequences).
+    uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
     // FASTA headers of the sequences in a column, indexed by seq_id.
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
 
