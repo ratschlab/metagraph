@@ -267,6 +267,36 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                           chain_seeds.end());
         assert(chain_seeds.size());
 
+        // Drop coord-redundant seeds: when two consecutive chain seeds share
+        // the same starting reference coord (different query positions), one
+        // is a strictly redundant alternative — keep the longer one. The
+        // chain DP can produce such pairs when two paths tie in score (more
+        // common on protein graphs with BLOSUM62 than on DNA's ±2 scoring);
+        // the merge loop above only merges when query- and coord-shifts
+        // agree, so coord-redundant seeds with a query-side insertion gap
+        // survive otherwise. A redundant seed contributes no new coordinate
+        // distance and would later trip the strictly-positive marginal-coord
+        // assertions, and downstream `coord_offset += chain[i].second` would
+        // assert non-positive.
+        for (size_t i = chain_seeds.size(); i-- > 1;) {
+            auto &prev_seed = chain_seeds[i - 1].first;
+            auto &cur_seed = chain_seeds[i].first;
+            if (prev_seed.empty() || cur_seed.empty())
+                continue;
+            if (chain_seeds[i - 1].second == chain_seeds[i].second) {
+                if (prev_seed.get_query_view().size()
+                        <= cur_seed.get_query_view().size()) {
+                    prev_seed = Seed();
+                } else {
+                    cur_seed = Seed();
+                }
+            }
+        }
+        chain_seeds.erase(std::remove_if(chain_seeds.begin(), chain_seeds.end(),
+                                         [](const auto &a) { return a.first.empty(); }),
+                          chain_seeds.end());
+        assert(chain_seeds.size());
+
         for (size_t i = chain_seeds.size() - 1; i > 0; --i) {
             assert(chain_seeds[i].first.get_clipping()
                         > chain_seeds[i - 1].first.get_clipping());
