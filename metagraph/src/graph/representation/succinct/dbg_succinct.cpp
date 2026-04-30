@@ -703,16 +703,8 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         if (!boss_graph_->load_suffix_ranges(*in))
             logger->warn("No index for node ranges could be loaded");
 
-        if (utils::with_madvise()) {
-            if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream*>(in.get())) {
-                // hint random access for query-time traversal of the loaded data
-                if (madvise(mmap_in->get_mmap_context()->data(),
-                            mmap_in->get_mmap_context()->file_size_bytes(),
-                            MADV_RANDOM)) {
-                    logger->warn("madvise(MADV_RANDOM) failed");
-                }
-            }
-        }
+        // hint random access for query-time traversal of the loaded data
+        utils::madvise_random_range(*in);
     }
 
     return true;

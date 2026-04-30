@@ -147,8 +147,6 @@ CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
 
 
 bool CoordRowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    assert(_f);
     try {
         num_columns_ = load_number(f);
         auto boundary_start = load_number(f);
@@ -158,15 +156,17 @@ bool CoordRowDisk::load(std::istream &f) {
         bits_for_number_of_vals_ = load_number(f);
         bits_for_single_value_ = load_number(f);
 
-        buffer_params_.filename = _f->get_filename();
+        buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
 
-        f.seekg(boundary_start, std::ios_base::beg);
-
-        boundary_.load(f);
-        num_attributes_ = load_number(f);
+        // boundary_ is too large to load into RAM, always mmap it.
+        utils::load_mmap_random(buffer_params_.filename, boundary_start,
+                                [&](std::istream &in) {
+            boundary_.load(in);
+            num_attributes_ = load_number(in);
+        });
 
         num_rows_ = boundary_.num_set_bits();
 

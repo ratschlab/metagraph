@@ -150,7 +150,12 @@ template <class BaseMatrix>
 bool IntRowDiff<BaseMatrix>::load(std::istream &in) {
     std::string version(4, '\0');
     in.read(version.data(), 4);
-    return anchor_.load(in) && fork_succ_.load(in) && diffs_.load(in);
+    auto anchor_start = in.tellg();
+    if (!anchor_.load(in) || !fork_succ_.load(in))
+        return false;
+    // anchor_ / fork_succ_ are accessed randomly, hint the kernel.
+    utils::madvise_random_range(in, anchor_start, in.tellg() - anchor_start);
+    return diffs_.load(in);
 }
 
 template <class BaseMatrix>
