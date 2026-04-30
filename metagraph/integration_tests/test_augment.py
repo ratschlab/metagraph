@@ -32,7 +32,7 @@ class TestAugment(TestingBase):
 
     def _build_initial_graph(self, representation, mode='basic', with_weights=False):
         initial_graph_base = self.tempdir.name + '/graph_initial'
-        build_flags = '--mask-dummy --disk-swap ""'
+        build_flags = '--mask-dummy --in-ram --disk-swap ""'
         if with_weights:
             build_flags += ' --count-kmers'
 

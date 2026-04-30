@@ -26,7 +26,7 @@ class TestColumnOperations(TestingBase):
 
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
-                         20, cls.graph_repr, 'basic', '--mask-dummy')
+                         20, cls.graph_repr, 'basic', '--mask-dummy --in-ram')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -162,7 +162,7 @@ class TestColumnOperationsWithCounts(TestingBase):
         fasta_paths = [f'{TEST_DATA_DIR}/{dataset}.fa' for dataset in cls.datasets]
         cls._build_graph(fasta_paths,
                          cls.tempdir.name + '/graph',
-                         20, cls.graph_repr, 'basic', '--mask-dummy')
+                         20, cls.graph_repr, 'basic', '--mask-dummy --in-ram')
 
         # Store test k-mers with their count arrays from each annotation
         # Format: kmer -> (logan_30_counts, logan_30_alt_counts)
@@ -395,6 +395,155 @@ class TestColumnOperationsWithCounts(TestingBase):
 
             self.assertEqual(actual, expected,
                 f"K-mer {kmer}: test={test_name}, expected {expected}, got {actual}")
+
+
+class TestRowDiffAnnoConverters(TestingBase):
+    """Source-preserving reformats that don't need -i <GRAPH> because the
+    anchor and fork_succ bitmaps are embedded in the input annotation:
+
+      row_diff_brwt -> row_diff_disk
+      row_diff_flat -> row_diff_disk
+      row_diff_brwt -> row_diff_flat
+
+    Each conversion is verified to produce an annotation whose stats match
+    the source and whose query output is byte-identical to the source's.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+        cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                         cls.tempdir.name + '/graph',
+                         20, 'succinct', 'basic', '--mask-dummy --in-ram')
+        cls.graph_path = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
+
+        # Build the two starting points via the full column -> row_diff -> {brwt,flat}
+        # pipeline. These are what the new reformat paths consume.
+        cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                            cls.graph_path,
+                            cls.tempdir.name + '/from_brwt',
+                            'row_diff_brwt')
+        cls.brwt_path = cls.tempdir.name + '/from_brwt.row_diff_brwt.annodbg'
+
+        cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                            cls.graph_path,
+                            cls.tempdir.name + '/from_flat',
+                            'row_diff_flat')
+        cls.flat_path = cls.tempdir.name + '/from_flat.row_diff_flat.annodbg'
+
+        # Query against the same fasta used to build the graph — guarantees
+        # non-empty matches, so query-identity tests actually exercise rows.
+        cls.query_fa = TEST_DATA_DIR + '/transcripts_100.fa'
+
+    def _reformat(self, source_path, target_anno, out_base):
+        """Run `transform_anno --anno-type <target>` without -i (embedded anchors)."""
+        command = (f'{METAGRAPH} transform_anno --anno-type {target_anno} '
+                   f'-o {out_base} -p {NUM_THREADS} {source_path}')
+        res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0,
+            msg=f"transform_anno failed: {res.stderr.decode()}")
+        out_path = f'{out_base}.{target_anno}.annodbg'
+        self.assertTrue(os.path.exists(out_path), f"missing {out_path}")
+        return out_path
+
+    def _assert_stats_match(self, src_path, dst_path):
+        src = self._get_stats(f'-a {src_path}')
+        dst = self._get_stats(f'-a {dst_path}')
+        self.assertEqual(src['returncode'], 0, msg=f"src stats rc={src['returncode']}")
+        self.assertEqual(dst['returncode'], 0, msg=f"dst stats rc={dst['returncode']}")
+        self.assertEqual(src['labels'], dst['labels'])
+        self.assertEqual(src['objects'], dst['objects'])
+
+    def _assert_query_identical(self, src_path, dst_path):
+        """Query the same FASTA against both annotations and compare stdout."""
+        def query(anno_path):
+            cmd = (f'{METAGRAPH} query -i {self.graph_path} -a {anno_path} '
+                   f'--min-kmers-fraction-label 0 {self.query_fa}')
+            res = subprocess.run(cmd.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0, msg=res.stderr.decode())
+            return res.stdout
+        self.assertEqual(query(src_path), query(dst_path))
+
+    def test_row_diff_brwt_to_row_diff_disk(self):
+        out = self._reformat(self.brwt_path, 'row_diff_disk',
+                             self.tempdir.name + '/brwt_to_disk')
+        self._assert_stats_match(self.brwt_path, out)
+        self._assert_query_identical(self.brwt_path, out)
+
+    def test_row_diff_brwt_to_row_diff_flat(self):
+        out = self._reformat(self.brwt_path, 'row_diff_flat',
+                             self.tempdir.name + '/brwt_to_flat')
+        self._assert_stats_match(self.brwt_path, out)
+        self._assert_query_identical(self.brwt_path, out)
+
+    def test_row_diff_flat_to_row_diff_disk(self):
+        out = self._reformat(self.flat_path, 'row_diff_disk',
+                             self.tempdir.name + '/flat_to_disk')
+        self._assert_stats_match(self.flat_path, out)
+        self._assert_query_identical(self.flat_path, out)
+
+    def test_embedded_anchor_input_ignores_graph_flag(self):
+        """Passing -i <GRAPH> emits a warning but still succeeds, since the
+        anchors are embedded in the annotation."""
+        for i, source in enumerate([self.brwt_path, self.flat_path]):
+            out_base = f'{self.tempdir.name}/with_graph_{i}'
+            command = (f'{METAGRAPH} transform_anno --anno-type row_diff_disk '
+                       f'-i {self.graph_path} -o {out_base} '
+                       f'-p {NUM_THREADS} {source}')
+            res = subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0,
+                msg=f"unexpected failure for {source}: {res.stderr.decode()}")
+            self.assertTrue(os.path.exists(f'{out_base}.row_diff_disk.annodbg'))
+
+    def test_all_zero_rows_preserved(self):
+        """Sparse rows (k-mers not covered by any annotation column) round-trip
+        through the new converters. The graph contains k-mers from
+        `transcripts_100.fa` that don't appear in the smaller annotation source,
+        so the resulting matrix has rows with zero set bits — which RowDisk's
+        delta encoding must handle without dropping or duplicating bytes."""
+        # Annotate using the first ~10 lines of transcripts_100.fa so the graph
+        # has many k-mers with no annotation row set.
+        small_fa = os.path.join(self.tempdir.name, 'small_subset.fa')
+        with open(TEST_DATA_DIR + '/transcripts_100.fa') as src, open(small_fa, 'w') as dst:
+            for i, line in enumerate(src):
+                if i >= 10:
+                    break
+                dst.write(line)
+
+        sparse_brwt_base = os.path.join(self.tempdir.name, 'sparse_brwt')
+        self._annotate_graph(small_fa, self.graph_path, sparse_brwt_base, 'row_diff_brwt')
+        sparse_brwt = sparse_brwt_base + '.row_diff_brwt.annodbg'
+
+        for target in ('row_diff_disk', 'row_diff_flat'):
+            out = self._reformat(sparse_brwt, target,
+                                 os.path.join(self.tempdir.name, f'sparse_{target}'))
+            self._assert_stats_match(sparse_brwt, out)
+            self._assert_query_identical(sparse_brwt, out)
+
+    def test_round_trip_column_to_brwt_to_flat_to_disk(self):
+        """Full pipeline: starting column annotation should query identically
+        after column -> row_diff_brwt -> row_diff_flat -> row_diff_disk."""
+        column_base = os.path.join(self.tempdir.name, 'rt_column')
+        self._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                             self.graph_path, column_base, 'column')
+        column_path = column_base + '.column.annodbg'
+
+        # Need the row_diff_column intermediate (with anchors) to feed into the
+        # reformat paths. _annotate_graph for 'row_diff_brwt' produces this end
+        # state directly; we then reformat brwt -> flat -> disk.
+        rt_brwt_base = os.path.join(self.tempdir.name, 'rt_brwt')
+        self._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                             self.graph_path, rt_brwt_base, 'row_diff_brwt')
+        rt_brwt = rt_brwt_base + '.row_diff_brwt.annodbg'
+
+        rt_flat = self._reformat(rt_brwt, 'row_diff_flat',
+                                 os.path.join(self.tempdir.name, 'rt_flat'))
+        rt_disk = self._reformat(rt_flat, 'row_diff_disk',
+                                 os.path.join(self.tempdir.name, 'rt_disk'))
+
+        # column and the reformatted variants must answer queries identically.
+        for converted in (rt_brwt, rt_flat, rt_disk):
+            self._assert_query_identical(column_path, converted)
 
 
 if __name__ == '__main__':

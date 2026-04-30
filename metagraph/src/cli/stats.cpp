@@ -15,6 +15,8 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "config/config.hpp"
+#include "common/utils/file_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 
@@ -208,7 +210,6 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     auto &annotation = *anno_p;
 
     if (!annotation.load(fname)) {
-        logger->error("Cannot load annotations from file '{}'", fname);
         exit(1);
     }
 
@@ -373,7 +374,6 @@ void print_coord_to_header_stats(const std::string &fname) {
 
     annot::CoordToHeader coord_to_header;
     if (!coord_to_header.load(fname)) {
-        logger->error("Cannot load CoordToHeader mapping from file '{}'", fname);
         exit(1);
     }
 

@@ -1,7 +1,9 @@
 #include "annotation/coord_to_header.hpp"
 
+#include "common/logger.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
@@ -9,6 +11,7 @@ namespace mtg {
 namespace annot {
 
 using Tuple = CoordToHeader::Tuple;
+using mtg::common::logger;
 
 CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                              std::vector<std::vector<uint64_t>> &&num_kmers)
@@ -16,7 +19,7 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
     assert(headers_.size() == num_kmers.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t j = 0; j < num_kmers.size(); ++j) {
-        assert(num_kmers[j].size() == num_headers(j));
+        assert(num_kmers[j].size() == num_sequences(j));
         if (num_kmers[j].empty())
             continue;
         auto &offsets = num_kmers[j];
@@ -35,32 +38,63 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
         for (auto &[col, coords] : row) {
-            const auto &offsets = coord_offsets_.at(col);
+            const size_t n = num_sequences(col);
             for (uint64_t &coord : coords) {
-                if (coord >= offsets.size()) {
-                    throw std::runtime_error("Querying coordinate " + std::to_string(coord) + " for"
-                            + " column " + std::to_string(col) + " while CoordToHeader has only "
-                            + std::to_string(offsets.size()) + " coordinates for that column");
+                auto [seq_id, local_coord] = map_single_coord(col, coord);
+                assert(n);
+                if (local_coord > std::numeric_limits<uint64_t>::max() / n) {
+                    throw std::runtime_error(fmt::format("Local coordinate {} is too large to "
+                            "pack with a seq_id into a single 64-bit integer "
+                            "({} sequences in column {})", local_coord, n, col));
                 }
-                size_t header = coord ? offsets.rank1(coord - 1) : 0;
-                // Convert global coordinate to local (sequence-based) coordinate
-                uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
-                if (local_coord > std::numeric_limits<uint64_t>::max() / num_headers(col)) {
-                    throw std::runtime_error(fmt::format("Local coordinate {} is too large for the "
-                            "given {} headers in column {} to encode both local_coord and header_id"
-                            " in a single 64-bit integer", local_coord, num_headers(col), col));
-                }
-                coord = local_coord * num_headers(col) + header;
+                coord = local_coord * n + seq_id;
             }
         }
     }
 }
 
+std::pair<size_t, uint64_t>
+CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    const auto &offsets = coord_offsets_[col];
+    if (coord >= offsets.size()) {
+        throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
+                "(CoordToHeader has {} coordinates for that column)", coord, col, offsets.size()));
+    }
+    size_t header = coord ? offsets.rank1(coord - 1) : 0;
+    uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
+    return { header, local_coord };
+}
+
+uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    const auto &offsets = coord_offsets_[col];
+    if (seq_id >= num_sequences(col)) {
+        throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
+                "({} sequences)", seq_id, col, num_sequences(col)));
+    }
+    // coord_offsets_ has a set bit at the partial-sum boundary of each
+    // sequence, so the k-mer count for sequence s is
+    //     select1(s+1) - (s == 0 ? -1 : select1(s)).
+    uint64_t end = offsets.select1(seq_id + 1);
+    uint64_t start = seq_id ? offsets.select1(seq_id) + 1 : 0;
+    return end - start + 1;
+}
+
 bool CoordToHeader::load(const std::string &filename_base) {
-    std::unique_ptr<std::ifstream> in
-        = utils::open_ifstream(utils::make_suffix(filename_base, kExtension));
-    if (!in)
+    const std::string path = utils::make_suffix(filename_base, kExtension);
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);
+    if (!in->good()) {
+        logger->error("Cannot open CoordToHeader file '{}': {}", path,
+                      utils::file_read_failure_detail(path));
         return false;
+    }
 
     try {
         uint64_t num_columns = load_number(*in);
@@ -73,7 +107,13 @@ bool CoordToHeader::load(const std::string &filename_base) {
         }
         return true;
 
+    } catch (const std::exception &e) {
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught: {})", path,
+                      utils::file_read_failure_detail(path), e.what());
+        return false;
     } catch (...) {
+        logger->error("Cannot load CoordToHeader from '{}': {} (caught unknown exception)",
+                      path, utils::file_read_failure_detail(path));
         return false;
     }
 }

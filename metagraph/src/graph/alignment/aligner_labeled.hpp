@@ -38,15 +38,9 @@ class LabeledExtender : public DefaultColumnExtender {
         flush();
 
         // run backtracking
-        auto alignments = DefaultColumnExtender::backtrack(
+        return DefaultColumnExtender::backtrack(
             min_path_score, window, right_end_bonus, tips, target_node
         );
-
-        for (Alignment &alignment : alignments) {
-            alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
-        }
-
-        return alignments;
     }
 
     virtual bool set_seed(const Alignment &seed) override final;

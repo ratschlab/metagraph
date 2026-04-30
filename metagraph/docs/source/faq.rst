@@ -129,7 +129,8 @@ How to handle large datasets?
 3. **Extremely large graphs:**
 
 Extremely large succinct graphs can be constructed by building their parts separately
-and writing them to disk on the fly with flag ``--inplace``.
+and writing them to disk on the fly. This is the default succinct build path;
+pass ``--in-ram`` to construct the graph in RAM instead (requires more RAM, normally not needed).
 
 Annotation
 ==========

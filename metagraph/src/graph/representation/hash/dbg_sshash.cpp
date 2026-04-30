@@ -1,6 +1,9 @@
 #include "dbg_sshash.hpp"
 
+#include <memory>
 #include <type_traits>
+
+#include <sdsl/memory_management.hpp>
 
 #include <streaming_query.hpp>
 #include <progress_bar.hpp>
@@ -18,6 +21,7 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/file_utils.hpp"
 #include "kmer/kmer_extractor.hpp"
 
 
@@ -349,7 +353,25 @@ void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
 
 DBGSSHash::node_index DBGSSHash::traverse(node_index node, char next_char) const {
     assert(in_graph(node));
-    // TODO: if a node is in the middle of a unitig, then we only need to check the next node index
+    // Fast path: if successor is the next index, just check if the character matches
+    if (node < succ_is_next_.size()) {
+        if (succ_is_next_[node]) {
+            if (get_last_char(node + 1) == next_char)
+                return node + 1;
+            else
+                return npos; // degree-1 node, but character doesn't match
+        }
+    } else {
+        node_index rev_comp = reverse_complement(node);
+        if (pred_is_prev_[rev_comp]) {
+            --rev_comp;
+            if (complement(get_first_char(rev_comp)) == next_char)
+                return reverse_complement(rev_comp);
+            else
+                return npos;
+        }
+    }
+    // Slow path: full MPHF lookup
     return kmer_to_node(get_node_sequence(node).substr(1) + next_char);
 }
 
@@ -732,6 +754,11 @@ bool DBGSSHash::load(std::istream& in) {
     num_nodes_ = num_nodes;
 
     if (num_nodes_) {
+        // Enable zero-copy mmap if the stream is backed by an mmap'd file
+        if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
+            auto ctx = mmap_stream->get_mmap_context();
+            loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
+        }
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
         succ_is_next_.load(in);
         pred_is_prev_.load(in);
@@ -742,8 +769,8 @@ bool DBGSSHash::load(std::istream& in) {
 
 bool DBGSSHash::load(const std::string& filename) {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
-    std::ifstream fin(suffixed_filename, std::ios::binary);
-    return load(fin);
+    auto fin = utils::open_ifstream(suffixed_filename);
+    return load(*fin);
 }
 
 } // namespace graph

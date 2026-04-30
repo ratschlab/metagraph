@@ -38,7 +38,7 @@ gfa_tests = {
 }
 
 GFAs = [name for name, _ in gfa_tests.items()]
-MASKED = ['','--mask-dummy']
+MASKED = ['','--mask-dummy --in-ram']
 
 
 class TestAnnotate(unittest.TestCase):
@@ -77,7 +77,7 @@ class TestAnnotate(unittest.TestCase):
                 --mode canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
-            mask_dummy='--mask-dummy' if mask == 'mask' else '',
+            mask_dummy='--mask-dummy --in-ram' if mask == 'mask' else '',
             k=k,
             outfile=self.tempdir.name + '/graph',
             input=gfa_tests[gfa_test]['fasta_path']
@@ -228,7 +228,7 @@ class TestDiffAssembly(TestingBase):
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
-            mask_dummy='--mask-dummy' if cls.mask_dummy else '',
+            mask_dummy='--mask-dummy --in-ram' if cls.mask_dummy else '',
             repr=cls.graph_repr,
             k=k,
             outfile=cls.tempdir.name + '/graph',
@@ -318,3 +318,28 @@ class TestDiffAssembly(TestingBase):
         self.assertTrue('>metasub_by_kmer' in results)
         self.assertEqual(len(results['>metasub_by_kmer']), 1)
         self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
+
+    @parameterized.expand([
+        ('top_level_experiments', '{"experiments": [{"name": "x", "in": [], "out": []}]}'),
+        ('empty_groups',          '{"groups": []}'),
+        ('groups_wrong_type',     '{"groups": "not_an_array"}'),
+    ])
+    def test_diff_assembly_invalid_config(self, _name, content):
+        """Configs without a non-empty 'groups' array must error out cleanly.
+        The previous behavior was a silent exit with no output file."""
+        bad_config = self.tempdir.name + f'/bad_{_name}.json'
+        with open(bad_config, 'w') as f:
+            f.write(content)
+        out_base = self.tempdir.name + f'/should_not_exist_{_name}'
+        cmd = (f'{METAGRAPH} assemble -p {NUM_THREADS} '
+               f'-a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} '
+               f'-o {out_base} '
+               f'--diff-assembly-rules {bad_config} '
+               f'{self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}')
+        res = subprocess.run([cmd], shell=True, stderr=subprocess.PIPE)
+        self.assertNotEqual(res.returncode, 0,
+            msg="expected non-zero exit for malformed config")
+        self.assertIn(b"groups", res.stderr,
+            msg=f"expected error to mention 'groups', got: {res.stderr.decode()}")
+        self.assertFalse(os.path.exists(out_base + '.fasta.gz'),
+            msg="output file should not have been created")

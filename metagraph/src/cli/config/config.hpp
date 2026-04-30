@@ -47,7 +47,7 @@ class Config {
     bool subsample_rows = false;
     bool batch_align = false;
     bool suppress_unlabeled = false;
-    bool inplace = false;
+    bool in_ram = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool greedy_brwt = false;

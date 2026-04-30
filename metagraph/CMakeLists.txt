@@ -824,7 +824,6 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   add_executable(unit_tests ${unit_tests_files})
   target_link_directories(unit_tests PRIVATE ${PROJECT_BINARY_DIR})
   target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
-  target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
   target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
 
   target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
@@ -883,6 +882,22 @@ if(METAGRAPH_BUILD_EXECUTABLE)
     "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
   )
   file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+    DESTINATION "${PROJECT_BINARY_DIR}"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                     GROUP_READ GROUP_EXECUTE
+                     WORLD_READ WORLD_EXECUTE
+  )
+
+  # --- parallel unit-tests runner (Google Test sharding) ---
+  # `:=` preserves a user-supplied UNIT_TESTS override (handy for driving the
+  # wrapper with a stub binary when testing the script itself).
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel" "#!/usr/bin/env bash\n")
+  file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
+    "\n: \"\${UNIT_TESTS:=${PROJECT_BINARY_DIR}/unit_tests}\""
+    "\nexport UNIT_TESTS"
+    "\nexec ${PROJECT_SOURCE_DIR}/scripts/unit_tests_parallel.sh \"$@\"\n"
+  )
+  file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
     DESTINATION "${PROJECT_BINARY_DIR}"
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                      GROUP_READ GROUP_EXECUTE

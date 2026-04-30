@@ -9,6 +9,9 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/row_disk/row_disk.hpp"
+#include "annotation/int_matrix/row_disk/coord_row_disk.hpp"
+#include "annotation/int_matrix/row_disk/int_row_disk.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
 #define protected public
@@ -2054,6 +2057,134 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
         EXPECT_EQ(score, mtg::cli::score_kmer_presence_mask(anno_graph->get_graph().get_k(), vector)) << i;
         ++i;
     }
+}
+
+// `RowDiff<RowDisk>` can load via either `sdsl::mmap_ifstream` or
+// `utils::named_ifstream`. Verify both paths produce the same query results.
+TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
+    const std::vector<std::string> sequences {
+        std::string(80, 'A') + std::string(5, 'C'),
+        std::string(80, 'T') + std::string(5, 'G'),
+        std::string(80, 'G') + std::string(5, 'A'),
+    };
+    const std::vector<std::string> labels { "First", "Second", "Third" };
+    constexpr size_t k = 7;
+
+    const bool mmap_orig = utils::with_mmap();
+
+    utils::set_mmap(true);
+    auto anno_mmap = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(false);
+    auto anno_plain = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(mmap_orig);
+
+    ASSERT_NE(nullptr, anno_mmap);
+    ASSERT_NE(nullptr, anno_plain);
+
+    auto labels_per_node = [](const AnnotatedDBG &g, const std::string &seq) {
+        std::vector<std::set<std::string>> result;
+        g.get_graph().map_to_nodes(seq, [&](auto idx) {
+            EXPECT_NE(SequenceGraph::npos, idx);
+            result.push_back(convert_to_set(g.get_labels(idx)));
+        });
+        return result;
+    };
+
+    for (const auto &seq : sequences) {
+        EXPECT_EQ(labels_per_node(*anno_mmap, seq),
+                  labels_per_node(*anno_plain, seq));
+    }
+}
+
+// `IntRowDisk::load` supports both mmap and non-mmap paths; verify they
+// produce the same row reads from a freshly serialized matrix.
+TEST(IntRowDiskTest, LoadConsistentAcrossMmapSettings) {
+    using mtg::annot::matrix::IntRowDisk;
+    using mtg::annot::matrix::IntMatrix;
+    using mtg::annot::matrix::BinaryMatrix;
+
+    const std::string fname = test_dump_dir() + "/test_int_row_disk.bin";
+    { std::ofstream tmp(fname, std::ios::binary | std::ios::trunc); }
+
+    std::vector<IntMatrix::RowValues> input_rows = {
+        { { 0, 5 }, { 2, 7 } },
+        { { 1, 3 } },
+        { { 0, 1 }, { 1, 2 }, { 2, 4 } },
+    };
+    constexpr uint64_t num_set_bits = 6;
+    constexpr uint8_t  max_val = 7;
+    constexpr uint64_t num_cols = 3;
+
+    IntRowDisk::serialize(fname,
+        [&](std::function<void(const IntMatrix::RowValues &)> write_row) {
+            for (const auto &row : input_rows) write_row(row);
+        },
+        num_cols, input_rows.size(), num_set_bits, max_val);
+
+    auto query = [&](bool mmap) {
+        const bool orig = utils::with_mmap();
+        utils::set_mmap(mmap);
+        auto in = utils::open_ifstream(fname);
+        IntRowDisk d;
+        EXPECT_TRUE(d.load(*in));
+        std::vector<BinaryMatrix::Row> all_rows(input_rows.size());
+        std::iota(all_rows.begin(), all_rows.end(), 0u);
+        auto got = d.get_row_values(all_rows);
+        utils::set_mmap(orig);
+        return got;
+    };
+
+    EXPECT_EQ(input_rows, query(true));
+    EXPECT_EQ(input_rows, query(false));
+}
+
+// `CoordRowDisk::load` reads `num_attributes_` from the boundary stream
+// after loading `boundary_`; verify mmap on/off paths are consistent.
+TEST(CoordRowDiskTest, LoadConsistentAcrossMmapSettings) {
+    using mtg::annot::matrix::CoordRowDisk;
+    using mtg::annot::matrix::MultiIntMatrix;
+    using mtg::annot::matrix::BinaryMatrix;
+    using Tuple = MultiIntMatrix::Tuple;
+
+    const std::string fname = test_dump_dir() + "/test_coord_row_disk.bin";
+    { std::ofstream tmp(fname, std::ios::binary | std::ios::trunc); }
+
+    std::vector<MultiIntMatrix::RowTuples> input_rows = {
+        { { 0, Tuple{ 5, 8 } }, { 2, Tuple{ 7 } } },
+        { { 1, Tuple{ 3 } } },
+        { { 0, Tuple{ 1 } }, { 1, Tuple{ 2, 4 } } },
+    };
+    constexpr uint64_t num_set_bits    = 5;  // total (col, Tuple) pairs
+    constexpr uint64_t num_values      = 7;  // total tuple elements
+    constexpr uint64_t max_val         = 8;
+    constexpr uint64_t max_tuple_size  = 2;
+    constexpr uint64_t num_cols        = 3;
+
+    CoordRowDisk::serialize(fname,
+        [&](std::function<void(const MultiIntMatrix::RowTuples &)> write_row) {
+            for (const auto &row : input_rows) write_row(row);
+        },
+        num_cols, input_rows.size(), num_set_bits, num_values, max_val, max_tuple_size);
+
+    auto query = [&](bool mmap) {
+        const bool orig = utils::with_mmap();
+        utils::set_mmap(mmap);
+        auto in = utils::open_ifstream(fname);
+        CoordRowDisk d;
+        EXPECT_TRUE(d.load(*in));
+        std::vector<BinaryMatrix::Row> all_rows(input_rows.size());
+        std::iota(all_rows.begin(), all_rows.end(), 0u);
+        auto got = d.get_row_tuples(all_rows);
+        utils::set_mmap(orig);
+        return got;
+    };
+
+    EXPECT_EQ(input_rows, query(true));
+    EXPECT_EQ(input_rows, query(false));
 }
 
 } // namespace

@@ -9,6 +9,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
 #include "load_graph.hpp"
@@ -68,8 +69,6 @@ load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
             loaded = annotation_temp->load(config.infbase_annotators.at(0));
         }
         if (!loaded) {
-            logger->error("Cannot load annotations for graph {}, file corrupted",
-                          config.infbase);
             exit(1);
         }
 
@@ -103,7 +102,6 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
         if (std::filesystem::exists(cth_fname)) {
             coord_to_header = std::make_unique<annot::CoordToHeader>();
             if (!coord_to_header->load(cth_fname)) {
-                logger->error("Failed loading the CoordToHeader mapping from {}", cth_fname);
                 exit(1);
             }
             logger->trace("CoordToHeader mapping loaded successfully from {}. "

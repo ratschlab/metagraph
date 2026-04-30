@@ -7,6 +7,8 @@
 
 #include "common/threads/threading.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
@@ -377,8 +379,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
-        } else if (!strcmp(argv[i], "--inplace")) {
-            inplace = true;
+        } else if (!strcmp(argv[i], "--in-ram")) {
+            in_ram = true;
         } else if (!strcmp(argv[i], "--index-ranges")) {
             node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
@@ -631,12 +633,30 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
-        if (to_row_diff && !infbase.size()) {
+        // For row_diff_brwt and row_diff_flat inputs, the anchor and fork-succ
+        // bitmaps are embedded in the .annodbg, so no graph is needed when
+        // re-formatting to another row_diff representation.
+        const bool input_has_embedded_anchor = fnames.size()
+                && (utils::ends_with(fnames.front(), annot::RowDiffBRWTAnnotator::kExtension)
+                        || utils::ends_with(fnames.front(), annot::RowDiffRowFlatAnnotator::kExtension));
+        if (input_has_embedded_anchor && fnames.size() != 1) {
+            std::cerr << "Can only convert " << fnames.front()
+                      << " annotations one at a time" << std::endl;
+            print_usage_and_exit = true;
+        }
+        if (to_row_diff && !infbase.size() && !input_has_embedded_anchor) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
         } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+            std::cerr << "Graph is only required for transform to row_diff types"
+                      << std::endl;
             print_usage_and_exit = true;
+        } else if (input_has_embedded_anchor && infbase.size()) {
+            common::logger->warn(
+                    "Graph is not needed when the input annotation has embedded "
+                    "anchors (row_diff_brwt, row_diff_flat); ignoring '-i {}'",
+                    infbase);
+            infbase.clear();
         }
     }
 
@@ -983,7 +1003,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct] / sshash\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
-            fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
+            fprintf(stderr, "\t   --in-ram \t\tconstruct succinct graph in RAM instead of inplace [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
@@ -1001,7 +1021,7 @@ if (advanced) {
 }
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
 if (advanced) {
-            fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph) [off]\n");
+            fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph; requires --in-ram) [off]\n");
 }
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");

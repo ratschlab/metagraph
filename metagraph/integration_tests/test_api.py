@@ -805,3 +805,79 @@ class TestAPIClientParallel(TestAPIBase):
 
         for graph in self.graph_names:
             self.assertIsInstance(dfs[graph], ValueError)
+
+
+class TestAPIServerLoadErrors(TestingBase):
+    """Verify the server prints the offending file path when it fails to load
+    a graph or annotation. Regression guard against a prior bug where the
+    multi-graph regime logged a generic 'Cannot load graph ...' with only
+    the graph path, making it impossible to tell which annotation was bad."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.graph_path = cls.tempdir.name + '/graph.dbg'
+        cls.anno_base = cls.tempdir.name + '/annotation'
+        cls.anno_path = cls.anno_base + '.column.annodbg'
+        cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa', cls.graph_path,
+                         6, 'succinct')
+        cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                            cls.graph_path, cls.anno_base, 'column')
+
+    @staticmethod
+    def _pick_free_port():
+        """Ask the OS for a free TCP port. There's a tiny race between close()
+        and the server's bind(), but irrelevant here: these tests expect the
+        server to exit during graph/annotation load, before it ever binds."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+
+    def _run_server_expecting_failure(self, argv_tail):
+        """Launch `metagraph server_query <argv_tail>` and return (exit_code, stderr_text)."""
+        cmd = (f'{METAGRAPH} server_query {argv_tail}'
+               f' --port {self._pick_free_port()} --address 127.0.0.1 -p 2')
+        proc = subprocess.Popen(shlex.split(cmd), shell=False,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            _, stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, stderr = proc.communicate()
+            self.fail(f"Server did not exit within 30s on load failure.\n"
+                      f"stderr so far:\n{stderr.decode(errors='replace')}")
+        return proc.returncode, stderr.decode(errors='replace')
+
+    def _assert_error_line_contains_path(self, stderr, path):
+        """The offending path must appear on a line tagged '[error]', not just
+        somewhere in the log."""
+        error_lines = [l for l in stderr.splitlines() if '[error]' in l]
+        self.assertTrue(
+            any(path in l for l in error_lines),
+            msg=(f"no [error] line mentions path '{path}'.\n"
+                 f"[error] lines:\n" + '\n'.join(error_lines) + '\n'
+                 f"full stderr:\n{stderr}"))
+
+    def test_single_missing_annotation_mentions_annotation_path(self):
+        missing = self.tempdir.name + '/does_not_exist.column.annodbg'
+        rc, stderr = self._run_server_expecting_failure(
+            f'-i {self.graph_path} -a {missing}')
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, missing)
+
+    def test_single_missing_graph_mentions_graph_path(self):
+        missing = self.tempdir.name + '/does_not_exist.dbg'
+        rc, stderr = self._run_server_expecting_failure(
+            f'-i {missing} -a {self.anno_path}')
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, missing)
+
+    def test_multigraph_missing_annotation_mentions_annotation_path(self):
+        missing = self.tempdir.name + '/does_not_exist.column.annodbg'
+        graphs_file = self.tempdir.name + '/graphs_err.txt'
+        with open(graphs_file, 'w') as f:
+            f.write(f'GOOD,{self.graph_path},{self.anno_path}\n')
+            f.write(f'BAD,{self.graph_path},{missing}\n')
+        rc, stderr = self._run_server_expecting_failure(graphs_file)
+        self.assertNotEqual(0, rc, msg=stderr)
+        self._assert_error_line_contains_path(stderr, missing)

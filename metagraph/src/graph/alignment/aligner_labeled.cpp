@@ -337,7 +337,6 @@ void LabeledExtender::call_alignments(score_t end_score,
                                       const std::function<void(Alignment&&)> &callback) {
     Alignment alignment = construct_alignment(ops, clipping, window, path, match,
                                               end_score, offset, extra_score);
-    alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
     auto [base_labels, base_coords]
         = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());

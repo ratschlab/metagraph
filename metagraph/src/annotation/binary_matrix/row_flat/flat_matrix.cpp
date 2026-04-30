@@ -52,6 +52,14 @@ RowFlat<BitVector>::get_row(Row row) const {
 }
 
 template <typename BitVector>
+void RowFlat<BitVector>::call_rows(
+        const std::function<void(const SetBitPositions &)> &callback) const {
+    for (uint64_t r = 0; r < num_rows_; ++r) {
+        callback(get_row(r));
+    }
+}
+
+template <typename BitVector>
 std::vector<typename RowFlat<BitVector>::Row>
 RowFlat<BitVector>::get_column(Column column) const {
     assert(compressed_rows_.get());
@@ -96,12 +104,12 @@ void RowFlat<BitVector>::serialize(std::ostream &out) const {
 }
 
 template <typename BitVector>
-void RowFlat<BitVector>::serialize(const std::function<void(const RowCallback&)> &call_rows,
+void RowFlat<BitVector>::serialize(const std::string &filename,
+                                   const std::function<void(const RowCallback&)> &call_rows,
                                    uint64_t num_columns,
                                    uint64_t num_rows,
-                                   uint64_t num_set_bits,
-                                   const std::string &filename, bool append_file) {
-    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : std::ios::openmode(0)));
+                                   uint64_t num_set_bits) {
+    std::ofstream out(filename, std::ios::binary | std::ios::app);
     serialize_number(out, num_columns);
     out.close();
     auto call_bits = [&](auto callback) {
