@@ -221,7 +221,7 @@ TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
     }
 }
 
-// Test Alignment::format_coords() with coord_to_header
+// Test Alignment::format_coords(cth, k) renders per-header ranges
 TEST(AlignmentFormatCoords, WithCoordToHeader) {
     using namespace mtg::graph::align;
 

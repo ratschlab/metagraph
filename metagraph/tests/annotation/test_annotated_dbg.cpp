@@ -2048,9 +2048,8 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
     }
 }
 
-// `RowDiff<RowDisk>` previously forced mmap; now it loads via either
-// `sdsl::mmap_ifstream` or `utils::named_ifstream`. Verify both paths
-// produce the same query results.
+// `RowDiff<RowDisk>` can load via either `sdsl::mmap_ifstream` or
+// `utils::named_ifstream`. Verify both paths produce the same query results.
 TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
     const std::vector<std::string> sequences {
         std::string(80, 'A') + std::string(5, 'C'),
@@ -2090,8 +2089,8 @@ TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
     }
 }
 
-// `IntRowDisk::load` no longer forces mmap; verify both paths produce the
-// same row reads from a freshly serialized matrix.
+// `IntRowDisk::load` supports both mmap and non-mmap paths; verify they
+// produce the same row reads from a freshly serialized matrix.
 TEST(IntRowDiskTest, LoadConsistentAcrossMmapSettings) {
     using mtg::annot::matrix::IntRowDisk;
     using mtg::annot::matrix::IntMatrix;
