@@ -20,7 +20,7 @@ TEST(CoordToHeader, MapSingleCoordFirstSequence) {
     );
 
     EXPECT_EQ(cth.num_columns(), 1u);
-    EXPECT_EQ(cth.num_headers(0), 2u);
+    EXPECT_EQ(cth.num_sequences(0), 2u);
 
     // coord 0 -> seq0, local 0
     auto [h0, lc0] = cth.map_single_coord(0, 0);
@@ -59,8 +59,8 @@ TEST(CoordToHeader, MapSingleCoordMultipleColumns) {
     );
 
     EXPECT_EQ(cth.num_columns(), 2u);
-    EXPECT_EQ(cth.num_headers(0), 2u);
-    EXPECT_EQ(cth.num_headers(1), 1u);
+    EXPECT_EQ(cth.num_sequences(0), 2u);
+    EXPECT_EQ(cth.num_sequences(1), 1u);
 
     // Column 0, coord 3 -> A, local 3
     auto [h0, lc0] = cth.map_single_coord(0, 3);
@@ -85,7 +85,7 @@ TEST(CoordToHeader, MapSingleCoordThreeSequences) {
         { { 2, 3, 4 } }
     );
 
-    EXPECT_EQ(cth.num_headers(0), 3u);
+    EXPECT_EQ(cth.num_sequences(0), 3u);
 
     // coord 0 -> a, local 0  (first seq, first coord)
     auto [h0, lc0] = cth.map_single_coord(0, 0);
@@ -178,10 +178,10 @@ TEST(CoordToHeader, SerializeLoadRoundTrip) {
 
     ASSERT_EQ(src.num_columns(), dst.num_columns());
     for (uint64_t col = 0; col < src.num_columns(); ++col) {
-        EXPECT_EQ(src.num_headers(col), dst.num_headers(col))  << "col " << col;
+        EXPECT_EQ(src.num_sequences(col), dst.num_sequences(col))  << "col " << col;
         EXPECT_EQ(src.num_kmers(col),   dst.num_kmers(col))    << "col " << col;
         EXPECT_EQ(src.get_headers(col), dst.get_headers(col))  << "col " << col;
-        for (size_t h = 0; h < src.num_headers(col); ++h) {
+        for (size_t h = 0; h < src.num_sequences(col); ++h) {
             EXPECT_EQ(src.num_kmers_in_sequence(col, h),
                       dst.num_kmers_in_sequence(col, h))
                 << "col " << col << " seq_id " << h;
@@ -213,7 +213,7 @@ TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {
         size_t idx = 0;
         for (uint64_t global_coord : { 0u, 2u, 3u, 6u, 8u }) {
             auto [seq_id, local_coord] = cth.map_single_coord(col, global_coord);
-            uint64_t encoded = local_coord * cth.num_headers(col) + seq_id;
+            uint64_t encoded = local_coord * cth.num_sequences(col) + seq_id;
             EXPECT_EQ(encoded, coords[idx])
                 << "Mismatch at global coord " << global_coord;
             ++idx;

@@ -49,6 +49,8 @@ class CoordToHeader {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
+    // global_coord -> (seq_id, local_coord)
+    std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
     /**
      * Batch variant of `map_single_coord` that replaces each global coord
      * in `rows_tuples` with a packed `(seq_id, local_coord)` pair
@@ -56,9 +58,9 @@ class CoordToHeader {
      * the existing `uint64_t`-valued row/tuple data structures instead of
      * introducing a parallel structure for pairs.
      *
-     * Packing:   `packed = local_coord * num_headers[col] + seq_id`
-     * Unpacking: `seq_id   = packed % num_headers[col]`
-     *            `local_coord = packed / num_headers[col]`
+     * Packing:   `packed = local_coord * num_sequences[col] + seq_id`
+     * Unpacking: `seq_id   = packed % num_sequences[col]`
+     *            `local_coord = packed / num_sequences[col]`
      *
      * For single-coord lookups prefer `map_single_coord`, which returns
      * the pair directly without packing.
@@ -69,19 +71,11 @@ class CoordToHeader {
     // Total number of k-mers / coordinates in a column (across all sequences).
     uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
     // Number of sequences in a column.
-    size_t num_headers(Column column) const { return headers_[column].size(); }
+    size_t num_sequences(Column column) const { return headers_[column].size(); }
+    // Number of k-mers in a sequence.
+    uint64_t num_kmers_in_sequence(Column col, size_t seq_id) const;
     // FASTA headers of the sequences in a column, indexed by seq_id.
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
-
-    /**
-     * Map a single global coordinate in a column to (seq_id, local_coord).
-     */
-    std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
-
-    /**
-     * Number of k-mers covered by a single sequence in a column.
-     */
-    uint64_t num_kmers_in_sequence(Column col, size_t seq_id) const;
 
     static constexpr auto kExtension = ".seqs";
 

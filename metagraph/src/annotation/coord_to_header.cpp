@@ -19,7 +19,7 @@ CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
     assert(headers_.size() == num_kmers.size());
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t j = 0; j < num_kmers.size(); ++j) {
-        assert(num_kmers[j].size() == num_headers(j));
+        assert(num_kmers[j].size() == num_sequences(j));
         if (num_kmers[j].empty())
             continue;
         auto &offsets = num_kmers[j];
@@ -38,16 +38,14 @@ void CoordToHeader::map_to_local_coords(std::vector<RowTuples> *rows) const {
     assert(rows);
     for (auto &row : *rows) {
         for (auto &[col, coords] : row) {
-            // n > 0 is guaranteed: map_single_coord throws below if col is
-            // out of range or coords refers to an empty column.
-            const size_t n = num_headers(col);
+            const size_t n = num_sequences(col);
             for (uint64_t &coord : coords) {
                 auto [seq_id, local_coord] = map_single_coord(col, coord);
+                assert(n);
                 if (local_coord > std::numeric_limits<uint64_t>::max() / n) {
                     throw std::runtime_error(fmt::format("Local coordinate {} is too large to "
                             "pack with a seq_id into a single 64-bit integer "
-                            "({} sequences in column {})",
-                            local_coord, n, col));
+                            "({} sequences in column {})", local_coord, n, col));
                 }
                 coord = local_coord * n + seq_id;
             }
@@ -64,8 +62,7 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     const auto &offsets = coord_offsets_[col];
     if (coord >= offsets.size()) {
         throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
-                "(CoordToHeader has {} coordinates for that column)",
-                coord, col, offsets.size()));
+                "(CoordToHeader has {} coordinates for that column)", coord, col, offsets.size()));
     }
     size_t header = coord ? offsets.rank1(coord - 1) : 0;
     uint64_t local_coord = !header ? coord : coord - offsets.select1(header) - 1;
@@ -78,9 +75,9 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
                 "(CoordToHeader has {} columns)", col, num_columns()));
     }
     const auto &offsets = coord_offsets_[col];
-    if (seq_id >= num_headers(col)) {
+    if (seq_id >= num_sequences(col)) {
         throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
-                "({} sequences)", seq_id, col, num_headers(col)));
+                "({} sequences)", seq_id, col, num_sequences(col)));
     }
     // coord_offsets_ has a set bit at the partial-sum boundary of each
     // sequence, so the k-mer count for sequence s is

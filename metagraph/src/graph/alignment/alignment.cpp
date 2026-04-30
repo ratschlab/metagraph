@@ -32,7 +32,7 @@ static std::string format_coords_with_header_map(const Alignment::Columns &label
 
     for (size_t i = 0; i < label_columns.size(); ++i) {
         Alignment::Column col = label_columns[i];
-        const size_t n_seqs = cth.num_headers(col);
+        const size_t n_seqs = cth.num_sequences(col);
         for (uint64_t coord : label_coordinates[i]) {
             auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
             uint64_t remaining = L;
