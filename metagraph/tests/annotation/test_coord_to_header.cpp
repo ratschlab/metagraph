@@ -242,12 +242,8 @@ TEST(AlignmentFormatCoords, WithCoordToHeader) {
         { 3 },   // column 0, coord 3 -> accession_A, local 3 -> "4-7"
         { 12 },  // column 0, coord 12 -> accession_B, local 2 -> "3-6"
     };
-    aln.coord_to_header = &cth;
-    // k must be >0 per format_coords's contract; its specific value doesn't
-    // affect this test since neither range crosses a sequence boundary.
-    aln.coord_to_header_k = 5;
 
-    EXPECT_EQ(aln.format_coords(), "accession_A:4-7;accession_B:3-6");
+    EXPECT_EQ(aln.format_coords(cth, 5), "accession_A:4-7;accession_B:3-6");
 }
 
 TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
@@ -270,10 +266,8 @@ TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
     aln.label_coordinates = {
         { 2, 7 },  // coord 2 -> seqA local 2, coord 7 -> seqB local 2
     };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 5;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:3-5;seqB:3-5");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:3-5;seqB:3-5");
 }
 
 TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
@@ -295,16 +289,15 @@ TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
     aln.label_coordinates = {
         { 3, 10 },  // two coords in the same header
     };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 5;
 
     // Same header gets both ranges appended
-    EXPECT_EQ(aln.format_coords(), "ref:4-5:11-12");
+    EXPECT_EQ(aln.format_coords(cth, 5), "ref:4-5:11-12");
 }
 
 TEST(AlignmentFormatCoords, EmptyCoordinates) {
     using namespace mtg::graph::align;
 
+    LabelEncoder<> encoder;
     Alignment aln(
         std::string_view{},
         {},
@@ -312,10 +305,10 @@ TEST(AlignmentFormatCoords, EmptyCoordinates) {
         0, {}, 0, false, 0
     );
     // No coordinates -> empty string
-    EXPECT_EQ(aln.format_coords(), "");
+    EXPECT_EQ(aln.format_coords(encoder), "");
 }
 
-TEST(AlignmentFormatCoords, WithoutCoordToHeaderUsesLabelEncoder) {
+TEST(AlignmentFormatCoords, WithEncoder) {
     using namespace mtg::graph::align;
 
     LabelEncoder<> encoder;
@@ -327,27 +320,10 @@ TEST(AlignmentFormatCoords, WithoutCoordToHeaderUsesLabelEncoder) {
         std::string("ACGT"),  // 4-char sequence -> range width = 4
         0, {}, 0, false, 0
     );
-    aln.label_encoder = &encoder;
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 42 } };  // coord 42 -> "43-46"
 
-    EXPECT_EQ(aln.format_coords(), "/path/to/file.fa:43-46");
-}
-
-TEST(AlignmentFormatCoords, WithoutCoordToHeaderOrEncoder) {
-    using namespace mtg::graph::align;
-
-    Alignment aln(
-        std::string_view{},
-        {},
-        std::string("ACGT"),
-        0, {}, 0, false, 0
-    );
-    // No label_encoder, no coord_to_header -> falls back to column index
-    aln.label_columns = { 5 };
-    aln.label_coordinates = { { 0 } };
-
-    EXPECT_EQ(aln.format_coords(), "5:1-4");
+    EXPECT_EQ(aln.format_coords(encoder), "/path/to/file.fa:43-46");
 }
 
 // A range that extends past the starting sequence is split across
@@ -368,10 +344,8 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 7 } };  // seqA local 7; 7 nt fit + 1 spills
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 5;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:8-14;seqB:1-1");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:8-14;seqB:1-1");
 }
 
 TEST(AlignmentFormatCoords, CrossThreeSequences) {
@@ -390,10 +364,8 @@ TEST(AlignmentFormatCoords, CrossThreeSequences) {
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 3 } };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 3;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:4-7;seqB:1-7;seqC:1-5");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:4-7;seqB:1-7;seqC:1-5");
 }
 
 TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
@@ -418,10 +390,8 @@ TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
     //   coord 6 -> seqA local 6, avail=6, spills 2 nt into seqB
     //   coord 7 -> seqA local 7, avail=5, spills 3 nt into seqB
     aln.label_coordinates = { { 6, 7 } };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 5;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:7-12:8-12;seqB:1-2:1-3");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:7-12:8-12;seqB:1-2:1-3");
 }
 
 TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
@@ -441,10 +411,8 @@ TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 0 } };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 3;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:1-7;seqB:1-7");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:1-7;seqB:1-7");
 }
 
 TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
@@ -463,10 +431,8 @@ TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 2 } };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 3;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:3-7");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:3-7");
 }
 
 TEST(AlignmentFormatCoords, SpansEntireColumn) {
@@ -486,10 +452,8 @@ TEST(AlignmentFormatCoords, SpansEntireColumn) {
     );
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 0 } };
-    aln.coord_to_header = &cth;
-    aln.coord_to_header_k = 3;
 
-    EXPECT_EQ(aln.format_coords(), "seqA:1-5;seqB:1-6;seqC:1-4");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:1-5;seqB:1-6;seqC:1-4");
 }
 
 } // namespace

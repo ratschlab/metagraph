@@ -254,7 +254,9 @@ void gfa_map_files(const Config *config,
 std::string format_alignment(const std::string &header,
                              const AlignmentResults &paths,
                              const DeBruijnGraph &graph,
-                             const Config &config) {
+                             const Config &config,
+                             const annot::LabelEncoder<> *encoder,
+                             const annot::CoordToHeader *cth) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
@@ -263,6 +265,21 @@ std::string format_alignment(const std::string &header,
         } else {
             for (const auto &path : paths) {
                 sout += fmt::format("\t{}", path);
+                // labels/coordinates only ever come from a labeled aligner,
+                // which always supplies the encoder. cth is the optional refinement.
+                if (path.label_coordinates.size()) {
+                    assert(encoder);
+                    sout += "\t" + (cth ? path.format_coords(*cth, graph.get_k())
+                                        : path.format_coords(*encoder));
+                } else if (path.label_columns.size()) {
+                    assert(encoder);
+                    std::vector<std::string> labels;
+                    labels.reserve(path.label_columns.size());
+                    for (auto col : path.label_columns) {
+                        labels.emplace_back(encoder->decode(col));
+                    }
+                    sout += fmt::format("\t{}", fmt::join(labels, ";"));
+                }
             }
             sout += "\n";
         }
@@ -431,15 +448,16 @@ int align_to_graph(Config *config) {
                     aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }
 
+                const annot::LabelEncoder<> *encoder = nullptr;
+                const annot::CoordToHeader *cth = nullptr;
+                if (anno_dbg) {
+                    encoder = &anno_dbg->get_annotator().get_label_encoder();
+                    cth = anno_dbg->get_coord_to_header();
+                }
+
                 aligner->align_batch(batch,
                     [&](const std::string &header, AlignmentResults&& paths) {
-                        if (anno_dbg && anno_dbg->get_coord_to_header()) {
-                            for (auto &aln : paths) {
-                                aln.coord_to_header = anno_dbg->get_coord_to_header();
-                                aln.coord_to_header_k = graph->get_k();
-                            }
-                        }
-                        const auto &res = format_alignment(header, paths, *graph, *config);
+                        auto res = format_alignment(header, paths, *graph, *config, encoder, cth);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
                     }

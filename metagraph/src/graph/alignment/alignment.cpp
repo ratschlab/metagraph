@@ -17,21 +17,40 @@ namespace align {
 
 using mtg::common::logger;
 
-// Resolve the alignment's global coordinates to per-sequence labels via the
-// CoordToHeader index, splitting ranges that cross sequence boundaries.
-// See `Alignment::format_coords` for the output grammar and ordering.
-static std::string format_coords_with_header_map(const Alignment::Columns &label_columns,
-                                                 const Alignment::CoordinateSet &label_coordinates,
-                                                 uint64_t L,
-                                                 const annot::CoordToHeader &cth,
-                                                 size_t k) {
-    assert(k > 0 && "coord_to_header_k must be >0 when coord_to_header is in use");
-    using Key = std::pair<Alignment::Column, size_t>;  // (column, seq_id)
+std::string Alignment::format_coords(const annot::LabelEncoder<> &encoder) const {
+    if (!label_coordinates.size())
+        return "";
+
+    assert(label_columns.size());
+    assert(label_coordinates.size() == label_columns.size());
+
+    std::vector<std::string> decoded_labels;
+    decoded_labels.reserve(label_columns.size());
+    for (size_t i = 0; i < label_columns.size(); ++i) {
+        decoded_labels.emplace_back(encoder.decode(label_columns[i]));
+        for (uint64_t coord : label_coordinates[i]) {
+            // alignment coordinates are 1-based inclusive ranges
+            decoded_labels.back() += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
+        }
+    }
+    return fmt::format("{}", fmt::join(decoded_labels, ";"));
+}
+
+std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) const {
+    if (!label_coordinates.size())
+        return "";
+
+    assert(label_columns.size());
+    assert(label_coordinates.size() == label_columns.size());
+    assert(k > 0 && "k must be >0 when CoordToHeader is in use");
+
+    using Key = std::pair<Column, size_t>;  // (column, seq_id)
     // Per-key list of local (start, end_inclusive) ranges, 0-based.
     VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> seq_ranges;
 
+    const uint64_t L = sequence_.size();
     for (size_t i = 0; i < label_columns.size(); ++i) {
-        Alignment::Column col = label_columns[i];
+        Column col = label_columns[i];
         const size_t n_seqs = cth.num_sequences(col);
         for (uint64_t coord : label_coordinates[i]) {
             auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
@@ -66,37 +85,6 @@ static std::string format_coords_with_header_map(const Alignment::Columns &label
         for (auto [start, end] : ranges) {
             // 1-based inclusive ranges
             decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
-        }
-    }
-
-    return fmt::format("{}", fmt::join(decoded_labels, ";"));
-}
-
-std::string Alignment::format_coords() const {
-    if (!label_coordinates.size())
-        return "";
-
-    assert(label_columns.size());
-    assert(label_coordinates.size() == label_columns.size());
-
-    if (coord_to_header) {
-        return format_coords_with_header_map(label_columns, label_coordinates,
-                                             sequence_.size(),
-                                             *coord_to_header, coord_to_header_k);
-    }
-
-    std::vector<std::string> decoded_labels;
-    decoded_labels.reserve(label_columns.size());
-
-    for (size_t i = 0; i < label_columns.size(); ++i) {
-        decoded_labels.emplace_back(label_encoder
-            ? label_encoder->decode(label_columns[i])
-            : std::to_string(label_columns[i])
-        );
-        for (uint64_t coord : label_coordinates[i]) {
-            // alignment coordinates are 1-based inclusive ranges
-            decoded_labels.back()
-                += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
         }
     }
 

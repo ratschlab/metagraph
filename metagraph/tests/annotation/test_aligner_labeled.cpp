@@ -314,15 +314,6 @@ class LabeledAlignerCoordTest : public ::testing::Test {
         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
         return aligner.align(query);
     }
-
-    // Attach the CoordToHeader + k to every alignment in `paths`.
-    // `cth` must outlive `paths` (typically declared in the test scope).
-    void attach(AlignmentResults &paths, const annot::CoordToHeader &cth) {
-        for (auto &aln : paths) {
-            aln.coord_to_header = &cth;
-            aln.coord_to_header_k = k;
-        }
-    }
 };
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundary) {
@@ -343,8 +334,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundary) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequences) {
@@ -366,8 +356,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequences) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-12;seq3:1-4", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-12;seq3:1-4", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequencesWithIndels) {
@@ -393,8 +382,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequencesWithIndels) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-12;seq3:1-4", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-12;seq3:1-4", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, ThreeSequencesPartialCoverage) {
@@ -419,8 +407,7 @@ TEST_F(LabeledAlignerCoordTest, ThreeSequencesPartialCoverage) {
     EXPECT_EQ(18u, aln.label_coordinates[0][2]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:3-9;seq2:3-9;seq3:3-9", alignments[0].format_coords());
+    EXPECT_EQ("seq1:3-9;seq2:3-9;seq3:3-9", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
@@ -439,8 +426,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
@@ -461,8 +447,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     EXPECT_EQ(0u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords());
+    EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords(cth, k));
 }
 #endif  // ! _PROTEIN_GRAPH
 
@@ -493,13 +478,6 @@ class LabeledAlignerProteinCoordTest : public ::testing::Test {
         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
         return aligner.align(query);
     }
-
-    void attach(AlignmentResults &paths, const annot::CoordToHeader &cth) {
-        for (auto &aln : paths) {
-            aln.coord_to_header = &cth;
-            aln.coord_to_header_k = k;
-        }
-    }
 };
 
 TEST_F(LabeledAlignerProteinCoordTest, CrossBoundary) {
@@ -517,8 +495,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundary) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, SharedKmerMultipleLabels) {
@@ -536,8 +513,7 @@ TEST_F(LabeledAlignerProteinCoordTest, SharedKmerMultipleLabels) {
     ASSERT_EQ(2u, aln.label_coordinates[0].size());
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:4-8;seq2:4-8", alignments[0].format_coords());
+    EXPECT_EQ("seq1:4-8;seq2:4-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithMismatch) {
@@ -558,8 +534,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithMismatch) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
@@ -578,8 +553,7 @@ TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords());
+    EXPECT_EQ("seq1:5-12;seq2:1-4", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
@@ -601,8 +575,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
     EXPECT_EQ(0u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords());
+    EXPECT_EQ("seq1:1-12;seq2:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, ThreeSequencesPartialCoverage) {
@@ -624,8 +597,7 @@ TEST_F(LabeledAlignerProteinCoordTest, ThreeSequencesPartialCoverage) {
     ASSERT_EQ(3u, aln.label_coordinates[0].size());
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    attach(alignments, cth);
-    EXPECT_EQ("seq1:3-7;seq2:3-7;seq3:3-7", alignments[0].format_coords());
+    EXPECT_EQ("seq1:3-7;seq2:3-7;seq3:3-7", alignments[0].format_coords(cth, k));
 }
 #endif  // _PROTEIN_GRAPH
 
