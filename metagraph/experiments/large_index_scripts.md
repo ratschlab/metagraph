@@ -1979,7 +1979,6 @@ for G in {0..5}; do
             /usr/bin/time -v $METAGRAPH build -v \
                 -k 31 \
                 --mode canonical \
-                --inplace \
                 -o $DIR/graph_canonical_${G} \
                 --mem-cap-gb 80 \
                 --disk-swap ~/metagenome/scratch/nobackup/ \
@@ -2010,7 +2009,6 @@ bsub -J "metazoa_canonical" \
      -n 36 -R "rusage[mem=80000] span[hosts=1]" \
     "/usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             -o $DIR/graph_basic \
             --disk-swap ~/metagenome/scratch/nobackup/ \
             --mem-cap-gb 180 \
@@ -2369,7 +2367,6 @@ sbatch -J "metazoa1k" \
     --wrap="cat ${DIR}/samples.txt \
         | /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             --mode canonical \
             --mem-cap-gb 50 \
             --disk-swap ~/metagenome/scratch/nobackup \
@@ -2592,7 +2589,6 @@ for i in {0,9}; do
         --wrap="cat ${DIR}/samples.txt \
             | /usr/bin/time -v $METAGRAPH build -v \
                 -k 31 \
-                --inplace \
                 --mode canonical \
                 --mem-cap-gb 50 \
                 --disk-swap ~/metagenome/scratch/nobackup \
@@ -2941,7 +2937,6 @@ sbatch -J "random100" \
     --wrap="cat ${DIR}/samples.txt \
         | /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             --mode canonical \
             --mem-cap-gb 50 \
             --disk-swap ~/metagenome/scratch/nobackup \
@@ -3181,7 +3176,6 @@ sbatch -J "random10K_cleaned_2" \
         /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
             --mode canonical \
-            --inplace \
             --mem-cap-gb 20 \
             --count-kmers \
             --disk-swap ~/metagenome/scratch/nobackup \
@@ -3233,7 +3227,6 @@ sbatch -J "random5K" \
     --wrap="cat ${DIR}/5k_list.txt \
         | /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             --mode canonical \
             --mem-cap-gb 50 \
             --disk-swap ~/metagenome/scratch/nobackup \
@@ -3530,7 +3523,6 @@ sbatch -J "random5K" \
     --wrap="cat ${DIR}/5k_list.txt \
         | /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             --mode canonical \
             --mem-cap-gb 50 \
             --disk-swap ~/metagenome/scratch/nobackup \

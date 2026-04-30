@@ -30,7 +30,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -62,7 +62,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -92,7 +92,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -126,7 +126,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation, mode='canonical',
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -156,7 +156,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -179,7 +179,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -211,7 +211,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation, mode='canonical',
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -244,7 +244,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation, mode='canonical',
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -273,7 +273,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT.primary',
                           k=11, repr=representation, mode='primary',
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -306,7 +306,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT.primary',
                           k=11, repr=representation, mode='primary',
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -335,7 +335,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])
@@ -361,7 +361,7 @@ class TestDNAAlign(TestingBase):
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
                           k=11, repr=representation,
-                          extra_params="--mask-dummy")
+                          extra_params="--mask-dummy --in-ram")
 
         params = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         self.assertEqual('11', params['k'])

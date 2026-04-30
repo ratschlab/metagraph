@@ -30,7 +30,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -75,7 +75,7 @@ class TestAnnotate(TestingBase):
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, graph_repr):
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} --mode canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -120,7 +120,7 @@ class TestAnnotate(TestingBase):
         Annotate non-canonical graph constructed from non-canonical KMC database
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
@@ -161,7 +161,7 @@ class TestAnnotate(TestingBase):
         Annotate non-canonical graph constructed from canonical KMC database
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters_both_strands.kmc_suf'
@@ -224,7 +224,7 @@ class TestAnnotate(TestingBase):
         Annotate canonical graph with k-mers from KMC
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} --mode canonical -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
@@ -283,7 +283,7 @@ class TestAnnotate(TestingBase):
         graph_repr = 'succinct'
         anno_repr = 'column'
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -325,7 +325,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand(GRAPH_TYPES)
     def test_annotate_coordinates(self, graph_repr):
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                               --graph {graph_repr} -k 11 \
                               -o {self.tempdir.name}/graph \
                               {TEST_DATA_DIR}/transcripts_100.fa'
@@ -345,7 +345,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand(GRAPH_TYPES)
     def test_annotate_coordinates_with_disk_swap(self, graph_repr):
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                               --graph {graph_repr} -k 11 \
                               -o {self.tempdir.name}/graph \
                               {TEST_DATA_DIR}/transcripts_100.fa'

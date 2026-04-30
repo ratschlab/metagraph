@@ -26,7 +26,7 @@ class TestColumnOperations(TestingBase):
 
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
-                         20, cls.graph_repr, 'basic', '--mask-dummy')
+                         20, cls.graph_repr, 'basic', '--mask-dummy --in-ram')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -162,7 +162,7 @@ class TestColumnOperationsWithCounts(TestingBase):
         fasta_paths = [f'{TEST_DATA_DIR}/{dataset}.fa' for dataset in cls.datasets]
         cls._build_graph(fasta_paths,
                          cls.tempdir.name + '/graph',
-                         20, cls.graph_repr, 'basic', '--mask-dummy')
+                         20, cls.graph_repr, 'basic', '--mask-dummy --in-ram')
 
         # Store test k-mers with their count arrays from each annotation
         # Format: kmer -> (logan_30_counts, logan_30_alt_counts)
@@ -414,7 +414,7 @@ class TestRowDiffAnnoConverters(TestingBase):
         cls.tempdir = TemporaryDirectory()
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
-                         20, 'succinct', 'basic', '--mask-dummy')
+                         20, 'succinct', 'basic', '--mask-dummy --in-ram')
         cls.graph_path = cls.tempdir.name + '/graph' + graph_file_extension['succinct']
 
         # Build the two starting points via the full column -> row_diff -> {brwt,flat}
