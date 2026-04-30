@@ -164,10 +164,10 @@ int build_graph(Config *config) {
                     utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
         }
 
-        if (config->inplace) {
+        if (!config->in_ram) {
             if (config->mark_dummy_kmers) {
-                logger->warn("Graph is being constructed in-place, dummy k-mers will"
-                             " not be marked. Run `metagraph transform --clear-dummy` manually after construction.");
+                logger->error("--mask-dummy requires --in-ram (dummy marking needs the graph in RAM)");
+                exit(1);
             }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);

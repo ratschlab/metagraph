@@ -38,7 +38,7 @@ gfa_tests = {
 }
 
 GFAs = [name for name, _ in gfa_tests.items()]
-MASKED = ['','--mask-dummy']
+MASKED = ['','--mask-dummy --in-ram']
 
 
 class TestAnnotate(unittest.TestCase):
@@ -77,7 +77,7 @@ class TestAnnotate(unittest.TestCase):
                 --mode canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
-            mask_dummy='--mask-dummy' if mask == 'mask' else '',
+            mask_dummy='--mask-dummy --in-ram' if mask == 'mask' else '',
             k=k,
             outfile=self.tempdir.name + '/graph',
             input=gfa_tests[gfa_test]['fasta_path']
@@ -228,7 +228,7 @@ class TestDiffAssembly(TestingBase):
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
-            mask_dummy='--mask-dummy' if cls.mask_dummy else '',
+            mask_dummy='--mask-dummy --in-ram' if cls.mask_dummy else '',
             repr=cls.graph_repr,
             k=k,
             outfile=cls.tempdir.name + '/graph',

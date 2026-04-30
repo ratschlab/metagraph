@@ -137,7 +137,7 @@ class TestQuery(TestingBase):
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
                          20, cls.graph_repr, 'basic',
-                         '--mask-dummy' if cls.mask_dummy else '')
+                         '--mask-dummy --in-ram' if cls.mask_dummy else '')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -426,7 +426,7 @@ class TestQueryTinyLinear(TestingBase):
             cls.graph_repr = 'succinct'
             cls.mask_dummy = True
 
-        cls._build_graph(cls.fasta_graph, cls.tempdir.name + '/graph', 5, cls.graph_repr, 'basic', '--mask-dummy')
+        cls._build_graph(cls.fasta_graph, cls.tempdir.name + '/graph', 5, cls.graph_repr, 'basic', '--mask-dummy --in-ram')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -506,7 +506,7 @@ class TestQuery1Column(TestingBase):
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
                          20, cls.graph_repr, 'basic',
-                         '--mask-dummy' if cls.mask_dummy else '')
+                         '--mask-dummy --in-ram' if cls.mask_dummy else '')
 
         stats_graph = cls._get_stats(cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
         assert(stats_graph['returncode'] == 0)
@@ -692,7 +692,7 @@ class TestQueryCounts(TestingBase):
             cls.mask_dummy = True
 
         cls._build_graph((cls.fasta_file_1, cls.fasta_file_2), cls.tempdir.name + '/graph',
-                         cls.k, cls.graph_repr, 'basic', '--mask-dummy' if cls.mask_dummy else '')
+                         cls.k, cls.graph_repr, 'basic', '--mask-dummy --in-ram' if cls.mask_dummy else '')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -872,7 +872,7 @@ class TestQueryCanonical(TestingBase):
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
                          20, cls.graph_repr, 'canonical',
-                         '--mask-dummy' if cls.mask_dummy else '')
+                         '--mask-dummy --in-ram' if cls.mask_dummy else '')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
@@ -980,7 +980,7 @@ class TestQueryPrimary(TestingBase):
         cls._build_graph(TEST_DATA_DIR + '/transcripts_100.fa',
                          cls.tempdir.name + '/graph',
                          20, cls.graph_repr, 'primary',
-                         '--mask-dummy' if cls.mask_dummy else '')
+                         '--mask-dummy --in-ram' if cls.mask_dummy else '')
 
         stats_graph = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
         assert(stats_graph['returncode'] == 0)
