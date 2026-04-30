@@ -77,9 +77,43 @@ std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool m
     if (mmap_stream) {
         in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));
     } else {
-        in.reset(new std::ifstream(filename, std::ios_base::binary));
+        in.reset(new named_ifstream(filename, std::ios_base::binary));
     }
     return in;
+}
+
+const std::string& get_filename(std::istream &f) {
+    if (auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f))
+        return mmap_in->get_filename();
+    if (auto *named_in = dynamic_cast<named_ifstream *>(&f))
+        return named_in->get_filename();
+    throw std::runtime_error(
+            "get_filename: stream is neither sdsl::mmap_ifstream nor utils::named_ifstream");
+}
+
+void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff length) {
+    if (!with_madvise())
+        return;
+    auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f);
+    if (!mmap_in)
+        return;
+    if (length < 0)
+        length = mmap_in->get_mmap_context()->file_size_bytes() - start;
+    const std::streamoff pagesize = sysconf(_SC_PAGESIZE);
+    std::streamoff aligned_start = start - start % pagesize;
+    if (madvise(mmap_in->get_mmap_context()->data() + aligned_start,
+                length + (start - aligned_start),
+                MADV_RANDOM)) {
+        logger->warn("madvise(MADV_RANDOM) failed for range [{}, {})", start, start + length);
+    }
+}
+
+void load_mmap_random(const std::string &filename, std::streamoff offset,
+                      const std::function<void(std::istream &)> &fn) {
+    sdsl::mmap_ifstream in(filename);
+    in.seekg(offset, std::ios_base::beg);
+    fn(in);
+    madvise_random_range(in, offset);
 }
 
 std::string file_read_failure_detail(const fs::path &path) {
