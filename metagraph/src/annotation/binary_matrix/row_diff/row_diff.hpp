@@ -96,6 +96,8 @@ class IRowDiff {
 template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
+    using base_matrix_type = BaseMatrix;
+
     template <typename... Args>
     RowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }

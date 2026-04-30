@@ -915,15 +915,26 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
             }
         }
-    } else if (input_anno_type == Config::RowDiffBRWT && config->anno_type == Config::RowDiffRowFlat) {
-        if (files.size() != 1) {
-            logger->error("Can only convert row_diff_brwt annotations one at a time");
-            exit(1);
+    } else if ((input_anno_type == Config::RowDiffBRWT
+                    && (config->anno_type == Config::RowDiffRowFlat
+                            || config->anno_type == Config::RowDiffDisk))
+                || (input_anno_type == Config::RowDiffRowFlat
+                    && config->anno_type == Config::RowDiffDisk)) {
+        // `files.size() == 1` is enforced earlier in Config::Config().
+        assert(files.size() == 1);
+        if (input_anno_type == Config::RowDiffBRWT) {
+            RowDiffBRWTAnnotator annotator;
+            annotator.load(files[0]);
+            if (config->anno_type == Config::RowDiffRowFlat) {
+                convert_to_row_diff<RowDiffRowFlatAnnotator>(annotator, config->outfbase);
+            } else {
+                convert_to_row_diff<RowDiffDiskAnnotator>(annotator, config->outfbase);
+            }
+        } else {  // Config::RowDiffRowFlat -> Config::RowDiffDisk
+            RowDiffRowFlatAnnotator annotator;
+            annotator.load(files[0]);
+            convert_to_row_diff<RowDiffDiskAnnotator>(annotator, config->outfbase);
         }
-        RowDiffBRWTAnnotator annotator;
-        annotator.load(files[0]);
-
-        convert_to_row_diff<RowDiffRowFlatAnnotator>(annotator, config->outfbase);
         logger->trace("Serialized to {}", config->outfbase);
 
     } else {
