@@ -25,8 +25,7 @@ using mtg::common::logger;
 namespace {
 
 // Kick off graph loading on a worker thread.
-std::shared_future<std::shared_ptr<DeBruijnGraph>>
-async_load_critical_dbg(const Config &config) {
+std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
     return std::async(std::launch::async, [&config]() -> std::shared_ptr<DeBruijnGraph> {
         return load_critical_dbg(config.infbase);
     }).share();
@@ -37,9 +36,9 @@ async_load_critical_dbg(const Config &config) {
 // with graph loading; the graph is awaited only at the very end, to attach
 // it to a row_diff annotator (a pointer fixup needed for queries).
 std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
-load_annotation_async(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
-                      const Config &config,
-                      size_t max_chunks_open) {
+load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
+                const Config &config,
+                size_t max_chunks_open) {
     if (!config.infbase_annotators.size()) {
         // No annotators configured: build an empty annotation sized to the graph.
         auto graph = graph_future.get();
@@ -63,18 +62,16 @@ load_annotation_async(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_f
     if (!loaded)
         exit(1);
 
-    // row_diff side files (no graph needed).
     using namespace annot::matrix;
     BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
-    IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix);
-    if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-        row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-        row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-    }
-
-    // Attach the graph to the row_diff annotator. This is the only step that
-    // needs the graph; everything above ran in parallel with the graph load.
-    if (row_diff) {
+    if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+        // row_diff side files (no graph needed).
+        if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+            row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+            row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+        }
+        // Attach the graph: the only step that needs it; everything above ran
+        // in parallel with the graph load.
         auto graph = graph_future.get();
         const DeBruijnGraph *base_graph = graph.get();
         if (auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get()))
@@ -125,7 +122,9 @@ std::unique_ptr<AnnotatedDBG>
 build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
                     const Config &config,
                     size_t max_chunks_open) {
-    auto annotation = load_annotation_async(graph_future, config, max_chunks_open);
+    auto annotation = load_annotation(graph_future, config, max_chunks_open);
+    // The graph future may already be resolved (load_annotation awaits it for
+    // row_diff annotators). For other annotators it's awaited here.
     auto graph = graph_future.get();
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
@@ -159,12 +158,17 @@ std::pair<std::shared_future<std::shared_ptr<DeBruijnGraph>>,
           std::future<std::unique_ptr<AnnotatedDBG>>>
 load_graph_with_async_annotation(const Config &config) {
     auto graph_future = async_load_critical_dbg(config);
-    auto anno_dbg_future = std::async(std::launch::async,
-        [graph_future, &config]() -> std::unique_ptr<AnnotatedDBG> {
-            if (!config.infbase_annotators.size())
-                return nullptr;
+    std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
+    if (config.infbase_annotators.size()) {
+        anno_dbg_future = std::async(std::launch::async, [graph_future, &config] {
             return build_annotated_dbg(graph_future, config, kDefaultMaxChunksOpen);
         });
+    } else {
+        // No annotation requested: deliver an immediately-ready null future.
+        std::promise<std::unique_ptr<AnnotatedDBG>> ready;
+        ready.set_value(nullptr);
+        anno_dbg_future = ready.get_future();
+    }
     return std::make_pair(std::move(graph_future), std::move(anno_dbg_future));
 }
 

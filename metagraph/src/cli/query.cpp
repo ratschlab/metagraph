@@ -1106,6 +1106,7 @@ int query_graph(Config *config) {
     auto loaded = load_graph_with_async_annotation(*config);
     auto graph = loaded.first.get();
     auto anno_graph = loaded.second.get();
+    assert(anno_graph);  // guaranteed by the assertion above
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
