@@ -28,10 +28,6 @@ std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &conf
  * Start loading the graph and the AnnotatedDBG in parallel. Returns futures
  * for both. The annotated DBG future resolves to nullptr when no annotation
  * is configured.
- *
- * Lifetime: `config` is captured by reference by the spawned task and must
- * outlive the returned futures, including their destructors (which block on
- * the background threads).
  */
 std::pair<std::shared_future<std::shared_ptr<graph::DeBruijnGraph>>,
           std::future<std::unique_ptr<graph::AnnotatedDBG>>>

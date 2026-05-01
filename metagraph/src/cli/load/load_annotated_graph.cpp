@@ -26,8 +26,8 @@ namespace {
 
 // Kick off graph loading on a worker thread.
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
-    return std::async(std::launch::async, [&config]() -> std::shared_ptr<DeBruijnGraph> {
-        return load_critical_dbg(config.infbase);
+    return std::async(std::launch::async, [path=config.infbase]() -> std::shared_ptr<DeBruijnGraph> {
+        return load_critical_dbg(path);
     }).share();
 }
 
@@ -152,7 +152,7 @@ load_graph_with_async_annotation(const Config &config) {
     auto graph_future = async_load_critical_dbg(config);
     std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
     if (config.infbase_annotators.size()) {
-        anno_dbg_future = std::async(std::launch::async, [graph_future, &config] {
+        anno_dbg_future = std::async(std::launch::async, [graph_future, config] {
             return build_annotated_dbg(graph_future, config, kDefaultMaxChunksOpen);
         });
     } else {

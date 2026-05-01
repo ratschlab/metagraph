@@ -313,11 +313,19 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    // Load graph; if an annotation is also requested, start loading it in
-    // parallel and pick up the result later.
-    auto loaded = load_graph_with_async_annotation(*config);
-    auto graph = loaded.first.get();
-    auto anno_dbg_future = std::move(loaded.second);
+    // For graph-only outputs/queries, avoid starting annotation loading.
+    const bool graph_only_path = utils::ends_with(config->outfbase, ".gfa")
+                                 || config->map_sequences;
+    std::shared_ptr<DeBruijnGraph> graph;
+    std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
+    if (graph_only_path) {
+        graph = load_critical_dbg(config->infbase);
+    } else {
+        // Load graph and annotation in parallel for alignment mode.
+        auto loaded = load_graph_with_async_annotation(*config);
+        graph = loaded.first.get();
+        anno_dbg_future = std::move(loaded.second);
+    }
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -368,7 +376,9 @@ int align_to_graph(Config *config) {
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
     assert(config->infbase_annotators.size() <= 1);
-    std::unique_ptr<AnnotatedDBG> anno_dbg = anno_dbg_future.get();
+    std::unique_ptr<AnnotatedDBG> anno_dbg;
+    if (anno_dbg_future.valid())
+        anno_dbg = anno_dbg_future.get();
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
