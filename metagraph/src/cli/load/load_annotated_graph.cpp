@@ -33,9 +33,9 @@ async_load_critical_dbg(const Config &config) {
 }
 
 // Load (or initialize, if no annotators are configured) the annotation matrix.
-// When annotators are configured, metadata init runs while the graph is still
-// loading on another thread; the graph is only awaited at the point where it
-// is needed (to set the base graph on a row_diff annotator).
+// When annotators are configured, the bulk annotation load runs in parallel
+// with graph loading; the graph is awaited only at the very end, to attach
+// it to a row_diff annotator (a pointer fixup needed for queries).
 std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
 load_annotation_async(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
                       const Config &config,
@@ -47,10 +47,8 @@ load_annotation_async(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_f
                                      graph->max_index(), max_chunks_open);
     }
 
-    // Annotation metadata init runs in parallel with graph load.
     auto annotation = initialize_annotation(config.infbase_annotators.at(0),
                                             config, 0, max_chunks_open);
-    auto graph = graph_future.get();
 
     bool loaded = false;
     if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation.get())) {
@@ -65,20 +63,23 @@ load_annotation_async(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_f
     if (!loaded)
         exit(1);
 
-    // row_diff annotation needs the underlying base graph (unwrapped).
-    // If a CanonicalDBG was passed in, walk one level down.
+    // row_diff side files (no graph needed).
     using namespace annot::matrix;
     BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
-    if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+    IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix);
+    if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+        row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+        row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+    }
+
+    // Attach the graph to the row_diff annotator. This is the only step that
+    // needs the graph; everything above ran in parallel with the graph load.
+    if (row_diff) {
+        auto graph = graph_future.get();
         const DeBruijnGraph *base_graph = graph.get();
         if (auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get()))
             base_graph = &canonical->get_graph();
         row_diff->set_graph(base_graph);
-
-        if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-            row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-            row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-        }
     }
 
     return annotation;
