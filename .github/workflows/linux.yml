@@ -156,8 +156,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
+      # Static builds need none of these — the binary is self-contained.
       - &install-runtime-deps
         name: Install runtime dependencies
+        if: inputs.build_static == 'OFF'
         run: |
           sudo apt-get update
           sudo apt-get install -y libbz2-1.0 libjemalloc2 libdeflate0 liblzma5 libzstd1
