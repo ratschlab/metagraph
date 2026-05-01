@@ -27,7 +27,7 @@ on:
 
 jobs:
   build:
-    runs-on: &platform ubuntu-22.04
+    runs-on: &platform ubuntu-24.04
 
     env: &linux-build-env
       CCACHE_DEFAULT_DIR: ~/.cache/ccache
