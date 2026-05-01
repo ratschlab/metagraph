@@ -40,7 +40,7 @@ jobs:
 
       - &checkout-submodules-cache
         name: Checkout submodules cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             .git/modules
@@ -83,10 +83,12 @@ jobs:
         run: brew install ccache
 
       - name: Cache ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
           key: ccache-build-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-build-
 
       - &setup-ccache-config
         name: Setup ccache config
@@ -241,10 +243,12 @@ jobs:
       - *install-ccache-macos
 
       - name: Cache ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
           key: ccache-examples-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-examples-
 
       - *setup-ccache-config
 
