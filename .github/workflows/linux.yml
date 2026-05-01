@@ -76,13 +76,6 @@ jobs:
           echo "CC=$(which ${{ inputs.cc }})" >> $GITHUB_ENV
           echo "CXX=$(which ${{ inputs.cxx }})" >> $GITHUB_ENV
 
-      # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
-      - &install-runtime-deps
-        name: Install runtime dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libbz2-1.0 libjemalloc2 libdeflate0 liblzma5 libzstd1
-
       - &install-ccache-linux
         name: Install ccache (Linux)
         run: sudo apt-get install -y ccache
@@ -162,7 +155,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - *install-runtime-deps
+      # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
+      - &install-runtime-deps
+        name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbz2-1.0 libjemalloc2 libdeflate0 liblzma5 libzstd1
 
       - &download-build-artifacts
         name: Download build artifacts
