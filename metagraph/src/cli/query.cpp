@@ -1104,7 +1104,7 @@ int query_graph(Config *config) {
 
     // Load graph and annotation in parallel.
     auto loaded = load_graph_with_async_annotation(*config);
-    auto graph = std::move(loaded.first);
+    auto graph = loaded.first.get();
     auto anno_graph = loaded.second.get();
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;

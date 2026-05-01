@@ -316,7 +316,7 @@ int align_to_graph(Config *config) {
     // Load graph; if an annotation is also requested, start loading it in
     // parallel and pick up the result later.
     auto loaded = load_graph_with_async_annotation(*config);
-    auto graph = std::move(loaded.first);
+    auto graph = loaded.first.get();
     auto anno_dbg_future = std::move(loaded.second);
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
@@ -367,11 +367,8 @@ int align_to_graph(Config *config) {
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
-    std::unique_ptr<AnnotatedDBG> anno_dbg;
-    if (anno_dbg_future.valid()) {
-        assert(config->infbase_annotators.size() == 1);
-        anno_dbg = anno_dbg_future.get();
-    }
+    assert(config->infbase_annotators.size() <= 1);
+    std::unique_ptr<AnnotatedDBG> anno_dbg = anno_dbg_future.get();
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {

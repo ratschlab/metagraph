@@ -24,15 +24,14 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
-// Load the graph; if `config.infbase_annotators` is non-empty, also start
-// loading the annotation on a background thread. Returns the graph (ready)
-// and a future that resolves to the annotated DBG. The future is invalid
-// (`.valid() == false`) when no annotation is configured.
+// Start loading the graph and the AnnotatedDBG in parallel. Returns futures
+// for both. The annotated DBG future resolves to nullptr when no annotation
+// is configured.
 //
 // Lifetime: `config` is captured by reference by the spawned task and must
-// outlive the returned future, including its destructor (which blocks on the
-// background thread).
-std::pair<std::shared_ptr<graph::DeBruijnGraph>,
+// outlive the returned futures, including their destructors (which block on
+// the background threads).
+std::pair<std::shared_future<std::shared_ptr<graph::DeBruijnGraph>>,
           std::future<std::unique_ptr<graph::AnnotatedDBG>>>
 load_graph_with_async_annotation(const Config &config);
 

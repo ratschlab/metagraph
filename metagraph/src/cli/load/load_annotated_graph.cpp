@@ -154,17 +154,17 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return build_annotated_dbg(async_load_critical_dbg(config), config, kDefaultMaxChunksOpen);
 }
 
-std::pair<std::shared_ptr<DeBruijnGraph>,
+std::pair<std::shared_future<std::shared_ptr<DeBruijnGraph>>,
           std::future<std::unique_ptr<AnnotatedDBG>>>
 load_graph_with_async_annotation(const Config &config) {
     auto graph_future = async_load_critical_dbg(config);
-    std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
-    if (config.infbase_annotators.size()) {
-        anno_dbg_future = std::async(std::launch::async, [graph_future, &config] {
+    auto anno_dbg_future = std::async(std::launch::async,
+        [graph_future, &config]() -> std::unique_ptr<AnnotatedDBG> {
+            if (!config.infbase_annotators.size())
+                return nullptr;
             return build_annotated_dbg(graph_future, config, kDefaultMaxChunksOpen);
         });
-    }
-    return std::make_pair(graph_future.get(), std::move(anno_dbg_future));
+    return std::make_pair(std::move(graph_future), std::move(anno_dbg_future));
 }
 
 
