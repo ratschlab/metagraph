@@ -313,8 +313,11 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    // initialize graph
-    auto graph = load_critical_dbg(config->infbase);
+    // Load graph; if an annotation is also requested, start loading it in
+    // parallel and pick up the result later.
+    auto loaded = load_graph_with_async_annotation(*config);
+    auto graph = std::move(loaded.first);
+    auto anno_dbg_future = std::move(loaded.second);
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -365,9 +368,9 @@ int align_to_graph(Config *config) {
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
-    if (config->infbase_annotators.size()) {
+    if (anno_dbg_future.valid()) {
         assert(config->infbase_annotators.size() == 1);
-        anno_dbg = initialize_annotated_dbg(graph, *config);
+        anno_dbg = anno_dbg_future.get();
     }
 
     auto wrap_graph = [&](auto graph) {
