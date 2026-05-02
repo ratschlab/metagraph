@@ -165,7 +165,7 @@ enum QueryMode {
 };
 
 /**
- * Query sequences from a FASTA files.
+ * Query sequences from a FASTA file.
  *
  * Provide a callback which receives a reference to a SeqSearchResult instance which the
  * callback function should use as desired (typically generate a string/JSON output).
