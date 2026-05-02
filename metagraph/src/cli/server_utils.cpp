@@ -84,7 +84,8 @@ std::string json_str_with_error_msg(const std::string &msg) {
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
                      size_t request_id,
-                     const std::function<Json::Value(const std::string &)> &process) {
+                     const std::function<Json::Value(const std::string &)> &process,
+                     std::function<void(const SimpleWeb::error_code &)> on_sent) {
     logger->info("[Server] {} request {} from {}", request->path, request_id,
                  request->remote_endpoint().address().to_string());
     Timer timer;
@@ -119,6 +120,7 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     }
     double processing_time = timer.elapsed();
     response->write(status, ret, header);
+    response->send(std::move(on_sent));
     logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
                  "finished in {:.3f} sec",
                  request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
