@@ -62,7 +62,7 @@ jobs:
         name: Checkout submodules
         run: git submodule update --init --recursive --depth 1
 
-      - &install-build-deps
+      - &install-linux-deps
         name: Install build dependencies
         run: |
           sudo apt-get update
@@ -155,14 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
-      # Static builds need none of these — the binary is self-contained.
-      - &install-runtime-deps
-        name: Install runtime dependencies
-        if: inputs.build_static == 'OFF'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libbz2-1.0 libjemalloc2 libdeflate0 liblzma5 libzstd1
+      - *install-linux-deps
 
       - &download-build-artifacts
         name: Download build artifacts
@@ -197,7 +190,7 @@ jobs:
           cache: pip
           cache-dependency-path: metagraph/workflows/requirements.txt
 
-      - *install-runtime-deps
+      - *install-linux-deps
 
       - name: Install Python packages for tests
         run: |
@@ -248,7 +241,7 @@ jobs:
 
       - *checkout-submodules-update
 
-      - *install-build-deps
+      - *install-linux-deps
 
       - *install-ccache-linux
 
