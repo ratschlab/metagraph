@@ -108,14 +108,13 @@ Json::Value process_search_request(const Json::Value &json,
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
 
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config));
-
     // Query sequences and callback by appending result to vector with mutex for thread safety
-    engine.query_fasta(tf.name(),
+    query_fasta(tf.name(),
         [&](const SeqSearchResult &result) {
             std::lock_guard<std::mutex> lock(result_mutex);
             search_results.emplace_back(std::move(result));
-        }
+        },
+        config, anno_graph, aligner_config.get()
     );
 
     // Ensure JSON results are sorted by their ID
