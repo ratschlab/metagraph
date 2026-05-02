@@ -40,7 +40,7 @@ jobs:
 
       - &checkout-submodules-cache
         name: Checkout submodules cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             .git/modules
@@ -71,7 +71,7 @@ jobs:
 
       - &install-macos-deps
         name: install dependencies
-        run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c@77
+        run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
 
       - &install-openssl-cross-compile
         name: (Only for cross-compilation) Install OpenSSL for target architecture
@@ -83,10 +83,12 @@ jobs:
         run: brew install ccache
 
       - name: Cache ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
           key: ccache-build-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-build-
 
       - &setup-ccache-config
         name: Setup ccache config
@@ -241,10 +243,12 @@ jobs:
       - *install-ccache-macos
 
       - name: Cache ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DEFAULT_DIR }}
           key: ccache-examples-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-examples-
 
       - *setup-ccache-config
 
