@@ -868,12 +868,11 @@ void split_contigs_for_rebalancing(size_t k,
  * 3. Extract annotation for the nodes of the query graph and return.
  */
 std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
+construct_query_graph(const DeBruijnGraph &full_dbg,
+                      const AnnotatedDBG::Annotator &full_annotation,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       const Config &config) {
-    const auto &full_dbg = anno_graph.get_graph();
-    const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1337,7 +1336,8 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
-                anno_graph,
+                anno_graph.get_graph(),
+                anno_graph.get_annotator(),
                 [&seq_batch](auto callback) {
                     for (const auto &seq : *seq_batch) {
                         callback(seq.sequence);
