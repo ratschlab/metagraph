@@ -22,14 +22,13 @@ namespace cli {
 using namespace mtg::graph;
 using mtg::common::logger;
 
-namespace {
-
-// Kick off graph loading on a worker thread.
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
     return std::async(std::launch::async, [path=config.infbase]() -> std::shared_ptr<DeBruijnGraph> {
         return load_critical_dbg(path);
     }).share();
 }
+
+namespace {
 
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
@@ -63,8 +62,6 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
 
     return coord_to_header;
 }
-
-} // namespace
 
 // Load just the annotation. The bulk load is graph-independent and runs in
 // parallel with the graph future. The graph is awaited only for row_diff
@@ -114,17 +111,6 @@ load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
 
     return annotation;
 }
-
-std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
-load_annotation(std::shared_ptr<DeBruijnGraph> graph,
-                const Config &config,
-                size_t max_chunks_open) {
-    std::promise<std::shared_ptr<DeBruijnGraph>> ready;
-    ready.set_value(std::move(graph));
-    return load_annotation(ready.get_future().share(), config, max_chunks_open);
-}
-
-namespace {
 
 // Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
 // in parallel with the graph load; the graph is awaited only when needed

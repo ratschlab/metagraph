@@ -1268,11 +1268,9 @@ int query_graph(Config *config) {
 
     assert(config->infbase_annotators.size() == 1);
 
-    ThreadPool graph_loader(1, 1);
-    std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future = graph_loader.enqueue([&]() {
-        std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
-        return graph;
-    });
+    auto loaded = load_graph_with_async_annotation(*config);
+    auto graph_future = std::move(loaded.first);
+    auto anno_dbg_future = std::move(loaded.second);
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
@@ -1303,7 +1301,39 @@ int query_graph(Config *config) {
         }
     };
 
+    // Type info from a stub annotation -- lets us decide batched mode and
+    // validate the annotation type without waiting for the full data to load.
+    auto temp_anno = initialize_annotation(config->infbase_annotators.at(0), *config, 0);
+    check_annotation(*config, temp_anno->get_matrix());
+    bool coord_to_header_exists = false;
+    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&temp_anno->get_matrix())
+            && !config->no_coord_mapping) {
+        coord_to_header_exists = std::filesystem::exists(
+            utils::remove_suffix(config->infbase_annotators.at(0), temp_anno->file_extension())
+                    + annot::CoordToHeader::kExtension
+        );
+    }
+    // In batched mode the annotation is fetched lazily inside batched_query_fasta;
+    // queries can begin while it's still loading.
+    const bool use_batched = files.size() == 1 && config->query_batch_size
+                          && config->query_mode != COORDS && !coord_to_header_exists;
+
+    std::shared_ptr<DeBruijnGraph> graph;
     std::unique_ptr<graph::AnnotatedDBG> anno_graph;
+    std::shared_future<std::unique_ptr<graph::AnnotatedDBG>> anno_dbg_shared;
+
+    if (use_batched) {
+        graph = graph_future.get();
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<graph::CanonicalDBG>(graph);
+            logger->trace("Primary graph wrapped into canonical");
+        }
+        anno_dbg_shared = anno_dbg_future.share();
+    } else {
+        anno_graph = anno_dbg_future.get();
+        graph = graph_future.get();
+    }
+    k = graph->get_k();
 
     // iterate over input files
     for (const auto &file : files) {
@@ -1311,42 +1341,13 @@ int query_graph(Config *config) {
         Timer curr_timer;
         size_t num_bp = 0;
 
-        bool coord_to_header_exists = false;
-        auto temp_anno = initialize_annotation(config->infbase_annotators.at(0), *config, 0);
-        if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(&temp_anno->get_matrix())
-                && !config->no_coord_mapping) {
-            coord_to_header_exists = std::filesystem::exists(
-                utils::remove_suffix(config->infbase_annotators.at(0), temp_anno->file_extension())
-                        + annot::CoordToHeader::kExtension
-            );
-        }
-
-        // If there is a single file and it's a batch query, run a special mode that
-        // loads the index in in parts, only when it's needed for query.
-        if (files.size() == 1 && config->query_batch_size
-                && config->query_mode != COORDS && !coord_to_header_exists) {
-            ThreadPool annotation_loader(1, 1);
-            std::shared_future<std::unique_ptr<AnnotatedDBG::Annotator>> annotation
-                    = annotation_loader.enqueue([&]() {
-                auto anno = load_annotation(graph_future, *config);
-                check_annotation(*config, anno->get_matrix());
-                return anno;
-            });
-            auto graph = graph_future.get();
-            k = graph->get_k();
-            if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-                graph = std::make_shared<graph::CanonicalDBG>(graph);
-                logger->trace("Primary graph wrapped into canonical");
-            }
-
+        if (use_batched) {
             num_bp = batched_query_fasta(file, query_callback, *config, aligner_config.get(),
-                                         *graph, [&](){ return annotation.get().get(); }
-            );
+                                         *graph,
+                                         [&anno_dbg_shared]() {
+                                             return &anno_dbg_shared.get()->get_annotator();
+                                         });
         } else {
-            auto graph = graph_future.get();
-            k = graph->get_k();
-            if (!anno_graph)
-                anno_graph = initialize_annotated_dbg(graph, *config);
             num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get());
         }
 
