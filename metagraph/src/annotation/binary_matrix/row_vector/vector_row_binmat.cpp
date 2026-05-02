@@ -156,9 +156,8 @@ double VectorRowBinMat<RowType>::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-template class VectorRowBinMat<Vector<uint64_t>>;
-template class VectorRowBinMat<Vector<uint32_t>>;
 template class VectorRowBinMat<SmallVector<uint32_t>>;
+template class VectorRowBinMat<Vector<uint64_t>>;
 
 } // namespace matrix
 } // namespace annot

@@ -41,12 +41,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
     void add_sequence(std::string_view sequence,
                       const std::function<bool()> &skip,
-                      const std::function<void(node_index)> &on_insertion) {
-        add_sequence(sequence, skip, [&](size_t, node_index node){ return on_insertion(node); });
-    }
-    void add_sequence(std::string_view sequence,
-                      const std::function<bool()> &skip,
-                      const std::function<void(size_t, node_index)> &on_insertion);
+                      const std::function<void(node_index)> &on_insertion);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -133,7 +128,7 @@ DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
 template <typename KMER>
 void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
                                             const std::function<bool()> &skip,
-                                            const std::function<void(size_t, node_index)> &on_insertion) {
+                                            const std::function<void(node_index)> &on_insertion) {
     if (sequence.size() < get_k())
         return;
 
@@ -162,7 +157,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
 #endif
 
         if (index_insert.second) {
-            on_insertion(skipped.size() - 1, kmers_.size());
+            on_insertion(kmers_.size());
         } else {
             skipped.back() = true;
         }
@@ -177,7 +172,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     auto it = skipped.end();
     for (const auto &[kmer, valid] : sequence_to_kmers(rev_comp)) {
         if (!*(--it) && kmers_.insert(kmer).second)
-            on_insertion(skipped.size(), kmers_.size());
+            on_insertion(kmers_.size());
     }
 }
 
