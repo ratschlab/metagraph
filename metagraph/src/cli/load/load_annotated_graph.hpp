@@ -24,6 +24,10 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
+// Kick off graph loading on a worker thread.
+std::shared_future<std::shared_ptr<graph::DeBruijnGraph>>
+async_load_critical_dbg(const Config &config);
+
 /**
  * Start loading the graph and the AnnotatedDBG in parallel. Returns futures
  * for both. The annotated DBG future resolves to nullptr when no annotation
