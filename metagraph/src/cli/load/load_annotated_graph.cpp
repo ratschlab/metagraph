@@ -63,55 +63,6 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
     return coord_to_header;
 }
 
-// Load just the annotation. The bulk load is graph-independent and runs in
-// parallel with the graph future. The graph is awaited only for row_diff
-// set_graph (and for empty-annotation sizing when no annotators are configured).
-std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
-load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
-                const Config &config,
-                size_t max_chunks_open) {
-    if (!config.infbase_annotators.size()) {
-        // No annotators configured: build an empty annotation sized to the graph.
-        auto graph = graph_future.get();
-        return initialize_annotation(config.anno_type, config,
-                                     graph->max_index(), max_chunks_open);
-    }
-
-    auto annotation = initialize_annotation(config.infbase_annotators.at(0),
-                                            config, 0, max_chunks_open);
-
-    bool loaded = false;
-    if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation.get())) {
-        loaded = cc->merge_load(config.infbase_annotators);
-    } else {
-        if (config.infbase_annotators.size() > 1) {
-            logger->warn("Cannot merge annotations of this type. Only the first"
-                         " file {} will be loaded.", config.infbase_annotators.at(0));
-        }
-        loaded = annotation->load(config.infbase_annotators.at(0));
-    }
-    if (!loaded)
-        exit(1);
-
-    using namespace annot::matrix;
-    BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
-    if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-        // row_diff side files (no graph needed).
-        if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-            row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-            row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-        }
-        // Attach the graph (the only annotation step that needs it).
-        auto graph = graph_future.get();
-        const DeBruijnGraph *base_graph = graph.get();
-        if (auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get()))
-            base_graph = &canonical->get_graph();
-        row_diff->set_graph(base_graph);
-    }
-
-    return annotation;
-}
-
 // Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
 // in parallel with the graph load; the graph is awaited only when needed
 // (for row_diff set_graph and for the final PRIMARY wrap).
@@ -119,11 +70,51 @@ std::unique_ptr<AnnotatedDBG>
 build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
                     const Config &config,
                     size_t max_chunks_open) {
-    auto annotation = load_annotation(graph_future, config, max_chunks_open);
-
+    // Construct the annotation. The bulk load is graph-independent and runs
+    // in parallel with the graph load.
+    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation;
     std::unique_ptr<annot::CoordToHeader> coord_to_header;
-    if (config.infbase_annotators.size())
+    if (!config.infbase_annotators.size()) {
+        // No annotators configured: build an empty annotation sized to the graph.
+        auto graph = graph_future.get();
+        annotation = initialize_annotation(config.anno_type, config,
+                                           graph->max_index(), max_chunks_open);
+    } else {
+        annotation = initialize_annotation(config.infbase_annotators.at(0),
+                                           config, 0, max_chunks_open);
+
+        bool loaded = false;
+        if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation.get())) {
+            loaded = cc->merge_load(config.infbase_annotators);
+        } else {
+            if (config.infbase_annotators.size() > 1) {
+                logger->warn("Cannot merge annotations of this type. Only the first"
+                             " file {} will be loaded.", config.infbase_annotators.at(0));
+            }
+            loaded = annotation->load(config.infbase_annotators.at(0));
+        }
+        if (!loaded)
+            exit(1);
+
+        // CTH load (graph-independent) — overlaps with graph load.
         coord_to_header = load_coord_to_header(*annotation, config);
+
+        using namespace annot::matrix;
+        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
+        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+            // row_diff side files (no graph needed).
+            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+            }
+            // Attach the graph (the only annotation step that needs it).
+            auto graph = graph_future.get();
+            const DeBruijnGraph *base_graph = graph.get();
+            if (auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get()))
+                base_graph = &canonical->get_graph();
+            row_diff->set_graph(base_graph);
+        }
+    }
 
     // Final assembly: await graph (may already be resolved) and wrap PRIMARY.
     auto graph = graph_future.get();
