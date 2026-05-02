@@ -71,7 +71,7 @@ jobs:
 
       - &install-macos-deps
         name: install dependencies
-        run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c@78
+        run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
 
       - &install-openssl-cross-compile
         name: (Only for cross-compilation) Install OpenSSL for target architecture
