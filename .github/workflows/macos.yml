@@ -69,8 +69,8 @@ jobs:
           echo "/usr/local/bin" >> "$GITHUB_PATH"
           echo "/usr/local/sbin" >> "$GITHUB_PATH"
 
-      - &install-macos-deps
-        name: install dependencies
+      - &install-macos-build-deps
+        name: install build dependencies
         run: brew install bzip2 libomp boost jemalloc autoconf automake libdeflate icu4c
 
       - &install-openssl-cross-compile
@@ -149,7 +149,10 @@ jobs:
 
       - *install-rosetta-homebrew
 
-      - *install-macos-deps
+      # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
+      - &install-macos-runtime-deps
+        name: install runtime dependencies
+        run: brew install libomp jemalloc libdeflate icu4c@78
 
       - *install-openssl-cross-compile
 
@@ -181,7 +184,7 @@ jobs:
 
       - *install-rosetta-homebrew
 
-      - *install-macos-deps
+      - *install-macos-runtime-deps
 
       - *install-openssl-cross-compile
 
@@ -236,7 +239,7 @@ jobs:
 
       - *install-rosetta-homebrew
 
-      - *install-macos-deps
+      - *install-macos-build-deps
 
       - *install-openssl-cross-compile
 
