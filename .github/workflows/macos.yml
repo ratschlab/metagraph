@@ -152,7 +152,7 @@ jobs:
       # Boost is statically linked (Boost_USE_STATIC_LIBS), so no boost runtime needed.
       - &install-macos-runtime-deps
         name: install runtime dependencies
-        run: brew install libomp jemalloc libdeflate icu4c@78
+        run: brew install libomp jemalloc libdeflate icu4c
 
       - *install-openssl-cross-compile
 
