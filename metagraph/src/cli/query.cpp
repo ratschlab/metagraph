@@ -1156,15 +1156,14 @@ int query_graph(Config *config) {
  * alignment information (score and cigar string).
  *
  * @param seq               pointer to sequence string (which will be modified if alignment found)
- * @param anno_graph        reference to annotated DBG we align to
+ * @param graph             reference to DBG we align to
  * @param aligner_config    alignment config
  *
  * @return Alignment struct instance with score and cigar string
  */
 Alignment align_sequence(std::string *seq,
-                         const AnnotatedDBG &anno_graph,
+                         const DeBruijnGraph &graph,
                          const align::DBGAlignerConfig &aligner_config) {
-    const DeBruijnGraph &graph = anno_graph.get_graph();
     align::DBGAligner aligner(graph, aligner_config);
     const align::DBGAlignerConfig &revised_config = aligner.get_config();
     align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
@@ -1197,7 +1196,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
     // Align sequence and modify sequence struct to store alignment results
     std::optional<Alignment> alignment;
     if (aligner_config)
-        alignment = align_sequence(&sequence.sequence, anno_graph, *aligner_config);
+        alignment = align_sequence(&sequence.sequence, anno_graph.get_graph(), *aligner_config);
 
     // Get sequence search result by executing query
     SeqSearchResult result = execute_query(std::move(sequence),
@@ -1330,7 +1329,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 for (size_t i = 0; i < seq_batch->size(); ++i) {
                     // Set alignment for this seq_batch
                     alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
-                                                         anno_graph, *aligner_config);
+                                                         anno_graph.get_graph(), *aligner_config);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
