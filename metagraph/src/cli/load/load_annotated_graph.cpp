@@ -22,70 +22,13 @@ namespace cli {
 using namespace mtg::graph;
 using mtg::common::logger;
 
+namespace {
 
-std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
-load_annotation(std::shared_ptr<DeBruijnGraph> graph,
-                const Config &config,
-                size_t max_chunks_open) {
-    std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future = std::async(std::launch::async, [graph]{ return graph; });
-    return load_annotation(graph_future, config, max_chunks_open);
-}
-
-std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
-load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
-                const Config &config,
-                size_t max_chunks_open) {
-
-    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation_temp;
-    if (config.infbase_annotators.size())
-        annotation_temp = initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open);
-
-    std::shared_ptr<DeBruijnGraph> graph = graph_future.get();
-    uint64_t max_index = graph->max_index();
-
-    const auto *base_graph_ptr = graph.get();
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        graph = std::make_shared<CanonicalDBG>(graph);
-        logger->trace("Primary graph wrapped into canonical");
-    } else if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get())) {
-        base_graph_ptr = &canonical->get_graph();
-        max_index = base_graph_ptr->max_index();
-    }
-
-    if (!config.infbase_annotators.size())
-        annotation_temp = initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
-
-    assert(annotation_temp);
-
-    if (config.infbase_annotators.size()) {
-        bool loaded = false;
-        if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
-            loaded = cc->merge_load(config.infbase_annotators);
-        } else {
-            if (config.infbase_annotators.size() > 1) {
-                logger->warn("Cannot merge annotations of this type. Only the first"
-                             " file {} will be loaded.", config.infbase_annotators.at(0));
-            }
-            loaded = annotation_temp->load(config.infbase_annotators.at(0));
-        }
-        if (!loaded) {
-            exit(1);
-        }
-
-        // row_diff annotation is special, as it must know the graph structure
-        using namespace annot::matrix;
-        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
-        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            row_diff->set_graph(base_graph_ptr);
-
-            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-            }
-        }
-    }
-
-    return annotation_temp;
+// Kick off graph loading on a worker thread.
+std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
+    return std::async(std::launch::async, [path=config.infbase]() -> std::shared_ptr<DeBruijnGraph> {
+        return load_critical_dbg(path);
+    }).share();
 }
 
 std::unique_ptr<annot::CoordToHeader>
@@ -121,29 +64,126 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
     return coord_to_header;
 }
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
-                                                       const Config &config,
-                                                       size_t max_chunks_open) {
+} // namespace
+
+// Load just the annotation. The bulk load is graph-independent and runs in
+// parallel with the graph future. The graph is awaited only for row_diff
+// set_graph (and for empty-annotation sizing when no annotators are configured).
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
+                const Config &config,
+                size_t max_chunks_open) {
+    if (!config.infbase_annotators.size()) {
+        // No annotators configured: build an empty annotation sized to the graph.
+        auto graph = graph_future.get();
+        return initialize_annotation(config.anno_type, config,
+                                     graph->max_index(), max_chunks_open);
+    }
+
+    auto annotation = initialize_annotation(config.infbase_annotators.at(0),
+                                            config, 0, max_chunks_open);
+
+    bool loaded = false;
+    if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation.get())) {
+        loaded = cc->merge_load(config.infbase_annotators);
+    } else {
+        if (config.infbase_annotators.size() > 1) {
+            logger->warn("Cannot merge annotations of this type. Only the first"
+                         " file {} will be loaded.", config.infbase_annotators.at(0));
+        }
+        loaded = annotation->load(config.infbase_annotators.at(0));
+    }
+    if (!loaded)
+        exit(1);
+
+    using namespace annot::matrix;
+    BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation->get_matrix());
+    if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+        // row_diff side files (no graph needed).
+        if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+            row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+            row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+        }
+        // Attach the graph (the only annotation step that needs it).
+        auto graph = graph_future.get();
+        const DeBruijnGraph *base_graph = graph.get();
+        if (auto *canonical = dynamic_cast<const CanonicalDBG *>(graph.get()))
+            base_graph = &canonical->get_graph();
+        row_diff->set_graph(base_graph);
+    }
+
+    return annotation;
+}
+
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
+load_annotation(std::shared_ptr<DeBruijnGraph> graph,
+                const Config &config,
+                size_t max_chunks_open) {
+    std::promise<std::shared_ptr<DeBruijnGraph>> ready;
+    ready.set_value(std::move(graph));
+    return load_annotation(ready.get_future().share(), config, max_chunks_open);
+}
+
+namespace {
+
+// Build the AnnotatedDBG from a graph future. Annotation and CTH loads run
+// in parallel with the graph load; the graph is awaited only when needed
+// (for row_diff set_graph and for the final PRIMARY wrap).
+std::unique_ptr<AnnotatedDBG>
+build_annotated_dbg(std::shared_future<std::shared_ptr<DeBruijnGraph>> graph_future,
+                    const Config &config,
+                    size_t max_chunks_open) {
+    auto annotation = load_annotation(graph_future, config, max_chunks_open);
+
+    std::unique_ptr<annot::CoordToHeader> coord_to_header;
+    if (config.infbase_annotators.size())
+        coord_to_header = load_coord_to_header(*annotation, config);
+
+    // Final assembly: await graph (may already be resolved) and wrap PRIMARY.
+    auto graph = graph_future.get();
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph wrapped into canonical");
     }
-
-    auto annotation = load_annotation(graph, config, max_chunks_open);
-    auto coord_to_header = load_coord_to_header(*annotation, config);
     auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation),
                                                      false, std::move(coord_to_header));
-
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }
-
     return anno_graph;
 }
 
+} // namespace
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config,
+                                                       size_t max_chunks_open) {
+    std::promise<std::shared_ptr<DeBruijnGraph>> ready;
+    ready.set_value(std::move(graph));
+    return build_annotated_dbg(ready.get_future().share(), config, max_chunks_open);
+}
+
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
-    return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
+    return build_annotated_dbg(async_load_critical_dbg(config), config, kDefaultMaxChunksOpen);
+}
+
+std::pair<std::shared_future<std::shared_ptr<DeBruijnGraph>>,
+          std::future<std::unique_ptr<AnnotatedDBG>>>
+load_graph_with_async_annotation(const Config &config) {
+    auto graph_future = async_load_critical_dbg(config);
+    std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
+    if (config.infbase_annotators.size()) {
+        anno_dbg_future = std::async(std::launch::async, [graph_future, config] {
+            return build_annotated_dbg(graph_future, config, kDefaultMaxChunksOpen);
+        });
+    } else {
+        // No annotation requested: deliver an immediately-ready null future.
+        std::promise<std::unique_ptr<AnnotatedDBG>> ready;
+        ready.set_value(nullptr);
+        anno_dbg_future = ready.get_future();
+    }
+    return std::make_pair(std::move(graph_future), std::move(anno_dbg_future));
 }
 
 
