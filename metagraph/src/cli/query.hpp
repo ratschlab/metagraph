@@ -126,7 +126,7 @@ class SeqSearchResult {
      * Returns a Json object representing the individual query result for the
      * represented sequence.
      *
-     * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
+     * @param verbose_output    do not collapse continuous ranges of coords (or counts)
      * @param k                 k-mer length for kmer presence mask scoring
      * @return  Json::Value instance representing sequence result
      */

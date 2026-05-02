@@ -1151,7 +1151,7 @@ int query_graph(Config *config) {
 
 
 /**
- * Align a sequence to the annotated DBG before querying. Modify the sequence in place and return
+ * Align a sequence to the DBG before querying. Modify the sequence in place and return
  * alignment information (score and cigar string).
  *
  * @param seq               pointer to sequence string (which will be modified if alignment found)
