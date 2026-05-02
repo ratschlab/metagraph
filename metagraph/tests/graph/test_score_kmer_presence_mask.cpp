@@ -156,7 +156,6 @@ TEST(score_kmer_presence_mask, basic) {
           1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1 }), 822 }
     };
 
-
     size_t i = 0;
     for (const auto &[vector, score] : results) {
         EXPECT_EQ(score, score_kmer_presence_mask(k, vector)) << i;
