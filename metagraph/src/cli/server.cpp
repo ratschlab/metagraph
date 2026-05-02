@@ -273,12 +273,9 @@ int run_server(Config *config) {
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
-            logger->info("[Server] Loading graph...");
-            auto graph = load_critical_dbg(config->infbase);
-            logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
-
-            auto anno_graph = initialize_annotated_dbg(graph, *config);
-            logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+            logger->info("[Server] Loading graph and annotation in parallel...");
+            auto anno_graph = initialize_annotated_dbg(*config);
+            logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             return anno_graph;
         });
     } else {
