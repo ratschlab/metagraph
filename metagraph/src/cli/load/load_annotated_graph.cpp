@@ -22,14 +22,13 @@ namespace cli {
 using namespace mtg::graph;
 using mtg::common::logger;
 
-namespace {
-
-// Kick off graph loading on a worker thread.
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
     return std::async(std::launch::async, [path=config.infbase]() -> std::shared_ptr<DeBruijnGraph> {
         return load_critical_dbg(path);
     }).share();
 }
+
+namespace {
 
 std::unique_ptr<annot::CoordToHeader>
 load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,

@@ -16,6 +16,18 @@
 #include "seq_io/sequence_io.hpp"
 
 
+namespace mtg::cli {
+// Forward-declared because construct_query_graph is no longer in the public
+// header; the benchmark links against it directly.
+std::unique_ptr<graph::AnnotatedDBG>
+construct_query_graph(const graph::DeBruijnGraph &full_dbg,
+                      const graph::AnnotatedDBG::Annotator &full_annotation,
+                      StringGenerator call_sequences,
+                      size_t num_threads,
+                      const Config &config);
+} // namespace mtg::cli
+
+
 namespace {
 
 using namespace mtg;
@@ -62,7 +74,8 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
     const char* argv[] = {"metagraph", "query", "-i", "-.dbg", "-a", "-.annodbg", "-.fa" };
     mtg::cli::Config config(sizeof(argv) / sizeof(argv[0]), const_cast<char**>(argv));
     return cli::construct_query_graph(
-        anno_graph,
+        anno_graph.get_graph(),
+        anno_graph.get_annotator(),
         [&](std::function<void(const std::string&)> call_sequence) {
             seq_io::read_fasta_file_critical(
                 query_filename,

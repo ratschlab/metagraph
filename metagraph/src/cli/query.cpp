@@ -21,6 +21,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
+#include "graph/alignment/score_kmer_presence_mask.hpp"
 #include "cli/align.hpp"
 
 
@@ -165,8 +166,8 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool verbose_output,
-                                     const graph::AnnotatedDBG &anno_graph) const {
+
+Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
     Json::Value root;
 
     // Add seq information
@@ -206,7 +207,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+            sig_obj["score"] = Json::Value(align::score_kmer_presence_mask(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
@@ -271,7 +272,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
                                        bool verbose_output,
-                                       const graph::AnnotatedDBG &anno_graph) const {
+                                       size_t k) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
     // If empty and unlabeled sequences are supressed then return empty string
     if (suppress_unlabeled && !std::visit([] (auto&& vec) { return vec.size(); }, result_))
@@ -306,7 +307,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   count,
                                   sdsl::util::to_string(kmer_presence_mask),
-                                  anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+                                  align::score_kmer_presence_mask(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
@@ -356,12 +357,12 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 }
 
 
-SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
-                                             QueryMode query_mode,
-                                             size_t num_top_labels,
-                                             double discovery_fraction,
-                                             double presence_fraction,
-                                             const graph::AnnotatedDBG &anno_graph) {
+SeqSearchResult execute_query(QuerySequence&& sequence,
+                              QueryMode query_mode,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction,
+                              const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
 
@@ -867,12 +868,11 @@ void split_contigs_for_rebalancing(size_t k,
  * 3. Extract annotation for the nodes of the query graph and return.
  */
 std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
+construct_query_graph(const DeBruijnGraph &full_dbg,
+                      const AnnotatedDBG::Annotator &full_annotation,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       const Config &config) {
-    const auto &full_dbg = anno_graph.get_graph();
-    const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1117,31 +1117,30 @@ int query_graph(Config *config) {
             initialize_aligner_config(*config, *graph)
         ));
     }
+    graph.reset();
 
-    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config));
+    size_t k = anno_graph->get_graph().get_k();
 
     // iterate over input files
     for (const auto &file : files) {
         Timer curr_timer;
 
-        // Callback, which captures the config pointer and a const reference to the anno_graph
-        // instance pointed to by our unique_ptr...
-        auto query_callback = [config, &anno_graph=std::as_const(*anno_graph)](const SeqSearchResult &result) {
+        auto query_callback = [config, k](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
                                          || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                     anno_graph) << "\n";
+                                     k) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
                                                 || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                              anno_graph) + "\n";
+                                              k) + "\n";
             }
         };
-        size_t num_bp = executor.query_fasta(file, query_callback);
+        size_t num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get());
         auto time = curr_timer.elapsed();
         logger->trace("File '{}' with {} base pairs was processed in {:.3f} sec, throughput: {:.1f} bp/s",
                       file, num_bp, time, (double)num_bp / time);
@@ -1152,19 +1151,18 @@ int query_graph(Config *config) {
 
 
 /**
- * Align a sequence to the annotated DBG before querying. Modify the sequence in place and return
+ * Align a sequence to the DBG before querying. Modify the sequence in place and return
  * alignment information (score and cigar string).
  *
  * @param seq               pointer to sequence string (which will be modified if alignment found)
- * @param anno_graph        reference to annotated DBG we align to
+ * @param graph             reference to DBG we align to
  * @param aligner_config    alignment config
  *
  * @return Alignment struct instance with score and cigar string
  */
 Alignment align_sequence(std::string *seq,
-                         const AnnotatedDBG &anno_graph,
+                         const DeBruijnGraph &graph,
                          const align::DBGAlignerConfig &aligner_config) {
-    const DeBruijnGraph &graph = anno_graph.get_graph();
     align::DBGAligner aligner(graph, aligner_config);
     const align::DBGAlignerConfig &revised_config = aligner.get_config();
     align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
@@ -1197,10 +1195,10 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
     // Align sequence and modify sequence struct to store alignment results
     std::optional<Alignment> alignment;
     if (aligner_config)
-        alignment = align_sequence(&sequence.sequence, anno_graph, *aligner_config);
+        alignment = align_sequence(&sequence.sequence, anno_graph.get_graph(), *aligner_config);
 
     // Get sequence search result by executing query
-    SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
+    SeqSearchResult result = execute_query(std::move(sequence),
             config.query_mode,
             config.num_top_labels, config.discovery_fraction,
             config.presence_fraction, anno_graph);
@@ -1212,16 +1210,25 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 }
 
 
-size_t QueryExecutor::query_fasta(const string &file,
-                                  const std::function<void(const SeqSearchResult &)> &callback) {
+size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
+                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const Config &config,
+                           const graph::AnnotatedDBG &anno_graph,
+                           const graph::align::DBGAlignerConfig *aligner_config);
+
+size_t query_fasta(const std::string &file,
+                   const std::function<void(const SeqSearchResult &)> &callback,
+                   const Config &config,
+                   const graph::AnnotatedDBG &anno_graph,
+                   const graph::align::DBGAlignerConfig *aligner_config) {
     logger->trace("Parsing sequences from file '{}'", file);
 
-    seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
+    seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 
     // Only query_coords/count_kmers if using coord/count aware index.
-    if (config_.query_mode == COORDS
+    if (config.query_mode == COORDS
             && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                    &this->anno_graph_.get_annotator().get_matrix())) {
+                    &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}, {}).",
@@ -1233,9 +1240,9 @@ size_t QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if ((config_.query_mode == COUNTS || config_.query_mode == COUNTS_SUM)
+    if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
             && !dynamic_cast<const annot::matrix::IntMatrix *>(
-                    &this->anno_graph_.get_annotator().get_matrix())) {
+                    &anno_graph.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {}, {}, {}).",
@@ -1245,10 +1252,10 @@ size_t QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (config_.query_batch_size) {
-        if (config_.query_mode != COORDS && !anno_graph_.get_coord_to_header()) {
+    if (config.query_batch_size) {
+        if (config.query_mode != COORDS && !anno_graph.get_coord_to_header()) {
             // Construct a query graph and query against it
-            return batched_query_fasta(fasta_parser, callback);
+            return batched_query_fasta(fasta_parser, callback, config, anno_graph, aligner_config);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1263,8 +1270,8 @@ size_t QueryExecutor::query_fasta(const string &file,
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence), anno_graph_,
-                                    config_, aligner_config_.get()));
+            callback(query_sequence(std::move(sequence), anno_graph,
+                                    config, aligner_config));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
         num_bp += kseq.seq.l;
     }
@@ -1274,18 +1281,20 @@ size_t QueryExecutor::query_fasta(const string &file,
     return num_bp;
 }
 
-size_t
-QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                                   const std::function<void(const SeqSearchResult &)> &callback) {
+size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
+                           const std::function<void(const SeqSearchResult &)> &callback,
+                           const Config &config,
+                           const graph::AnnotatedDBG &anno_graph,
+                           const graph::align::DBGAlignerConfig *aligner_config) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
-    const uint64_t batch_size = config_.query_batch_size;
+    const uint64_t batch_size = config.query_batch_size;
 
     size_t seq_count = 0;
     size_t num_bp = 0;
 
-    size_t parallel_each = std::max<size_t>(1, config_.parallel_each);
+    size_t parallel_each = std::max<size_t>(1, config.parallel_each);
     size_t threads_per_batch = std::max<size_t>(1, get_num_threads() / parallel_each);
     omp_set_max_active_levels(2);
     #pragma omp parallel num_threads(parallel_each)
@@ -1310,7 +1319,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             Timer batch_timer;
             std::vector<Alignment> alignments_batch;
             // Align sequences ahead of time on full graph if we don't have batch_align
-            if (aligner_config_ && !config_.batch_align) {
+            if (aligner_config && !config.batch_align) {
                 alignments_batch.resize(seq_batch->size());
                 logger->trace("Aligning sequences from batch against the full graph...");
                 batch_timer.reset();
@@ -1319,7 +1328,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                 for (size_t i = 0; i < seq_batch->size(); ++i) {
                     // Set alignment for this seq_batch
                     alignments_batch[i] = align_sequence(&(*seq_batch)[i].sequence,
-                                                         anno_graph_, *aligner_config_);
+                                                         anno_graph.get_graph(), *aligner_config);
                 }
                 logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
                 batch_timer.reset();
@@ -1327,14 +1336,15 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
-                anno_graph_,
+                anno_graph.get_graph(),
+                anno_graph.get_annotator(),
                 [&seq_batch](auto callback) {
                     for (const auto &seq : *seq_batch) {
                         callback(seq.sequence);
                     }
                 },
                 threads_per_batch,
-                config_
+                config
             );
 
             auto query_graph_construction = batch_timer.elapsed();
@@ -1343,8 +1353,8 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             #pragma omp parallel for num_threads(threads_per_batch) schedule(dynamic)
             for (size_t i = 0; i < seq_batch->size(); ++i) {
                 SeqSearchResult search_result
-                    = query_sequence(std::move((*seq_batch)[i]), *query_graph, config_,
-                                     config_.batch_align ? aligner_config_.get() : NULL);
+                    = query_sequence(std::move((*seq_batch)[i]), *query_graph, config,
+                                     config.batch_align ? aligner_config : NULL);
 
                 if (alignments_batch.size())
                     search_result.get_alignment() = std::move(alignments_batch[i]);

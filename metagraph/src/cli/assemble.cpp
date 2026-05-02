@@ -162,15 +162,16 @@ int assemble(Config *config) {
     Timer timer;
     logger->trace("Graph loading...");
 
-    auto graph = load_critical_dbg(files.at(0));
-
-    logger->trace("Graph loaded in {} sec", timer.elapsed());
+    std::shared_ptr<DeBruijnGraph> graph;
 
     if (config->infbase_annotators.size()) {
         config->infbase = files.at(0);
 
         assert(config->assembly_config_file.size());
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
+        auto loaded = load_graph_with_async_annotation(*config);
+        graph = loaded.first.get();
+        logger->trace("Graph loaded in {} sec", timer.elapsed());
+        auto anno_graph = loaded.second.get();
 
         logger->trace("Generating masked graphs...");
 
@@ -208,6 +209,9 @@ int assemble(Config *config) {
 
         return 0;
     }
+
+    graph = load_critical_dbg(files.at(0));
+    logger->trace("Graph loaded in {} sec", timer.elapsed());
 
     logger->trace("Extracting sequences from graph...");
 
