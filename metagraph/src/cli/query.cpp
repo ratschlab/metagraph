@@ -21,7 +21,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
-#include "common/vectors/score_kmer_presence_mask.hpp"
+#include "graph/alignment/score_kmer_presence_mask.hpp"
 #include "cli/align.hpp"
 
 
@@ -207,7 +207,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] = Json::Value(common::score_kmer_presence_mask(k, kmer_presence_mask));
+            sig_obj["score"] = Json::Value(align::score_kmer_presence_mask(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
@@ -307,7 +307,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   count,
                                   sdsl::util::to_string(kmer_presence_mask),
-                                  common::score_kmer_presence_mask(k, kmer_presence_mask));
+                                  align::score_kmer_presence_mask(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)

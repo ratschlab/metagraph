@@ -10,7 +10,8 @@
 
 
 namespace mtg {
-namespace common {
+namespace graph {
+namespace align {
 
 namespace {
 
@@ -137,5 +138,6 @@ int32_t score_kmer_presence_mask(size_t k,
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
 
-} // namespace common
+} // namespace align
+} // namespace graph
 } // namespace mtg
