@@ -239,8 +239,8 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
 
         for (const auto &kmer_pair : sequence_to_kmers(sequence)) {
             // putting the structured binding in the for statement above crashes gcc 8.2.0
-            const auto &[kmer, in_graph] = kmer_pair;
-            if (!in_graph) {
+            const auto &[kmer, valid] = kmer_pair;
+            if (!valid) {
                 previous_valid = false;
                 continue;
             }
@@ -295,7 +295,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                                 std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
@@ -303,7 +303,7 @@ void DBGHashFastImpl<KMER>::map_to_nodes_sequentially(
                || get_node_index(kmer) == npos
                || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(in_graph ? get_node_index(kmer) : npos);
+        callback(valid ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
@@ -314,13 +314,13 @@ template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
         assert(!get_node_index(kmer) || kmer == get_kmer(get_node_index(kmer)));
 
-        callback(in_graph ? get_node_index(kmer) : npos);
+        callback(valid ? get_node_index(kmer) : npos);
         // TODO: `next_kmer()` could speed this up
     }
 }
