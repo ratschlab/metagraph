@@ -17,7 +17,7 @@
 #define protected public
 #define private public
 #include "annotation/annotation_converters.hpp"
-#include "cli/score_kmer_presence_mask.hpp"
+#include "common/vectors/score_kmer_presence_mask.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
 
@@ -2044,7 +2044,7 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
 
     size_t i = 0;
     for (const auto &[vector, score] : results) {
-        EXPECT_EQ(score, mtg::cli::score_kmer_presence_mask(anno_graph->get_graph().get_k(), vector)) << i;
+        EXPECT_EQ(score, mtg::common::score_kmer_presence_mask(anno_graph->get_graph().get_k(), vector)) << i;
         ++i;
     }
 }

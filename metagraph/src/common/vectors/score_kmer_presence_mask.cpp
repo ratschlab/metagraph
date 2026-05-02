@@ -10,7 +10,7 @@
 
 
 namespace mtg {
-namespace cli {
+namespace common {
 
 namespace {
 
@@ -137,5 +137,5 @@ int32_t score_kmer_presence_mask(size_t k,
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
 
-} // namespace cli
+} // namespace common
 } // namespace mtg
