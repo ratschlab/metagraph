@@ -173,6 +173,11 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual boss::BOSS& get_boss() final { return *boss_graph_; }
     virtual boss::BOSS* release_boss() final { return boss_graph_.release(); }
 
+    // Issue madvise(WILLNEED) on the suffix-ranges index pages so they are
+    // (asynchronously) fetched into the page cache before subsequent queries.
+    // No-op when the graph was not loaded with mmap or madvise is disabled.
+    void prefetch_suffix_ranges() const;
+
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
     virtual const std::string& alphabet() const override final;
@@ -206,6 +211,12 @@ class DBGSuccinct : public DeBruijnGraph {
     Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
+
+    // Virtual address range of the suffix_ranges index inside the mmap'd
+    // graph file. Set in load_without_mask() when loaded via mmap; remains
+    // valid as long as this object is alive (sdsl keeps the mapping open).
+    void *suffix_ranges_mmap_addr_ = nullptr;
+    size_t suffix_ranges_mmap_size_ = 0;
 
     std::unique_ptr<bit_vector> generate_valid_kmer_mask(size_t num_threads, bool with_pruning) const;
 };
