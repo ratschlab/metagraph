@@ -109,15 +109,15 @@ TEST(ServerQueryCache, NeverEvictsEntryWithWaiters) {
 }
 
 
-TEST(ServerQueryCache, FailedWithinTtlPreservedOverDelivered) {
-    // Pass 1 should evict the DELIVERED entry before touching the FAILED
-    // entry that's still inside its retention window.
-    ServerQueryCache cache(/* max */ 100, /* failed_ttl */ 1h);
+TEST(ServerQueryCache, ProtectedWithinWindowPreservedOverDelivered) {
+    // Pass 1 should evict the DELIVERED entry before touching the
+    // PROTECTED entry that's still inside its retention window.
+    ServerQueryCache cache(/* max */ 100, /* protection_ttl */ 1h);
 
     {
         auto h_failed = cache.acquire("failed");
         h_failed.set_result(make_result(60));
-        h_failed.mark_failed();
+        h_failed.mark_protected();
     }
     {
         auto h_ok = cache.acquire("ok");
@@ -136,16 +136,16 @@ TEST(ServerQueryCache, FailedWithinTtlPreservedOverDelivered) {
 }
 
 
-TEST(ServerQueryCache, FailedEntriesEvictedUnderHeavyPressure) {
-    // When all waiterless entries are FAILED-within-TTL and the cache is
+TEST(ServerQueryCache, ProtectedEntriesEvictedUnderHeavyPressure) {
+    // When all waiterless entries are PROTECTED-within-window and the cache is
     // overfull, pass 2 must still evict — otherwise the cache grows without
     // bound.
-    ServerQueryCache cache(/* max */ 100, /* failed_ttl */ 1h);
+    ServerQueryCache cache(/* max */ 100, /* protection_ttl */ 1h);
 
     auto store_failed = [&](const std::string &key, size_t bytes) {
         auto h = cache.acquire(key);
         h.set_result(make_result(bytes));
-        h.mark_failed();
+        h.mark_protected();
     };
 
     store_failed("f1", 60);
@@ -158,32 +158,85 @@ TEST(ServerQueryCache, FailedEntriesEvictedUnderHeavyPressure) {
 }
 
 
-TEST(ServerQueryCache, FailedTtlExpires) {
-    ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 50ms);
+TEST(ServerQueryCache, ProtectedPastWindowGraduatesToMainCache) {
+    // After `protection_ttl` of no retry hits, a PROTECTED entry stays
+    // in the cache but loses its priority — it's evictable like a
+    // DELIVERED entry, only under size pressure (no proactive removal).
+    ServerQueryCache cache(/* max */ 100, /* protection_ttl */ 50ms);
 
     {
-        auto h = cache.acquire("dies");
-        h.set_result(make_result(10));
-        h.mark_failed();
+        auto h = cache.acquire("aged");
+        h.set_result(make_result(60));
+        h.mark_protected();
     }
-    EXPECT_TRUE(cache.contains("dies"));
     std::this_thread::sleep_for(120ms);
-    // Touch the cache to trigger opportunistic TTL eviction.
+    // Past the window — entry stays in cache.
+    EXPECT_TRUE(cache.contains("aged"));
+
+    // Insert a DELIVERED entry that triggers size pressure. The aged
+    // PROTECTED entry is no longer prioritized → evictable in pass 1
+    // at normal LRU priority.
     {
-        auto h = cache.acquire("touch");
-        h.set_result(make_result(10));
+        auto h = cache.acquire("new");
+        h.set_result(make_result(60));   // 60 + 60 = 120 > 100
+        h.mark_delivered();
     }
-    EXPECT_FALSE(cache.contains("dies"));
+    EXPECT_FALSE(cache.contains("aged"));
+    EXPECT_TRUE(cache.contains("new"));
 }
 
 
-TEST(ServerQueryCache, FailedWithinTtlIsKept) {
-    ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 1h);
+TEST(ServerQueryCache, ProtectedHitRefreshesPriorityWindow) {
+    // A cache hit on a PROTECTED entry refreshes its retention TTL —
+    // the window is sliding, tracking the upstream's retry pattern.
+    ServerQueryCache cache(/* max */ 100, /* protection_ttl */ 100ms);
+
+    {
+        auto h = cache.acquire("retried");
+        h.set_result(make_result(60));
+        h.mark_protected();
+    }
+    // Sacrificial DELIVERED entry: filling cache to capacity so a later
+    // insert triggers pressure with a waiterless eviction candidate
+    // available (otherwise pass 1 would have nothing to evict and pass 2
+    // would falsely sacrifice the PROTECTED entry we're trying to test).
+    {
+        auto h = cache.acquire("filler");
+        h.set_result(make_result(40));   // total = 100, at cap
+        h.mark_delivered();
+    }
+
+    std::this_thread::sleep_for(60ms);
+    // Mid-window retry: cache hit refreshes ready_at on "retried".
+    {
+        auto h = cache.acquire("retried");
+        ASSERT_FALSE(h.is_miss());
+        h.get();
+    }
+    std::this_thread::sleep_for(60ms);
+    // Elapsed = 120ms (past the original 100ms TTL). With the sliding
+    // window refresh we're only 60ms into the new window — still protected.
+
+    // Insert an intruder that triggers pressure. Pass 1 should sacrifice
+    // "filler" (DELIVERED, waiterless) and leave "retried" alone.
+    {
+        auto h = cache.acquire("intruder");
+        h.set_result(make_result(40));   // total during insert: 140 > 100
+        h.mark_delivered();
+    }
+    EXPECT_TRUE(cache.contains("retried"));    // protected by refreshed window
+    EXPECT_FALSE(cache.contains("filler"));    // sacrificed in pass 1
+    EXPECT_TRUE(cache.contains("intruder"));
+}
+
+
+TEST(ServerQueryCache, ProtectedWithinWindowIsKept) {
+    ServerQueryCache cache(/* max */ 1ull << 20, /* protection_ttl */ 1h);
 
     {
         auto h = cache.acquire("kept");
         h.set_result(make_result(10));
-        h.mark_failed();
+        h.mark_protected();
     }
     EXPECT_TRUE(cache.contains("kept"));
     auto h = cache.acquire("kept");
@@ -193,7 +246,7 @@ TEST(ServerQueryCache, FailedWithinTtlIsKept) {
 
 
 TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
-    ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 50ms);
+    ServerQueryCache cache(/* max */ 1ull << 20, /* protection_ttl */ 50ms);
 
     // First delivery succeeds — entry becomes DELIVERED.
     {
@@ -205,7 +258,7 @@ TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
     {
         auto h = cache.acquire("k");
         ASSERT_FALSE(h.is_miss());
-        h.mark_failed();  // must NOT downgrade DELIVERED → FAILED
+        h.mark_protected();  // must NOT downgrade DELIVERED → PROTECTED
     }
     // Wait past the (very short) failed TTL. If the sink semantics held,
     // the entry stays. If they didn't, evict_expired_failed_locked would
@@ -221,7 +274,7 @@ TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
 
 
 TEST(ServerQueryCache, DeliveredEntryStaysUntilSizePressure) {
-    ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 1ms);
+    ServerQueryCache cache(/* max */ 1ull << 20, /* protection_ttl */ 1ms);
 
     {
         auto h = cache.acquire("ok");
@@ -229,7 +282,7 @@ TEST(ServerQueryCache, DeliveredEntryStaysUntilSizePressure) {
         h.mark_delivered();
     }
     std::this_thread::sleep_for(20ms);
-    // Even though the FAILED-style TTL has elapsed, DELIVERED entries are
+    // Even though the protection TTL has elapsed, DELIVERED entries are
     // immune — only LRU pressure can evict them.
     auto h = cache.acquire("ok");
     EXPECT_FALSE(h.is_miss());

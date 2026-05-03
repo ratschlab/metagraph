@@ -384,22 +384,41 @@ int run_server(Config *config) {
         logger->info("[Server] /search result cache disabled (--cache-size 0)");
     }
 
-    // the actual server
     HttpServer server;
+
+    // ---------- /search ----------
+    //
+    // Request lifecycle:
+    //   1. process_request invokes the compute lambda below.
+    //   2. The compute lambda derives a cache key and `acquire()`s a
+    //      handle. On a hit it returns the cached Json::Value directly.
+    //      On a miss it runs the (potentially multi-minute) query,
+    //      publishes the result via Handle::set_result(), and returns
+    //      the same Json::Value.
+    //   3. process_request serializes the JSON and writes the response.
+    //   4. The on_sent callback runs after the async write completes:
+    //        ec == 0  → mark_delivered() (DELIVERED sink)
+    //        ec != 0  → mark_protected() (entry kept with priority for
+    //                  the configured retry window)
+    //
+    // The handle has to span both lambdas so the on_sent callback can
+    // call mark_delivered/mark_protected on the same entry. We pass it
+    // through a shared_ptr captured by both lambdas.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        // Cache handle is created on the inner (compute) lambda's first run and
-        // shared with the on_sent callback so delivery outcome reaches the cache.
         auto handle_holder = std::make_shared<ServerQueryCache::Handle>();
         process_request(response, request, request_id,
             [&, handle_holder](const std::string &content) {
                 if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
-                    throw CurrentlyInitializingError();  // the index is not loaded yet, so we can't process the request
+                    throw CurrentlyInitializingError();  // graph still loading
 
                 Json::Value content_json = parse_json_string(content);
                 logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
+                // Build graph identity for the cache key: the single graph
+                // path in the simple case, or a sorted concatenation of
+                // (graph, annotator) pairs for the multi-graph server.
                 std::string graph_identity;
                 if (!config->fnames.size()) {
                     graph_identity = config->infbase;
@@ -415,6 +434,8 @@ int run_server(Config *config) {
                 }
                 std::string cache_key = make_search_cache_key(content_json, *config, graph_identity);
 
+                // Cache handshake: hit returns immediately, miss falls
+                // through to compute and publishes via set_result below.
                 *handle_holder = search_cache.acquire(cache_key);
                 if (!handle_holder->is_miss()) {
                     auto cached = handle_holder->get();
@@ -429,6 +450,9 @@ int run_server(Config *config) {
                     return cached->response;
                 }
 
+                // Cache miss: run the search, publish the result. If the
+                // compute throws, propagate the exception to any duplicate
+                // waiters via set_exception() before re-throwing.
                 Json::Value result;
                 try {
                     if (!config->fnames.size()) {
@@ -544,6 +568,11 @@ int run_server(Config *config) {
                     throw;
                 }
 
+                // Publish the result to the cache (and to any concurrent
+                // duplicate waiters blocked on the shared_future).
+                // approx_size_bytes is the JSON-serialized size — same
+                // serialization process_request uses below to write the
+                // response, so it's the right number for the byte budget.
                 ServerQueryCache::CachedResult cached;
                 cached.response = result;
                 cached.approx_size_bytes = Json::writeString(Json::StreamWriterBuilder(), result).size();
@@ -559,16 +588,20 @@ int run_server(Config *config) {
                 }
                 return result;
             },
+            // on_sent: fires after the async response write completes.
+            // Reports the delivery outcome to the cache so subsequent
+            // identical requests hit a DELIVERED entry (LRU normal) or
+            // a PROTECTED entry (priority retention for retries).
             [handle_holder, request_id, &search_cache](const SimpleWeb::error_code &ec) {
                 if (!handle_holder || !*handle_holder)
                     return;  // never acquired (e.g. early throw before acquire)
                 if (ec) {
                     auto ttl_min = std::chrono::duration_cast<std::chrono::minutes>(
-                                       search_cache.failed_ttl()).count();
+                                       search_cache.protection_ttl()).count();
                     logger->info("[Server] Request {}: delivery FAILED ({}); "
-                                 "cache entry retained for {} min retry window",
+                                 "cache entry protected for {} min retry window",
                                  request_id, ec.message(), ttl_min);
-                    handle_holder->mark_failed();
+                    handle_holder->mark_protected();
                 } else {
                     handle_holder->mark_delivered();
                 }
