@@ -84,21 +84,21 @@ std::string json_str_with_error_msg(const std::string &msg) {
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
                      size_t request_id,
-                     const std::function<Json::Value(const std::string &)> &process,
+                     const std::function<std::string(const std::string &)> &process,
                      std::function<void(const SimpleWeb::error_code &)> on_sent) {
     logger->info("[Server] {} request {} from {}", request->path, request_id,
                  request->remote_endpoint().address().to_string());
     Timer timer;
-    // Retrieve string:
     std::string content = request->content.string();
     SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
     SimpleWeb::StatusCode status;
     std::string ret;
 
     try {
-        // Return JSON string
         status = SimpleWeb::StatusCode::success_ok;
-        ret = Json::writeString(Json::StreamWriterBuilder(), process(content));
+        // process() is expected to return the response body already
+        // serialized as JSON (a std::string).
+        ret = process(content);
         if (is_compression_requested(request)) {
             ret = compress_string(ret);
             header.insert(std::make_pair("Content-Encoding", "deflate"));
@@ -125,6 +125,7 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                  "finished in {:.3f} sec",
                  request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
 }
+
 
 } // namespace cli
 } // namespace mtg

@@ -13,11 +13,11 @@ namespace {
 using namespace mtg::cli;
 using namespace std::chrono_literals;
 
-// Helper to build a CachedResult with a given size, ignoring response content.
-ServerQueryCache::CachedResult make_result(size_t bytes) {
-    ServerQueryCache::CachedResult r;
-    r.approx_size_bytes = bytes;
-    return r;
+// Build a placeholder response string of the requested byte size. The
+// cache value is the serialized JSON body — for the eviction-policy
+// tests we only care about its size, so the contents are arbitrary.
+std::string response_of_size(size_t bytes) {
+    return std::string(bytes, '\0');
 }
 
 
@@ -25,14 +25,14 @@ TEST(ServerQueryCache, MissThenHit) {
     ServerQueryCache cache(1ull << 20);
     auto h1 = cache.acquire("k1");
     ASSERT_TRUE(h1.is_miss());
-    h1.set_result(make_result(100));
+    h1.set_result(response_of_size(100));
     auto val1 = h1.get();
     ASSERT_NE(val1, nullptr);
 
     auto h2 = cache.acquire("k1");
     EXPECT_FALSE(h2.is_miss());
     auto val2 = h2.get();
-    EXPECT_EQ(val1.get(), val2.get());  // shared CachedResult
+    EXPECT_EQ(val1.get(), val2.get());  // both handles share the same response object
 }
 
 
@@ -49,7 +49,7 @@ TEST(ServerQueryCache, ConcurrentDeduplication) {
         // Let the waiter run while we're still computing.
         waiter_can_start.set_value();
         std::this_thread::sleep_for(50ms);
-        h.set_result(make_result(42));
+        h.set_result(response_of_size(42));
         h.get();  // ensure the future is observed before destruction
     });
 
@@ -58,7 +58,7 @@ TEST(ServerQueryCache, ConcurrentDeduplication) {
     // Second arrival must NOT be a miss — first computation owns the slot.
     EXPECT_FALSE(h.is_miss());
     auto val = h.get();  // blocks until producer publishes
-    EXPECT_EQ(val->approx_size_bytes, 42u);
+    EXPECT_EQ(val->size(), 42u);
     producer.join();
 
     // Single computation despite two acquires.
@@ -71,11 +71,11 @@ TEST(ServerQueryCache, EvictionUnderSizePressure) {
 
     {
         auto h1 = cache.acquire("a");
-        h1.set_result(make_result(60));
+        h1.set_result(response_of_size(60));
     }
     {
         auto h2 = cache.acquire("b");
-        h2.set_result(make_result(60));
+        h2.set_result(response_of_size(60));
     }
     // Total 120 > 100 → LRU "a" should be evicted.
     EXPECT_FALSE(cache.contains("a"));
@@ -89,12 +89,12 @@ TEST(ServerQueryCache, NeverEvictsEntryWithWaiters) {
 
     // "a" has a live waiter — should never be evicted even under pressure.
     auto h_a = cache.acquire("a");
-    h_a.set_result(make_result(60));
+    h_a.set_result(response_of_size(60));
 
     // Insert "b" and let it become evictable (waiters drop to 0).
     {
         auto h_b = cache.acquire("b");
-        h_b.set_result(make_result(60));
+        h_b.set_result(response_of_size(60));
     }
     // Total at this point is 120 > 100, but "b" had waiters when its
     // result was published, so it survived the insert-time eviction pass.
@@ -102,7 +102,7 @@ TEST(ServerQueryCache, NeverEvictsEntryWithWaiters) {
     // "b" is now waiterless, so "b" is the LRU victim.
     {
         auto h_c = cache.acquire("c");
-        h_c.set_result(make_result(60));
+        h_c.set_result(response_of_size(60));
     }
     EXPECT_TRUE(cache.contains("a"));
     EXPECT_FALSE(cache.contains("b"));
@@ -116,18 +116,18 @@ TEST(ServerQueryCache, ProtectedWithinWindowPreservedOverDelivered) {
 
     {
         auto h_failed = cache.acquire("failed");
-        h_failed.set_result(make_result(60));
+        h_failed.set_result(response_of_size(60));
         h_failed.mark_protected();
     }
     {
         auto h_ok = cache.acquire("ok");
-        h_ok.set_result(make_result(40));
+        h_ok.set_result(response_of_size(40));
         h_ok.mark_delivered();
     }
     // Both waiterless, total=100 (== max). Force a touch under pressure.
     {
         auto h_extra = cache.acquire("extra");
-        h_extra.set_result(make_result(40));  // 100 + 40 = 140 > 100
+        h_extra.set_result(response_of_size(40));  // 100 + 40 = 140 > 100
         h_extra.mark_delivered();
     }
     EXPECT_TRUE(cache.contains("failed"));   // protected
@@ -144,7 +144,7 @@ TEST(ServerQueryCache, ProtectedEntriesEvictedUnderHeavyPressure) {
 
     auto store_failed = [&](const std::string &key, size_t bytes) {
         auto h = cache.acquire(key);
-        h.set_result(make_result(bytes));
+        h.set_result(response_of_size(bytes));
         h.mark_protected();
     };
 
@@ -166,7 +166,7 @@ TEST(ServerQueryCache, ProtectedPastWindowGraduatesToMainCache) {
 
     {
         auto h = cache.acquire("aged");
-        h.set_result(make_result(60));
+        h.set_result(response_of_size(60));
         h.mark_protected();
     }
     std::this_thread::sleep_for(120ms);
@@ -178,7 +178,7 @@ TEST(ServerQueryCache, ProtectedPastWindowGraduatesToMainCache) {
     // at normal LRU priority.
     {
         auto h = cache.acquire("new");
-        h.set_result(make_result(60));   // 60 + 60 = 120 > 100
+        h.set_result(response_of_size(60));   // 60 + 60 = 120 > 100
         h.mark_delivered();
     }
     EXPECT_FALSE(cache.contains("aged"));
@@ -193,7 +193,7 @@ TEST(ServerQueryCache, ProtectedHitRefreshesPriorityWindow) {
 
     {
         auto h = cache.acquire("retried");
-        h.set_result(make_result(60));
+        h.set_result(response_of_size(60));
         h.mark_protected();
     }
     // Sacrificial DELIVERED entry: filling cache to capacity so a later
@@ -202,7 +202,7 @@ TEST(ServerQueryCache, ProtectedHitRefreshesPriorityWindow) {
     // would falsely sacrifice the PROTECTED entry we're trying to test).
     {
         auto h = cache.acquire("filler");
-        h.set_result(make_result(40));   // total = 100, at cap
+        h.set_result(response_of_size(40));   // total = 100, at cap
         h.mark_delivered();
     }
 
@@ -221,7 +221,7 @@ TEST(ServerQueryCache, ProtectedHitRefreshesPriorityWindow) {
     // "filler" (DELIVERED, waiterless) and leave "retried" alone.
     {
         auto h = cache.acquire("intruder");
-        h.set_result(make_result(40));   // total during insert: 140 > 100
+        h.set_result(response_of_size(40));   // total during insert: 140 > 100
         h.mark_delivered();
     }
     EXPECT_TRUE(cache.contains("retried"));    // protected by refreshed window
@@ -235,13 +235,13 @@ TEST(ServerQueryCache, ProtectedWithinWindowIsKept) {
 
     {
         auto h = cache.acquire("kept");
-        h.set_result(make_result(10));
+        h.set_result(response_of_size(10));
         h.mark_protected();
     }
     EXPECT_TRUE(cache.contains("kept"));
     auto h = cache.acquire("kept");
     EXPECT_FALSE(h.is_miss());
-    EXPECT_EQ(h.get()->approx_size_bytes, 10u);
+    EXPECT_EQ(h.get()->size(), 10u);
 }
 
 
@@ -251,7 +251,7 @@ TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
     // First delivery succeeds — entry becomes DELIVERED.
     {
         auto h = cache.acquire("k");
-        h.set_result(make_result(10));
+        h.set_result(response_of_size(10));
         h.mark_delivered();
     }
     // Second acquirer of the same entry has a delivery failure.
@@ -260,14 +260,16 @@ TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
         ASSERT_FALSE(h.is_miss());
         h.mark_protected();  // must NOT downgrade DELIVERED → PROTECTED
     }
-    // Wait past the (very short) failed TTL. If the sink semantics held,
-    // the entry stays. If they didn't, evict_expired_failed_locked would
-    // drop it.
+    // Wait past the (very short) protection TTL. With the sink semantics
+    // the entry stays DELIVERED so the eviction sweep treats it as a
+    // normal LRU citizen rather than a downgraded PROTECTED-past-window
+    // entry — but we never get to test that distinction, the assertion
+    // below is just "still in cache".
     std::this_thread::sleep_for(120ms);
     {
         // Trigger an eviction sweep via release_waiter.
         auto h = cache.acquire("touch");
-        h.set_result(make_result(10));
+        h.set_result(response_of_size(10));
     }
     EXPECT_TRUE(cache.contains("k"));
 }
@@ -278,7 +280,7 @@ TEST(ServerQueryCache, DeliveredEntryStaysUntilSizePressure) {
 
     {
         auto h = cache.acquire("ok");
-        h.set_result(make_result(10));
+        h.set_result(response_of_size(10));
         h.mark_delivered();
     }
     std::this_thread::sleep_for(20ms);
@@ -294,7 +296,7 @@ TEST(ServerQueryCache, DisabledCacheRecomputesEveryTime) {
 
     auto h1 = cache.acquire("x");
     EXPECT_TRUE(h1.is_miss());
-    h1.set_result(make_result(10));
+    h1.set_result(response_of_size(10));
 
     // Disabled cache: nothing is retained, second acquire is also a miss.
     auto h2 = cache.acquire("x");

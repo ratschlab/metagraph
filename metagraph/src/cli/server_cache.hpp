@@ -70,21 +70,22 @@ class Config;
  *
  * Cache value
  * -----------
- *   The final response `Json::Value`. The server's `verbose_output` flag
- *   is process-constant (set on startup), so the cached JSON is
- *   consistent across all hits within a process; only Accept-Encoding-
- *   driven compression is reapplied per request.
+ *   The serialized JSON response body, kept as a `std::string` (held
+ *   via shared_ptr so concurrent waiters/readers can share it). Caching
+ *   the serialized form rather than `Json::Value` (a) makes the byte
+ *   budget reflect the entry's actual memory footprint instead of the
+ *   much larger Json::Value tree, and (b) lets cache hits skip
+ *   serialization entirely. The server's `verbose_output` flag is
+ *   process-constant (set on startup), so the cached body is consistent
+ *   across all hits within a process; only Accept-Encoding-driven
+ *   compression is reapplied per request.
  */
 class ServerQueryCache {
   public:
     enum class DeliveryState { PENDING, DELIVERED, PROTECTED };
 
-    struct CachedResult {
-        Json::Value response;
-        size_t      approx_size_bytes = 0;
-    };
-
-    using ResultPtr = std::shared_ptr<const CachedResult>;
+    // The cache value is the serialized JSON response body.
+    using ResultPtr = std::shared_ptr<const std::string>;
     using ResultFuture = std::shared_future<ResultPtr>;
 
   private:
@@ -127,7 +128,7 @@ class ServerQueryCache {
 
         // Producer-only: publish the result (or thrown exception) to
         // all current and future waiters of this entry's shared_future.
-        void set_result(CachedResult result);
+        void set_result(std::string response);
         void set_exception(std::exception_ptr eptr);
 
         // Record the eventual delivery outcome of the response.
@@ -190,12 +191,16 @@ class ServerQueryCache {
         // RAII-managed by Handle: producer + each reader contributes 1.
         // An entry with waiters > 0 is never evicted.
         std::atomic<int>      waiters{0};
-        // Set when set_result/set_exception/mark_protected first runs;
-        // refreshed on every PROTECTED cache hit (sliding window).
+        // Set when the producer publishes (set_result / set_exception
+        // → on_result_ready), and refreshed on every cache hit while
+        // the entry is in PROTECTED state (sliding retention window).
         // Used to compute "within protection_ttl" for eviction priority.
         std::chrono::steady_clock::time_point ready_at{};
         std::atomic<DeliveryState> delivery{DeliveryState::PENDING};
-        size_t                approx_size_bytes = 0;
+        // Byte size of the published response — duplicated here so the
+        // eviction sweep can sum/subtract it without touching the
+        // shared_future. Set once in on_result_ready.
+        size_t                size_bytes = 0;
         // Iterator into ServerQueryCache::lru_; valid iff in_cache.
         std::list<std::shared_ptr<Entry>>::iterator lru_pos{};
         // false means this entry is detached (evicted, or made by the
@@ -203,8 +208,14 @@ class ServerQueryCache {
         bool in_cache = false;
     };
 
+    // Allocate a new Entry + paired promise/future. Caller decides
+    // whether to attach it to the cache (in_cache, lru_, map_) or use
+    // it as a one-shot detached entry (disabled-cache fast path).
+    std::pair<std::shared_ptr<std::promise<ResultPtr>>, std::shared_ptr<Entry>>
+        make_pending_entry(const std::string &key);
+
     void release_waiter(const std::shared_ptr<Entry> &entry);
-    void on_result_ready(const std::shared_ptr<Entry> &entry, size_t approx_size);
+    void on_result_ready(const std::shared_ptr<Entry> &entry, size_t size);
     void on_delivery(const std::shared_ptr<Entry> &entry, DeliveryState state);
     void evict_under_pressure_locked();
     void touch_lru_locked(const std::shared_ptr<Entry> &entry);

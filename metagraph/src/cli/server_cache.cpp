@@ -63,12 +63,12 @@ ServerQueryCache::ResultPtr ServerQueryCache::Handle::get() const {
     return entry_->future.get();
 }
 
-void ServerQueryCache::Handle::set_result(CachedResult result) {
-    auto ptr = std::make_shared<const CachedResult>(std::move(result));
-    size_t approx = ptr->approx_size_bytes;
+void ServerQueryCache::Handle::set_result(std::string response) {
+    auto ptr = std::make_shared<const std::string>(std::move(response));
+    size_t bytes = ptr->size();
     producer_->set_value(ptr);
     producer_.reset();
-    cache_->on_result_ready(entry_, approx);
+    cache_->on_result_ready(entry_, bytes);
 }
 
 void ServerQueryCache::Handle::set_exception(std::exception_ptr eptr) {
@@ -78,7 +78,7 @@ void ServerQueryCache::Handle::set_exception(std::exception_ptr eptr) {
     // exception via future.get(). The entry becomes evictable once
     // every waiter drops; subsequent identical requests will hit it,
     // re-throw the same error, and behave consistently.
-    cache_->on_result_ready(entry_, /* approx_size = */ 0);
+    cache_->on_result_ready(entry_, /* size = */ 0);
 }
 
 void ServerQueryCache::Handle::mark_delivered() {
@@ -97,16 +97,22 @@ ServerQueryCache::ServerQueryCache(size_t max_size_bytes,
       : max_size_bytes_(max_size_bytes),
         protection_ttl_(protection_ttl) {}
 
+std::pair<std::shared_ptr<std::promise<ServerQueryCache::ResultPtr>>,
+          std::shared_ptr<ServerQueryCache::Entry>>
+ServerQueryCache::make_pending_entry(const std::string &key) {
+    auto producer = std::make_shared<std::promise<ResultPtr>>();
+    auto entry = std::make_shared<Entry>();
+    entry->key = key;
+    entry->future = producer->get_future().share();
+    entry->waiters.store(1, std::memory_order_relaxed);
+    return { std::move(producer), std::move(entry) };
+}
+
 ServerQueryCache::Handle ServerQueryCache::acquire(const std::string &key) {
     if (max_size_bytes_ == 0) {
         // Disabled-cache fast path: every caller gets a fresh, detached
         // entry. No dedup, no retention, no LRU bookkeeping.
-        auto producer = std::make_shared<std::promise<ResultPtr>>();
-        auto entry = std::make_shared<Entry>();
-        entry->key = key;
-        entry->future = producer->get_future().share();
-        entry->waiters.store(1, std::memory_order_relaxed);
-        entry->in_cache = false;
+        auto [producer, entry] = make_pending_entry(key);
         return Handle(this, std::move(entry), std::move(producer));
     }
 
@@ -127,19 +133,16 @@ ServerQueryCache::Handle ServerQueryCache::acquire(const std::string &key) {
         return Handle(this, entry, /* producer = */ nullptr);
     }
 
-    // Miss. Create a fresh entry with a shared_future paired to a
-    // promise the caller (the producer) will fulfil via set_result().
-    // Eviction-bookkeeping (size, LRU) happens later in on_result_ready.
-    auto producer = std::make_shared<std::promise<ResultPtr>>();
-    auto entry = std::make_shared<Entry>();
-    entry->key = key;
-    entry->future = producer->get_future().share();
-    entry->waiters.store(1, std::memory_order_relaxed);
+    // Miss. Create a fresh entry, attach it to the cache, and hand the
+    // promise to the caller (the producer) to fulfil via set_result().
+    // Eviction-bookkeeping (size accounting) happens later in
+    // on_result_ready, when the producer publishes.
+    auto [producer, entry] = make_pending_entry(key);
     entry->in_cache = true;
     lru_.push_front(entry);
     entry->lru_pos = lru_.begin();
     map_.emplace(key, entry);
-    return Handle(this, entry, std::move(producer));
+    return Handle(this, std::move(entry), std::move(producer));
 }
 
 void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
@@ -156,7 +159,7 @@ void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
 }
 
 void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
-                                       size_t approx_size) {
+                                       size_t size) {
     // Called by the producer after publishing the value (set_result) or
     // exception (set_exception). Records the moment the result became
     // available, registers its size in the byte budget, and runs the
@@ -167,8 +170,8 @@ void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
     if (!entry->in_cache)
         return;  // Detached entry from the disabled-cache path.
     entry->ready_at = std::chrono::steady_clock::now();
-    entry->approx_size_bytes = approx_size;
-    total_size_bytes_ += approx_size;
+    entry->size_bytes = size;
+    total_size_bytes_ += size;
     evict_under_pressure_locked();
 }
 
@@ -197,11 +200,12 @@ void ServerQueryCache::on_delivery(const std::shared_ptr<Entry> &entry,
         }
     }
     if (transitioned_to_protected) {
-        // First entry into PROTECTED: arm ready_at if no result was
-        // ever published (set_exception path; on_result_ready would
-        // have set it otherwise). Subsequent transitions are no-ops
-        // here — the sliding window is refreshed on each cache hit
-        // in acquire().
+        // ready_at is normally already set by on_result_ready (called
+        // from set_result/set_exception); this is just a defensive
+        // arm for the producer-abandoned path, where ~Handle satisfies
+        // the promise without going through on_result_ready.
+        // Subsequent PROTECTED→PROTECTED transitions are no-ops here —
+        // the sliding window is refreshed on each cache hit in acquire().
         std::lock_guard<std::mutex> lock(mutex_);
         if (entry->ready_at.time_since_epoch().count() == 0)
             entry->ready_at = std::chrono::steady_clock::now();
@@ -237,7 +241,7 @@ void ServerQueryCache::evict_under_pressure_locked() {
         if (rit == lru_.rend())
             return false;
         auto &entry = *rit;
-        total_size_bytes_ -= entry->approx_size_bytes;
+        total_size_bytes_ -= entry->size_bytes;
         map_.erase(entry->key);
         entry->in_cache = false;
         lru_.erase(std::next(rit).base());

@@ -391,11 +391,13 @@ int run_server(Config *config) {
     // Request lifecycle:
     //   1. process_request invokes the compute lambda below.
     //   2. The compute lambda derives a cache key and `acquire()`s a
-    //      handle. On a hit it returns the cached Json::Value directly.
-    //      On a miss it runs the (potentially multi-minute) query,
-    //      publishes the result via Handle::set_result(), and returns
-    //      the same Json::Value.
-    //   3. process_request serializes the JSON and writes the response.
+    //      handle. On a hit it returns the cached serialized response
+    //      directly (no JSON re-serialization). On a miss it runs the
+    //      (potentially multi-minute) query, serializes the JSON once,
+    //      publishes the serialized string via Handle::set_result(),
+    //      and returns the same string.
+    //   3. process_request writes the body to the wire (compressing on
+    //      the fly if Accept-Encoding requests it).
     //   4. The on_sent callback runs after the async write completes:
     //        ec == 0  → mark_delivered() (DELIVERED sink)
     //        ec != 0  → mark_protected() (entry kept with priority for
@@ -409,7 +411,7 @@ int run_server(Config *config) {
         size_t request_id = num_requests++;
         auto handle_holder = std::make_shared<ServerQueryCache::Handle>();
         process_request(response, request, request_id,
-            [&, handle_holder](const std::string &content) {
+            [&, handle_holder](const std::string &content) -> std::string {
                 if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                     throw CurrentlyInitializingError();  // graph still loading
 
@@ -434,20 +436,20 @@ int run_server(Config *config) {
                 }
                 std::string cache_key = make_search_cache_key(content_json, *config, graph_identity);
 
-                // Cache handshake: hit returns immediately, miss falls
-                // through to compute and publishes via set_result below.
+                // Cache handshake: hit returns the cached body directly,
+                // miss falls through to compute + serialize + publish.
                 *handle_holder = search_cache.acquire(cache_key);
                 if (!handle_holder->is_miss()) {
                     auto cached = handle_holder->get();
                     if (cache_size_bytes) {
                         logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
                                      "(occupancy {:.1f}/{:.0f} MB, {} entries)",
-                                     request_id, cached->approx_size_bytes / 1e3,
+                                     request_id, cached->size() / 1e3,
                                      search_cache.size_bytes() / 1e6,
                                      cache_size_bytes / 1e6,
                                      search_cache.entry_count());
                     }
-                    return cached->response;
+                    return *cached;
                 }
 
                 // Cache miss: run the search, publish the result. If the
@@ -568,16 +570,11 @@ int run_server(Config *config) {
                     throw;
                 }
 
-                // Publish the result to the cache (and to any concurrent
-                // duplicate waiters blocked on the shared_future).
-                // approx_size_bytes is the JSON-serialized size — same
-                // serialization process_request uses below to write the
-                // response, so it's the right number for the byte budget.
-                ServerQueryCache::CachedResult cached;
-                cached.response = result;
-                cached.approx_size_bytes = Json::writeString(Json::StreamWriterBuilder(), result).size();
-                size_t entry_size = cached.approx_size_bytes;
-                handle_holder->set_result(std::move(cached));
+                // Serialize once: the cached form *is* the response
+                // body. Cache hits then skip serialization entirely.
+                std::string serialized = Json::writeString(Json::StreamWriterBuilder(), result);
+                size_t entry_size = serialized.size();
+                handle_holder->set_result(serialized);
                 if (cache_size_bytes) {
                     logger->info("[Server] Request {}: cache STORE {:.1f} KB  "
                                  "(occupancy {:.1f}/{:.0f} MB, {} entries)",
@@ -586,7 +583,7 @@ int run_server(Config *config) {
                                  cache_size_bytes / 1e6,
                                  search_cache.entry_count());
                 }
-                return result;
+                return serialized;
             },
             // on_sent: fires after the async response write completes.
             // Reports the delivery outcome to the cache so subsequent
@@ -614,11 +611,12 @@ int run_server(Config *config) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
-            if (!config->fnames.size())
-                return process_align_request(content, anno_graph.get()->get_graph(), *config);
-
-            throw std::invalid_argument("Bad request: alignment requests are not yet supported for "
-                                        "servers with multiple graphs");
+            if (config->fnames.size()) {
+                throw std::invalid_argument("Bad request: alignment requests are not yet supported for "
+                                            "servers with multiple graphs");
+            }
+            return Json::writeString(Json::StreamWriterBuilder(),
+                process_align_request(content, anno_graph.get()->get_graph(), *config));
         });
     };
 
@@ -644,7 +642,7 @@ int run_server(Config *config) {
                     }
                 }
             }
-            return root;
+            return Json::writeString(Json::StreamWriterBuilder(), root);
         });
     };
 
@@ -703,7 +701,7 @@ int run_server(Config *config) {
                 root["annotation"]["labels"] = get_num_labels(*anno_graph.get());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
             }
-            return root;
+            return Json::writeString(Json::StreamWriterBuilder(), root);
         });
     };
 
