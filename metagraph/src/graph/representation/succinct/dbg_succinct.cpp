@@ -687,6 +687,10 @@ uint64_t DBGSuccinct::max_index() const {
     return boss_graph_->num_edges();
 }
 
+void DBGSuccinct::prefetch_suffix_ranges() const {
+    utils::madvise_willneed(suffix_ranges_mmap_addr_, suffix_ranges_mmap_size_);
+}
+
 bool DBGSuccinct::load_without_mask(const std::string &filename) {
     // release the old mask
     valid_edges_.reset();
@@ -700,8 +704,20 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
 
         mode_ = static_cast<Mode>(load_number(*in));
 
-        if (!boss_graph_->load_suffix_ranges(*in))
+        suffix_ranges_mmap_addr_ = nullptr;
+        suffix_ranges_mmap_size_ = 0;
+        auto suffix_ranges_start = static_cast<std::streamoff>(in->tellg());
+        if (!boss_graph_->load_suffix_ranges(*in)) {
             logger->warn("No index for node ranges could be loaded");
+        } else if (void *base = utils::get_mmap_data(*in, suffix_ranges_start)) {
+            // sdsl zero-copy: when loaded from an mmap stream, the suffix-ranges
+            // data lives in the mmap region. Record its address+size so that
+            // prefetch_suffix_ranges() can warm those pages later.
+            auto suffix_ranges_end = static_cast<std::streamoff>(in->tellg());
+            suffix_ranges_mmap_addr_ = base;
+            suffix_ranges_mmap_size_
+                = static_cast<size_t>(suffix_ranges_end - suffix_ranges_start);
+        }
 
         // hint random access for query-time traversal of the loaded data
         utils::madvise_random_range(*in);
