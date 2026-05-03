@@ -42,31 +42,52 @@ node_index row_diff_successor(const graph::DeBruijnGraph &graph,
 namespace matrix {
 
 void IRowDiff::load_anchor(const std::string &filename) {
+    anchor_mmap_addr_ = nullptr;
+    anchor_mmap_size_ = 0;
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
         logger->error("Cannot open anchor file '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         std::exit(1);
     }
+    const auto anchor_start = static_cast<std::streamoff>(f->tellg());
     if (!anchor_.load(*f)) {
         logger->error("Cannot load anchor from '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         std::exit(1);
     }
+    if (void *base = utils::get_mmap_data(*f, anchor_start)) {
+        const auto anchor_end = static_cast<std::streamoff>(f->tellg());
+        anchor_mmap_addr_ = base;
+        anchor_mmap_size_ = static_cast<size_t>(anchor_end - anchor_start);
+    }
 }
 
 void IRowDiff::load_fork_succ(const std::string &filename) {
+    fork_succ_mmap_addr_ = nullptr;
+    fork_succ_mmap_size_ = 0;
     std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
         logger->error("Cannot open fork successor file '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         std::exit(1);
     }
+    const auto fork_succ_start = static_cast<std::streamoff>(f->tellg());
     if (!fork_succ_.load(*f)) {
         logger->error("Cannot load fork successor bitmap from '{}': {}", filename,
                       utils::file_read_failure_detail(filename));
         std::exit(1);
     }
+    if (void *base = utils::get_mmap_data(*f, fork_succ_start)) {
+        const auto fork_succ_end = static_cast<std::streamoff>(f->tellg());
+        fork_succ_mmap_addr_ = base;
+        fork_succ_mmap_size_ = static_cast<size_t>(fork_succ_end - fork_succ_start);
+    }
+}
+
+void IRowDiff::prefetch() const {
+    utils::madvise_willneed(anchor_mmap_addr_, anchor_mmap_size_);
+    utils::madvise_willneed(fork_succ_mmap_addr_, fork_succ_mmap_size_);
 }
 
 std::tuple<std::vector<BinaryMatrix::Row>,

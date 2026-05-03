@@ -51,6 +51,9 @@ class IRowDiff {
 
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
+    // Hint MADV_WILLNEED on mmap-backed anchor + fork_succ bitmaps (no-op if not mmap).
+    void prefetch() const;
+
   protected:
     // get row-diff paths starting at |row_ids|
     // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
@@ -70,6 +73,11 @@ class IRowDiff {
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;
+
+    void *anchor_mmap_addr_ = nullptr;
+    size_t anchor_mmap_size_ = 0;
+    void *fork_succ_mmap_addr_ = nullptr;
+    size_t fork_succ_mmap_size_ = 0;
 };
 
 /**

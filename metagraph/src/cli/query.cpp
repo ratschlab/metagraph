@@ -12,6 +12,7 @@
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -1235,6 +1236,10 @@ size_t query_fasta(const std::string &file,
         if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(graph))
             dbg_succ->prefetch_suffix_ranges();
     }
+
+    if (const auto *rd = dynamic_cast<const annot::matrix::IRowDiff *>(
+            &anno_graph.get_annotator().get_matrix()))
+        rd->prefetch();
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 
