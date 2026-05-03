@@ -109,6 +109,55 @@ TEST(ServerQueryCache, NeverEvictsEntryWithWaiters) {
 }
 
 
+TEST(ServerQueryCache, FailedWithinTtlPreservedOverDelivered) {
+    // Pass 1 should evict the DELIVERED entry before touching the FAILED
+    // entry that's still inside its retention window.
+    ServerQueryCache cache(/* max */ 100, /* failed_ttl */ 1h);
+
+    {
+        auto h_failed = cache.acquire("failed");
+        h_failed.set_result(make_result(60));
+        h_failed.mark_failed();
+    }
+    {
+        auto h_ok = cache.acquire("ok");
+        h_ok.set_result(make_result(40));
+        h_ok.mark_delivered();
+    }
+    // Both waiterless, total=100 (== max). Force a touch under pressure.
+    {
+        auto h_extra = cache.acquire("extra");
+        h_extra.set_result(make_result(40));  // 100 + 40 = 140 > 100
+        h_extra.mark_delivered();
+    }
+    EXPECT_TRUE(cache.contains("failed"));   // protected
+    EXPECT_FALSE(cache.contains("ok"));      // sacrificed first
+    EXPECT_TRUE(cache.contains("extra"));
+}
+
+
+TEST(ServerQueryCache, FailedEntriesEvictedUnderHeavyPressure) {
+    // When all waiterless entries are FAILED-within-TTL and the cache is
+    // overfull, pass 2 must still evict — otherwise the cache grows without
+    // bound.
+    ServerQueryCache cache(/* max */ 100, /* failed_ttl */ 1h);
+
+    auto store_failed = [&](const std::string &key, size_t bytes) {
+        auto h = cache.acquire(key);
+        h.set_result(make_result(bytes));
+        h.mark_failed();
+    };
+
+    store_failed("f1", 60);
+    store_failed("f2", 60);  // 60 + 60 = 120 > 100
+    // f1 was protected during f2's set_result (f2 had waiters); f1 is now
+    // the only waiterless entry, and pass 2 lets us evict it despite TTL.
+    EXPECT_FALSE(cache.contains("f1"));
+    EXPECT_TRUE(cache.contains("f2"));
+    EXPECT_LE(cache.size_bytes(), 100u);
+}
+
+
 TEST(ServerQueryCache, FailedTtlExpires) {
     ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 50ms);
 
@@ -140,6 +189,34 @@ TEST(ServerQueryCache, FailedWithinTtlIsKept) {
     auto h = cache.acquire("kept");
     EXPECT_FALSE(h.is_miss());
     EXPECT_EQ(h.get()->approx_size_bytes, 10u);
+}
+
+
+TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
+    ServerQueryCache cache(/* max */ 1ull << 20, /* failed_ttl */ 50ms);
+
+    // First delivery succeeds — entry becomes DELIVERED.
+    {
+        auto h = cache.acquire("k");
+        h.set_result(make_result(10));
+        h.mark_delivered();
+    }
+    // Second acquirer of the same entry has a delivery failure.
+    {
+        auto h = cache.acquire("k");
+        ASSERT_FALSE(h.is_miss());
+        h.mark_failed();  // must NOT downgrade DELIVERED → FAILED
+    }
+    // Wait past the (very short) failed TTL. If the sink semantics held,
+    // the entry stays. If they didn't, evict_expired_failed_locked would
+    // drop it.
+    std::this_thread::sleep_for(120ms);
+    {
+        // Trigger an eviction sweep via release_waiter.
+        auto h = cache.acquire("touch");
+        h.set_result(make_result(10));
+    }
+    EXPECT_TRUE(cache.contains("k"));
 }
 
 

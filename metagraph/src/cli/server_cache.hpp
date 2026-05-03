@@ -26,14 +26,20 @@ class Config;
  *      (in-flight dedup via std::shared_future).
  *   2. An upstream retry after a connection drop hits the cached result
  *      instead of recomputing.
- *   3. Failed deliveries (TCP error or no handshake) are kept for a 2h
- *      retry window even when the cache is otherwise under size pressure.
+ *   3. Failed deliveries (TCP error or no handshake) are retained with
+ *      higher priority than normal results for a 2h retry window, so a
+ *      flood of small successful requests can't displace responses that
+ *      an upstream is still about to retry.
  *
  * Eviction: LRU once the total approximate response size exceeds the
  * configured max. Entries with active waiters (currently being computed
- * or still being read) are never evicted. Non-DELIVERED entries get a
- * 2h TTL from the moment the result is ready; DELIVERED entries live
- * until size pressure forces eviction.
+ * or still being read) are never evicted. FAILED-delivery entries have
+ * *higher* retention priority than DELIVERED ones for `failed_ttl`
+ * (default 2h) — they are sacrificed only after every waiterless
+ * DELIVERED (and past-TTL FAILED) entry has been evicted, so a flood of
+ * tiny normal requests can't displace responses an upstream is still
+ * about to retry. Past `failed_ttl` they are evictable like any other
+ * waiterless entry.
  *
  * Cache values are the final response Json::Value. The server's
  * `verbose_output` flag is process-constant (set on startup), so the
@@ -85,9 +91,15 @@ class ServerQueryCache {
         void set_exception(std::exception_ptr eptr);
 
         // Mark the eventual delivery outcome of the response.
-        // mark_delivered() removes any TTL; mark_failed() arms the 2h TTL
-        // and (if the producer didn't already publish a result) records
-        // the moment for the TTL clock.
+        //
+        // mark_delivered() is a sink: once an entry has been successfully
+        // delivered to any client, it stays DELIVERED — a later mark_failed()
+        // on the same entry (e.g. from a duplicate request whose delivery
+        // dropped) will NOT resurrect the TTL clock.
+        //
+        // mark_failed() arms the failed-delivery TTL on the first transition
+        // out of PENDING, and (if the producer didn't already publish a
+        // result) records the moment for the TTL clock.
         void mark_delivered();
         void mark_failed();
 
@@ -117,6 +129,7 @@ class ServerQueryCache {
     size_t size_bytes() const;
     size_t entry_count() const;
     bool contains(const std::string &key) const;
+    std::chrono::nanoseconds failed_ttl() const { return failed_ttl_; }
 
   private:
     struct Entry {

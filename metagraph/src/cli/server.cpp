@@ -418,8 +418,14 @@ int run_server(Config *config) {
                 *handle_holder = search_cache.acquire(cache_key);
                 if (!handle_holder->is_miss()) {
                     auto cached = handle_holder->get();
-                    logger->info("[Server] Request {}: cache hit ({} bytes)",
-                                 request_id, cached->approx_size_bytes);
+                    if (cache_size_bytes) {
+                        logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
+                                     "(occupancy {:.1f}/{:.0f} MB, {} entries)",
+                                     request_id, cached->approx_size_bytes / 1e3,
+                                     search_cache.size_bytes() / 1e6,
+                                     cache_size_bytes / 1e6,
+                                     search_cache.entry_count());
+                    }
                     return cached->response;
                 }
 
@@ -541,15 +547,27 @@ int run_server(Config *config) {
                 ServerQueryCache::CachedResult cached;
                 cached.response = result;
                 cached.approx_size_bytes = Json::writeString(Json::StreamWriterBuilder(), result).size();
+                size_t entry_size = cached.approx_size_bytes;
                 handle_holder->set_result(std::move(cached));
+                if (cache_size_bytes) {
+                    logger->info("[Server] Request {}: cache STORE {:.1f} KB  "
+                                 "(occupancy {:.1f}/{:.0f} MB, {} entries)",
+                                 request_id, entry_size / 1e3,
+                                 search_cache.size_bytes() / 1e6,
+                                 cache_size_bytes / 1e6,
+                                 search_cache.entry_count());
+                }
                 return result;
             },
-            [handle_holder, request_id](const SimpleWeb::error_code &ec) {
+            [handle_holder, request_id, &search_cache](const SimpleWeb::error_code &ec) {
                 if (!handle_holder || !*handle_holder)
                     return;  // never acquired (e.g. early throw before acquire)
                 if (ec) {
-                    logger->info("[Server] Request {}: delivery FAILED ({}); response retained for retries",
-                                 request_id, ec.message());
+                    auto ttl_min = std::chrono::duration_cast<std::chrono::minutes>(
+                                       search_cache.failed_ttl()).count();
+                    logger->info("[Server] Request {}: delivery FAILED ({}); "
+                                 "cache entry retained for {} min retry window",
+                                 request_id, ec.message(), ttl_min);
                     handle_holder->mark_failed();
                 } else {
                     handle_holder->mark_delivered();

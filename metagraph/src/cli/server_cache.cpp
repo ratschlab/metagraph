@@ -142,11 +142,13 @@ void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
         return;  // Still has waiters.
 
     // Last waiter dropped — entry is now eligible for size-pressure / TTL
-    // eviction. We don't proactively evict here; the next acquire() that
-    // triggers pressure will reclaim space. But we do prune obviously
-    // expired FAILED entries opportunistically.
+    // eviction. Run both sweeps so the cache settles back under budget
+    // without waiting for the next insert (the just-inserted entry that
+    // pushed us over the cap might have been waiter-protected during its
+    // own insert-time eviction pass).
     std::lock_guard<std::mutex> lock(mutex_);
     evict_expired_failed_locked();
+    evict_under_pressure_locked();
 }
 
 void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
@@ -162,9 +164,26 @@ void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
 
 void ServerQueryCache::on_delivery(const std::shared_ptr<Entry> &entry,
                                    DeliveryState state) {
-    entry->delivery.store(state, std::memory_order_release);
-    if (state == DeliveryState::FAILED) {
-        // Refresh ready_at to start the 2h TTL from the failure observation
+    if (state == DeliveryState::DELIVERED) {
+        // DELIVERED is a sink state — once an entry has been successfully
+        // served to any client it stays delivered, no TTL.
+        entry->delivery.store(DeliveryState::DELIVERED, std::memory_order_release);
+        return;
+    }
+    // FAILED: do NOT downgrade an entry that has already been DELIVERED.
+    // A duplicate request's late delivery failure must not resurrect a
+    // previously-served entry's TTL clock.
+    DeliveryState current = entry->delivery.load(std::memory_order_acquire);
+    bool transitioned_to_failed = false;
+    while (current != DeliveryState::DELIVERED) {
+        if (entry->delivery.compare_exchange_weak(current, DeliveryState::FAILED,
+                                                  std::memory_order_acq_rel)) {
+            transitioned_to_failed = true;
+            break;
+        }
+    }
+    if (transitioned_to_failed) {
+        // Refresh ready_at to start the TTL from the failure observation
         // moment if we don't have one yet (set_result wasn't called).
         std::lock_guard<std::mutex> lock(mutex_);
         if (entry->ready_at.time_since_epoch().count() == 0)
@@ -181,22 +200,39 @@ void ServerQueryCache::touch_lru_locked(const std::shared_ptr<Entry> &entry) {
 }
 
 void ServerQueryCache::evict_under_pressure_locked() {
-    while (total_size_bytes_ > max_size_bytes_) {
-        // Walk LRU from oldest (back) to newest (front). Skip entries with
-        // active waiters — they're being computed or read right now.
+    auto now = std::chrono::steady_clock::now();
+    auto is_protected_failed = [&](const Entry &e) {
+        // FAILED within the retention window has *higher* priority than
+        // DELIVERED — preserve while normal entries can be sacrificed.
+        return e.delivery.load(std::memory_order_acquire) == DeliveryState::FAILED
+               && e.ready_at.time_since_epoch().count() != 0
+               && now - e.ready_at <= failed_ttl_;
+    };
+
+    auto evict_one = [&](auto pred) {
         auto rit = std::find_if(lru_.rbegin(), lru_.rend(),
-            [](const std::shared_ptr<Entry> &e) {
-                return e->waiters.load(std::memory_order_relaxed) == 0;
+            [&](const std::shared_ptr<Entry> &e) {
+                return e->waiters.load(std::memory_order_relaxed) == 0 && pred(*e);
             });
         if (rit == lru_.rend())
-            break;  // Every remaining entry has waiters; nothing else to free.
-
+            return false;
         auto &entry = *rit;
         total_size_bytes_ -= entry->approx_size_bytes;
         map_.erase(entry->key);
         entry->in_cache = false;
-        // Convert reverse iterator to forward iterator for erase.
         lru_.erase(std::next(rit).base());
+        return true;
+    };
+
+    // Pass 1: prefer DELIVERED and FAILED-past-TTL entries (the "easy"
+    // sacrifices). FAILED-within-TTL entries are protected.
+    while (total_size_bytes_ > max_size_bytes_
+            && evict_one([&](const Entry &e) { return !is_protected_failed(e); })) {
+    }
+    // Pass 2: still over budget — too many FAILED-within-TTL entries piled
+    // up. Sacrifice them in LRU order so the cache stays bounded.
+    while (total_size_bytes_ > max_size_bytes_
+            && evict_one([](const Entry &) { return true; })) {
     }
 }
 
