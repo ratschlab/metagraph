@@ -438,6 +438,30 @@ can be used when constructing a count-aware graph annotation::
     ``[warning] No k-mer counts found ...`` will be printed and ``metagraph annotate`` will proceed with the assumption that the count of each k-mer is equal to 1.
 
 
+Query k-mer presence masks
+""""""""""""""""""""""""""
+
+To retrieve a per-k-mer presence/absence mask for each matching label, use::
+
+    metagraph query --query-mode signature ...
+
+Each label in the result is followed by the number of matching k-mers and a run-length
+encoded (RLE) bitmask indicating which k-mer positions in the query are present in the
+graph under that label.
+
+**RLE format:** ``x<N>o<N>...`` where ``x`` denotes a run of *N* present k-mers and
+``o`` denotes a run of *N* absent k-mers. Trailing absent-runs are included so the total
+k-mer count equals the sum of all run lengths. For example, for an 8-k-mer query::
+
+    11100110  →  x3o2x2o1   (3 present, 2 absent, 2 present, 1 absent)
+    11111111  →  x8         (all 8 k-mers present)
+    00000000  →  o8         (no k-mers present)
+
+To get the full binary string instead of RLE, pass ``--verbose-output``::
+
+    metagraph query --query-mode signature --verbose-output ...
+
+
 Query k-mer counts
 """"""""""""""""""
 
