@@ -1233,8 +1233,10 @@ size_t query_fasta(const std::string &file,
         const DeBruijnGraph *graph = &anno_graph.get_graph();
         if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph))
             graph = &canonical->get_graph();
-        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(graph))
+        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(graph)) {
             dbg_succ->prefetch_suffix_ranges();
+            dbg_succ->prefetch_bloom_filter();
+        }
     }
 
     if (const auto *rd = dynamic_cast<const annot::matrix::IRowDiff *>(

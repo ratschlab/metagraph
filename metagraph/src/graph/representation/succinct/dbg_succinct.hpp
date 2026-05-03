@@ -178,6 +178,8 @@ class DBGSuccinct : public DeBruijnGraph {
     // No-op when the graph was not loaded with mmap or madvise is disabled.
     void prefetch_suffix_ranges() const;
 
+    void prefetch_bloom_filter() const;
+
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
     virtual const std::string& alphabet() const override final;

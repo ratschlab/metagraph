@@ -3,6 +3,7 @@
 
 #include "common/hashers/rolling_hasher.hpp"
 #include "common/bloom_filter.hpp"
+#include "common/utils/file_utils.hpp"
 
 
 namespace mtg {
@@ -53,11 +54,16 @@ class KmerBloomFilter {
 
     const BloomFilter& get_filter() const { return filter_; }
 
+    void prefetch() const;
+
   private:
     BloomFilter filter_;
     bool canonical_mode_;
     size_t k_;
     const KmerHasher hasher_;
+
+    void *bloom_mmap_addr_ = nullptr;
+    size_t bloom_mmap_size_ = 0;
 };
 
 

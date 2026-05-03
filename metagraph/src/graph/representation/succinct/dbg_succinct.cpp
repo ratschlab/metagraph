@@ -691,6 +691,11 @@ void DBGSuccinct::prefetch_suffix_ranges() const {
     utils::madvise_willneed(suffix_ranges_mmap_addr_, suffix_ranges_mmap_size_);
 }
 
+void DBGSuccinct::prefetch_bloom_filter() const {
+    if (bloom_filter_)
+        bloom_filter_->prefetch();
+}
+
 bool DBGSuccinct::load_without_mask(const std::string &filename) {
     // release the old mask
     valid_edges_.reset();

@@ -195,18 +195,34 @@ void KmerBloomFilter<KmerHasher>
 template <class KmerHasher>
 bool KmerBloomFilter<KmerHasher>
 ::load(std::istream &in) {
+    bloom_mmap_addr_ = nullptr;
+    bloom_mmap_size_ = 0;
     if (!in.good())
         return false;
 
     try {
+        const auto bloom_start = static_cast<std::streamoff>(in.tellg());
         k_ = load_number(in);
         canonical_mode_ = load_number(in);
         const_cast<KmerHasher&>(hasher_) = KmerHasher(k_);
 
-        return filter_.load(in);
+        if (!filter_.load(in))
+            return false;
+
+        if (void *base = utils::get_mmap_data(in, bloom_start)) {
+            const auto bloom_end = static_cast<std::streamoff>(in.tellg());
+            bloom_mmap_addr_ = base;
+            bloom_mmap_size_ = static_cast<size_t>(bloom_end - bloom_start);
+        }
+        return true;
     } catch (...) {
         return false;
     }
+}
+
+template <class KmerHasher>
+void KmerBloomFilter<KmerHasher>::prefetch() const {
+    utils::madvise_willneed(bloom_mmap_addr_, bloom_mmap_size_);
 }
 
 template class KmerBloomFilter<>;

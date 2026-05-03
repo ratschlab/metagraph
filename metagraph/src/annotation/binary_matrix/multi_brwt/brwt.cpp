@@ -2,11 +2,13 @@
 
 #include <queue>
 #include <numeric>
+#include <unistd.h>
 
 #include <progress_bar.hpp>
 
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
 
@@ -202,6 +204,8 @@ using NonzeroAndChildRows = std::pair<std::vector<size_t>, std::vector<BRWT::Row
 NonzeroAndChildRows BRWT::get_nonzero_rows(const std::vector<Row>& row_ids,
                                            ThreadPool* thread_pool,
                                            bool adaptive_chunk_size) const {
+    prefetch_if_dense(row_ids.size());
+
     std::vector<size_t> nonzero_indices;
     std::vector<Row> child_row_ids;
     nonzero_indices.reserve(row_ids.size());
@@ -468,16 +472,44 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     return rows;
 }
 
+void BRWT::prefetch_if_dense(size_t num_queries) const {
+    if (!utils::with_madvise() || !nonzero_rows_mmap_addr_ || !nonzero_rows_mmap_size_)
+        return;
+    const long psz_l = sysconf(_SC_PAGESIZE);
+    if (psz_l <= 0 || num_queries == 0)
+        return;
+    const size_t pagesize = static_cast<size_t>(psz_l);
+    if (num_queries > SIZE_MAX / pagesize)
+        return;
+    const size_t q_span = num_queries * pagesize;
+    constexpr unsigned ALPHA_NUM = 1;
+    constexpr unsigned ALPHA_DEN = 10;
+    if (q_span > SIZE_MAX / ALPHA_DEN)
+        return;
+    if (q_span * ALPHA_DEN < nonzero_rows_mmap_size_ * ALPHA_NUM)
+        return;
+    utils::madvise_willneed(nonzero_rows_mmap_addr_, nonzero_rows_mmap_size_);
+}
+
 bool BRWT::load(std::istream &in) {
     if (!in.good())
         return false;
 
     try {
+        nonzero_rows_mmap_addr_ = nullptr;
+        nonzero_rows_mmap_size_ = 0;
+
         if (!assignments_.load(in))
             return false;
 
+        const auto nonzero_start = static_cast<std::streamoff>(in.tellg());
         if (!nonzero_rows_->load(in))
             return false;
+        if (void *base = utils::get_mmap_data(in, nonzero_start)) {
+            const auto nonzero_end = static_cast<std::streamoff>(in.tellg());
+            nonzero_rows_mmap_addr_ = base;
+            nonzero_rows_mmap_size_ = static_cast<size_t>(nonzero_end - nonzero_start);
+        }
 
         size_t num_child_nodes = load_number(in);
         child_nodes_.clear();
