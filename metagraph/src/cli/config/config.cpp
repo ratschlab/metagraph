@@ -1343,7 +1343,10 @@ if (advanced) {
             fprintf(stderr, "\t       Available modes:\n");
             fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
             fprintf(stderr, "\t                %s \tprint labels and the number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
-            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
+            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers\n", querymode_to_string(SIGNATURE).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: run-length encoding 'x<N>o<N>...' where x=present, o=absent\n"
+                            "\t                \t\t\t\t    e.g. 'x3o2x2o1' for bitmask '11100110'\n"
+                            "\t                \t\t\t\tWith --verbose-output: full binary string, e.g. '11100110'\n");
 if (advanced) {
             fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
 }
@@ -1356,7 +1359,7 @@ if (advanced) {
                             "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                \t\t\t\tAll positions start with 0\n");
 if (advanced) {
-            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
+            fprintf(stderr, "\t   --verbose-output \t\tfor coords/counts: do not collapse ranges; for signature: print full mask instead of RLE [off]\n");
 }
             fprintf(stderr, "\t   --num-top-labels [INT] \t\tmaximum number of top labels to output [inf]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");

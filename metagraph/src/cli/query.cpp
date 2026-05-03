@@ -124,6 +124,24 @@ Json::Value adjust_for_types(const std::string &v) {
 }
 
 
+// Encode a k-mer presence bitmask as alternating x<len>o<len>... runs
+// (x = ones, o = zeros). Trailing zeros are included so the total length
+// is recoverable as the sum of all run lengths.
+// Example: 11100110 → x3o2x2o1
+std::string encode_presence_mask(const sdsl::bit_vector &mask) {
+    std::string result;
+    size_t pos = 0;
+    while (pos < mask.size()) {
+        bool bit = mask[pos];
+        size_t run_start = pos;
+        while (pos < mask.size() && (bool)mask[pos] == bit) ++pos;
+        result += (bit ? 'x' : 'o');
+        result += std::to_string(pos - run_start);
+    }
+    return result;
+}
+
+
 /**
  * Given a label string in the format '<sample_name>(;<property_name>=<property_value>)*'
  * return a JSON representation of the label with its properties.
@@ -206,7 +224,9 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             // Store the presence mask and score in a separate object
             Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
-            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
+            sig_obj["presence_mask"] = Json::Value(verbose_output
+                ? sdsl::util::to_string(kmer_presence_mask)
+                : encode_presence_mask(kmer_presence_mask));
             sig_obj["score"] = Json::Value(align::score_kmer_presence_mask(k, kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
@@ -306,7 +326,8 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         for (const auto &[label, count, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   count,
-                                  sdsl::util::to_string(kmer_presence_mask),
+                                  verbose_output ? sdsl::util::to_string(kmer_presence_mask)
+                                                 : encode_presence_mask(kmer_presence_mask),
                                   align::score_kmer_presence_mask(k, kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
@@ -1128,16 +1149,12 @@ int query_graph(Config *config) {
         auto query_callback = [config, k](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
-                ss << result.to_json(config->verbose_output
-                                         || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                     k) << "\n";
+                ss << result.to_json(config->verbose_output, k) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
-                                              config->verbose_output
-                                                || !(config->query_mode == COUNTS || config->query_mode == COORDS),
-                                              k) + "\n";
+                                              config->verbose_output, k) + "\n";
             }
         };
         size_t num_bp = query_fasta(file, query_callback, *config, *anno_graph, aligner_config.get());

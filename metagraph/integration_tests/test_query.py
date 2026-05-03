@@ -1402,18 +1402,24 @@ class TestCoordToHeader(TestingBase):
         test_stdout('--num-top-labels 3', {'0', 'query1', '<seq2>:37', '<seq3>:12', '<seq1>:10'}, mode='counts-sum')
 
         test_stdout('--num-top-labels 1',
-            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+            '0\tquery1\t<seq2>:13:x13:17', mode='signature')
         test_stdout('--min-kmers-fraction-label 0.5',
-            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+            {'0', 'query1', '<seq2>:13:x13:17', '<seq3>:12:o1x12:16', '<seq1>:10:x4o1x3o1x3o1:15'}, mode='signature')
         test_stdout('--min-kmers-fraction-label 1.0',
-            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+            '0\tquery1\t<seq2>:13:x13:17', mode='signature')
         test_stdout('--min-kmers-fraction-graph 1.0',
-            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+            {'0', 'query1', '<seq2>:13:x13:17', '<seq3>:12:o1x12:16', '<seq1>:10:x4o1x3o1x3o1:15'}, mode='signature')
         test_stdout('',
-            {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
+            {'0', 'query1', '<seq2>:13:x13:17', '<seq3>:12:o1x12:16', '<seq1>:10:x4o1x3o1x3o1:15'}, mode='signature')
         test_stdout('--num-top-labels 2',
-            '0\tquery1\t<seq2>:13:1111111111111:17\t<seq3>:12:0111111111111:16', mode='signature')
+            '0\tquery1\t<seq2>:13:x13:17\t<seq3>:12:o1x12:16', mode='signature')
         test_stdout('--num-top-labels 3',
+            {'0', 'query1', '<seq2>:13:x13:17', '<seq3>:12:o1x12:16', '<seq1>:10:x4o1x3o1x3o1:15'}, mode='signature')
+
+        # --verbose-output switches the presence mask back to the full binary string
+        test_stdout('--num-top-labels 1 --verbose-output',
+            '0\tquery1\t<seq2>:13:1111111111111:17', mode='signature')
+        test_stdout('--min-kmers-fraction-label 0.5 --verbose-output',
             {'0', 'query1', '<seq2>:13:1111111111111:17', '<seq3>:12:0111111111111:16', '<seq1>:10:1111011101110:15'}, mode='signature')
 
     @parameterized.expand(['labels', 'matches', 'counts', 'counts-sum', 'coords', 'signature'])
