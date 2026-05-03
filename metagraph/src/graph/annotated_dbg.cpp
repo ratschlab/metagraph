@@ -1,6 +1,5 @@
 #include "annotated_dbg.hpp"
 
-#include <array>
 #include <cstdlib>
 
 #include <tsl/hopscotch_set.h>
@@ -13,9 +12,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/algorithms.hpp"
-#include "common/aligned_vector.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
 

@@ -126,7 +126,7 @@ class SeqSearchResult {
      * Returns a Json object representing the individual query result for the
      * represented sequence.
      *
-     * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
+     * @param verbose_output    do not collapse continuous ranges of coords (or counts)
      * @param k                 k-mer length for kmer presence mask scoring
      * @return  Json::Value instance representing sequence result
      */
@@ -165,7 +165,7 @@ enum QueryMode {
 };
 
 /**
- * Query sequences from a FASTA files.
+ * Query sequences from a FASTA file.
  *
  * Provide a callback which receives a reference to a SeqSearchResult instance which the
  * callback function should use as desired (typically generate a string/JSON output).

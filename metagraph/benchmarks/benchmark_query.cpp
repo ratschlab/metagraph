@@ -17,6 +17,9 @@
 
 
 namespace mtg::cli {
+// Forward-declared because construct_query_graph is no longer in the public
+// header; the benchmark links against it directly. Takes a getter so the
+// annotation can be loaded asynchronously while the graph is being mapped.
 std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::DeBruijnGraph &full_dbg,
                       const std::function<const graph::AnnotatedDBG::Annotator *()> &get_annotation,
@@ -24,6 +27,7 @@ construct_query_graph(const graph::DeBruijnGraph &full_dbg,
                       size_t num_threads,
                       const Config &config);
 } // namespace mtg::cli
+
 
 namespace {
 
