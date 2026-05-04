@@ -660,6 +660,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
         self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
+        self.assertTrue(df['kmer_abundances'].map(lambda x: isinstance(x, str)).all())
 
     def test_api_simple_query_coords_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
@@ -669,6 +670,7 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
         self.assertEqual(df['kmer_coords'].size, self.sample_query_expected_rows)
+        self.assertTrue(df['kmer_coords'].map(lambda x: isinstance(x, str)).all())
 
 
 # No canonical mode for Protein alphabets
@@ -718,6 +720,7 @@ class TestAPIClientWithCounts(TestAPIBase):
         self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
         self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
+        self.assertTrue(df['kmer_abundances'].map(lambda x: isinstance(x, str)).all())
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):

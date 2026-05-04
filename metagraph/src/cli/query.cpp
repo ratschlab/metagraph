@@ -237,12 +237,10 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
             assert(abundances.size());
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
-            Json::Value &counts_array = (label_obj[KMER_ABUNDANCE_FIELD] = Json::arrayValue);
             if (verbose_output) {
-                for (size_t c : abundances) {
-                    counts_array.append(static_cast<Json::Int64>(c));
-                }
+                label_obj[KMER_ABUNDANCE_FIELD] = fmt::format("{}", fmt::join(abundances, ":"));
             } else {
+                std::vector<std::string> run_strings;
                 std::pair<size_t, size_t> last(0, abundances.at(0));
                 for (size_t i = 1; i <= abundances.size(); ++i) {
                     if (i < abundances.size() && abundances[i] == last.second)
@@ -251,9 +249,10 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
                     // end of run
                     if (last.second) {
                         if (i == last.first + 1) {
-                            counts_array.append(fmt::format("{}={}", last.first, last.second));
+                            run_strings.push_back(fmt::format("{}={}", last.first, last.second));
                         } else {
-                            counts_array.append(fmt::format("{}-{}={}", last.first, i - 1, last.second));
+                            run_strings.push_back(
+                                fmt::format("{}-{}={}", last.first, i - 1, last.second));
                         }
                     }
 
@@ -263,6 +262,8 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
                         last.second = abundances[i];
                     }
                 }
+                label_obj[KMER_ABUNDANCE_FIELD]
+                    = fmt::format("{}", fmt::join(run_strings, ":"));
             }
         }
     } else {
@@ -270,17 +271,17 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
         for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
-            Json::Value &coord_array = (label_obj[KMER_COORDINATE_FIELD] = Json::arrayValue);
-
-            // Each tuple is represented as a folly::SmallVector<uint64_t> instance
             if (verbose_output) {
+                std::vector<std::string> segments;
+                segments.reserve(tuples.size());
                 for (const auto &coords : tuples) {
-                    coord_array.append(fmt::format("{}", fmt::join(coords, ",")));
+                    segments.push_back(fmt::format("{}", fmt::join(coords, ",")));
                 }
+                label_obj[KMER_COORDINATE_FIELD]
+                    = fmt::format("{}", fmt::join(segments, ":"));
             } else {
-                for (const auto &range : collapse_coord_ranges(tuples)) {
-                    coord_array.append(range);
-                }
+                label_obj[KMER_COORDINATE_FIELD]
+                    = fmt::format("{}", fmt::join(collapse_coord_ranges(tuples), ":"));
             }
         }
     }
