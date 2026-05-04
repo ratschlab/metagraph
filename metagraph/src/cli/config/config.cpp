@@ -407,8 +407,8 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
-        // } else if (!strcmp(argv[i], "--cache-size")) {
-        //     row_cache_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--cache-size")) {
+            server_cache_size = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);
@@ -1435,7 +1435,7 @@ if (advanced) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
-            // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+            fprintf(stderr, "\t   --cache-size [GB] \tmax size of the /search result cache, in GB (0 disables) [1]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seq index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
