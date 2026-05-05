@@ -1,7 +1,11 @@
 import argparse
+import difflib
 import importlib
 import logging
+import os
+import re
 import shlex
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -29,7 +33,119 @@ COUNT_COMPATIBLE_FORMATS = {
     AnnotationFormats.ROW_DIFF_INT_DISK,
 }
 
-# TODO: use custom config object? fluent config?
+
+def _parse_annotation_format_value(value: str) -> AnnotationFormats:
+    try:
+        return AnnotationFormats(value)
+    except ValueError:
+        valid_values = [v.value for v in AnnotationFormats]
+        suggestion = difflib.get_close_matches(value, valid_values, n=1)
+        suggestion_msg = f" Did you mean '{suggestion[0]}'?" if suggestion else ""
+        raise ValueError(
+            f"Unsupported annotation format '{value}'. "
+            f"Valid values: {', '.join(valid_values)}.{suggestion_msg}"
+        )
+
+
+def _format_error(text: str) -> str:
+    if sys.stderr.isatty():
+        return f"\033[31mError: {text}\033[0m"
+    return f"Error: {text}"
+
+
+def _validate_metagraph_cmd(cmd: str) -> None:
+    cmd_parts = shlex.split(cmd)
+    if not cmd_parts:
+        raise ValueError("--metagraph-cmd is empty. Provide a valid executable path or command name.")
+
+    executable = cmd_parts[0]
+    if "/" in executable:
+        exe_path = Path(executable).expanduser()
+        if not exe_path.exists():
+            raise ValueError(
+                f"MetaGraph executable not found at '{executable}'. "
+                "Provide a valid path via --metagraph-cmd or add 'metagraph' to PATH."
+            )
+        if not exe_path.is_file() or not os.access(exe_path, os.X_OK):
+            raise ValueError(
+                f"MetaGraph executable '{executable}' is not executable. "
+                "Fix permissions or use --metagraph-cmd with a valid executable."
+            )
+    else:
+        if shutil.which(executable) is None:
+            raise ValueError(
+                f"MetaGraph executable '{executable}' was not found in PATH. "
+                "Use --metagraph-cmd with an absolute path or add it to PATH."
+            )
+
+
+def _extract_first_relevant_error_line(log_text: str) -> Optional[str]:
+    for line in reversed(log_text.splitlines()):
+        s = line.strip()
+        if not s:
+            continue
+        if "failed_to_exec=" in s or "command not found" in s or "No such file or directory" in s:
+            return s
+        if "[error]" in s.lower():
+            return s
+    return None
+
+
+def _summarize_snakemake_failure(output_dir: Path) -> str:
+    stage_logs_dir = Path(output_dir) / "logs"
+    stage_log = None
+    if stage_logs_dir.exists():
+        candidates = sorted(stage_logs_dir.rglob("*.log"), key=lambda p: p.stat().st_mtime)
+        if candidates:
+            stage_log = candidates[-1]
+    details = []
+    if stage_log and stage_log.exists():
+        try:
+            stage_text = stage_log.read_text(errors='replace')
+            root_line = _extract_first_relevant_error_line(stage_text)
+            if root_line:
+                details.append(f"Root cause: {root_line}")
+            details.append(f"Failing stage log: {stage_log}")
+        except OSError:
+            pass
+
+    details.append(f"Stage logs: {Path(output_dir) / 'logs'}")
+    details.append("Snakemake logs: .snakemake/log/")
+    return "Workflow execution failed.\n" + "\n".join(details)
+
+
+def _extract_failing_stage_log(cli_output: str) -> Optional[Path]:
+    # Snakemake typically prints:
+    #   log: <path> (check log file(s) for error details)
+    matches = re.findall(r"log:\s+(\S+)\s+\(check log file\(s\) for error details\)", cli_output)
+    if matches:
+        return Path(matches[-1])
+    return None
+
+
+def _summarize_snakemake_failure_from_output(output_dir: Path, cli_output: str) -> str:
+    stage_log = _extract_failing_stage_log(cli_output)
+    if stage_log is None:
+        return _summarize_snakemake_failure(output_dir)
+
+    details = []
+    if stage_log.exists():
+        try:
+            stage_text = stage_log.read_text(errors='replace')
+            root_line = _extract_first_relevant_error_line(stage_text)
+            if root_line:
+                details.append(f"Root cause: {root_line}")
+            details.append(f"Failing stage log: {stage_log}")
+        except OSError:
+            pass
+    else:
+        details.append(f"Failing stage log: {stage_log}")
+
+    details.append(f"Stage logs: {Path(output_dir) / 'logs'}")
+    details.append("Snakemake logs: .snakemake/log/")
+    return "Workflow execution failed.\n" + "\n".join(details)
+
+
 def run_build_workflow(
         output_dir: Path,
         seqs_file_list_path: Optional[Path] = None,
@@ -99,6 +215,7 @@ def run_build_workflow(
         config['count_width'] = count_width
 
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
+    _validate_metagraph_cmd(config['metagraph_cmd'])
     config['max_threads'] = threads if threads else snakemake.utils.available_cpu_count()
 
     if verbose:
@@ -141,10 +258,23 @@ def run_build_workflow(
             cmd.extend([f'--{key}', str(value)])
 
     # Run snakemake
+    # Keep stdout/stderr attached so Snakemake preserves colors and rich formatting.
     result = subprocess.run([' '.join(cmd)], shell=True)
 
     if result.returncode != 0:
-        raise RuntimeError(f"The snakemake workflow did not terminate correctly")
+        snakemake_log_dir = Path(".snakemake/log")
+        latest_snakemake_log = None
+        if snakemake_log_dir.exists():
+            logs = sorted(snakemake_log_dir.glob("*.snakemake.log"), key=lambda p: p.stat().st_mtime)
+            if logs:
+                latest_snakemake_log = logs[-1]
+        if latest_snakemake_log and latest_snakemake_log.exists():
+            try:
+                cli_output = latest_snakemake_log.read_text(errors='replace')
+                raise RuntimeError(_summarize_snakemake_failure_from_output(Path(output_dir), cli_output))
+            except OSError:
+                pass
+        raise RuntimeError(_summarize_snakemake_failure(Path(output_dir)))
 
 
 def setup_build_parser(parser):
@@ -232,7 +362,7 @@ def init_build(args):
         k=args.k,
         base_name=args.base_name,
         build_primary_graph=args.build_primary_graph,
-        annotation_formats=[AnnotationFormats(af) for af in args.annotation_format],
+        annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
         annotation_labels_source=args.annotation_labels_source,
         with_counts=args.with_counts,
         count_width=args.count_width,
@@ -256,10 +386,14 @@ def main(args=tuple(sys.argv[1:])):
 
     parsed_arguments = parser.parse_args(args)
 
-    if parsed_arguments.func:
-        parsed_arguments.func(parsed_arguments)
-    else:
-        sys.exit("Unknown function call")
+    try:
+        if parsed_arguments.func:
+            parsed_arguments.func(parsed_arguments)
+        else:
+            sys.exit("Unknown function call")
+    except (ValueError, RuntimeError) as e:
+        print(_format_error(str(e)), file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

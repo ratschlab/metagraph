@@ -1,12 +1,13 @@
 import itertools
 import logging
+import os
 import re
-import subprocess
+import shlex
 from pathlib import Path
 from typing import Union
 
 from metagraph_workflows import workflow_configs, utils
-from metagraph_workflows.workflow_configs import GNU_TIME_CMD, TMP_DIR, \
+from metagraph_workflows.workflow_configs import TMP_DIR, \
     RULE_CONFIGS_KEY, SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
 logger = logging.getLogger("metagraph_workflow")
@@ -112,22 +113,16 @@ def get_wdir(config):
     return Path(config['output_directory'])
 
 
+def get_time_wrapper_command(config):
+    """Return a portable Python timing wrapper command."""
+    del config
+    module_call = [shlex.quote(os.environ.get("PYTHON", "python")), "-m", "metagraph_workflows.time_wrapper"]
+    return " ".join(module_call)
+
+
 def get_gnu_time_command(config):
-    EMTPY_CMD = ''
-    cmd = config.get(GNU_TIME_CMD, EMTPY_CMD)
-
-    if cmd:
-        test_cmd=[cmd, '--version']
-        proc = subprocess.run(test_cmd, capture_output=True)
-        if proc.returncode == 0:
-            return f"{cmd} --verbose"
-        else:
-            logger.warning(f"Command {' '.join(test_cmd)} for GNU time could not be executed successfully: {proc.stderr}."
-                           f" No timing information collected")
-    else:
-        logger.warning("No GNU Time command provided.")
-
-    return EMTPY_CMD
+    """Backward-compatible alias for old Snakefiles."""
+    return get_time_wrapper_command(config)
 
 
 def get_log_path(rule_name, config, wildcards=None):

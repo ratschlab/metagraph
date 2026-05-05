@@ -150,6 +150,32 @@ def test_build_help_mentions_defaults():
     assert "row_diff_int_brwt" in out
 
 
+def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--metagraph-cmd', 'definitely_missing_metagraph_binary_12345',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "was not found in PATH" in proc.stdout.decode()
+
+
+def test_invalid_annotation_format_shows_suggestion(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--annotation-format', 'row_diff_int_brwt1',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    out = proc.stdout.decode()
+    assert "Unsupported annotation format 'row_diff_int_brwt1'" in out
+    assert "Did you mean 'row_diff_int_brwt'" in out
+
+
 @pytest.mark.parametrize("count_width", [2, 12, 32])
 def test_count_width_is_propagated_to_count_build_steps(sample_list_path, output_dir, count_width):
     proc = run_wrapper([
