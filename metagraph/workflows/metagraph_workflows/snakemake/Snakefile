@@ -229,7 +229,7 @@ rule transform_rd_stage0:
         dbg_graph=graph_path,
         columns_file=columns_file,
     output:
-        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+        columns_rd_row_count=temp(rd_cols_dir/'vector.row_count')
     threads: max_threads
     resources:
         mem_mb=TransformRdStage0Resources(config).get_mem()
@@ -259,19 +259,20 @@ rule transform_rd_stage1:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
-        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+        columns_rd_row_count=rules.transform_rd_stage0.output.columns_rd_row_count
     output:
-        pred=wdir / f'{graph}.dbg.pred',
-        pred_boundary=wdir / f'{graph}.dbg.pred_boundary',
+        pred=temp(wdir / f'{graph}.dbg.pred'),
+        pred_boundary=temp(wdir / f'{graph}.dbg.pred_boundary'),
+        succ=temp(wdir / f'{graph}.dbg.succ'),
+        succ_boundary=temp(wdir / f'{graph}.dbg.succ_boundary'),
         rd_succ=wdir / f'{graph}.dbg.rd_succ',
-        succ=wdir / f'{graph}.dbg.succ',
-        succ_boundary=wdir / f'{graph}.dbg.succ_boundary',
-        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+        stage1_done=touch(rd_cols_dir / 'stage1.DONE')
     threads: max_threads
     resources:
         mem_mb=TransformRdStage1Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage1Resources(config).get_mem_buffer_gib(),
+        rd_cols_dir=rd_cols_dir,
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
@@ -285,7 +286,7 @@ rule transform_rd_stage1:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.cols_rd_vectors} {params.tempdir_opt} > {log} 2>&1
+            -o {params.rd_cols_dir}/out {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -294,7 +295,11 @@ rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
-        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+        pred=rules.transform_rd_stage1.output.pred,
+        pred_boundary=rules.transform_rd_stage1.output.pred_boundary,
+        succ=rules.transform_rd_stage1.output.succ,
+        succ_boundary=rules.transform_rd_stage1.output.succ_boundary,
+        stage1_done=rules.transform_rd_stage1.output.stage1_done
     output:
         anchors=wdir/f'{graph}.dbg.anchors',
         rd_cols_done=touch(rd_cols_dir/DONE)
@@ -323,12 +328,13 @@ rule transform_rd_stage2:
 ANNOTATE_ROW_DIFF_BRWT_RULE="annotate_row_diff_brwt"
 rule annotate_row_diff_brwt:
     input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
         anchors=rules.transform_rd_stage2.output.anchors,
         rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
         dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
-        linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
+        linkage=temp(wdir / f'{graph}.row_diff_brwt.annodbg.linkage'),
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
@@ -381,6 +387,7 @@ rule annotate_row_diff_int_brwt:
         dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_int_brwt.annodbg',
+        linkage=temp(wdir/f'{graph}.row_diff_int_brwt.annodbg.linkage')
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config).get_mem(),
@@ -432,6 +439,7 @@ rule annotate_row_diff_brwt_coord:
         dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_brwt_coord.annodbg',
+        linkage=temp(wdir/f'{graph}.row_diff_brwt_coord.annodbg.linkage')
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config).get_mem(),

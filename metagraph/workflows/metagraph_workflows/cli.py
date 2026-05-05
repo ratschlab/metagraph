@@ -8,6 +8,7 @@ import shlex
 import shutil
 import sys
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterable, Optional, Dict, Any
 
@@ -40,6 +41,171 @@ COORD_COMPATIBLE_FORMATS = {
 }
 
 
+def _format_bytes(size_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    val = float(size_bytes)
+    for unit in units:
+        if val < 1024 or unit == units[-1]:
+            return f"{val:.1f}{unit}"
+        val /= 1024.0
+    return f"{size_bytes}B"
+
+
+def _format_seconds_human(value: str) -> str:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return "-"
+
+    if seconds < 1.0:
+        return f"{int(round(seconds * 1000))}ms"
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    mins, secs = divmod(seconds, 60.0)
+    if mins < 60:
+        return f"{int(mins)}m {int(round(secs))}s"
+    hours, mins = divmod(mins, 60.0)
+    return f"{int(hours)}h {int(mins)}m {int(round(secs))}s"
+
+
+def _parse_timing_line(line: str) -> Optional[Dict[str, str]]:
+    if "[timing]" not in line:
+        return None
+    parts = {}
+    for token in line.strip().split():
+        if "=" in token:
+            k, v = token.split("=", 1)
+            parts[k] = v
+    return parts if parts else None
+
+
+def _collect_stage_summaries(output_dir: Path) -> Iterable[Dict[str, str]]:
+    logs_root = output_dir / "logs"
+    if not logs_root.exists():
+        return []
+
+    rows = []
+    for log_path in logs_root.rglob("*.log"):
+        try:
+            text = log_path.read_text(errors='replace')
+        except OSError:
+            continue
+        timing = None
+        for line in reversed(text.splitlines()):
+            parsed = _parse_timing_line(line)
+            if parsed:
+                timing = parsed
+                break
+        if not timing:
+            continue
+
+        stage_name = str(log_path.relative_to(logs_root)).replace(".log", "")
+        rss_kb = timing.get("max_rss_kb", "-")
+        try:
+            rss_gb = f"{(float(rss_kb) / (1024.0 * 1024.0)):.3f}"
+        except (TypeError, ValueError):
+            rss_gb = "-"
+        rows.append({
+            "stage": stage_name,
+            "wall": _format_seconds_human(timing.get("wall_sec", "-")),
+            "user": _format_seconds_human(timing.get("user_sec", "-")),
+            "sys": _format_seconds_human(timing.get("sys_sec", "-")),
+            "rss": rss_gb,
+            "_mtime": str(log_path.stat().st_mtime),
+        })
+    rows.sort(key=lambda r: float(r.get("_mtime", "0")))
+    for r in rows:
+        r.pop("_mtime", None)
+    return rows
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    for p in path.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _print_run_summary(output_dir: Path, dryrun: bool) -> None:
+    print("\n=== Workflow summary ===")
+    if dryrun:
+        print("Mode: dry-run (no commands executed, no runtime metrics).")
+        return
+
+    rows = list(_collect_stage_summaries(output_dir))
+    if rows:
+        print("1) Executed steps (timing + memory):")
+        idx_w = max(2, len(str(len(rows))))
+        stage_w = max(12, min(56, max(len(r["stage"]) for r in rows)))
+        header = (
+            f"   {'#':>{idx_w}}  "
+            f"{'stage':<{stage_w}}  "
+            f"{'wall':>8}  {'user':>8}  {'sys':>8}  {'rss_gb':>8}"
+        )
+        print(header)
+        print("   " + "-" * (len(header) - 3))
+        for i, r in enumerate(rows, start=1):
+            print(
+                f"   {i:>{idx_w}}  "
+                f"{r['stage']:<{stage_w}}  "
+                f"{r['wall']:>8}  {r['user']:>8}  {r['sys']:>8}  {r['rss']:>8}"
+            )
+    else:
+        print("1) Executed steps: unavailable (no timing entries found).")
+
+    def _is_final_artifact(path: Path) -> bool:
+        name = path.name
+        return name == "graph.dbg" or (name.startswith("graph") and name.endswith(".annodbg"))
+
+    total_size = _directory_size(output_dir)
+    final_artifacts = []
+    intermediate_artifacts = []
+    for p in output_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        if "/logs/" in str(p):
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        rel = p.relative_to(output_dir)
+        if _is_final_artifact(p):
+            final_artifacts.append((rel, size))
+        else:
+            intermediate_artifacts.append((rel, size))
+
+    final_total = sum(sz for _, sz in final_artifacts)
+    intermediate_total = sum(sz for _, sz in intermediate_artifacts)
+    final_artifacts.sort(key=lambda x: x[1], reverse=True)
+    intermediate_artifacts.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"2) Output directory: {output_dir}")
+    print(f"3) Total output size: {_format_bytes(total_size)}")
+    print(f"4) Final artifacts total: {_format_bytes(final_total)}")
+    for rel, sz in final_artifacts:
+        print(f"   - {_format_bytes(sz):>8}  {rel}")
+    print(f"5) Intermediate artifacts total: {_format_bytes(intermediate_total)}")
+
+    if intermediate_artifacts:
+        print("6) Largest intermediate artifacts:")
+        top = intermediate_artifacts[:10]
+        idx_w = max(2, len(str(len(top))))
+        size_vals = [_format_bytes(sz) for _, sz in top]
+        size_w = max(8, max(len(s) for s in size_vals))
+        print(f"   {'#':>{idx_w}}  {'size':>{size_w}}  path")
+        print("   " + "-" * (idx_w + size_w + 8 + 20))
+        for i, ((rel, _), size_s) in enumerate(zip(top, size_vals), start=1):
+            rel_str = str(rel)
+            if sys.stdout.isatty():
+                rel_str = f"\033[90m{rel_str}\033[0m"
+            print(f"   {i:>{idx_w}}  {size_s:>{size_w}}  {rel_str}")
+
+
 def _parse_annotation_format_value(value: str) -> AnnotationFormats:
     try:
         return AnnotationFormats(value)
@@ -55,7 +221,29 @@ def _parse_annotation_format_value(value: str) -> AnnotationFormats:
 
 def _format_error(text: str) -> str:
     if sys.stderr.isatty():
-        return f"\033[31mError: {text}\033[0m"
+        red = "\033[31m"
+        pink = "\033[95m"
+        reset = "\033[0m"
+        lines = text.splitlines() or [text]
+
+        rendered = [f"{red}Error: {lines[0]}{reset}"]
+        in_metagraph = False
+        for line in lines[1:]:
+            stripped = line.strip()
+            if stripped == "metagraph output:":
+                in_metagraph = True
+                rendered.append(f"{red}{line}{reset}")
+                continue
+            if in_metagraph and stripped.startswith("[timing]"):
+                in_metagraph = False
+                rendered.append(f"{red}{line}{reset}")
+                continue
+            if in_metagraph:
+                rendered.append(f"{pink}{line}{reset}")
+            else:
+                rendered.append(f"{red}{line}{reset}")
+
+        return "\n".join(rendered)
     return f"Error: {text}"
 
 
@@ -86,66 +274,178 @@ def _validate_metagraph_cmd(cmd: str) -> None:
 
 
 def _extract_first_relevant_error_line(log_text: str) -> Optional[str]:
-    for line in reversed(log_text.splitlines()):
+    lines = log_text.splitlines()
+    for line in lines:
         s = line.strip()
         if not s:
             continue
-        if "failed_to_exec=" in s or "command not found" in s or "No such file or directory" in s:
+        lowered = s.lower()
+        if lowered.startswith("usage:") or "unrecognized option" in lowered or "unknown option" in lowered \
+                or lowered.startswith("error:") or "[error]" in lowered:
             return s
-        if "[error]" in s.lower():
+    for line in reversed(lines):
+        s = line.strip()
+        if not s:
+            continue
+        lowered = s.lower()
+        if "failed_to_exec=" in s or "command not found" in lowered or "no such file or directory" in lowered:
+            return s
+        if "[error]" in lowered or lowered.startswith("error:") or "invalid argument" in lowered:
+            return s
+    # Fallback: show last meaningful non-timing line to avoid empty/opaque summaries.
+    for line in reversed(lines):
+        s = line.strip()
+        if not s:
+            continue
+        lowered = s.lower()
+        if s.startswith("[timing]") or "[trace]" in lowered or "[debug]" in lowered or "[info]" in lowered:
+            continue
+        if "\t" in s and "%" in s:
+            continue
+        return s
+    return None
+
+
+def _latest_snakemake_log_for_run(run_started_at: float) -> Optional[Path]:
+    snakemake_log_dir = Path(".snakemake/log")
+    if not snakemake_log_dir.exists():
+        return None
+    candidates = [p for p in snakemake_log_dir.glob("*.snakemake.log") if p.is_file()]
+    current_run = [p for p in candidates if p.stat().st_mtime >= run_started_at - 1.0]
+    pool = current_run if current_run else candidates
+    if not pool:
+        return None
+    return max(pool, key=lambda p: p.stat().st_mtime)
+
+
+def _extract_failing_shell_command(cli_output: str) -> Optional[str]:
+    lines = cli_output.splitlines()
+    shell_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == "shell:":
+            shell_idx = i
+    if shell_idx is None:
+        return None
+
+    cmd_lines = []
+    for line in lines[shell_idx + 1:]:
+        s = line.rstrip()
+        if "(command exited with non-zero exit code)" in s:
+            break
+        if not s.strip():
+            continue
+        cmd_lines.append(s.strip())
+    if not cmd_lines:
+        return None
+    cmd = " ".join(cmd_lines)
+    return cmd if len(cmd) <= 500 else (cmd[:497] + "...")
+
+
+def _compact_command(cmd: str, max_len: int = 220) -> str:
+    # Show the most relevant subcommand when piped through wrappers.
+    metagraph_idx = cmd.find("metagraph ")
+    if metagraph_idx != -1:
+        cmd = cmd[metagraph_idx:]
+    cmd = " ".join(cmd.split())
+    return cmd if len(cmd) <= max_len else (cmd[:max_len - 3] + "...")
+
+
+def _extract_stage_log_block(log_text: str, head_lines: int = 20, tail_lines: int = 10) -> Iterable[str]:
+    lines = log_text.splitlines()
+    max_lines = head_lines + tail_lines
+    if len(lines) <= max_lines:
+        return lines
+    return (
+        lines[:head_lines]
+        + ["... (truncated; see failing stage log for full output)"]
+        + lines[-tail_lines:]
+    )
+
+
+def _extract_timing_exit_code(log_text: str) -> Optional[int]:
+    for line in reversed(log_text.splitlines()):
+        parsed = _parse_timing_line(line)
+        if not parsed:
+            continue
+        raw = parsed.get("exit_code")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _extract_snakemake_failure_line(cli_output: str) -> Optional[str]:
+    for line in cli_output.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if "MissingOutputException" in s or "RuleException" in s or s.endswith("WorkflowError:"):
             return s
     return None
 
 
-def _summarize_snakemake_failure(output_dir: Path) -> str:
-    stage_logs_dir = Path(output_dir) / "logs"
-    stage_log = None
-    if stage_logs_dir.exists():
-        candidates = sorted(stage_logs_dir.rglob("*.log"), key=lambda p: p.stat().st_mtime)
-        if candidates:
-            stage_log = candidates[-1]
+def _extract_failing_stage_log_from_snakemake_output(cli_output: str, output_dir: Path) -> Optional[Path]:
+    lines = cli_output.splitlines()
+    for line in reversed(lines):
+        if "log:" not in line:
+            continue
+        after = line.split("log:", 1)[1].strip()
+        if not after:
+            continue
+        candidate = after.split(" (", 1)[0].strip().rstrip(",")
+        if not candidate:
+            continue
+        p = Path(candidate)
+        if not p.is_absolute():
+            p = Path(output_dir).parent / p
+        return p
+    return None
+
+
+def _summarize_snakemake_failure_for_run(output_dir: Path, run_started_at: float) -> str:
     details = []
+    stage_log = None
+    snakemake_log = _latest_snakemake_log_for_run(run_started_at)
+    snakemake_output = None
+    if snakemake_log and snakemake_log.exists():
+        try:
+            snakemake_output = snakemake_log.read_text(errors='replace')
+        except OSError:
+            snakemake_output = None
+
+    if snakemake_output:
+        stage_log = _extract_failing_stage_log_from_snakemake_output(snakemake_output, Path(output_dir))
+
     if stage_log and stage_log.exists():
         try:
             stage_text = stage_log.read_text(errors='replace')
+            stage_block = list(_extract_stage_log_block(stage_text))
+            stage_exit_code = _extract_timing_exit_code(stage_text)
             root_line = _extract_first_relevant_error_line(stage_text)
+            if stage_block and stage_exit_code != 0:
+                details.append("metagraph output:")
+                details.extend(stage_block)
             if root_line:
-                details.append(f"Root cause: {root_line}")
+                if stage_exit_code == 0:
+                    details.append(
+                        "Root cause: metagraph command exited successfully, "
+                        "but Snakemake reported missing/incorrect output files."
+                    )
+                else:
+                    details.append(f"Root cause: {root_line}")
             details.append(f"Failing stage log: {stage_log}")
         except OSError:
             pass
-
-    details.append(f"Stage logs: {Path(output_dir) / 'logs'}")
-    details.append("Snakemake logs: .snakemake/log/")
-    return "Workflow execution failed.\n" + "\n".join(details)
-
-
-def _extract_failing_stage_log(cli_output: str) -> Optional[Path]:
-    # Snakemake typically prints:
-    #   log: <path> (check log file(s) for error details)
-    matches = re.findall(r"log:\s+(\S+)\s+\(check log file\(s\) for error details\)", cli_output)
-    if matches:
-        return Path(matches[-1])
-    return None
-
-
-def _summarize_snakemake_failure_from_output(output_dir: Path, cli_output: str) -> str:
-    stage_log = _extract_failing_stage_log(cli_output)
-    if stage_log is None:
-        return _summarize_snakemake_failure(output_dir)
-
-    details = []
-    if stage_log.exists():
-        try:
-            stage_text = stage_log.read_text(errors='replace')
-            root_line = _extract_first_relevant_error_line(stage_text)
-            if root_line:
-                details.append(f"Root cause: {root_line}")
-            details.append(f"Failing stage log: {stage_log}")
-        except OSError:
-            pass
-    else:
-        details.append(f"Failing stage log: {stage_log}")
+    if snakemake_output:
+        failure_line = _extract_snakemake_failure_line(snakemake_output)
+        if failure_line:
+            details.append(f"Snakemake failure: {failure_line}")
+        cmd = _extract_failing_shell_command(snakemake_output)
+        if cmd:
+            details.append(f"Failing command: {_compact_command(cmd)}")
 
     details.append(f"Stage logs: {Path(output_dir) / 'logs'}")
     details.append("Snakemake logs: .snakemake/log/")
@@ -290,22 +590,12 @@ def run_build_workflow(
 
     # Run snakemake
     # Keep stdout/stderr attached so Snakemake preserves colors and rich formatting.
+    run_started_at = time.time()
     result = subprocess.run([' '.join(cmd)], shell=True)
 
     if result.returncode != 0:
-        snakemake_log_dir = Path(".snakemake/log")
-        latest_snakemake_log = None
-        if snakemake_log_dir.exists():
-            logs = sorted(snakemake_log_dir.glob("*.snakemake.log"), key=lambda p: p.stat().st_mtime)
-            if logs:
-                latest_snakemake_log = logs[-1]
-        if latest_snakemake_log and latest_snakemake_log.exists():
-            try:
-                cli_output = latest_snakemake_log.read_text(errors='replace')
-                raise RuntimeError(_summarize_snakemake_failure_from_output(Path(output_dir), cli_output))
-            except OSError:
-                pass
-        raise RuntimeError(_summarize_snakemake_failure(Path(output_dir)))
+        raise RuntimeError(_summarize_snakemake_failure_for_run(Path(output_dir), run_started_at))
+    _print_run_summary(Path(output_dir), dryrun)
 
 
 def setup_build_parser(parser):

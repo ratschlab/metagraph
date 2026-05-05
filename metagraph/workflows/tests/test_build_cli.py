@@ -1,5 +1,7 @@
 import os
 import subprocess
+import shutil
+import re
 from itertools import product
 from pathlib import Path
 
@@ -25,13 +27,54 @@ COORD_FORMATS = {
 WORKFLOW_ROOT = Path(metagraph_workflows.__file__).parent / 'snakemake'
 
 
+def _resolve_metagraph_cmd() -> str | None:
+    """Best-effort resolution of the local `metagraph` binary for tests.
+
+    Tests should normally run with a `metagraph` executable available on `PATH`.
+    When that's not the case (e.g. fresh dev environments), we fall back to
+    `../build/metagraph` if it exists.
+    """
+    if shutil.which("metagraph") is not None:
+        return None
+
+    code_base = Path(os.path.realpath(__file__)).parent.parent  # metagraph/workflows
+    repo_root = code_base.parent  # metagraph/
+    candidate = repo_root / "build" / "metagraph"
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
 def run_wrapper(args_list):
     code_base = Path(os.path.realpath(__file__)).parent.parent
-
     process_args = ['python', '-m', 'metagraph_workflows.cli'] + args_list
 
-    proc = subprocess.run([str(a) for a in process_args],
-                          cwd=code_base, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # If tests are running without `metagraph` on PATH, inject `--metagraph-cmd`
+    # pointing to the locally built binary (when available).
+    if "--metagraph-cmd" not in args_list:
+        metagraph_cmd = _resolve_metagraph_cmd()
+        if metagraph_cmd is None:
+            pytest.skip("metagraph executable not found in PATH and local build/metagraph missing")
+        if not args_list:
+            pytest.skip("empty args_list passed to run_wrapper")
+        # If the last arg is an option (e.g. "-h"), don't attempt to treat it
+        # as the output_dir positional argument.
+        last = args_list[-1]
+        if isinstance(last, str) and last.startswith("-"):
+            process_args = ['python', '-m', 'metagraph_workflows.cli'] + args_list
+        else:
+            output_dir = args_list[-1]
+            base_args = args_list[:-1]
+            process_args = ['python', '-m', 'metagraph_workflows.cli'] + base_args + [
+                "--metagraph-cmd", metagraph_cmd, output_dir
+            ]
+
+    proc = subprocess.run(
+        [str(a) for a in process_args],
+        cwd=code_base,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
 
     return proc
 
@@ -76,7 +119,15 @@ def test_build_workflow(primary, annotation_format, annotation_label_src, sample
 
 
 def test_workflow_invocation_via_python(sample_list_path, output_dir):
-    assert cli.run_build_workflow(output_dir, seqs_file_list_path=sample_list_path) is None
+    metagraph_cmd = _resolve_metagraph_cmd()
+    if metagraph_cmd is None and shutil.which("metagraph") is None:
+        pytest.skip("metagraph executable not found in PATH and local build/metagraph missing")
+
+    assert cli.run_build_workflow(
+        output_dir,
+        seqs_file_list_path=sample_list_path,
+        metagraph_cmd=metagraph_cmd,
+    ) is None
 
 
 def test_workflow_invocation_additional_args(sample_list_path, output_dir):
@@ -222,9 +273,25 @@ def test_build_help_mentions_defaults():
     proc = run_wrapper(['build', '-h'])
     assert proc.returncode == 0
     out = proc.stdout.decode()
-    assert "Default is relax.row_diff_brwt" in out
+    # Argparse may insert newlines + indentation into long help strings;
+    # normalize all whitespace so substring checks are stable.
+    out_norm = re.sub(r'\s+', ' ', out).strip()
+    assert "Default is relax.row_diff_brwt" in out_norm
     assert "row_diff_int_brwt" in out
     assert "row_diff_brwt_coord" in out
+
+
+def test_dryrun_prints_summary(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "=== Workflow summary ===" in out
+    assert "Mode: dry-run" in out
 
 
 def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
