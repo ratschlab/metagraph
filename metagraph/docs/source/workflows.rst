@@ -80,6 +80,7 @@ the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
 
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
+                              --build-primary-graph \
                               --with-counts \
                               --count-width 12 \
                               [OUTPUT_DIR]
@@ -89,6 +90,7 @@ automatically enables count-aware mode::
 
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
+                              --build-primary-graph \
                               --annotation-format row_diff_int_brwt \
                               --count-width 12 \
                               [OUTPUT_DIR]
@@ -98,6 +100,37 @@ Use ``--count-width`` to control the stored numeric range for counts
 
 When reusing an output directory, the workflow keeps count and non-count intermediates in
 separate mode-specific directories to avoid stale artifact reuse.
+
+Coordinate-aware annotations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The workflow supports these coordinate-aware annotation formats:
+
+* ``brwt_coord``
+* ``row_diff_coord``
+* ``row_diff_brwt_coord``
+* ``row_diff_disk_coord``
+
+To enable coordinates explicitly, pass ``--with-coords``. If no annotation format is specified,
+the default switches from ``relax.row_diff_brwt`` to ``row_diff_brwt_coord``::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --with-coords \
+                              [OUTPUT_DIR]
+
+You can also select a coordinate-aware format directly via ``--annotation-format``; this
+automatically enables coordinate-aware mode::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --annotation-format row_diff_brwt_coord \
+                              [OUTPUT_DIR]
+
+Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
+For this use case, primary graph mode is usually not recommended.
+
+Count-aware and coordinate-aware modes are mutually exclusive in this workflow.
 
 See ``metagraph-workflows build -h`` for more details.
 3. Once a MetaGraph index has been created, it can be queried either by using the command line

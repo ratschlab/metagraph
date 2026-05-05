@@ -40,6 +40,7 @@ DISK_CAP_MB_KEY = 'disk_cap_mb'
 
 WITH_COUNTS = 'with_counts'
 COUNT_WIDTH = 'count_width'
+WITH_COORDINATES = 'with_coordinates'
 
 
 class AnnotationLabelsSource(Enum):
@@ -70,3 +71,7 @@ class AnnotationFormats(Enum):
     INT_BRWT = 'int_brwt'
     ROW_DIFF_INT_BRWT = 'row_diff_int_brwt'
     ROW_DIFF_INT_DISK = 'row_diff_int_disk'
+    BRWT_COORD = 'brwt_coord'
+    ROW_DIFF_COORD = 'row_diff_coord'
+    ROW_DIFF_BRWT_COORD = 'row_diff_brwt_coord'
+    ROW_DIFF_DISK_COORD = 'row_diff_disk_coord'

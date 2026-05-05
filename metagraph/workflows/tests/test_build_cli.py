@@ -14,6 +14,12 @@ COUNT_FORMATS = {
     AnnotationFormats.ROW_DIFF_INT_BRWT,
     AnnotationFormats.ROW_DIFF_INT_DISK,
 }
+COORD_FORMATS = {
+    AnnotationFormats.BRWT_COORD,
+    AnnotationFormats.ROW_DIFF_COORD,
+    AnnotationFormats.ROW_DIFF_BRWT_COORD,
+    AnnotationFormats.ROW_DIFF_DISK_COORD,
+}
 
 
 WORKFLOW_ROOT = Path(metagraph_workflows.__file__).parent / 'snakemake'
@@ -53,6 +59,8 @@ def test_build_workflow(primary, annotation_format, annotation_label_src, sample
                  '--annotation-labels-source', annotation_label_src.value]
     if annotation_format in COUNT_FORMATS:
         base_args += ['--with-counts']
+    if annotation_format in COORD_FORMATS:
+        base_args += ['--with-coords']
 
     base_args += ['--build-primary-graph'] if primary else []
 
@@ -113,6 +121,34 @@ def test_with_counts_rejects_incompatible_annotation_format(sample_list_path, ou
     assert "Count-aware mode is enabled" in proc.stdout.decode()
 
 
+def test_with_coordinates_defaults_to_row_diff_brwt_coord(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--with-coords',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "with_coordinates: true" in cfg
+    assert "annotation_formats:" in cfg
+    assert "- row_diff_brwt_coord" in cfg
+
+
+def test_with_coordinates_rejects_incompatible_annotation_format(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--with-coords',
+        '--annotation-format', AnnotationFormats.BRWT.value,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "Coordinate-aware mode is enabled" in proc.stdout.decode()
+
+
 def test_with_counts_respects_explicit_annotation_format(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
@@ -142,12 +178,53 @@ def test_count_capable_format_auto_enables_with_counts(sample_list_path, output_
     assert "- row_diff_int_disk" in cfg
 
 
+def test_coord_capable_format_auto_enables_with_coordinates(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "with_coordinates: true" in cfg
+    assert "- row_diff_brwt_coord" in cfg
+
+
+def test_with_counts_and_with_coordinates_are_mutually_exclusive(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--with-counts',
+        '--with-coords',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "mutually exclusive" in proc.stdout.decode()
+
+
+def test_mixed_count_and_coord_formats_are_mutually_exclusive(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
+        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "mutually exclusive" in proc.stdout.decode()
+
+
 def test_build_help_mentions_defaults():
     proc = run_wrapper(['build', '-h'])
     assert proc.returncode == 0
     out = proc.stdout.decode()
     assert "Default is relax.row_diff_brwt" in out
     assert "row_diff_int_brwt" in out
+    assert "row_diff_brwt_coord" in out
 
 
 def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
@@ -155,7 +232,7 @@ def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
         'build',
         '--seqs-file-list-path', sample_list_path,
         '--metagraph-cmd', 'definitely_missing_metagraph_binary_12345',
-        '--dryrun',
+        '--additional-snakemake-args=printshellcmds=True',
         output_dir,
     ])
     assert proc.returncode != 0
@@ -174,6 +251,20 @@ def test_invalid_annotation_format_shows_suggestion(sample_list_path, output_dir
     out = proc.stdout.decode()
     assert "Unsupported annotation format 'row_diff_int_brwt1'" in out
     assert "Did you mean 'row_diff_int_brwt'" in out
+
+
+def test_invalid_coord_annotation_format_shows_suggestion(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--annotation-format', 'row_diff_brwt_coord1',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    out = proc.stdout.decode()
+    assert "Unsupported annotation format 'row_diff_brwt_coord1'" in out
+    assert "Did you mean 'row_diff_brwt_coord'" in out
 
 
 @pytest.mark.parametrize("count_width", [2, 12, 32])

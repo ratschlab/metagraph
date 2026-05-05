@@ -32,6 +32,12 @@ COUNT_COMPATIBLE_FORMATS = {
     AnnotationFormats.ROW_DIFF_INT_BRWT,
     AnnotationFormats.ROW_DIFF_INT_DISK,
 }
+COORD_COMPATIBLE_FORMATS = {
+    AnnotationFormats.BRWT_COORD,
+    AnnotationFormats.ROW_DIFF_COORD,
+    AnnotationFormats.ROW_DIFF_BRWT_COORD,
+    AnnotationFormats.ROW_DIFF_DISK_COORD,
+}
 
 
 def _parse_annotation_format_value(value: str) -> AnnotationFormats:
@@ -156,6 +162,7 @@ def run_build_workflow(
         annotation_formats: Iterable[AnnotationFormats] = (),
         annotation_labels_source: Optional[AnnotationLabelsSource] = None,
         with_counts: bool = False,
+        with_coordinates: bool = False,
         count_width: Optional[int] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
@@ -191,10 +198,21 @@ def run_build_workflow(
 
     selected_formats = set(annotation_formats)
     has_count_formats = any(af in COUNT_COMPATIBLE_FORMATS for af in selected_formats)
+    has_coord_formats = any(af in COORD_COMPATIBLE_FORMATS for af in selected_formats)
     effective_with_counts = with_counts or has_count_formats
+    effective_with_coordinates = with_coordinates or has_coord_formats
+
+    if effective_with_counts and effective_with_coordinates:
+        raise ValueError(
+            "Count-aware and coordinate-aware modes are mutually exclusive in this workflow. "
+            "Choose either count formats (--with-counts / int_* / row_diff_int_*) or "
+            "coordinate formats (--with-coords / *_coord)."
+        )
 
     if effective_with_counts and not annotation_formats:
         config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_INT_BRWT.value]
+    elif effective_with_coordinates and not annotation_formats:
+        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_BRWT_COORD.value]
     else:
         config['annotation_formats'] = [af.value for af in
                                         annotation_formats] if annotation_formats else config['annotation_formats']
@@ -208,14 +226,27 @@ def run_build_workflow(
                 + ", ".join(sorted([f.value for f in COUNT_COMPATIBLE_FORMATS]))
                 + f". Got: {', '.join(invalid_formats)}"
             )
+    if effective_with_coordinates:
+        invalid_formats = [af.value for af in annotation_formats if af not in COORD_COMPATIBLE_FORMATS]
+        if invalid_formats:
+            raise ValueError(
+                "Coordinate-aware mode is enabled (--with-coords or *_coord --annotation-format), "
+                "--annotation-format must be one of: "
+                + ", ".join(sorted([f.value for f in COORD_COMPATIBLE_FORMATS]))
+                + f". Got: {', '.join(invalid_formats)}"
+            )
     config['with_counts'] = effective_with_counts
+    config['with_coordinates'] = effective_with_coordinates
     if count_width is not None and not (2 <= count_width <= 32):
         raise ValueError(f"--count-width must be in range [2, 32], got {count_width}")
+    if count_width is not None and not effective_with_counts:
+        raise ValueError("--count-width can only be used with count-aware mode (--with-counts or count formats).")
     if count_width is not None:
         config['count_width'] = count_width
 
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
-    _validate_metagraph_cmd(config['metagraph_cmd'])
+    if not dryrun:
+        _validate_metagraph_cmd(config['metagraph_cmd'])
     config['max_threads'] = threads if threads else snakemake.utils.available_cpu_count()
 
     if verbose:
@@ -301,7 +332,8 @@ def setup_build_parser(parser):
                             help=f"Annotation format (can be used multiple times). "
                                  f"Possible values: {', '.join([v.value for v in AnnotationFormats])}. "
                                  f"Default is relax.row_diff_brwt; with --with-counts and no explicit format, "
-                                 f"default is row_diff_int_brwt.")
+                                 f"default is row_diff_int_brwt; with --with-coords and no explicit format, "
+                                 f"default is row_diff_brwt_coord.")
     annotation.add_argument('--annotation-labels-source',
                             type=AnnotationLabelsSource,
                             default=AnnotationLabelsSource.SEQUENCE_HEADERS,
@@ -311,6 +343,10 @@ def setup_build_parser(parser):
                             help="Enable count-aware annotation workflow. "
                                  "If no --annotation-format is provided, defaults to row_diff_int_brwt. "
                                  "Also enabled automatically when a count-capable annotation format is selected.")
+    annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
+                            help="Enable coordinate-aware annotation workflow. "
+                                 "If no --annotation-format is provided, defaults to row_diff_brwt_coord. "
+                                 "Also enabled automatically when a coordinate-capable annotation format is selected.")
     annotation.add_argument('--count-width', type=int, default=None,
                             help="Bit width for count values (passed to annotate/transform_anno). "
                                  "Default behavior is 8-bit when unset.")
@@ -365,6 +401,7 @@ def init_build(args):
         annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
         annotation_labels_source=args.annotation_labels_source,
         with_counts=args.with_counts,
+        with_coordinates=args.with_coordinates,
         count_width=args.count_width,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
