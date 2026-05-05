@@ -23,6 +23,11 @@ logging.basicConfig(format=LOGGING_FORMAT, level=logging.WARNING)
 
 
 default_path = Path(WORKFLOW_ROOT / 'default.yml')
+COUNT_COMPATIBLE_FORMATS = {
+    AnnotationFormats.INT_BRWT,
+    AnnotationFormats.ROW_DIFF_INT_BRWT,
+    AnnotationFormats.ROW_DIFF_INT_DISK,
+}
 
 # TODO: use custom config object? fluent config?
 def run_build_workflow(
@@ -34,6 +39,8 @@ def run_build_workflow(
         build_primary_graph: bool = False,
         annotation_formats: Iterable[AnnotationFormats] = (),
         annotation_labels_source: Optional[AnnotationLabelsSource] = None,
+        with_counts: bool = False,
+        count_width: Optional[int] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
@@ -66,8 +73,30 @@ def run_build_workflow(
     config['base_name'] = base_name if base_name else config['base_name']
     config['build_primary_graph'] = build_primary_graph
 
-    config['annotation_formats'] = [af.value for af in
-                                    annotation_formats] if annotation_formats else config['annotation_formats']
+    selected_formats = set(annotation_formats)
+    has_count_formats = any(af in COUNT_COMPATIBLE_FORMATS for af in selected_formats)
+    effective_with_counts = with_counts or has_count_formats
+
+    if effective_with_counts and not annotation_formats:
+        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_INT_BRWT.value]
+    else:
+        config['annotation_formats'] = [af.value for af in
+                                        annotation_formats] if annotation_formats else config['annotation_formats']
+
+    if effective_with_counts:
+        invalid_formats = [af.value for af in annotation_formats if af not in COUNT_COMPATIBLE_FORMATS]
+        if invalid_formats:
+            raise ValueError(
+                "Count-aware mode is enabled (--with-counts or count-capable --annotation-format), "
+                "--annotation-format must be one of: "
+                + ", ".join(sorted([f.value for f in COUNT_COMPATIBLE_FORMATS]))
+                + f". Got: {', '.join(invalid_formats)}"
+            )
+    config['with_counts'] = effective_with_counts
+    if count_width is not None and not (2 <= count_width <= 32):
+        raise ValueError(f"--count-width must be in range [2, 32], got {count_width}")
+    if count_width is not None:
+        config['count_width'] = count_width
 
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
     config['max_threads'] = threads if threads else snakemake.utils.available_cpu_count()
@@ -140,12 +169,21 @@ def setup_build_parser(parser):
     annotation.add_argument('--annotation-format', action='append',
                             default=[],
                             help=f"Annotation format (can be used multiple times). "
-                                 f"Possible values: {', '.join([v.value for v in AnnotationFormats])}")
+                                 f"Possible values: {', '.join([v.value for v in AnnotationFormats])}. "
+                                 f"Default is relax.row_diff_brwt; with --with-counts and no explicit format, "
+                                 f"default is row_diff_int_brwt.")
     annotation.add_argument('--annotation-labels-source',
                             type=AnnotationLabelsSource,
                             default=AnnotationLabelsSource.SEQUENCE_HEADERS,
                             help=f"What should be used as column labels. Possible values: "
                                  f"{', '.join([v.value for v in AnnotationLabelsSource])}")
+    annotation.add_argument('--with-counts', default=False, action='store_true',
+                            help="Enable count-aware annotation workflow. "
+                                 "If no --annotation-format is provided, defaults to row_diff_int_brwt. "
+                                 "Also enabled automatically when a count-capable annotation format is selected.")
+    annotation.add_argument('--count-width', type=int, default=None,
+                            help="Bit width for count values (passed to annotate/transform_anno). "
+                                 "Default behavior is 8-bit when unset.")
 
     workflow = parser.add_argument_group('workflow',
                                          'arguments for the workflow')
@@ -196,6 +234,8 @@ def init_build(args):
         build_primary_graph=args.build_primary_graph,
         annotation_formats=[AnnotationFormats(af) for af in args.annotation_format],
         annotation_labels_source=args.annotation_labels_source,
+        with_counts=args.with_counts,
+        count_width=args.count_width,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,

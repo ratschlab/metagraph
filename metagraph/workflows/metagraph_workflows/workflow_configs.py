@@ -39,6 +39,8 @@ MEM_BUFFER_MB_KEY = 'mem_buffer_mb'
 DISK_CAP_MB_KEY = 'disk_cap_mb'
 
 GNU_TIME_CMD = 'gnu_time_cmd'
+WITH_COUNTS = 'with_counts'
+COUNT_WIDTH = 'count_width'
 
 
 class AnnotationLabelsSource(Enum):
@@ -66,3 +68,6 @@ class AnnotationFormats(Enum):
     #RELAXED_RB_BRWT = 'relax.rb_brwt' # not possible
     ROW_DIFF_BRWT = 'row_diff_brwt'
     RELAXED_ROW_DIFF_BRWT = 'relax.row_diff_brwt'
+    INT_BRWT = 'int_brwt'
+    ROW_DIFF_INT_BRWT = 'row_diff_int_brwt'
+    ROW_DIFF_INT_DISK = 'row_diff_int_disk'

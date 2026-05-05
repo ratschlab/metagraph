@@ -54,6 +54,7 @@ Typically, the following steps would be performed:
    * k-mer length
    * basic vs. primary graph mode
    * source of annotation labels: ``sequence_headers`` or ``sequence_file_names``
+   * count-aware annotation mode and format selection
 
    An example invocation:
 
@@ -65,7 +66,40 @@ Typically, the following steps would be performed:
                                --build-primary-graph \
                                [OUTPUT_DIR]
 
-   See ``metagraph-workflows build -h`` for more help.
+Count-aware annotations
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The workflow supports these count-aware annotation formats:
+
+* ``int_brwt``
+* ``row_diff_int_brwt``
+* ``row_diff_int_disk``
+
+To enable counts explicitly, pass ``--with-counts``. If no annotation format is specified,
+the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --with-counts \
+                              --count-width 12 \
+                              [OUTPUT_DIR]
+
+You can also select a count-aware format directly via ``--annotation-format``; this
+automatically enables count-aware mode::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --annotation-format row_diff_int_brwt \
+                              --count-width 12 \
+                              [OUTPUT_DIR]
+
+Use ``--count-width`` to control the stored numeric range for counts
+(valid range: ``2..32``, default: ``8``).
+
+When reusing an output directory, the workflow keeps count and non-count intermediates in
+separate mode-specific directories to avoid stale artifact reuse.
+
+See ``metagraph-workflows build -h`` for more details.
 3. Once a MetaGraph index has been created, it can be queried either by using the command line
    ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
    machine and querying it using the python :ref:`API` client.
