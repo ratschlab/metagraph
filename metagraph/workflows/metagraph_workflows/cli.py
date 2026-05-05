@@ -41,6 +41,34 @@ COORD_COMPATIBLE_FORMATS = {
 }
 
 
+def _help_formatter(prog: str):
+    return argparse.RawTextHelpFormatter(prog, width=100, max_help_position=34)
+
+
+def _help_color(text: str, color_code: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[{color_code}m{text}\033[0m"
+
+
+def _default_threads_auto() -> int:
+    try:
+        out = subprocess.check_output(["nproc"], text=True).strip()
+        n = int(out)
+        if n > 0:
+            return n
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["sysctl", "-n", "hw.logicalcpu"], text=True).strip()
+        n = int(out)
+        if n > 0:
+            return n
+    except Exception:
+        pass
+    return snakemake.utils.available_cpu_count()
+
+
 def _format_bytes(size_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     val = float(size_bytes)
@@ -547,7 +575,7 @@ def run_build_workflow(
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
     if not dryrun:
         _validate_metagraph_cmd(config['metagraph_cmd'])
-    config['max_threads'] = threads if threads else snakemake.utils.available_cpu_count()
+    config['max_threads'] = threads if threads else _default_threads_auto()
 
     if verbose:
         importlib.reload(logging)
@@ -578,7 +606,7 @@ def run_build_workflow(
         cmd.extend(['--cores', str(threads)])
     else:
         # Add default cores if not specified
-        cmd.extend(['--cores', str(snakemake.utils.available_cpu_count())])
+        cmd.extend(['--cores', str(_default_threads_auto())])
 
     # Add additional arguments
     for key, value in additional_args.items():
@@ -599,57 +627,107 @@ def run_build_workflow(
 
 
 def setup_build_parser(parser):
-    parser.add_argument('output_dir', type=Path)
+    label_sources = [v.value for v in AnnotationLabelsSource]
+    count_formats = sorted([f.value for f in COUNT_COMPATIBLE_FORMATS])
+    count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
+    coord_formats = sorted([f.value for f in COORD_COMPATIBLE_FORMATS])
+    coord_formats_display = [_help_color(fmt, "35") for fmt in coord_formats]
+    classic_formats_display = [
+        _help_color(fmt, "36")
+        for fmt in [
+            "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt",
+            "rb_brwt", "row_diff_brwt", "relax.row_diff_brwt",
+        ]
+    ]
+    with_counts_label = _help_color("--with-counts", "33")
+    with_coords_label = _help_color("--with-coords", "35")
+    default_base_fmt = _help_color("relax.row_diff_brwt", "36")
+    default_count_fmt = _help_color("row_diff_int_brwt", "33")
+    default_coord_fmt = _help_color("row_diff_brwt_coord", "35")
+    default_count_width = _help_color("8", "33")
+    zero_count_width = _help_color("0", "36")
 
-    input_seq_group = parser.add_argument_group('input sequence paths', '')
+    parser.description = (
+        "Build a MetaGraph graph + annotation workflow from a sequence list or directory."
+    )
+    parser.epilog = (
+        "Examples:\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt -k 31 -o out/\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt --with-counts -o out/\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt --with-coords -o out/"
+    )
+
+    input_seq_group = parser.add_argument_group('input/output')
 
     input_seq_group_xor = input_seq_group.add_mutually_exclusive_group(required=True)
     input_seq_group_xor.add_argument('--seqs-file-list-path',
-                                     help='Path to text file containing paths of sequences files')
+                                     metavar='PATH',
+                                     help='Path to a text file with sample paths (one per line) []')
     input_seq_group_xor.add_argument('--seqs-dir-path',
-                                     help="Path to directory containing sequence files")
+                                     metavar='DIR',
+                                     help="Directory containing samples []")
+    input_seq_group.add_argument('-o', '--output_dir', type=Path, required=True,
+                                 help='Output directory [required]')
 
-    graph = parser.add_argument_group('graph', 'arguments for graph building')
-    graph.add_argument('-k', type=int, default=None)
-    graph.add_argument('--base-name', default=None)
-    graph.add_argument('--build-primary-graph', default=False,
-                       action='store_true')
+    graph = parser.add_argument_group('graph')
+    graph.add_argument('-k', type=int, default=31, metavar='K',
+                       help='k-mer length [31]')
+    graph.add_argument('--base-name', default='graph', metavar='NAME',
+                       help='Base output name [graph]')
+    graph.add_argument('--primary', dest='build_primary_graph', default=False,
+                       action='store_true',
+                       help='Build canonical graph first, then derive/build primary graph [False]')
 
-    annotation = parser.add_argument_group('annotation',
-                                           'arguments for annotations')
-    annotation.add_argument('--annotation-format', action='append',
-                            default=[],
-                            help=f"Annotation format (can be used multiple times). "
-                                 f"Possible values: {', '.join([v.value for v in AnnotationFormats])}. "
-                                 f"Default is relax.row_diff_brwt; with --with-counts and no explicit format, "
-                                 f"default is row_diff_int_brwt; with --with-coords and no explicit format, "
-                                 f"default is row_diff_brwt_coord.")
-    annotation.add_argument('--annotation-labels-source',
+    annotation = parser.add_argument_group('annotation')
+    all_formats_help = "\n".join([
+        f"    {classic_formats_display[0]}, {classic_formats_display[1]}, {classic_formats_display[2]}, {classic_formats_display[3]}, {classic_formats_display[4]}, {classic_formats_display[5]}, {classic_formats_display[6]},",
+        f"             {classic_formats_display[7]}, {classic_formats_display[8]}",
+        f"    {count_formats_display[0]}, {count_formats_display[1]}, {count_formats_display[2]}",
+        f"    {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]}, {coord_formats_display[3]}",
+    ])
+    annotation.add_argument('--anno-source',
+                            dest='annotation_labels_source',
                             type=AnnotationLabelsSource,
                             default=AnnotationLabelsSource.SEQUENCE_HEADERS,
-                            help=f"What should be used as column labels. Possible values: "
-                                 f"{', '.join([v.value for v in AnnotationLabelsSource])}")
+                            metavar='SOURCE',
+                            help=f"Column label source: {', '.join(label_sources)} [sequence_headers]\n"
+                                 "  ")
+    annotation.add_argument('--annotation-format', action='append',
+                            default=[],
+                            metavar='FORMAT',
+                            help=f"Annotation format (can be used multiple times).\n"
+                                 f"{all_formats_help}\n"
+                                 f"  [{default_base_fmt}/{default_count_fmt}/{default_coord_fmt}]\n"
+                                 "  ")
     annotation.add_argument('--with-counts', default=False, action='store_true',
-                            help="Enable count-aware annotation workflow. "
-                                 "If no --annotation-format is provided, defaults to row_diff_int_brwt. "
-                                 "Also enabled automatically when a count-capable annotation format is selected.")
-    annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
-                            help="Enable coordinate-aware annotation workflow. "
-                                 "If no --annotation-format is provided, defaults to row_diff_brwt_coord. "
-                                 "Also enabled automatically when a coordinate-capable annotation format is selected.")
+                            help=f"Index with k-mer counts [False]\n"
+                                 f"  Supported for {', '.join(count_formats_display)}.")
     annotation.add_argument('--count-width', type=int, default=None,
-                            help="Bit width for count values (passed to annotate/transform_anno). "
-                                 "Default behavior is 8-bit when unset.")
+                            metavar='BITS',
+                            help=f"Bit width for count values (passed to annotate/transform_anno) [{zero_count_width}/{default_count_width}]\n"
+                                 "  ")
+    annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
+                            help=f"Index with k-mer positions [False]\n"
+                                 f"  Supported for {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]},\n"
+                                 f"                     {coord_formats_display[3]}.")
 
-    workflow = parser.add_argument_group('workflow',
-                                         'arguments for the workflow')
-    workflow.add_argument('--threads', type=int, default=None)
-    workflow.add_argument('--force', default=False, action='store_true')
-    workflow.add_argument('--verbose', default=False, action='store_true')
-    workflow.add_argument('--dryrun', default=False, action='store_true')
-    workflow.add_argument('--metagraph-cmd', type=str, default=None)
-    workflow.add_argument('--additional-snakemake-args', type=str, default='',
-                          help='Additional arguments to pass to snakemake, e.g. --additional-snakemake-args="arg1=val1 arg2=val2"')
+    workflow = parser.add_argument_group('other')
+    workflow.add_argument('--threads', type=int, default=None, metavar='N',
+                          help='Max cores for Snakemake execution [num_cores]')
+    workflow.add_argument('--force', default=False, action='store_true',
+                          help='Force re-run all rules [False]')
+    workflow.add_argument('--verbose', default=False, action='store_true',
+                          help='Print verbose config/runtime logs [False]')
+    workflow.add_argument('--dryrun', default=False, action='store_true',
+                          help='Render DAG and config only; do not execute rules [False]')
+    workflow.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',
+                          help='Path/command for metagraph executable [metagraph from PATH]')
+    workflow.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
+                          help='Extra arguments to pass to snakemake [none]\n'
+                               '  Example: --extra-args="arg1=val1 arg2=val2"')
+    options = parser.add_argument_group('options')
+    options.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
+                         help='Show this help message and exit')
 
     parser.set_defaults(func=init_build)
 
@@ -698,17 +776,31 @@ def init_build(args):
         force=args.force,
         verbose=args.verbose,
         dryrun=args.dryrun,
-        additional_snakemake_args=_parse_additional_snakemake_args(args.additional_snakemake_args)
+        additional_snakemake_args=_parse_additional_snakemake_args(
+            getattr(args, "additional_snakemake_args", "")
+        )
     )
 
 
 def main(args=tuple(sys.argv[1:])):
-    parser = argparse.ArgumentParser(description='metagraph utils')
+    parser = argparse.ArgumentParser(
+        description='MetaGraph workflow utilities',
+        formatter_class=_help_formatter,
+    )
 
-    subparsers = parser.add_subparsers(help="Available subcommands", required=True,
-                                       dest="command")
+    subparsers = parser.add_subparsers(
+        help="Available subcommands",
+        required=True,
+        dest="command",
+        parser_class=argparse.ArgumentParser,
+    )
 
-    build_parser = subparsers.add_parser("build", help="Create index")
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Build graph + annotation workflow",
+        formatter_class=_help_formatter,
+        add_help=False,
+    )
     setup_build_parser(build_parser)
 
     parsed_arguments = parser.parse_args(args)

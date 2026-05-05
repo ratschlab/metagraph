@@ -47,27 +47,28 @@ def _resolve_metagraph_cmd() -> str | None:
 
 def run_wrapper(args_list):
     code_base = Path(os.path.realpath(__file__)).parent.parent
-    process_args = ['python', '-m', 'metagraph_workflows.cli'] + args_list
+    normalized_args = list(args_list)
+    if normalized_args and normalized_args[0] == "build":
+        has_output_flag = any(arg in ("-o", "--output_dir") for arg in normalized_args)
+        if not has_output_flag and len(normalized_args) > 1:
+            last = normalized_args[-1]
+            last_str = str(last)
+            if not last_str.startswith("-"):
+                normalized_args = normalized_args[:-1] + ["--output_dir", last]
+
+    process_args = ['python', '-m', 'metagraph_workflows.cli'] + normalized_args
 
     # If tests are running without `metagraph` on PATH, inject `--metagraph-cmd`
     # pointing to the locally built binary (when available).
-    if "--metagraph-cmd" not in args_list:
+    if "--metagraph-cmd" not in normalized_args:
         metagraph_cmd = _resolve_metagraph_cmd()
         if metagraph_cmd is None:
             pytest.skip("metagraph executable not found in PATH and local build/metagraph missing")
-        if not args_list:
+        if not normalized_args:
             pytest.skip("empty args_list passed to run_wrapper")
-        # If the last arg is an option (e.g. "-h"), don't attempt to treat it
-        # as the output_dir positional argument.
-        last = args_list[-1]
-        if isinstance(last, str) and last.startswith("-"):
-            process_args = ['python', '-m', 'metagraph_workflows.cli'] + args_list
-        else:
-            output_dir = args_list[-1]
-            base_args = args_list[:-1]
-            process_args = ['python', '-m', 'metagraph_workflows.cli'] + base_args + [
-                "--metagraph-cmd", metagraph_cmd, output_dir
-            ]
+        process_args = ['python', '-m', 'metagraph_workflows.cli'] + normalized_args + [
+            "--metagraph-cmd", metagraph_cmd
+        ]
 
     proc = subprocess.run(
         [str(a) for a in process_args],
@@ -92,20 +93,20 @@ def sample_list_path(tmpdir):
 
 
 @pytest.mark.parametrize('primary,annotation_format,annotation_label_src', list(product([False], [AnnotationFormats.ROW_DIFF_BRWT], [AnnotationLabelsSource.SEQUENCE_HEADERS])) +
-    list(product([False, True], AnnotationFormats, [AnnotationLabelsSource.SEQUENCE_FILE_NAMES])))
+    list(product([False, True], AnnotationFormats, [AnnotationLabelsSource.FILE_NAMES])))
 def test_build_workflow(primary, annotation_format, annotation_label_src, sample_list_path, output_dir):
 
     base_args = ['build',
                  '--seqs-file-list-path', sample_list_path,
                  '-k', 5,
                  '--annotation-format', annotation_format.value,
-                 '--annotation-labels-source', annotation_label_src.value]
+                 '--anno-source', annotation_label_src.value]
     if annotation_format in COUNT_FORMATS:
         base_args += ['--with-counts']
     if annotation_format in COORD_FORMATS:
         base_args += ['--with-coords']
 
-    base_args += ['--build-primary-graph'] if primary else []
+    base_args += ['--primary'] if primary else []
 
     ret = run_wrapper(base_args + [output_dir])
 
@@ -134,7 +135,7 @@ def test_workflow_invocation_additional_args(sample_list_path, output_dir):
     base_args = ['build',
                  '--seqs-file-list-path', sample_list_path,
                  '-k', 5,
-                 '--additional-snakemake-args="summary=True"']
+                 '--extra-args="summary=True"']
 
     proc = run_wrapper(base_args + [output_dir])
 
@@ -276,7 +277,7 @@ def test_build_help_mentions_defaults():
     # Argparse may insert newlines + indentation into long help strings;
     # normalize all whitespace so substring checks are stable.
     out_norm = re.sub(r'\s+', ' ', out).strip()
-    assert "Default is relax.row_diff_brwt" in out_norm
+    assert "[relax.row_diff_brwt/row_diff_int_brwt/row_diff_brwt_coord]" in out_norm
     assert "row_diff_int_brwt" in out
     assert "row_diff_brwt_coord" in out
 
@@ -299,7 +300,7 @@ def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
         'build',
         '--seqs-file-list-path', sample_list_path,
         '--metagraph-cmd', 'definitely_missing_metagraph_binary_12345',
-        '--additional-snakemake-args=printshellcmds=True',
+        '--extra-args=printshellcmds=True',
         output_dir,
     ])
     assert proc.returncode != 0
@@ -342,7 +343,7 @@ def test_count_width_is_propagated_to_count_build_steps(sample_list_path, output
         '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--count-width', str(count_width),
         '--dryrun',
-        '--additional-snakemake-args=printshellcmds=True',
+        '--extra-args=printshellcmds=True',
         output_dir,
     ])
     assert proc.returncode == 0

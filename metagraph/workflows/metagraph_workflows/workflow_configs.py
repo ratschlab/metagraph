@@ -45,10 +45,10 @@ WITH_COORDINATES = 'with_coordinates'
 
 class AnnotationLabelsSource(Enum):
     SEQUENCE_HEADERS = 'sequence_headers'
-    SEQUENCE_FILE_NAMES = 'sequence_file_names'
+    FILE_NAMES = 'file_names'
 
     def to_annotation_cmd_option(self):
-        if self == self.SEQUENCE_FILE_NAMES:
+        if self == self.FILE_NAMES:
             return '--anno-filename'
         elif self == self.SEQUENCE_HEADERS:
             return '--anno-header'

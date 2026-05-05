@@ -53,7 +53,7 @@ Typically, the following steps would be performed:
 
    * k-mer length
    * basic vs. primary graph mode
-   * source of annotation labels: ``sequence_headers`` or ``sequence_file_names``
+   * source of annotation labels: ``sequence_headers`` or ``file_names``
    * count-aware annotation mode and format selection
 
    An example invocation:
@@ -62,9 +62,9 @@ Typically, the following steps would be performed:
 
      metagraph-workflows build -k 31 \
                                --seqs-dir-path [PATH_TO_FILES] \
-                               --annotation-labels-source sequence_headers \
-                               --build-primary-graph \
-                               [OUTPUT_DIR]
+                               --anno-source sequence_headers \
+                               --primary \
+                               -o [OUTPUT_DIR]
 
 Count-aware annotations
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -80,20 +80,20 @@ the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
 
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
-                              --build-primary-graph \
+                              --primary \
                               --with-counts \
                               --count-width 12 \
-                              [OUTPUT_DIR]
+                              -o [OUTPUT_DIR]
 
 You can also select a count-aware format directly via ``--annotation-format``; this
 automatically enables count-aware mode::
 
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
-                              --build-primary-graph \
+                              --primary \
                               --annotation-format row_diff_int_brwt \
                               --count-width 12 \
-                              [OUTPUT_DIR]
+                              -o [OUTPUT_DIR]
 
 Use ``--count-width`` to control the stored numeric range for counts
 (valid range: ``2..32``, default: ``8``).
@@ -117,7 +117,7 @@ the default switches from ``relax.row_diff_brwt`` to ``row_diff_brwt_coord``::
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
                               --with-coords \
-                              [OUTPUT_DIR]
+                              -o [OUTPUT_DIR]
 
 You can also select a coordinate-aware format directly via ``--annotation-format``; this
 automatically enables coordinate-aware mode::
@@ -125,7 +125,7 @@ automatically enables coordinate-aware mode::
     metagraph-workflows build -k 31 \
                               --seqs-file-list-path transcript_paths.txt \
                               --annotation-format row_diff_brwt_coord \
-                              [OUTPUT_DIR]
+                              -o [OUTPUT_DIR]
 
 Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
 For this use case, primary graph mode is usually not recommended.
