@@ -266,6 +266,7 @@ rule transform_rd_stage1:
         succ=temp(wdir / f'{graph}.dbg.succ'),
         succ_boundary=temp(wdir / f'{graph}.dbg.succ_boundary'),
         rd_succ=wdir / f'{graph}.dbg.rd_succ',
+        row_reduction=temp(rd_cols_dir / 'vector.row_reduction'),
         stage1_done=touch(rd_cols_dir / 'stage1.DONE')
     threads: max_threads
     resources:
@@ -286,7 +287,7 @@ rule transform_rd_stage1:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {params.rd_cols_dir}/out {params.tempdir_opt} > {log} 2>&1
+            -o {output.row_reduction} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -295,6 +296,7 @@ rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
+        row_reduction=rules.transform_rd_stage1.output.row_reduction,
         pred=rules.transform_rd_stage1.output.pred,
         pred_boundary=rules.transform_rd_stage1.output.pred_boundary,
         succ=rules.transform_rd_stage1.output.succ,
