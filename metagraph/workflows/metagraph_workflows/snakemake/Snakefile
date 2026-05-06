@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import metagraph_workflows.utils
 from metagraph_workflows import workflow_configs, utils
 from metagraph_workflows.utils import take_value_or_default
@@ -18,6 +20,15 @@ for af in annotation_formats:
     # TODO: make a nicer error
 
 annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
+with_counts = take_value_or_default(workflow_configs.WITH_COUNTS, False, config)
+with_coordinates = take_value_or_default(workflow_configs.WITH_COORDINATES, False, config)
+if with_counts and with_coordinates:
+    raise RuntimeError(
+        'with_counts and with_coordinates cannot both be true (same constraint as metagraph row-diff).')
+count_width = take_value_or_default(workflow_configs.COUNT_WIDTH, 8, config)
+count_kmers_opt = '--count-kmers' if with_counts else ''
+coordinates_opt = '--coordinates' if with_coordinates else ''
+count_width_opt = f'--count-width {count_width}' if with_counts else ''
 
 
 metagraph_cmd=config['metagraph_cmd']
@@ -34,12 +45,22 @@ DONE="DONE"
 
 ## Paths
 graph_path=wdir/f'{graph}.dbg'
-annotation_cols_path=wdir/'columns'
+if with_counts:
+    annotation_mode_suffix = f'counts.w{count_width}'
+elif with_coordinates:
+    annotation_mode_suffix = 'coords'
+else:
+    annotation_mode_suffix = 'binary'
+annotation_cols_path=wdir/f'columns.{annotation_mode_suffix}'
 annotation_path_done=annotation_cols_path/DONE
 
-columns_file=wdir/'columns.txt'
+columns_file=wdir/f'columns.{annotation_mode_suffix}.txt'
 
 seqs_file_list_path=utils.get_seqs_file_list_path(wdir, config)
+
+column_anno_paths = utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
+column_counts_paths = [Path(str(p) + '.counts') for p in column_anno_paths] if with_counts else []
+column_coords_paths = [Path(str(p) + '.coords') for p in column_anno_paths] if with_coordinates else []
 
 contigs_dir=wdir/'contigs'
 
@@ -50,7 +71,7 @@ if not config[workflow_configs.SAMPLE_IDS_PATH]:
 localrules: generate_column_list
 
 rule all:
-     input:
+    input:
         graph_path,
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
 
@@ -64,7 +85,9 @@ rule annotate:
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
+        column_anno_files=temp(column_anno_paths),
+        column_count_files=(temp(column_counts_paths) if with_counts else []),
+        column_coord_files=(temp(column_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
@@ -80,7 +103,7 @@ rule annotate:
         else
             SEQ_PATHS="{input.seqs}"
         fi
-        
+
         OUT_DIR=$(dirname {output.done})
         mkdir -p $OUT_DIR
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
@@ -88,6 +111,9 @@ rule annotate:
           --parallel {threads} \
           -i {input.dbg_graph} \
           {annotation_labels_opt} \
+          {count_kmers_opt} \
+          {coordinates_opt} \
+          {count_width_opt} \
           --anno-type column \
           --separately \
           -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
@@ -96,7 +122,7 @@ rule annotate:
 GENERATE_COLUMN_LIST_RULE="generate_column_list"
 rule generate_column_list:
     input: rules.annotate.output.column_anno_files
-    output: columns_file
+    output: temp(columns_file)
     run:
         with open(output[0], 'w') as f:
             f.write('\n'.join([str(l) for l in input]))
@@ -108,6 +134,9 @@ GENERATE_BRWT_LINKAGE_RULE="generate_brwt_linkage"
 rule generate_brwt_linkage:
     input:
         columns_file=columns_file,
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
     output:
         linkage=wdir/f"{graph}.linkage.txt"
     threads: max_threads
@@ -128,11 +157,20 @@ rule generate_brwt_linkage:
         """
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
+ruleorder: annotate_row_diff_brwt > transform_annotation
+ruleorder: annotate_row_diff_int_brwt > transform_annotation
+ruleorder: annotate_row_diff_int_disk > transform_annotation
+ruleorder: annotate_row_diff_brwt_coord > transform_annotation
+ruleorder: annotate_row_diff_coord > transform_annotation
+ruleorder: annotate_row_diff_disk_coord > transform_annotation
 
 TRANSFORM_ANNOTATION_RULE="transform_annotation"
 rule transform_annotation:
     input:
         columns_file=columns_file,
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
     output:
         annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
     threads: max_threads
@@ -155,6 +193,9 @@ rule annotate_brwt:
     input:
         linkage=wdir/f"{graph}.linkage.txt",
         columns_file=columns_file,
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
     output:
         annotations=wdir/f'{graph}.brwt.annodbg',
     threads: max_threads
@@ -198,7 +239,13 @@ rule relax_brwt:
             {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
         """
 
-rd_cols_dir = wdir/'rd_cols'
+rd_cols_dir = wdir/f'rd_cols.{annotation_mode_suffix}'
+
+# Stage 2: *.column.annodbg (counts/coords) vs *.row_diff.annodbg (binary row-diff only).
+rd_col_annodbg_suffix = '.column.annodbg' if (with_counts or with_coordinates) else '.row_diff.annodbg'
+rd_col_annodbg_paths = utils.generate_col_paths(rd_cols_dir, seqs_file_list_path, config, suffix=rd_col_annodbg_suffix)
+rd_col_counts_paths = [Path(str(p) + '.counts') for p in rd_col_annodbg_paths] if with_counts else []
+rd_col_coords_paths = [Path(str(p) + '.coords') for p in rd_col_annodbg_paths] if with_coordinates else []
 
 from metagraph_workflows.resource_management import TransformRdStage0Resources
 
@@ -207,8 +254,11 @@ rule transform_rd_stage0:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
     output:
-        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+        columns_rd_row_count=temp(rd_cols_dir/'vector.row_count')
     threads: max_threads
     resources:
         mem_mb=TransformRdStage0Resources(config).get_mem()
@@ -226,6 +276,9 @@ rule transform_rd_stage0:
             --row-diff-stage 0 \
             -i {input.dbg_graph} \
             --parallel {threads} \
+            {count_kmers_opt} \
+            {coordinates_opt} \
+            {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
             -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
         """
@@ -235,19 +288,24 @@ rule transform_rd_stage1:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
-        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
+        columns_rd_row_count=rules.transform_rd_stage0.output.columns_rd_row_count
     output:
-        pred=wdir / f'{graph}.dbg.pred',
-        pred_boundary=wdir / f'{graph}.dbg.pred_boundary',
-        rd_succ=wdir / f'{graph}.dbg.rd_succ',
-        succ=wdir / f'{graph}.dbg.succ',
-        succ_boundary=wdir / f'{graph}.dbg.succ_boundary',
-        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+        pred=temp(wdir / f'{graph}.dbg.pred'),
+        pred_boundary=temp(wdir / f'{graph}.dbg.pred_boundary'),
+        succ=temp(wdir / f'{graph}.dbg.succ'),
+        succ_boundary=temp(wdir / f'{graph}.dbg.succ_boundary'),
+        rd_succ=temp(wdir / f'{graph}.dbg.rd_succ'),
+        row_reduction=temp(rd_cols_dir / 'vector.row_reduction'),
+        stage1_done=touch(rd_cols_dir / 'stage1.DONE')
     threads: max_threads
     resources:
         mem_mb=TransformRdStage1Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage1Resources(config).get_mem_buffer_gib(),
+        rd_cols_dir=rd_cols_dir,
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
@@ -257,8 +315,11 @@ rule transform_rd_stage1:
             --row-diff-stage 1 \
             -i {input.dbg_graph} \
             --parallel {threads} \
+            {count_kmers_opt} \
+            {coordinates_opt} \
+            {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.cols_rd_vectors} {params.tempdir_opt} > {log} 2>&1
+            -o {output.row_reduction} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -267,10 +328,22 @@ rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
-        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+        column_anno_files=rules.annotate.output.column_anno_files,
+        column_count_files=rules.annotate.output.column_count_files,
+        column_coord_files=rules.annotate.output.column_coord_files,
+        row_reduction=rules.transform_rd_stage1.output.row_reduction,
+        pred=rules.transform_rd_stage1.output.pred,
+        pred_boundary=rules.transform_rd_stage1.output.pred_boundary,
+        succ=rules.transform_rd_stage1.output.succ,
+        succ_boundary=rules.transform_rd_stage1.output.succ_boundary,
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        stage1_done=rules.transform_rd_stage1.output.stage1_done
     output:
-        anchors=wdir/f'{graph}.dbg.anchors',
-        rd_cols_done=touch(rd_cols_dir/DONE)
+        anchors=temp(wdir/f'{graph}.dbg.anchors'),
+        rd_cols_done=touch(rd_cols_dir/DONE),
+        rd_col_annodbg_files=temp(rd_col_annodbg_paths),
+        rd_col_count_files=(temp(rd_col_counts_paths) if with_counts else []),
+        rd_col_coord_files=(temp(rd_col_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=TransformRdStage2Resources(config).get_mem(),
@@ -285,6 +358,9 @@ rule transform_rd_stage2:
             --row-diff-stage 2 \
             -i {input.dbg_graph} \
             --parallel {threads} \
+            {count_kmers_opt} \
+            {coordinates_opt} \
+            {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
             -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
         """
@@ -293,12 +369,16 @@ rule transform_rd_stage2:
 ANNOTATE_ROW_DIFF_BRWT_RULE="annotate_row_diff_brwt"
 rule annotate_row_diff_brwt:
     input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
         anchors=rules.transform_rd_stage2.output.anchors,
         rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
         dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
-        linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
+        linkage=temp(wdir / f'{graph}.row_diff_brwt.annodbg.linkage'),
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
@@ -340,4 +420,152 @@ rule relax_row_diff_brwt:
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
             {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_INT_BRWT_RULE="annotate_row_diff_int_brwt"
+rule annotate_row_diff_int_brwt:
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_int_brwt.annodbg',
+        linkage=temp(wdir/f'{graph}.row_diff_int_brwt.annodbg.linkage')
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config).get_mem(),
+    params:
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config)
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_int_brwt \
+            --greedy \
+            --parallel-nodes {params.parallel_nodes} \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_INT_DISK_RULE="annotate_row_diff_int_disk"
+rule annotate_row_diff_int_disk:
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_int_disk.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_INT_DISK_RULE, config).get_mem(),
+    params:
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_INT_DISK_RULE, config)
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_int_disk \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_BRWT_COORD_RULE="annotate_row_diff_brwt_coord"
+rule annotate_row_diff_brwt_coord:
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_brwt_coord.annodbg',
+        linkage=temp(wdir/f'{graph}.row_diff_brwt_coord.annodbg.linkage')
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config).get_mem(),
+    params:
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config)
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_brwt_coord \
+            --greedy \
+            --parallel-nodes {params.parallel_nodes} \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_COORD_RULE="annotate_row_diff_coord"
+rule annotate_row_diff_coord:
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_coord.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_COORD_RULE, config).get_mem(),
+    params:
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_COORD_RULE, config)
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_coord \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_DISK_COORD_RULE="annotate_row_diff_disk_coord"
+rule annotate_row_diff_disk_coord:
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_disk_coord.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_DISK_COORD_RULE, config).get_mem(),
+    params:
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_DISK_COORD_RULE, config)
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_disk_coord \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """

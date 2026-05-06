@@ -11,6 +11,7 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace {
@@ -253,19 +254,142 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
     std::filesystem::remove_all(dst_dir);
     std::filesystem::create_directories(dst_dir);
 
-    std::string annot_fname
-            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
-    ColumnCompressed<>(5).serialize(annot_fname);
-
     std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     graph->serialize(graph_fname);
+
+    const std::string annot_fname
+            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ColumnCompressed<>(graph->max_index()).serialize(annot_fname);
 
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
-    ASSERT_TRUE(!std::filesystem::exists(dest_fname));
+    ASSERT_TRUE(std::filesystem::exists(dest_fname));
+    RowDiffColumnAnnotator annotator({}, graph.get());
+    annotator.load(dest_fname);
+    const_cast<matrix::RowDiff<matrix::ColumnMajor> &>(annotator.get_matrix())
+            .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
+    EXPECT_EQ(0u, annotator.num_labels());
+    EXPECT_EQ(graph->max_index(), annotator.num_objects());
+    std::filesystem::remove_all(dst_dir);
+}
+
+TEST(RowDiff, ConvertFromColumnCompressedEmptyAlongsideNonEmpty) {
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty_batch";
+    const std::string graph_fname
+            = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
+
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAC" });
+    graph->serialize(graph_fname);
+
+    const std::string empty_annot = dst_dir/(std::string("empty") + ColumnCompressed<>::kExtension);
+    ColumnCompressed<>(graph->max_index()).serialize(empty_annot);
+
+    uint64_t labeled_row = 0;
+    bool have_node = false;
+    graph->call_nodes([&](graph::DeBruijnGraph::node_index node_idx) {
+        if (!have_node) {
+            labeled_row = graph_to_anno_index(node_idx);
+            have_node = true;
+        }
+    });
+    ASSERT_TRUE(have_node);
+
+    const std::string full_annot = dst_dir/(std::string("full") + ColumnCompressed<>::kExtension);
+    ColumnCompressed full(graph->max_index());
+    full.add_labels({ labeled_row }, { "Label0" });
+    full.serialize(full_annot);
+
+    convert_to_row_diff({ empty_annot, full_annot }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::COMPUTE_REDUCTION);
+    convert_to_row_diff({ empty_annot, full_annot }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::CONVERT);
+
+    const std::string dest_empty = dst_dir/(std::string("empty") + RowDiffColumnAnnotator::kExtension);
+    const std::string dest_full = dst_dir/(std::string("full") + RowDiffColumnAnnotator::kExtension);
+    ASSERT_TRUE(std::filesystem::exists(dest_empty));
+    ASSERT_TRUE(std::filesystem::exists(dest_full));
+
+    RowDiffColumnAnnotator empty_rd({}, graph.get());
+    empty_rd.load(dest_empty);
+    const_cast<matrix::RowDiff<matrix::ColumnMajor> &>(empty_rd.get_matrix())
+            .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
+    EXPECT_EQ(0u, empty_rd.num_labels());
+    EXPECT_EQ(graph->max_index(), empty_rd.num_objects());
+
+    RowDiffColumnAnnotator full_rd({}, graph.get());
+    full_rd.load(dest_full);
+    const_cast<matrix::RowDiff<matrix::ColumnMajor> &>(full_rd.get_matrix())
+            .load_anchor(graph_fname + matrix::kRowDiffAnchorExt);
+    EXPECT_EQ(1u, full_rd.num_labels());
+    EXPECT_THAT(full_rd.get_labels(labeled_row), ElementsAre("Label0"));
+
+    std::filesystem::remove_all(dst_dir);
+}
+
+TEST(RowDiff, ConvertFromColumnCompressedEmptyCoordinatesMode) {
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty_coord";
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
+
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+    const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+    graph->serialize(graph_fname);
+
+    const std::string annot_fname
+            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ColumnCompressed<> coord_empty(graph->max_index(), 1, "", (uint64_t)1e7, 0, true, 2000);
+    coord_empty.serialize(annot_fname);
+
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::COMPUTE_REDUCTION, "", false, true, 0);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::CONVERT, "", false, true, 0);
+
+    const std::string dest_col = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ASSERT_TRUE(std::filesystem::exists(dest_col));
+    const std::string dest_coords = utils::remove_suffix(dest_col, ColumnCompressed<>::kExtension)
+            + ColumnCompressed<>::kCoordExtension;
+    ASSERT_TRUE(std::filesystem::exists(dest_coords));
+    const std::string dest_counts = utils::remove_suffix(dest_col, ColumnCompressed<>::kExtension)
+            + ColumnCompressed<>::kCountExtension;
+    ASSERT_FALSE(std::filesystem::exists(dest_counts));
+    ColumnCompressed<> loaded;
+    ASSERT_TRUE(loaded.load(dest_col));
+    EXPECT_EQ(0u, loaded.num_labels());
+    EXPECT_EQ(graph->max_index(), loaded.num_objects());
+
+    std::filesystem::remove_all(dst_dir);
+}
+
+TEST(RowDiff, ConvertFromColumnCompressedEmptyCountsMode) {
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty_counts";
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
+
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+    const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+    graph->serialize(graph_fname);
+
+    const std::string annot_fname
+            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ColumnCompressed<>(graph->max_index()).serialize(annot_fname);
+
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::COMPUTE_REDUCTION, "", true, false, 0);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir,
+                        RowDiffStage::CONVERT, "", true, false, 0);
+
+    const std::string dest_col = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ASSERT_TRUE(std::filesystem::exists(dest_col));
+    const std::string dest_counts = utils::remove_suffix(dest_col, ColumnCompressed<>::kExtension)
+            + ColumnCompressed<>::kCountExtension;
+    ASSERT_TRUE(std::filesystem::exists(dest_counts));
+
     std::filesystem::remove_all(dst_dir);
 }
 

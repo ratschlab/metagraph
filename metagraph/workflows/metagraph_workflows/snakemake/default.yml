@@ -12,13 +12,15 @@ kmc_mem_overhead_factor: 1.1
 # annotation options
 annotation_formats: ['relax.row_diff_brwt']
 annotation_labels_source: 'sequence_headers'
+with_counts: false
+with_coordinates: false
+count_width: 8
 
 brwt_relax_arity: 32
 brwt_parallel_nodes: 5
 brwt_linkage_subsample: 100000
 
 metagraph_cmd: 'metagraph'
-gnu_time_cmd: '/usr/bin/time'
 
 default_disk_mb: 10000
 max_memory_mb: 4048

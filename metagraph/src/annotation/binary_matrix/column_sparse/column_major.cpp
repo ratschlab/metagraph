@@ -10,7 +10,7 @@ namespace matrix {
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_.size()) {
-        return 0;
+        return explicit_num_rows_if_empty_;
     } else {
         assert(columns_[0]);
         return columns_[0]->size();
@@ -89,6 +89,7 @@ bool ColumnMajor::load(std::istream &in) {
         return false;
 
     columns_.clear();
+    explicit_num_rows_if_empty_ = 0;
 
     try {
         columns_.resize(load_number(in));
@@ -100,6 +101,10 @@ bool ColumnMajor::load(std::istream &in) {
             c = std::make_unique<bit_vector_sd>();
             if (!c->load(in))
                 return false;
+        }
+        // optional trailing row count for empty matrices
+        if (columns_.empty() && in.good() && in.peek() != std::istream::traits_type::eof()) {
+            explicit_num_rows_if_empty_ = load_number(in);
         }
         return true;
     } catch (...) {
@@ -119,6 +124,9 @@ void ColumnMajor::serialize(std::ostream &out) const {
         } else {
             c->copy_to<bit_vector_sd>().serialize(out);
         }
+    }
+    if (columns_.empty() && explicit_num_rows_if_empty_ > 0) {
+        serialize_number(out, explicit_num_rows_if_empty_);
     }
 }
 

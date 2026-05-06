@@ -14,8 +14,10 @@ namespace matrix {
 class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
   public:
     ColumnMajor() {}
-    ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
-        : columns_(std::move(columns)) {}
+    ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns,
+                uint64_t num_rows_if_empty = 0)
+        : columns_(std::move(columns)),
+          explicit_num_rows_if_empty_(columns_.empty() ? num_rows_if_empty : 0) {}
 
     uint64_t num_columns() const override { return columns_.size(); }
     uint64_t num_rows() const override;
@@ -48,6 +50,8 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
 
   private:
     std::vector<std::unique_ptr<bit_vector>> columns_;
+    // When |columns_| is empty, row dimension for serialization / num_objects (optional).
+    uint64_t explicit_num_rows_if_empty_ = 0;
 };
 
 } // namespace matrix

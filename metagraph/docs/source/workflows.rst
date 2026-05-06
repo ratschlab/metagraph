@@ -53,7 +53,8 @@ Typically, the following steps would be performed:
 
    * k-mer length
    * basic vs. primary graph mode
-   * source of annotation labels: ``sequence_headers`` or ``sequence_file_names``
+   * source of annotation labels: ``sequence_headers`` or ``file_names``
+   * count-aware annotation mode and format selection
 
    An example invocation:
 
@@ -61,11 +62,90 @@ Typically, the following steps would be performed:
 
      metagraph-workflows build -k 31 \
                                --seqs-dir-path [PATH_TO_FILES] \
-                               --annotation-labels-source sequence_headers \
-                               --build-primary-graph \
-                               [OUTPUT_DIR]
+                               --anno-source sequence_headers \
+                               --primary \
+                               -o [OUTPUT_DIR]
 
-   See ``metagraph-workflows build -h`` for more help.
+Count-aware annotations
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The workflow supports these count-aware annotation formats:
+
+* ``int_brwt``
+* ``row_diff_int_brwt``
+* ``row_diff_int_disk``
+
+To enable counts explicitly, pass ``--with-counts``. If no annotation format is specified,
+the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --primary \
+                              --with-counts \
+                              --count-width 12 \
+                              -o [OUTPUT_DIR]
+
+You can also select a count-aware format directly via ``--annotation-format``; this
+automatically enables count-aware mode::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --primary \
+                              --annotation-format row_diff_int_brwt \
+                              --count-width 12 \
+                              -o [OUTPUT_DIR]
+
+Use ``--count-width`` to control the stored numeric range for counts
+(valid range: ``2..32``, default: ``8``).
+
+When reusing an output directory, the workflow keeps count and non-count intermediates in
+separate mode-specific directories to avoid stale artifact reuse.
+
+Coordinate-aware annotations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The workflow supports these coordinate-aware annotation formats:
+
+* ``brwt_coord``
+* ``row_diff_coord``
+* ``row_diff_brwt_coord``
+* ``row_diff_disk_coord``
+
+To enable coordinates explicitly, pass ``--with-coords``. If no annotation format is specified,
+the default switches from ``relax.row_diff_brwt`` to ``row_diff_brwt_coord``::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --with-coords \
+                              -o [OUTPUT_DIR]
+
+You can also select a coordinate-aware format directly via ``--annotation-format``; this
+automatically enables coordinate-aware mode::
+
+    metagraph-workflows build -k 31 \
+                              --seqs-file-list-path transcript_paths.txt \
+                              --annotation-format row_diff_brwt_coord \
+                              -o [OUTPUT_DIR]
+
+Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
+For this use case, primary graph mode is usually not recommended.
+
+Count-aware and coordinate-aware modes are mutually exclusive in this workflow.
+
+Row-diff transform outputs
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The annotate step writes ``columns.<mode>/<basename>.column.annodbg`` for each input sequence
+file. Row-diff stages 0–2 then write under ``rd_cols.<mode>/`` (for example ``rd_cols.binary/``,
+``rd_cols.coords/``, or ``rd_cols.counts.w8/`` depending on configuration):
+
+* **Binary annotation mode** (no ``--with-counts`` / ``--with-coords``): stage 2 emits
+  ``<basename>.row_diff.annodbg`` per column—the ``RowDiffColumnAnnotator`` format.
+* **Count or coordinate mode**: stage 2 emits ``<basename>.column.annodbg`` and, when applicable,
+  ``<basename>.column.annodbg.counts`` and/or ``<basename>.column.annodbg.coords``.
+
+See ``metagraph-workflows build -h`` for more details.
+
 3. Once a MetaGraph index has been created, it can be queried either by using the command line
    ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
    machine and querying it using the python :ref:`API` client.

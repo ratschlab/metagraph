@@ -38,15 +38,17 @@ DISK_MB_KEY = 'disk_mb'
 MEM_BUFFER_MB_KEY = 'mem_buffer_mb'
 DISK_CAP_MB_KEY = 'disk_cap_mb'
 
-GNU_TIME_CMD = 'gnu_time_cmd'
+WITH_COUNTS = 'with_counts'
+COUNT_WIDTH = 'count_width'
+WITH_COORDINATES = 'with_coordinates'
 
 
 class AnnotationLabelsSource(Enum):
     SEQUENCE_HEADERS = 'sequence_headers'
-    SEQUENCE_FILE_NAMES = 'sequence_file_names'
+    FILE_NAMES = 'file_names'
 
     def to_annotation_cmd_option(self):
-        if self == self.SEQUENCE_FILE_NAMES:
+        if self == self.FILE_NAMES:
             return '--anno-filename'
         elif self == self.SEQUENCE_HEADERS:
             return '--anno-header'
@@ -66,3 +68,10 @@ class AnnotationFormats(Enum):
     #RELAXED_RB_BRWT = 'relax.rb_brwt' # not possible
     ROW_DIFF_BRWT = 'row_diff_brwt'
     RELAXED_ROW_DIFF_BRWT = 'relax.row_diff_brwt'
+    INT_BRWT = 'int_brwt'
+    ROW_DIFF_INT_BRWT = 'row_diff_int_brwt'
+    ROW_DIFF_INT_DISK = 'row_diff_int_disk'
+    BRWT_COORD = 'brwt_coord'
+    ROW_DIFF_COORD = 'row_diff_coord'
+    ROW_DIFF_BRWT_COORD = 'row_diff_brwt_coord'
+    ROW_DIFF_DISK_COORD = 'row_diff_disk_coord'

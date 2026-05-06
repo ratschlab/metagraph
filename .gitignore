@@ -29,4 +29,5 @@ metagraph/**/build*
 *.un~
 tags
 **/cmake-build-debug
+**/.snakemake/
 .idea
