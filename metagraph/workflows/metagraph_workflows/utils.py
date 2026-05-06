@@ -82,7 +82,12 @@ def get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path
     return _get_build_graph_input
 
 
-def generate_col_paths(annotation_cols_path, seqs_file_list_path, config):
+def generate_col_paths(annotation_cols_path, seqs_file_list_path, config,
+                       suffix=".column.annodbg"):
+    """Per-sample paths under ``annotation_cols_path`` (default: ``*.column.annodbg``).
+
+    Row-diff stage 2 binary mode emits ``*.row_diff.annodbg``; pass ``suffix='.row_diff.annodbg'``.
+    """
     sample_names = set()
 
     if workflow_configs.SAMPLE_IDS_PATH in config and config[workflow_configs.SAMPLE_IDS_PATH]:
@@ -105,8 +110,7 @@ def generate_col_paths(annotation_cols_path, seqs_file_list_path, config):
             else:
                 sample_names = set(column_names)
 
-    return [annotation_cols_path / f"{c}.column.annodbg" for c in
-            sample_names]
+    return [annotation_cols_path / f"{c}{suffix}" for c in sample_names]
 
 
 def get_wdir(config):

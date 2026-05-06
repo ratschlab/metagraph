@@ -132,7 +132,20 @@ For this use case, primary graph mode is usually not recommended.
 
 Count-aware and coordinate-aware modes are mutually exclusive in this workflow.
 
+Row-diff transform outputs
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The annotate step writes ``columns.<mode>/<basename>.column.annodbg`` for each input sequence
+file. Row-diff stages 0–2 then write under ``rd_cols.<mode>/`` (for example ``rd_cols.binary/``,
+``rd_cols.coords/``, or ``rd_cols.counts.w8/`` depending on configuration):
+
+* **Binary annotation mode** (no ``--with-counts`` / ``--with-coords``): stage 2 emits
+  ``<basename>.row_diff.annodbg`` per column—the ``RowDiffColumnAnnotator`` format.
+* **Count or coordinate mode**: stage 2 emits ``<basename>.column.annodbg`` and, when applicable,
+  ``<basename>.column.annodbg.counts`` and/or ``<basename>.column.annodbg.coords``.
+
 See ``metagraph-workflows build -h`` for more details.
+
 3. Once a MetaGraph index has been created, it can be queried either by using the command line
    ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
    machine and querying it using the python :ref:`API` client.

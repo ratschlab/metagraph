@@ -49,14 +49,12 @@ load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
             std::exit(1);
         }
 
-        if (!sources[i].num_labels())
-            continue;
-
+        const uint64_t n = sources[i].num_objects();
         #pragma omp critical
         {
             if (!*num_rows) {
-                *num_rows = sources[i].num_objects();
-            } else if (*num_rows != sources[i].num_objects()) {
+                *num_rows = n;
+            } else if (*num_rows != n) {
                 logger->error("Annotations have different number of rows");
                 std::exit(1);
             }
@@ -1157,13 +1155,15 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             diff_columns[l_idx] = std::move(columns);
 
         } else {
-            if (!columns.size())
-                continue;
-
             auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
             if constexpr(with_values) {
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
-                ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+                if (columns.size()) {
+                    ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+                } else {
+                    // serialize an empty annotation with counts
+                    ColumnCompressed<>(num_rows, 1, "", buf_size_bytes, 1).serialize(fpath);
+                }
                 logger->trace("Serialized {}", fpath);
 
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kCountExtension);
@@ -1177,7 +1177,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             } else {
                 fpath.replace_extension().replace_extension(RowDiffColumnAnnotator::kExtension);
                 RowDiffColumnAnnotator(
-                        std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                        std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns), num_rows)),
                         std::move(label_encoders[l_idx])).serialize(fpath);
                 logger->trace("Serialized {}", fpath);
             }
@@ -1524,9 +1524,6 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
-        if (!label_encoders[l_idx].size())
-            continue;
-
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         auto fpath_coord = col_out_dir/fs::path(source_files[l_idx]).filename();
@@ -1567,7 +1564,12 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
         logger->trace("Serialized {}", fpath_coord);
         auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
         fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
-        ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+        if (columns.size()) {
+            ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+        } else {
+            // serialize an empty annotation with coords
+            ColumnCompressed<>(num_rows, 1, "", buf_size_bytes, 0, true).serialize(fpath);
+        }
         logger->trace("Serialized {}", fpath);
     }
 

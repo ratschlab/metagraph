@@ -96,7 +96,8 @@ initialize_annotation(Config::AnnotationType anno_type,
                       double memory_available_gb,
                       uint8_t count_width,
                       size_t max_chunks_open,
-                      size_t RA_ivbuffer_size) {
+                      size_t RA_ivbuffer_size,
+                      bool index_coordinates) {
     std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation;
 
     switch (anno_type) {
@@ -104,7 +105,8 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(
                 new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached,
                                               swap_dir, memory_available_gb * kBytesInGigabyte,
-                                              count_width, max_chunks_open)
+                                              count_width, index_coordinates,
+                                              max_chunks_open)
             );
             break;
         }

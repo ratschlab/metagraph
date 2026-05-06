@@ -46,7 +46,8 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,
-        std::make_unique<ColumnCompressed<>>(max_index)
+        std::make_unique<ColumnCompressed<>>(max_index, 1, "", uint64_t(10'000'000), 0,
+                                             coordinates, 2000)
     );
 
     if (coordinates) {

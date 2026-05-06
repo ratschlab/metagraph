@@ -19,9 +19,10 @@ initialize_annotation(Config::AnnotationType anno_type,
                       uint64_t num_rows = 0,
                       const std::string &swap_dir = "",
                       double memory_available_gb = 1,
-                      uint8_t count_width = 8,
+                      uint8_t count_width = 0,
                       size_t max_chunks_open = 2000,
-                      size_t RA_ivbuffer_size = 16'384);
+                      size_t RA_ivbuffer_size = 16'384,
+                      bool index_coordinates = false);
 
 inline std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
@@ -31,7 +32,8 @@ initialize_annotation(Config::AnnotationType anno_type,
     return initialize_annotation(anno_type, config.num_columns_cached, config.sparse,
                                  num_rows, config.tmp_dir, config.memory_available,
                                  config.count_width, max_chunks_open,
-                                 config.RA_ivbuffer_size);
+                                 config.RA_ivbuffer_size,
+                                 config.coordinates);
 }
 
 template <typename... Args>

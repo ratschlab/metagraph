@@ -36,7 +36,8 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e7,
-                     uint8_t count_width = 8,
+                     uint8_t count_width = 0,
+                     bool index_coordinates = false,
                      size_t max_chunks_open = 2000);
 
     ColumnCompressed(sdsl::bit_vector&& column,
@@ -44,7 +45,8 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e7,
-                     uint8_t count_width = 8,
+                     uint8_t count_width = 0,
+                     bool index_coordinates = false,
                      size_t max_chunks_open = 2000);
 
     ColumnCompressed(std::vector<std::unique_ptr<bit_vector>>&& columns,
@@ -52,7 +54,8 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e7,
-                     uint8_t count_width = 8,
+                     uint8_t count_width = 0,
+                     bool index_coordinates = false,
                      size_t max_chunks_open = 2000);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
@@ -174,6 +177,7 @@ class ColumnCompressed : public MultiLabelAnnotation<Label> {
     mutable std::mutex counts_mu_;
     uint8_t count_width_;
     uint64_t max_count_;
+    bool index_coordinates_;
     std::vector<sdsl::int_vector<>> relation_counts_;
     // depending on parameters, coords are stored in RAM or in chunks dumped to disk
     std::vector<common::SortedVector<std::pair<Index, uint64_t>>> coords_;
