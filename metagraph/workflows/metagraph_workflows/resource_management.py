@@ -139,18 +139,11 @@ class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
         return mem_cap_mib + max(int(mem_cap_mib/self.CAP_MEM_FRACTION * (1-self.CAP_MEM_FRACTION)), BASE_MEM)
 
 
-class SupportsDiskCap(ResourceConfig):
-    def get_disk_cap(self):
-        def _get_disk_cap(wildcards):
-            return int(self.get_disk()(wildcards) / 1024)
-        return _get_disk_cap # TODO: come up with a heuristic
-
-
-class BuildGraphResources(SupportsMemBufferSize, SupportsDiskCap):
+class BuildGraphResources(SupportsMemBufferSize):
     pass
 
 
-class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, SupportsDiskCap):
+class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation):
 
     KMC_STATS_KEY = "Stats"
     KMC_UNIQUE_KMER_CNT = "#Unique_counted_k-mers"
