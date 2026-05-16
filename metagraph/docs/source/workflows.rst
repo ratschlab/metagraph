@@ -24,20 +24,25 @@ Set up a conda environment and install the necessary packages using:
 Creating graphs and annotations
 -------------------------------
 
-Given some raw sequencing data and a few options like the k-mer length, graphs and annotations
-are automatically built::
+A single command runs the full pipeline — graph construction,
+annotation, and all row-diff / BRWT transforms — for a set of samples::
 
-    metagraph-workflows build -k 5 transcript_paths.txt /tmp/mygraph
+    metagraph-workflows build samples.txt -o /tmp/mygraph --primary
+
+``samples.txt`` is a text file listing input paths (one per line); a
+directory of sample files also works. Process substitution is supported
+too, so you can pipe a glob inline::
+
+    metagraph-workflows build <(ls /data/samples/*.fa) -o /tmp/mygraph --primary
 
 
-The same pipeline can be invoked from within a python script:
+The same pipeline can be invoked from a Python script:
 
 .. code-block:: python
 
-    from metagraph_workflows import workflows
+    from metagraph_workflows import cli
 
-    workflows.run_build_workflow('/tmp/mygraph', seqs_file_list_path='transcript_paths.txt', k=5)
-
+    cli.run_workflow('/tmp/mygraph', samples='samples.txt', k=31, build_primary_graph=True)
 
 
 The pipelines are written in the `Snakemake <https://snakemake.readthedocs.io/>`__ workflow management system and can also be directly invoked using the ``snakemake`` command line tool (see below).
@@ -48,23 +53,32 @@ Usage
 
 Typically, the following steps would be performed:
 
-1. Prepare a list of files for indexing.
-2. Construct a MetaGraph index: invoke a workflow using ``metagraph-workflows build``. Important parameters you may consider tuning are:
+1. Prepare a list of input files (or a directory).
+2. Construct a MetaGraph index: invoke ``metagraph-workflows build``.
+   Tell the workflow how much hardware is available and what kind of
+   index you want; the per-stage memory caps, thread packing, and
+   BRWT clustering parameters are derived automatically.
 
-   * k-mer length
-   * basic vs. primary graph mode
-   * source of annotation labels: ``sequence_headers`` or ``file_names``
-   * count-aware annotation mode and format selection
+   Important parameters you may want to set:
+
+   * ``--threads N`` and ``--mem-gb GB`` for the hardware budget
+   * ``-k`` for k-mer length (default 31)
+   * ``--primary`` for primary graph mode (recommended for most workloads)
+   * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
+   * ``--anno-source`` (``sequence_headers`` or ``file_names``)
+   * ``--annotation-format FMT`` to choose / add output annotation formats
+   * ``--with-counts`` or ``--with-coords`` for count- / coordinate-aware
+     annotation (mutually exclusive)
+   * ``--graph EXISTING.dbg`` to reuse an already-built graph and run
+     only the annotation + transform stages
 
    An example invocation:
 
    .. code-block:: bash
 
-     metagraph-workflows build -k 31 \
-                               --seqs-dir-path [PATH_TO_FILES] \
-                               --anno-source sequence_headers \
-                               --primary \
-                               -o [OUTPUT_DIR]
+     metagraph-workflows build samples.txt -o /tmp/mygraph \
+         -k 31 --primary --anno-source sequence_headers \
+         --threads 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 
 Count-aware annotations
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -78,22 +92,14 @@ The workflow supports these count-aware annotation formats:
 To enable counts explicitly, pass ``--with-counts``. If no annotation format is specified,
 the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
 
-    metagraph-workflows build -k 31 \
-                              --seqs-file-list-path transcript_paths.txt \
-                              --primary \
-                              --with-counts \
-                              --count-width 12 \
-                              -o [OUTPUT_DIR]
+    metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
+        -k 31 --primary --with-counts --count-width 12
 
 You can also select a count-aware format directly via ``--annotation-format``; this
 automatically enables count-aware mode::
 
-    metagraph-workflows build -k 31 \
-                              --seqs-file-list-path transcript_paths.txt \
-                              --primary \
-                              --annotation-format row_diff_int_brwt \
-                              --count-width 12 \
-                              -o [OUTPUT_DIR]
+    metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
+        -k 31 --primary --annotation-format row_diff_int_brwt --count-width 12
 
 Use ``--count-width`` to control the stored numeric range for counts
 (valid range: ``2..32``, default: ``8``).
@@ -114,18 +120,14 @@ The workflow supports these coordinate-aware annotation formats:
 To enable coordinates explicitly, pass ``--with-coords``. If no annotation format is specified,
 the default switches from ``relax.row_diff_brwt`` to ``row_diff_brwt_coord``::
 
-    metagraph-workflows build -k 31 \
-                              --seqs-file-list-path transcript_paths.txt \
-                              --with-coords \
-                              -o [OUTPUT_DIR]
+    metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
+        -k 31 --with-coords
 
 You can also select a coordinate-aware format directly via ``--annotation-format``; this
 automatically enables coordinate-aware mode::
 
-    metagraph-workflows build -k 31 \
-                              --seqs-file-list-path transcript_paths.txt \
-                              --annotation-format row_diff_brwt_coord \
-                              -o [OUTPUT_DIR]
+    metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
+        -k 31 --annotation-format row_diff_brwt_coord
 
 Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
 For this use case, primary graph mode is usually not recommended.
