@@ -505,6 +505,27 @@ def test_coords_mode_auto_picks_threads_each_16(sample_list_path, output_dir):
     assert "--threads-each 16" in out
 
 
+@pytest.mark.parametrize("fmt", ["row_diff_flat", "row_diff_sparse", "row_diff_disk"])
+def test_row_diff_binary_formats_reach_shell(sample_list_path, output_dir, fmt):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--annotation-format', fmt,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    # Resolved by the shared annotate_row_diff_binary rule, which passes
+    # --anno-type <fmt> and -i graph.dbg (row-diff transform input).
+    assert f"--anno-type {fmt}" in out
+    assert "annotate_row_diff_binary" in out
+    if fmt == "row_diff_disk":
+        # disk variant gets --mem-cap-gb; the other two omit it.
+        assert "--mem-cap-gb" in out
+
+
 def test_brwt_parallel_nodes_default_is_10(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',

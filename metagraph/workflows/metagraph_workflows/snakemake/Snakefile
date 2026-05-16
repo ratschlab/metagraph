@@ -209,6 +209,7 @@ ruleorder: annotate_row_diff_int_disk > transform_annotation
 ruleorder: annotate_row_diff_brwt_coord > transform_annotation
 ruleorder: annotate_row_diff_coord > transform_annotation
 ruleorder: annotate_row_diff_disk_coord > transform_annotation
+ruleorder: annotate_row_diff_binary > transform_annotation
 
 TRANSFORM_ANNOTATION_RULE="transform_annotation"
 rule transform_annotation:
@@ -502,6 +503,50 @@ rule annotate_row_diff_int_brwt:
             --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_BINARY_RULE="annotate_row_diff_binary"
+rule annotate_row_diff_binary:
+    """Binary row-diff annotation in flat / sparse / disk form.
+
+    The three formats share the same input (row-diff stage-2 columns +
+    graph) and CLI shape. `--mem-cap-gb` is only meaningful for
+    row_diff_disk (which materializes the row-diff buffer to disk);
+    flat / sparse don't use it, matching the convention in
+    experiments/large_index_scripts.md.
+    """
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
+    wildcard_constraints:
+        anno_type="row_diff_flat|row_diff_sparse|row_diff_disk",
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BINARY_RULE, config).get_mem(),
+    params:
+        tempdir_opt=utils.temp_dir_config(config),
+        mem_cap_arg=(
+            lambda wildcards, input, threads, resources:
+                f"--mem-cap-gb {TransformRdStage2Resources(config).get_mem_buffer_gib()(wildcards, input, threads, resources)}"
+                if wildcards.anno_type == "row_diff_disk" else ""
+        ),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_BINARY_RULE, config, ['anno_type'])
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type {wildcards.anno_type} \
+            -p {threads} \
+            {params.mem_cap_arg} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """

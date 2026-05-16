@@ -769,26 +769,30 @@ def _add_annotation_args(annotation):
     coord_formats = sorted([f.value for f in COORD_COMPATIBLE_FORMATS])
     count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
     coord_formats_display = [_help_color(fmt, "35") for fmt in coord_formats]
-    classic_fmt_names = [
-        "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt",
-        "rb_brwt", "row_diff_brwt", "relax.row_diff_brwt",
+    plain_fmt_names = [
+        "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt", "rb_brwt",
+    ]
+    rd_fmt_names = [
+        "row_diff_brwt", "relax.row_diff_brwt",
+        "row_diff_flat", "row_diff_sparse", "row_diff_disk",
     ]
 
     def _with_default(name: str, color: str, default_name: str) -> str:
         colored = _help_color(name, color)
         return f"[{colored}]" if name == default_name else colored
 
-    classic_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt") for f in classic_fmt_names]
+    plain_fmt_help = [_with_default(f, "36", "") for f in plain_fmt_names]
+    rd_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt") for f in rd_fmt_names]
     count_fmt_help = [_with_default(f, "33", "row_diff_int_brwt") for f in count_formats]
     coord_fmt_help = [_with_default(f, "35", "row_diff_brwt_coord") for f in coord_formats]
     default_count_width = _help_color("8", "33")
     zero_count_width = _help_color("0", "36")
 
     all_formats_help = "\n".join([
-        f"    {classic_fmt_help[0]}, {classic_fmt_help[1]}, {classic_fmt_help[2]}, {classic_fmt_help[3]}, {classic_fmt_help[4]}, {classic_fmt_help[5]}, {classic_fmt_help[6]},",
-        f"             {classic_fmt_help[7]}, {classic_fmt_help[8]}",
-        f"    {count_fmt_help[0]}, {count_fmt_help[1]}, {count_fmt_help[2]}",
-        f"    {coord_fmt_help[0]}, {coord_fmt_help[2]}, {coord_fmt_help[1]}, {coord_fmt_help[3]}",
+        f"    {', '.join(plain_fmt_help)}",
+        f"    {', '.join(rd_fmt_help)}",
+        f"    {', '.join(count_fmt_help)}",
+        f"    {', '.join(coord_fmt_help)}",
     ])
 
     annotation.add_argument('--anno-source',

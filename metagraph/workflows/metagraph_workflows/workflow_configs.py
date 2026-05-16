@@ -68,6 +68,9 @@ class AnnotationFormats(Enum):
     RELAXED_BRWT = 'relax.brwt'
     RB_BRWT = 'rb_brwt'
     #RELAXED_RB_BRWT = 'relax.rb_brwt' # not possible
+    ROW_DIFF_FLAT = 'row_diff_flat'
+    ROW_DIFF_SPARSE = 'row_diff_sparse'
+    ROW_DIFF_DISK = 'row_diff_disk'
     ROW_DIFF_BRWT = 'row_diff_brwt'
     RELAXED_ROW_DIFF_BRWT = 'relax.row_diff_brwt'
     INT_BRWT = 'int_brwt'
