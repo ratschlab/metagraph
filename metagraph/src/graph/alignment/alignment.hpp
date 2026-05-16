@@ -270,10 +270,17 @@ class Alignment {
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
+    // `encoder` and `cth` are optional. When `encoder` is supplied, the
+    // returned object includes an `annotation.labels` array. With `cth` the
+    // labels are per-target-sequence (using `.seqs` to map global column
+    // coordinates to per-sequence positions); without it, the labels are
+    // per-annotation-column.
     Json::Value to_json(size_t node_size,
                         bool is_secondary = false,
                         const std::string &name = {},
-                        const std::string &label = {}) const;
+                        const std::string &label = {},
+                        const annot::LabelEncoder<> *encoder = nullptr,
+                        const annot::CoordToHeader *cth = nullptr) const;
 
     // writes to |query_str| the string which will be referenced in this object
     void load_from_json(const Json::Value &alignment,

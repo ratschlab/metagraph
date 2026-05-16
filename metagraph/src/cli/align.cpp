@@ -292,7 +292,8 @@ std::string format_alignment(const std::string &header,
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
 
-            Json::Value json_line = path.to_json(graph.get_k(), secondary, header);
+            Json::Value json_line = path.to_json(graph.get_k(), secondary, header,
+                                                 /*label=*/{}, encoder, cth);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
         }

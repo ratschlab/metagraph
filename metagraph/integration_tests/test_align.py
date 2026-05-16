@@ -1,6 +1,8 @@
 import unittest
 from parameterized import parameterized
 import subprocess
+import json
+import re
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
@@ -416,6 +418,14 @@ class TestAlignCoordToHeader(TestingBase):
     That is a larger change — design to be worked out separately.
     """
 
+    # Strip the per-target k-mer count (`/N`) emitted in CoordToHeader mode
+    # from a label-coord string so it can be compared against the
+    # --anno-header mode output (which has no `/N`).
+    _STRIP_KMERS_RE = re.compile(r'(^|;)([^:;]+)/\d+:')
+    @classmethod
+    def _strip_kmers_in_target(cls, s):
+        return cls._STRIP_KMERS_RE.sub(r'\1\2:', s)
+
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
@@ -495,29 +505,31 @@ class TestAlignCoordToHeader(TestingBase):
         rows = self._run_align(graph, anno, query_fa)
         self.assertEqual(len(rows), 3)
 
-        # query1 -> seq1:2-10
+        # `/N` after each header is the target sequence's nucleotide length:
+        # seq1 -> 10, seq2 -> 16, seq3 -> 28.
+        # query1 -> seq1/10:2-10
         self.assertEqual(rows[0][0], 'query1')
         self.assertEqual(rows[0][1], 'TATCGATCG')
         self.assertEqual(rows[0][3], 'TATCGATCG')
         self.assertEqual(rows[0][6], '9=')
         self.assertEqual(rows[0][7], '0')
-        self.assertEqual(rows[0][8], 'seq1:2-10')
+        self.assertEqual(rows[0][8], 'seq1/10:2-10')
 
-        # query2 -> seq2:1-13
+        # query2 -> seq2/16:1-13
         self.assertEqual(rows[1][0], 'query2')
         self.assertEqual(rows[1][1], 'GCTAGCTAGCTAG')
         self.assertEqual(rows[1][3], 'GCTAGCTAGCTAG')
         self.assertEqual(rows[1][6], '13=')
         self.assertEqual(rows[1][7], '0')
-        self.assertEqual(rows[1][8], 'seq2:1-13')
+        self.assertEqual(rows[1][8], 'seq2/16:1-13')
 
-        # query3 -> seq3:9-18
+        # query3 -> seq3/28:9-18
         self.assertEqual(rows[2][0], 'query3')
         self.assertEqual(rows[2][1], 'AAAAACCCCC')
         self.assertEqual(rows[2][3], 'AAAAACCCCC')
         self.assertEqual(rows[2][6], '10=')
         self.assertEqual(rows[2][7], '0')
-        self.assertEqual(rows[2][8], 'seq3:9-18')
+        self.assertEqual(rows[2][8], 'seq3/28:9-18')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_no_coord_mapping_flag(self, anno_repr):
@@ -571,7 +583,8 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][6], '8=')
         self.assertEqual(rows[0][7], '0')
         # Both sequences reported, separated by ;
-        self.assertEqual(rows[0][8], 'seq1:3-10;seq3:1-8')
+        # /N is the per-target nt length: seq1 -> 10, seq3 -> 28.
+        self.assertEqual(rows[0][8], 'seq1/10:3-10;seq3/28:1-8')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_multiple_input_files(self, anno_repr):
@@ -592,17 +605,18 @@ class TestAlignCoordToHeader(TestingBase):
         rows = self._run_align(graph, anno, query_fa)
         self.assertEqual(len(rows), 2)
 
-        # q_alpha -> alpha:2-10 (in file1.fa)
+        # /N is the per-target nt length: alpha -> 14, gamma -> 18.
+        # q_alpha -> alpha/14:2-10 (in file1.fa)
         self.assertEqual(rows[0][0], 'q_alpha')
         self.assertEqual(rows[0][3], 'TATCGATCG')
         self.assertEqual(rows[0][6], '9=')
-        self.assertEqual(rows[0][8], 'alpha:2-10')
+        self.assertEqual(rows[0][8], 'alpha/14:2-10')
 
-        # q_gamma -> gamma:9-18 (in file2.fa)
+        # q_gamma -> gamma/18:9-18 (in file2.fa)
         self.assertEqual(rows[1][0], 'q_gamma')
         self.assertEqual(rows[1][3], 'AAAAACCCCC')
         self.assertEqual(rows[1][6], '10=')
-        self.assertEqual(rows[1][8], 'gamma:9-18')
+        self.assertEqual(rows[1][8], 'gamma/18:9-18')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_with_mismatch(self, anno_repr):
@@ -623,7 +637,8 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][1], 'GTATCGATCGACATACGT')
         self.assertEqual(rows[0][3], 'GTATCGATCGACGTACGT')
         self.assertEqual(rows[0][6], '12=1X5=')
-        self.assertEqual(rows[0][8], 'seq1:1-18')
+        # seq1 GTATCGATCGACGTACGT -> 18 nt.
+        self.assertEqual(rows[0][8], 'seq1/18:1-18')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_sequence_boundaries(self, anno_repr):
@@ -637,19 +652,20 @@ class TestAlignCoordToHeader(TestingBase):
 
         graph, anno = self._setup_graph(test_fa, anno_repr)
 
+        # seq1 ACGTACGTACGT -> 12 nt.
         # Match at start of seq1 -> coord starts at 1
         rows = self._run_align(graph, anno, query_start)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], 'q_start')
         self.assertEqual(rows[0][6], '9=')
-        self.assertEqual(rows[0][8], 'seq1:1-9')
+        self.assertEqual(rows[0][8], 'seq1/12:1-9')
 
         # Match at end of seq1 -> coord ends at len(seq1)=12
         rows = self._run_align(graph, anno, query_end)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], 'q_end')
         self.assertEqual(rows[0][6], '10=')
-        self.assertEqual(rows[0][8], 'seq1:3-12')
+        self.assertEqual(rows[0][8], 'seq1/12:3-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_cross_sequence_boundary(self, anno_repr):
@@ -682,7 +698,60 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][0], 'q_concat')
         self.assertEqual(rows[0][6], '8S16=')
         # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
-        self.assertEqual(rows[0][8], 'seq1:5-12;seq2:1-8')
+        # seq1 -> 12 nt, seq2 -> 12 nt.
+        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-8')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_json_labels_array(self, anno_repr):
+        """JSON output should expose annotation.labels with nt_length and nt_coords.
+
+        Mirrors the TSV `<header>/N:start-end` so HTTP/API callers can compute
+        the fraction of the target covered directly from the nt coord range.
+        """
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),                       # 10 nt
+            ('seq2', 'GCTAGCTAGCTAGCTA'),                 # 16 nt
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),     # 28 nt
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('query1', 'TATCGATCG'),      # seq1
+            ('query2', 'GCTAGCTAGCTAG'),  # seq2
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        align_cmd = (f'{METAGRAPH} align --align-only-forwards --json '
+                     f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
+        res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
+
+        records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        self.assertEqual(len(records), 2)
+
+        # query1 -> seq1 (10 nt), 1-based inclusive range 2-10.
+        labels1 = records[0]['annotation']['labels']
+        self.assertEqual(len(labels1), 1)
+        self.assertEqual(labels1[0]['sample'], 'seq1')
+        self.assertEqual(labels1[0]['nt_length'], 10)
+        self.assertEqual(labels1[0]['nt_coords'], '2-10')
+
+        # query2 -> seq2 (16 nt), 1-based inclusive range 1-13.
+        labels2 = records[1]['annotation']['labels']
+        self.assertEqual(len(labels2), 1)
+        self.assertEqual(labels2[0]['sample'], 'seq2')
+        self.assertEqual(labels2[0]['nt_length'], 16)
+        self.assertEqual(labels2[0]['nt_coords'], '1-13')
+
+        # With --no-coord-mapping, labels reference the file label (no .seqs
+        # used) and nt_length is omitted.
+        align_cmd_nomap = align_cmd + ' --no-coord-mapping'
+        res = subprocess.run([align_cmd_nomap], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        for record in records:
+            for entry in record['annotation']['labels']:
+                self.assertNotIn('nt_length', entry,
+                                 "nt_length must only appear when .seqs is loaded")
+                self.assertEqual(entry['sample'], test_fa)
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_coord_to_header_matches_per_sequence_columns(self, anno_repr):
@@ -725,8 +794,11 @@ class TestAlignCoordToHeader(TestingBase):
             self.assertEqual(row_a[6], row_b[6],
                              f"CIGAR mismatch for {row_a[0]}: "
                              f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
-            # Normalize semicolon-separated labels (order may vary across modes).
-            labels_a = sorted(row_a[8].split(';'))
+            # Normalize semicolon-separated labels (order may vary across
+            # modes). CoordToHeader mode prefixes each header with the
+            # per-target k-mer count; strip it so the label-equivalence
+            # check matches --anno-header mode output.
+            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
             labels_b = sorted(row_b[8].split(';'))
             self.assertEqual(labels_a, labels_b,
                              f"label mismatch for {row_a[0]}: "
@@ -787,7 +859,7 @@ class TestAlignCoordToHeader(TestingBase):
             self.assertEqual(row_a[6], row_b[6],
                              f"CIGAR mismatch for {row_a[0]}: "
                              f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
-            labels_a = sorted(row_a[8].split(';'))
+            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
             labels_b = sorted(row_b[8].split(';'))
             self.assertEqual(labels_a, labels_b,
                              f"label mismatch for {row_a[0]}: "

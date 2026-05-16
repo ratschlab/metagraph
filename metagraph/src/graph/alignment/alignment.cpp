@@ -36,25 +36,28 @@ std::string Alignment::format_coords(const annot::LabelEncoder<> &encoder) const
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
-std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) const {
-    if (!label_coordinates.size())
-        return "";
+namespace {
 
-    assert(label_columns.size());
-    assert(label_coordinates.size() == label_columns.size());
-    assert(k > 0 && "k must be >0 when CoordToHeader is in use");
+// (column, seq_id, list of [start, end_inclusive] 0-based local ranges).
+using PerTargetRanges = VectorMap<std::pair<Alignment::Column, size_t>,
+                                  std::vector<std::pair<uint64_t, uint64_t>>>;
 
-    using Key = std::pair<Column, size_t>;  // (column, seq_id)
-    // Per-key list of local (start, end_inclusive) ranges, 0-based.
-    VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> seq_ranges;
-
-    const uint64_t L = sequence_.size();
+// Split a flat set of (column, global-coord) entries into per-(column, seq_id)
+// local-coordinate ranges using `cth`. Used by both `format_coords` (TSV) and
+// `to_json` (JSON) so they stay in lockstep.
+PerTargetRanges
+split_coords_by_target(const Alignment::Columns &label_columns,
+                       const Alignment::CoordinateSet &label_coordinates,
+                       const annot::CoordToHeader &cth,
+                       uint64_t alignment_nt_length,
+                       size_t k) {
+    PerTargetRanges seq_ranges;
     for (size_t i = 0; i < label_columns.size(); ++i) {
-        Column col = label_columns[i];
+        auto col = label_columns[i];
         const size_t n_seqs = cth.num_sequences(col);
         for (uint64_t coord : label_coordinates[i]) {
             auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
-            uint64_t remaining = L;
+            uint64_t remaining = alignment_nt_length;
             uint64_t cur_local = local_coord;
             size_t cur_seq_id = seq_id;
             while (remaining) {
@@ -76,12 +79,33 @@ std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) 
             }
         }
     }
+    return seq_ranges;
+}
+
+} // namespace
+
+std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) const {
+    if (!label_coordinates.size())
+        return "";
+
+    assert(label_columns.size());
+    assert(label_coordinates.size() == label_columns.size());
+    assert(k > 0 && "k must be >0 when CoordToHeader is in use");
+
+    auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
+                                             cth, sequence_.size(), k);
 
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(seq_ranges.size());
     for (const auto &[key, ranges] : seq_ranges) {
         const auto &[col, seq_id] = key;
-        decoded_labels.emplace_back(cth.get_headers(col)[seq_id]);
+        // `<header>/<nt_length>` exposes the target's nucleotide length so
+        // callers can compute the fraction of the target covered directly
+        // from the nt coord range (1-based inclusive) that follows.
+        uint64_t nt_length = cth.num_kmers_in_sequence(col, seq_id) + k - 1;
+        decoded_labels.emplace_back(fmt::format("{}/{}",
+                                                cth.get_headers(col)[seq_id],
+                                                nt_length));
         for (auto [start, end] : ranges) {
             // 1-based inclusive ranges
             decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
@@ -883,7 +907,9 @@ Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
 Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,
-                               const std::string &label) const {
+                               const std::string &label,
+                               const annot::LabelEncoder<> *encoder,
+                               const annot::CoordToHeader *cth) const {
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -911,6 +937,58 @@ Json::Value Alignment::to_json(size_t node_size,
             == full_query.size());
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
+
+    // Emit label/coord info when an encoder is available. With CTH, labels
+    // are per-target-sequence (`<header>/N` + nt ranges); without CTH, labels
+    // are per-annotation-column (decoded label + global column nt ranges).
+    // The `nt_coords` field is named to distinguish from query.cpp's
+    // `kmer_coords`, which encodes k-mer-indexed positions instead.
+    if (encoder && label_columns.size()) {
+        Json::Value labels = Json::arrayValue;
+        if (!label_coordinates.size()) {
+            // Labels-only path: just the decoded label, no coords.
+            for (auto col : label_columns) {
+                Json::Value entry;
+                entry["sample"] = encoder->decode(col);
+                labels.append(entry);
+            }
+        } else if (cth) {
+            auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
+                                                     *cth, sequence_.size(), node_size);
+            for (const auto &[key, ranges] : seq_ranges) {
+                const auto &[col, seq_id] = key;
+                Json::Value entry;
+                entry["sample"] = cth->get_headers(col)[seq_id];
+                entry["nt_length"] = static_cast<Json::Int64>(
+                        cth->num_kmers_in_sequence(col, seq_id) + node_size - 1);
+                std::vector<std::string> range_strs;
+                range_strs.reserve(ranges.size());
+                for (auto [start, end] : ranges) {
+                    range_strs.push_back(fmt::format("{}-{}", start + 1, end + 1));
+                }
+                entry["nt_coords"] = fmt::format("{}", fmt::join(range_strs, ":"));
+                labels.append(entry);
+            }
+        } else {
+            // No CTH: emit per-column global coord ranges (each coord spans
+            // the alignment's nucleotide length on the column).
+            assert(label_coordinates.size() == label_columns.size());
+            for (size_t i = 0; i < label_columns.size(); ++i) {
+                Json::Value entry;
+                entry["sample"] = encoder->decode(label_columns[i]);
+                std::vector<std::string> range_strs;
+                range_strs.reserve(label_coordinates[i].size());
+                for (uint64_t coord : label_coordinates[i]) {
+                    range_strs.push_back(fmt::format("{}-{}",
+                                                     coord + 1,
+                                                     coord + sequence_.size()));
+                }
+                entry["nt_coords"] = fmt::format("{}", fmt::join(range_strs, ":"));
+                labels.append(entry);
+            }
+        }
+        alignment["annotation"]["labels"] = std::move(labels);
+    }
 
     // encode path
     if (nodes_.size())
