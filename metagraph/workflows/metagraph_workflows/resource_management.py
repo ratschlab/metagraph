@@ -78,6 +78,13 @@ class SupportsMemBufferSize(ResourceConfig):
 
     CAP_MEM_FRACTION = 0.85
 
+    # If True, clip the auto-derived buffer to `max_buffer_size_mb`.
+    # build/annotate need this (their --mem-cap-gb is a preallocated
+    # buffer that competes with other in-memory state). Row-diff
+    # transforms scale with annotation size and routinely need
+    # >> max_buffer_size_mb, so those subclasses opt out.
+    APPLY_MAX_BUFFER_CAP = True
+
     def get_mem_buffer_gib(self):
         """
         value for the `--mem-cap-gb` parameter (in GiB)
@@ -90,7 +97,8 @@ class SupportsMemBufferSize(ResourceConfig):
                 mem_cap_mb = self._mem_buf_estimate(wildcards, resources, input, threads)
                 if mem_cap_mb == TBDString():
                     return TBDString()
-                mem_cap_mb = min(mem_cap_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
+                if self.APPLY_MAX_BUFFER_CAP:
+                    mem_cap_mb = min(mem_cap_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
 
             return int(math.ceil(mem_cap_mb / 1024.0))
 
@@ -185,6 +193,8 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
 
 
 class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage0', config)
 
@@ -195,11 +205,15 @@ class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
 
 
 class TransformRdStage1Resources(SupportsMemBufferSize):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage1', config)
 
 
 class TransformRdStage2Resources(SupportsMemBufferSize):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage2', config)
 
