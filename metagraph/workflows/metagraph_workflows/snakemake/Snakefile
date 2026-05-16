@@ -30,6 +30,12 @@ count_kmers_opt = '--count-kmers' if with_counts else ''
 coordinates_opt = '--coordinates' if with_coordinates else ''
 count_width_opt = f'--count-width {count_width}' if with_counts else ''
 
+# Auto-derive `annotate_threads_each` from annotation mode if not set
+# by the user. Coordinate annotation has larger per-k-mer work, so each
+# column gets more threads and fewer columns run in parallel.
+if workflow_configs.ANNOTATE_THREADS_EACH not in config:
+    config[workflow_configs.ANNOTATE_THREADS_EACH] = 16 if with_coordinates else 8
+
 
 metagraph_cmd=config['metagraph_cmd']
 time_cmd=utils.get_gnu_time_command(config)
@@ -119,10 +125,19 @@ rule annotate:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
         separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        tempdir_opt=utils.temp_dir_config(config),
         threads_each=lambda wildcards, threads: AnnotateResources(config).get_effective_threads_each(threads),
         parallel_cols=lambda wildcards, threads: AnnotateResources(config).get_parallel_cols(threads),
-        mem_buffer=AnnotateResources(config).get_mem_buffer_gib(),
+        # `--mem-cap-gb` and `--disk-swap` only matter when annotating
+        # with counts or coordinates (the per-k-mer payload is large
+        # enough that the buffer can overflow). For binary annotation,
+        # omit both: per-column buffers are tiny and never need a
+        # spill path. Matches experiments/large_index_scripts.md.
+        mem_cap_arg=(
+            (lambda wildcards, input, threads, resources:
+                f"--mem-cap-gb {AnnotateResources(config).get_mem_buffer_gib()(wildcards, input, threads, resources)}")
+            if (with_counts or with_coordinates) else ''
+        ),
+        tempdir_opt=utils.temp_dir_config(config) if (with_counts or with_coordinates) else '',
     log: utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
@@ -139,7 +154,7 @@ rule annotate:
           {verbose_opt} \
           -p {params.parallel_cols} \
           --threads-each {params.threads_each} \
-          --mem-cap-gb {params.mem_buffer} \
+          {params.mem_cap_arg} \
           -i {input.dbg_graph} \
           {annotation_labels_opt} \
           {count_kmers_opt} \
@@ -234,14 +249,16 @@ rule annotate_brwt:
         mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
-        """        
+        """
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type brwt \
-            --parallel-nodes {params.parallel_nodes} \
             --greedy \
+            --subsample {params.subsample} \
+            --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -294,9 +311,11 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage0Resources(config).get_mem_buffer_gib(),
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
+        # Stage 0 builds the row-count vector in RAM only; metagraph
+        # does not use --disk-swap at this stage, so the flag is
+        # intentionally omitted (matches large_index_scripts.md).
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
         mkdir -p $COLS_DIR
@@ -310,7 +329,7 @@ rule transform_rd_stage0:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
+            -o {output.columns_rd_row_count} > {log} 2>&1
         """
 
 TRANSFORM_RD_STAGE1_RULE="transform_rd_stage1"
@@ -414,6 +433,7 @@ rule annotate_row_diff_brwt:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
@@ -422,6 +442,7 @@ rule annotate_row_diff_brwt:
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \
@@ -470,6 +491,7 @@ rule annotate_row_diff_int_brwt:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config)
     shell:
@@ -477,6 +499,7 @@ rule annotate_row_diff_int_brwt:
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_int_brwt \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \
@@ -530,6 +553,7 @@ rule annotate_row_diff_brwt_coord:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config)
     shell:
@@ -537,6 +561,7 @@ rule annotate_row_diff_brwt_coord:
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt_coord \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \

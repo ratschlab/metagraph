@@ -97,7 +97,7 @@ def sample_list_path(tmpdir):
 def test_build_workflow(primary, annotation_format, annotation_label_src, sample_list_path, output_dir):
 
     base_args = ['build',
-                 '--seqs-file-list-path', sample_list_path,
+                 sample_list_path,
                  '-k', 5,
                  '--annotation-format', annotation_format.value,
                  '--anno-source', annotation_label_src.value]
@@ -126,14 +126,14 @@ def test_workflow_invocation_via_python(sample_list_path, output_dir):
 
     assert cli.run_build_workflow(
         output_dir,
-        seqs_file_list_path=sample_list_path,
+        samples=sample_list_path,
         metagraph_cmd=metagraph_cmd,
     ) is None
 
 
 def test_workflow_invocation_additional_args(sample_list_path, output_dir):
     base_args = ['build',
-                 '--seqs-file-list-path', sample_list_path,
+                 sample_list_path,
                  '-k', 5,
                  '--extra-args="summary=True"']
 
@@ -148,7 +148,7 @@ def test_workflow_invocation_additional_args(sample_list_path, output_dir):
 def test_with_counts_defaults_to_row_diff_int_brwt(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-counts',
         '--dryrun',
         output_dir,
@@ -163,7 +163,7 @@ def test_with_counts_defaults_to_row_diff_int_brwt(sample_list_path, output_dir)
 def test_with_counts_rejects_incompatible_annotation_format(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-counts',
         '--annotation-format', AnnotationFormats.BRWT.value,
         '--dryrun',
@@ -176,7 +176,7 @@ def test_with_counts_rejects_incompatible_annotation_format(sample_list_path, ou
 def test_with_coordinates_defaults_to_row_diff_brwt_coord(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-coords',
         '--dryrun',
         output_dir,
@@ -191,7 +191,7 @@ def test_with_coordinates_defaults_to_row_diff_brwt_coord(sample_list_path, outp
 def test_with_coordinates_rejects_incompatible_annotation_format(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-coords',
         '--annotation-format', AnnotationFormats.BRWT.value,
         '--dryrun',
@@ -204,7 +204,7 @@ def test_with_coordinates_rejects_incompatible_annotation_format(sample_list_pat
 def test_with_counts_respects_explicit_annotation_format(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-counts',
         '--annotation-format', AnnotationFormats.INT_BRWT.value,
         '--dryrun',
@@ -219,7 +219,7 @@ def test_with_counts_respects_explicit_annotation_format(sample_list_path, outpu
 def test_count_capable_format_auto_enables_with_counts(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', AnnotationFormats.ROW_DIFF_INT_DISK.value,
         '--dryrun',
         output_dir,
@@ -233,7 +233,7 @@ def test_count_capable_format_auto_enables_with_counts(sample_list_path, output_
 def test_coord_capable_format_auto_enables_with_coordinates(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
         '--dryrun',
         output_dir,
@@ -247,7 +247,7 @@ def test_coord_capable_format_auto_enables_with_coordinates(sample_list_path, ou
 def test_with_counts_and_with_coordinates_are_mutually_exclusive(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--with-counts',
         '--with-coords',
         '--dryrun',
@@ -260,7 +260,7 @@ def test_with_counts_and_with_coordinates_are_mutually_exclusive(sample_list_pat
 def test_mixed_count_and_coord_formats_are_mutually_exclusive(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
         '--dryrun',
@@ -286,7 +286,7 @@ def test_build_help_mentions_defaults():
 def test_dryrun_prints_summary(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--dryrun',
         output_dir,
     ])
@@ -299,7 +299,7 @@ def test_dryrun_prints_summary(sample_list_path, output_dir):
 def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--metagraph-cmd', 'definitely_missing_metagraph_binary_12345',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -311,7 +311,7 @@ def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):
 def test_invalid_annotation_format_shows_suggestion(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', 'row_diff_int_brwt1',
         '--dryrun',
         output_dir,
@@ -325,7 +325,7 @@ def test_invalid_annotation_format_shows_suggestion(sample_list_path, output_dir
 def test_invalid_coord_annotation_format_shows_suggestion(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', 'row_diff_brwt_coord1',
         '--dryrun',
         output_dir,
@@ -340,7 +340,7 @@ def test_invalid_coord_annotation_format_shows_suggestion(sample_list_path, outp
 def test_count_width_is_propagated_to_count_build_steps(sample_list_path, output_dir, count_width):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--count-width', str(count_width),
         '--dryrun',
@@ -362,7 +362,7 @@ def test_count_width_is_propagated_to_count_build_steps(sample_list_path, output
 def test_count_width_out_of_range_fails(sample_list_path, output_dir, invalid_count_width):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--count-width', str(invalid_count_width),
         '--dryrun',
@@ -374,17 +374,16 @@ def test_count_width_out_of_range_fails(sample_list_path, output_dir, invalid_co
 
 def test_annotate_threads_each_default_is_eight(sample_list_path, output_dir):
     # 16 threads / threads_each=8 -> parallel_cols=2, effective_each=8.
+    # threads_each defaults to 8 for binary mode (mode-derived).
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--threads', '16',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
     ])
     assert proc.returncode == 0
-    cfg = (output_dir / "config.yaml").read()
-    assert "annotate_threads_each: 8" in cfg
     out = proc.stdout.decode()
     assert "-p 2" in out
     assert "--threads-each 8" in out
@@ -394,7 +393,7 @@ def test_annotate_threads_each_overrides_default(sample_list_path, output_dir):
     # 16 threads / threads_each=4 -> parallel_cols=4, effective_each=4.
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--threads', '16',
         '--annotate-threads-each', '4',
         '--dryrun',
@@ -414,7 +413,7 @@ def test_annotate_threads_each_redistributes_leftover(sample_list_path, output_d
     # effective_each=ceil(12/2)=6, total used = 12 (no waste).
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--threads', '12',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -431,7 +430,7 @@ def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path,
     # effective_each=ceil(13/2)=7, total=14 (1-thread overcommit).
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--threads', '13',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -446,7 +445,7 @@ def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path,
 def test_disk_swap_dir_propagates_to_metagraph_stages(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--disk-swap-dir', '/var/tmp/test-swap',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -462,7 +461,7 @@ def test_disk_swap_dir_propagates_to_metagraph_stages(sample_list_path, output_d
 def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -475,7 +474,7 @@ def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
 def test_small_graph_step_runs(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -488,30 +487,87 @@ def test_small_graph_step_runs(sample_list_path, output_dir):
     assert "--state small" in out
 
 
-def test_mem_cap_gb_sets_max_memory_mb(sample_list_path, output_dir):
+def test_coords_mode_auto_picks_threads_each_16(sample_list_path, output_dir):
+    # Snakefile derives annotate_threads_each from mode when unset; for
+    # coords it becomes 16, so parallel_cols=ceil(16/16)=1.
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
-        '--mem-cap-gb', '12',
+        sample_list_path,
+        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--threads', '16',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "-p 1" in out
+    assert "--threads-each 16" in out
+
+
+def test_brwt_parallel_nodes_default_is_10(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "--parallel-nodes 10" in out
+
+
+def test_brwt_subsample_default_and_override(sample_list_path, output_dir, tmpdir):
+    # Default: 100000 from default.yml; reaches the row_diff_brwt rule.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    assert "--subsample 1000000" in proc.stdout.decode()
+
+    # CLI override.
+    other_out = tmpdir / 'other_out'
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--brwt-subsample', '200000',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        other_out,
+    ])
+    assert proc.returncode == 0
+    assert "--subsample 200000" in proc.stdout.decode()
+
+
+def test_mem_gb_sets_max_memory_mb(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--mem-gb', '12',
         '--dryrun',
         output_dir,
     ])
     assert proc.returncode == 0
     cfg = (output_dir / "config.yaml").read()
-    # 12 GB -> 12 * 1024 = 12288 MB
+    # 12 GiB -> 12 * 1024 = 12288 MB.
     assert "max_memory_mb: 12288" in cfg
 
 
-def test_mem_cap_gb_must_be_positive(sample_list_path, output_dir):
+def test_mem_gb_must_be_positive(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
-        '--mem-cap-gb', '0',
+        sample_list_path,
+        '--mem-gb', '0',
         '--dryrun',
         output_dir,
     ])
     assert proc.returncode != 0
-    assert "--mem-cap-gb must be > 0" in proc.stdout.decode()
+    assert "--mem-gb must be > 0" in proc.stdout.decode()
 
 
 @pytest.fixture
@@ -525,7 +581,7 @@ def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path
     proc = run_wrapper([
         'annotate',
         '--graph', stub_graph_path,
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--dryrun',
         '--extra-args=printshellcmds=True',
         '-o', output_dir,
@@ -566,7 +622,7 @@ def test_annotate_subcommand_requires_existing_graph(sample_list_path, output_di
     proc = run_wrapper([
         'annotate',
         '--graph', missing,
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--dryrun',
         '-o', output_dir,
     ])
@@ -577,7 +633,7 @@ def test_annotate_subcommand_requires_existing_graph(sample_list_path, output_di
 def test_annotate_threads_each_must_be_positive(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
-        '--seqs-file-list-path', sample_list_path,
+        sample_list_path,
         '--annotate-threads-each', '0',
         '--dryrun',
         output_dir,

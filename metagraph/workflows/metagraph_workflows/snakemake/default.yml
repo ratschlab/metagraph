@@ -27,16 +27,23 @@ annotation_labels_source: 'sequence_headers'
 with_counts: false
 with_coordinates: false
 count_width: 8
-# Threads used per file when annotating with --separately. The annotate
-# rule runs (max_threads // annotate_threads_each) columns in parallel,
-# and --mem-cap-gb is allocated per column, so raising this value reduces
-# parallel columns and increases each column's buffer budget.
-# Default of 8 matches the value most large-index runs use in practice.
-annotate_threads_each: 8
+# `annotate_threads_each` (threads used per file in `metagraph annotate
+# --separately`) is mode-derived in the Snakefile when unset here: 8 for
+# binary and counts mode (per-k-mer payload is small), 16 for coordinate
+# mode (positions inflate per-k-mer work, so each column gets more
+# threads and fewer columns run in parallel). Set explicitly to override.
 
 brwt_relax_arity: 32
-brwt_parallel_nodes: 5
-brwt_linkage_subsample: 100000
+# Number of BRWT tree nodes processed in parallel during row_diff_brwt /
+# brwt construction. Scripts in experiments/large_index_scripts.md use 10
+# (FUNGI, Random100, Mouse).
+brwt_parallel_nodes: 10
+# Bits subsampled for distance estimation during BRWT column
+# clustering (--subsample). Larger values give more accurate clustering
+# at the cost of more memory/time. Scripts in
+# experiments/large_index_scripts.md range from 2e5 (FUNGI) to 1e7
+# (Random100); 1e6 is a reasonable middle ground.
+brwt_linkage_subsample: 1000000
 
 metagraph_cmd: 'metagraph'
 

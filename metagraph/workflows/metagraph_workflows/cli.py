@@ -186,8 +186,14 @@ def _print_run_summary(output_dir: Path, dryrun: bool) -> None:
         print("1) Executed steps: unavailable (no timing entries found).")
 
     def _is_final_artifact(path: Path) -> bool:
-        name = path.name
-        return name == "graph.dbg" or (name.startswith("graph") and name.endswith(".annodbg"))
+        # Final .dbg / .annodbg files live at the top of output_dir;
+        # per-column intermediates live in subdirectories
+        # (columns.<mode>/, rd_cols.<mode>/). Build sidecars like
+        # graph.dbg.pred / .succ / .anchors have a different suffix
+        # so they're naturally excluded.
+        if path.parent != output_dir:
+            return False
+        return path.suffix in ('.dbg', '.annodbg')
 
     total_size = _directory_size(output_dir)
     final_artifacts = []
@@ -537,8 +543,35 @@ def _apply_annotation_options(config, annotation_formats, annotation_labels_sour
         config['count_width'] = count_width
 
 
+def _set_samples_config(config, samples, output_dir):
+    """Set the seqs config keys from a single samples path.
+
+    Auto-detects: directory -> SEQS_DIR_PATH; regular file ->
+    SEQS_FILE_LIST_PATH. Process substitution `<(...)` shows up as a
+    FIFO that becomes unreadable once the parent CLI exits, so we
+    snapshot its content to ``<output_dir>/samples.txt`` and point the
+    config at the snapshot.
+    """
+    samples_path = Path(samples).expanduser()
+    if samples_path.is_dir():
+        config[SEQS_DIR_PATH] = str(samples_path)
+        return
+    if samples_path.is_fifo() or samples_path.is_char_device():
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        snapshot = output_dir_path / 'samples.txt'
+        with open(samples_path, 'r') as src, open(snapshot, 'w') as dst:
+            dst.write(src.read())
+        config[SEQS_FILE_LIST_PATH] = str(snapshot)
+        return
+    if samples_path.is_file():
+        config[SEQS_FILE_LIST_PATH] = str(samples_path)
+        return
+    raise ValueError(f"samples path not found: {samples_path}")
+
+
 def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
-                           disk_swap_dir, mem_cap_gb, dryrun):
+                           disk_swap_dir, mem_gb, brwt_subsample, dryrun):
     """Apply runtime / resource fields to config; raise on invalid values."""
     config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
     if not dryrun:
@@ -551,16 +584,19 @@ def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd
         config['annotate_threads_each'] = annotate_threads_each
     if disk_swap_dir is not None:
         config['tmpdir'] = str(disk_swap_dir)
-    if mem_cap_gb is not None:
-        if mem_cap_gb <= 0:
-            raise ValueError(f"--mem-cap-gb must be > 0, got {mem_cap_gb}")
-        config['max_memory_mb'] = int(mem_cap_gb * 1024)
+    if mem_gb is not None:
+        if mem_gb <= 0:
+            raise ValueError(f"--mem-gb must be > 0, got {mem_gb}")
+        config['max_memory_mb'] = int(mem_gb * 1024)
+    if brwt_subsample is not None:
+        if brwt_subsample < 1:
+            raise ValueError(f"--brwt-subsample must be >= 1, got {brwt_subsample}")
+        config['brwt_linkage_subsample'] = brwt_subsample
 
 
 def run_build_workflow(
         output_dir: Path,
-        seqs_file_list_path: Optional[Path] = None,
-        seqs_dir_path: Optional[Path] = None,
+        samples: Path,
         k: Optional[int] = None,
         base_name: Optional[str] = None,
         build_primary_graph: bool = False,
@@ -571,7 +607,8 @@ def run_build_workflow(
         count_width: Optional[int] = None,
         annotate_threads_each: Optional[int] = None,
         disk_swap_dir: Optional[Path] = None,
-        mem_cap_gb: Optional[float] = None,
+        mem_gb: Optional[float] = None,
+        brwt_subsample: Optional[int] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
@@ -582,13 +619,7 @@ def run_build_workflow(
     with open(default_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    if not seqs_file_list_path and not seqs_dir_path:
-        raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
-
-    if seqs_file_list_path:
-        config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
-    if seqs_dir_path:
-        config[SEQS_DIR_PATH] = str(seqs_dir_path)
+    _set_samples_config(config, samples, output_dir)
 
     config['output_directory'] = str(output_dir)
     config['k'] = k if k else config['k']
@@ -598,7 +629,7 @@ def run_build_workflow(
     _apply_annotation_options(config, annotation_formats, annotation_labels_source,
                               with_counts, with_coordinates, count_width)
     _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
-                           disk_swap_dir, mem_cap_gb, dryrun)
+                           disk_swap_dir, mem_gb, brwt_subsample, dryrun)
 
     _invoke_snakemake(config, output_dir, threads=threads, force=force,
                       dryrun=dryrun, verbose=verbose,
@@ -652,8 +683,7 @@ def _invoke_snakemake(config, output_dir, threads, force, dryrun, verbose,
 def run_annotate_workflow(
         output_dir: Path,
         graph: Path,
-        seqs_file_list_path: Optional[Path] = None,
-        seqs_dir_path: Optional[Path] = None,
+        samples: Path,
         base_name: Optional[str] = None,
         annotation_formats: Iterable[AnnotationFormats] = (),
         annotation_labels_source: Optional[AnnotationLabelsSource] = None,
@@ -662,7 +692,8 @@ def run_annotate_workflow(
         count_width: Optional[int] = None,
         annotate_threads_each: Optional[int] = None,
         disk_swap_dir: Optional[Path] = None,
-        mem_cap_gb: Optional[float] = None,
+        mem_gb: Optional[float] = None,
+        brwt_subsample: Optional[int] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
@@ -680,17 +711,11 @@ def run_annotate_workflow(
     with open(default_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    if not seqs_file_list_path and not seqs_dir_path:
-        raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
-
     graph_path = Path(graph).expanduser().resolve()
     if not graph_path.exists():
         raise ValueError(f"Graph file not found: {graph_path}")
 
-    if seqs_file_list_path:
-        config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
-    if seqs_dir_path:
-        config[SEQS_DIR_PATH] = str(seqs_dir_path)
+    _set_samples_config(config, samples, output_dir)
 
     config['output_directory'] = str(output_dir)
     config['base_name'] = base_name if base_name else config['base_name']
@@ -703,7 +728,7 @@ def run_annotate_workflow(
     _apply_annotation_options(config, annotation_formats, annotation_labels_source,
                               with_counts, with_coordinates, count_width)
     _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
-                           disk_swap_dir, mem_cap_gb, dryrun)
+                           disk_swap_dir, mem_gb, brwt_subsample, dryrun)
 
     # Symlink the user's graph as <base_name>.dbg so downstream rules
     # see it as a satisfied input and snakemake doesn't try to rebuild.
@@ -719,22 +744,20 @@ def run_annotate_workflow(
                       additional_snakemake_args=additional_snakemake_args)
 
 
-def _add_seq_input_args(group, required=True):
-    """Add --seqs-file-list-path / --seqs-dir-path / -o / --output_dir.
+def _add_seq_input_args(group):
+    """Add the positional `samples` and `-o/--output_dir` arguments.
 
-    Returns the mutually-exclusive group so callers can attach more
-    members before the parse, if needed.
+    `samples` accepts either a directory (interpreted as a directory of
+    sample files) or a regular file (interpreted as a text file listing
+    sample paths, one per line). Process substitution `<(...)` is also
+    accepted: the CLI snapshots the FIFO contents to a real file inside
+    the output dir before invoking snakemake.
     """
-    xor = group.add_mutually_exclusive_group(required=required)
-    xor.add_argument('--seqs-file-list-path',
-                     metavar='PATH',
-                     help='Path to a text file with sample paths (one per line) []')
-    xor.add_argument('--seqs-dir-path',
-                     metavar='DIR',
-                     help="Directory containing samples []")
+    group.add_argument('samples', type=Path, metavar='SAMPLES',
+                       help='Either a directory of sample files OR a text file listing sample\n'
+                            '  paths (one per line). The type is auto-detected.')
     group.add_argument('-o', '--output_dir', type=Path, required=True,
                        help='Output directory [required]')
-    return xor
 
 
 def _add_annotation_args(annotation):
@@ -797,16 +820,21 @@ def _add_workflow_args(workflow):
     """Add the shared `other` argument group (threads, disk/mem, force,
     verbose, dryrun, metagraph-cmd, extra-args)."""
     workflow.add_argument('--threads', type=int, default=None, metavar='N',
-                          help='Max cores for Snakemake execution [num_cores]')
+                          help='Maximum CPU cores to use [num_cores]')
     workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
                           metavar='DIR',
                           help='Directory for on-disk buffers (passed as --disk-swap). Omit to keep everything in RAM. [none]')
-    workflow.add_argument('--mem-cap-gb', dest='mem_cap_gb', type=float, default=None,
+    workflow.add_argument('--mem-gb', type=float, default=None,
                           metavar='GB',
-                          help='Per-rule memory budget; drives the auto --mem-cap-gb of each metagraph stage. [4]')
+                          help='Approximate RAM budget per rule (in GB); drives the auto --mem-cap-gb\n'
+                               '  passed to each metagraph stage. [4]')
     workflow.add_argument('--annotate-threads-each', type=int, default=None, metavar='N',
-                          help='Threads per file in `annotate --separately`. Parallel columns = --threads // N;\n'
-                               '  raise N to give each column more --mem-cap-gb buffer. [8]')
+                          help='Threads used to annotate each input file. Parallel columns = --threads // N;\n'
+                               '  raise N to give each column more --mem-cap-gb buffer.\n'
+                               '  [8 for binary/counts, 16 for coords]')
+    workflow.add_argument('--brwt-subsample', type=int, default=None, metavar='N',
+                          help='Number of bits subsampled for distance estimation when clustering BRWT\n'
+                               '  columns (passed as --subsample to transform_anno --anno-type *_brwt*). [1000000]')
     workflow.add_argument('--force', default=False, action='store_true',
                           help='Force re-run all rules [False]')
     workflow.add_argument('--verbose', default=False, action='store_true',
@@ -837,14 +865,18 @@ def setup_build_parser(parser):
     )
     parser.epilog = (
         "Examples:\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt -k 31 -o out/\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt --with-counts -o out/\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt --with-coords -o out/"
+        "  metagraph-workflows build samples_dir/ -k 31 -o out/\n"
+        "  metagraph-workflows build <(ls /data/samples/*.fa) -k 31 -o out/\n"
+        "  metagraph-workflows build files.txt --with-counts -o out/\n"
+        "  metagraph-workflows build samples_dir/ --with-coords -o out/"
     )
 
     _add_seq_input_args(parser.add_argument_group('input/output'))
 
     graph = parser.add_argument_group('graph')
+    graph.add_argument('--graph', type=Path, default=None, metavar='PATH',
+                       help='Reuse an existing .dbg graph instead of building one from SAMPLES.\n'
+                            '  Skips the build pipeline; runs annotation + row-diff transforms only.')
     graph.add_argument('-k', type=int, default=31, metavar='K',
                        help='k-mer length [31]')
     graph.add_argument('--base-name', default='graph', metavar='NAME',
@@ -887,10 +919,36 @@ def _parse_additional_snakemake_args(arg: str) -> Dict[str, Any]:
 
 
 def init_build(args):
+    # If the user supplied --graph, bypass the build pipeline and run
+    # annotation-only against that graph. Otherwise build from samples.
+    if args.graph is not None:
+        run_annotate_workflow(
+            args.output_dir,
+            graph=args.graph,
+            samples=args.samples,
+            base_name=args.base_name,
+            annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
+            annotation_labels_source=args.annotation_labels_source,
+            with_counts=args.with_counts,
+            with_coordinates=args.with_coordinates,
+            count_width=args.count_width,
+            annotate_threads_each=args.annotate_threads_each,
+            disk_swap_dir=args.disk_swap_dir,
+            mem_gb=args.mem_gb,
+            brwt_subsample=args.brwt_subsample,
+            metagraph_cmd=args.metagraph_cmd,
+            threads=args.threads,
+            force=args.force,
+            verbose=args.verbose,
+            dryrun=args.dryrun,
+            additional_snakemake_args=_parse_additional_snakemake_args(
+                getattr(args, "additional_snakemake_args", "")
+            )
+        )
+        return
     run_build_workflow(
         args.output_dir,
-        seqs_file_list_path=args.seqs_file_list_path,
-        seqs_dir_path=args.seqs_dir_path,
+        samples=args.samples,
         k=args.k,
         base_name=args.base_name,
         build_primary_graph=args.build_primary_graph,
@@ -901,7 +959,8 @@ def init_build(args):
         count_width=args.count_width,
         annotate_threads_each=args.annotate_threads_each,
         disk_swap_dir=args.disk_swap_dir,
-        mem_cap_gb=args.mem_cap_gb,
+        mem_gb=args.mem_gb,
+        brwt_subsample=args.brwt_subsample,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,
@@ -926,8 +985,7 @@ def setup_annotate_parser(parser):
     )
     parser.epilog = (
         "Examples:\n"
-        "  metagraph-workflows annotate --graph mouse.dbg \\\n"
-        "      --seqs-file-list-path files.txt -o out/"
+        "  metagraph-workflows annotate --graph mouse.dbg files.txt -o out/"
     )
 
     io_group = parser.add_argument_group('input/output')
@@ -948,8 +1006,7 @@ def init_annotate(args):
     run_annotate_workflow(
         args.output_dir,
         graph=args.graph,
-        seqs_file_list_path=args.seqs_file_list_path,
-        seqs_dir_path=args.seqs_dir_path,
+        samples=args.samples,
         base_name=args.base_name,
         annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
         annotation_labels_source=args.annotation_labels_source,
@@ -958,7 +1015,8 @@ def init_annotate(args):
         count_width=args.count_width,
         annotate_threads_each=args.annotate_threads_each,
         disk_swap_dir=args.disk_swap_dir,
-        mem_cap_gb=args.mem_cap_gb,
+        mem_gb=args.mem_gb,
+        brwt_subsample=args.brwt_subsample,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,
