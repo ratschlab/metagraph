@@ -293,8 +293,6 @@ rd_col_annodbg_paths = utils.generate_col_paths(rd_cols_dir, seqs_file_list_path
 rd_col_counts_paths = [Path(str(p) + '.counts') for p in rd_col_annodbg_paths] if with_counts else []
 rd_col_coords_paths = [Path(str(p) + '.coords') for p in rd_col_annodbg_paths] if with_coordinates else []
 
-from metagraph_workflows.resource_management import TransformRdStage0Resources
-
 TRANSFORM_RD_STAGE0_RULE="transform_rd_stage0"
 rule transform_rd_stage0:
     input:

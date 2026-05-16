@@ -47,7 +47,7 @@ brwt_linkage_subsample: 1000000
 
 metagraph_cmd: 'metagraph'
 
-max_disk_mb: 1048576  # 1 TiB; surfaces as --disk-cap-gb 1024 in metagraph stages
+max_disk_mb: 1048576  # 1 TiB; declared as a Snakemake `disk_mb` resource on build rules (no metagraph flag)
 max_memory_mb: 16384  # 16 GiB default RAM budget per rule
 max_buffer_size_mb: 81920
 

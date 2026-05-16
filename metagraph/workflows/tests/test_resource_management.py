@@ -27,7 +27,8 @@ def test_TransformRdStage1Resources(config):
     assert inst.get_mem()(None, None, None) == mem
 
     resources = {'mem_mb': mem}
-    assert inst.get_mem_buffer_gib()(None, None, None, resources) == int(math.ceil(0.8 * mem / 1024))
+    expected_mb = int(rm.SupportsMemBufferSize.CAP_MEM_FRACTION * mem)
+    assert inst.get_mem_buffer_gib()(None, None, None, resources) == int(math.ceil(expected_mb / 1024.0))
 
     # now additionally setting mem cap explicitly
     mem_buffer = 2048

@@ -796,7 +796,7 @@ def _add_workflow_args(workflow):
                           help='Approximate RAM budget per rule (in GB); drives the auto --mem-cap-gb\n'
                                '  passed to each metagraph stage. [16]')
     workflow.add_argument('--annotate-threads-each', type=int, default=None, metavar='N',
-                          help='Threads used to annotate each input file. Parallel columns = --threads // N;\n'
+                          help='Threads used to annotate each input file. Parallel columns = ceil(--threads / N);\n'
                                '  raise N to give each column more --mem-cap-gb buffer.\n'
                                '  [8 for binary/counts, 16 for coords]')
     workflow.add_argument('--brwt-subsample', type=int, default=None, metavar='N',

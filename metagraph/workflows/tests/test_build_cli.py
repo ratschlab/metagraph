@@ -60,15 +60,11 @@ def run_wrapper(args_list):
 
     # If tests are running without `metagraph` on PATH, inject `--metagraph-cmd`
     # pointing to the locally built binary (when available).
-    if "--metagraph-cmd" not in normalized_args:
+    if "--metagraph-cmd" not in normalized_args and shutil.which("metagraph") is None:
         metagraph_cmd = _resolve_metagraph_cmd()
         if metagraph_cmd is None:
             pytest.skip("metagraph executable not found in PATH and local build/metagraph missing")
-        if not normalized_args:
-            pytest.skip("empty args_list passed to run_wrapper")
-        process_args = ['python', '-m', 'metagraph_workflows.cli'] + normalized_args + [
-            "--metagraph-cmd", metagraph_cmd
-        ]
+        process_args = process_args + ["--metagraph-cmd", metagraph_cmd]
 
     proc = subprocess.run(
         [str(a) for a in process_args],
@@ -540,7 +536,7 @@ def test_brwt_parallel_nodes_default_is_10(sample_list_path, output_dir):
 
 
 def test_brwt_subsample_default_and_override(sample_list_path, output_dir, tmpdir):
-    # Default: 100000 from default.yml; reaches the row_diff_brwt rule.
+    # Default: 1000000 from default.yml; reaches the row_diff_brwt rule.
     proc = run_wrapper([
         'build',
         sample_list_path,
