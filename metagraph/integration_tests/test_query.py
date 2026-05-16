@@ -1178,7 +1178,7 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(res.stdout.decode(), expected_output)
 
     def test_query_coords_json_kmers_in_target(self):
-        """JSON output should expose `kmers_in_target` so callers can compute breadth of coverage."""
+        """JSON output should expose `kmers_in_target` so callers can compute the fraction of the target covered."""
         graph_base = self.tempdir.name + '/graph'
         graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
         anno_base = self.tempdir.name + '/annotation'

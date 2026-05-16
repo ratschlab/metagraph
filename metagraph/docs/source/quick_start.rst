@@ -506,19 +506,24 @@ and do not repeat. If this condition is not met, an error will be returned.
 Map file coordinates to sequence headers
 """"""""""""""""""""""""""""""""""""""""
 When indexing coordinates with ``--anno-filename``, one can additionally build a mapping from file-level coordinates
-to original sequence headers using ``--index-header-coords``.
+to original sequence headers using ``--index-header-coords``. **This step is what lets callers compute the
+fraction of each target sequence that was covered by a query**: it produces a ``.seqs`` sidecar file
+alongside the annotation so that ``metagraph query --query-mode coords`` can report per-sequence positions
+and the per-target k-mer count (see :ref:`query_kmer_coordinates`). Without it, the query falls back to
+file-level coordinates and omits the per-target k-mer count.
 
 This is a second ``metagraph annotate`` run: the first run creates the annotation (``*.annodbg`` + ``*.coords``),
 and the second run creates only the coordinate-to-header (``CoordToHeader``) mapping (``*.seqs``)::
 
-    # 1) build coordinate-aware annotation
+    # 1) build coordinate-aware annotation (possibly in multiple chunks or with --separately)
     metagraph annotate -v -i graph.dbg --anno-filename --coordinates -p 4 \
                        -o annotation transcripts_1000.fa
 
     # ... optionally transform annotation to the final query representation
     #     (e.g., row_diff_brwt_coord)
 
-    # 2) build the CoordToHeader mapping
+    # 2) build the CoordToHeader mapping ONCE, against the final annotation,
+    #    with the FULL set of input FASTAs (in the order matching the final column layout)
     metagraph annotate -v -i graph.dbg --anno-filename --index-header-coords -p 4 \
                        -o annotation transcripts_1000.fa
 
@@ -528,7 +533,14 @@ Pass these files in an order that is consistent with the final transformed annot
 During query, MetaGraph loads ``annotation.*.annodbg.seqs`` (where ``*`` is the final transformed annotation type)
 automatically and reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
 
+The ``--index-header-coords`` step is a one-shot run against the final merged annotation. If the annotation
+was built in multiple chunks (multiple ``metagraph annotate`` invocations with disjoint FASTA subsets) or
+with ``--separately``, run ``--index-header-coords`` once after all annotation/transform steps are complete,
+passing every input FASTA in column order. ``metagraph stats --print-col-names`` will show the column order.
+
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
+
+.. _query_kmer_coordinates:
 
 Query k-mer coordinates
 """""""""""""""""""""""
@@ -549,8 +561,8 @@ Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is pass
 
 .. note::
     When the ``.seqs`` mapping is in use, each hit is annotated with the k-mer count of the
-    target sequence it was found in, so callers can compute the breadth of coverage (the
-    fraction of the target covered by matched k-mers). In the default TSV output the count
+    target sequence it was found in, so callers can compute the fraction of each target
+    covered by matched k-mers. In the default TSV output the count
     appears right after the header inside the angle brackets, separated by ``/``::
 
         0    query1    <seq1>/6:0-1-5    <seq3>/24:1-4:1-0-3

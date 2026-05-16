@@ -511,6 +511,24 @@ int annotate_graph(Config *config) {
         }
     }
 
+    // Coordinate-aware annotations need a CoordToHeader (.seqs) mapping so that
+    // `metagraph query --query-mode coords` can report per-sequence positions
+    // and the per-target k-mer count needed to compute the fraction of the
+    // target covered. This mapping must be built once against the FINAL merged
+    // annotation with the FULL set of input FASTAs (run it after any
+    // transform/merge step). It is a separate step because the column order
+    // may shift during transforms and a single annotate call may only see a
+    // subset of the inputs.
+    if (config->coordinates && config->filename_anno
+            && !config->annotate_sequence_headers && config->anno_labels.empty()) {
+        logger->info("To enable per-sequence coordinate reporting (`<seq>/N:...` "
+                     "and the JSON `kmers_in_target` field), build the CoordToHeader "
+                     "mapping once against the final merged annotation with all input "
+                     "FASTAs:\n"
+                     "    metagraph annotate --anno-filename --index-header-coords "
+                     "-i <graph> -o <final_anno_basename> <all_input_fastas>");
+    }
+
     return 0;
 }
 
