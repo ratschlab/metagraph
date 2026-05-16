@@ -480,6 +480,83 @@ def _summarize_snakemake_failure_for_run(output_dir: Path, run_started_at: float
     return "Workflow execution failed.\n" + "\n".join(details)
 
 
+def _apply_annotation_options(config, annotation_formats, annotation_labels_source,
+                              with_counts, with_coordinates, count_width):
+    """Apply annotation-related fields to config; raise on incompatible options."""
+    if annotation_labels_source:
+        config['annotation_labels_source'] = annotation_labels_source.value
+
+    selected = set(annotation_formats)
+    has_count = any(af in COUNT_COMPATIBLE_FORMATS for af in selected)
+    has_coord = any(af in COORD_COMPATIBLE_FORMATS for af in selected)
+    effective_counts = with_counts or has_count
+    effective_coords = with_coordinates or has_coord
+
+    if effective_counts and effective_coords:
+        raise ValueError(
+            "Count-aware and coordinate-aware modes are mutually exclusive in this workflow. "
+            "Choose either count formats (--with-counts / int_* / row_diff_int_*) or "
+            "coordinate formats (--with-coords / *_coord)."
+        )
+
+    if effective_counts and not annotation_formats:
+        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_INT_BRWT.value]
+    elif effective_coords and not annotation_formats:
+        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_BRWT_COORD.value]
+    elif annotation_formats:
+        config['annotation_formats'] = [af.value for af in annotation_formats]
+    # else: keep whatever default.yml provided.
+
+    if effective_counts:
+        invalid = [af.value for af in annotation_formats if af not in COUNT_COMPATIBLE_FORMATS]
+        if invalid:
+            raise ValueError(
+                "Count-aware mode is enabled (--with-counts or count-capable --annotation-format), "
+                "--annotation-format must be one of: "
+                + ", ".join(sorted([f.value for f in COUNT_COMPATIBLE_FORMATS]))
+                + f". Got: {', '.join(invalid)}"
+            )
+    if effective_coords:
+        invalid = [af.value for af in annotation_formats if af not in COORD_COMPATIBLE_FORMATS]
+        if invalid:
+            raise ValueError(
+                "Coordinate-aware mode is enabled (--with-coords or *_coord --annotation-format), "
+                "--annotation-format must be one of: "
+                + ", ".join(sorted([f.value for f in COORD_COMPATIBLE_FORMATS]))
+                + f". Got: {', '.join(invalid)}"
+            )
+
+    config['with_counts'] = effective_counts
+    config['with_coordinates'] = effective_coords
+    if count_width is not None:
+        if not (2 <= count_width <= 32):
+            raise ValueError(f"--count-width must be in range [2, 32], got {count_width}")
+        if not effective_counts:
+            raise ValueError(
+                "--count-width can only be used with count-aware mode (--with-counts or count formats).")
+        config['count_width'] = count_width
+
+
+def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
+                           disk_swap_dir, mem_cap_gb, dryrun):
+    """Apply runtime / resource fields to config; raise on invalid values."""
+    config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
+    if not dryrun:
+        _validate_metagraph_cmd(config['metagraph_cmd'])
+    config['max_threads'] = threads if threads else _default_threads_auto()
+    if annotate_threads_each is not None:
+        if annotate_threads_each < 1:
+            raise ValueError(
+                f"--annotate-threads-each must be >= 1, got {annotate_threads_each}")
+        config['annotate_threads_each'] = annotate_threads_each
+    if disk_swap_dir is not None:
+        config['tmpdir'] = str(disk_swap_dir)
+    if mem_cap_gb is not None:
+        if mem_cap_gb <= 0:
+            raise ValueError(f"--mem-cap-gb must be > 0, got {mem_cap_gb}")
+        config['max_memory_mb'] = int(mem_cap_gb * 1024)
+
+
 def run_build_workflow(
         output_dir: Path,
         seqs_file_list_path: Optional[Path] = None,
@@ -502,10 +579,6 @@ def run_build_workflow(
         dryrun: bool = False,
         additional_snakemake_args: Optional[Dict[str, Any]] = None
 ) -> None:
-    # TODO: support str argumt?
-
-    snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
-
     with open(default_path, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -518,80 +591,26 @@ def run_build_workflow(
         config[SEQS_DIR_PATH] = str(seqs_dir_path)
 
     config['output_directory'] = str(output_dir)
-
     config['k'] = k if k else config['k']
-
-    if annotation_labels_source:
-        config['annotation_labels_source'] = annotation_labels_source.value
-
     config['base_name'] = base_name if base_name else config['base_name']
     config['build_primary_graph'] = build_primary_graph
 
-    selected_formats = set(annotation_formats)
-    has_count_formats = any(af in COUNT_COMPATIBLE_FORMATS for af in selected_formats)
-    has_coord_formats = any(af in COORD_COMPATIBLE_FORMATS for af in selected_formats)
-    effective_with_counts = with_counts or has_count_formats
-    effective_with_coordinates = with_coordinates or has_coord_formats
+    _apply_annotation_options(config, annotation_formats, annotation_labels_source,
+                              with_counts, with_coordinates, count_width)
+    _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
+                           disk_swap_dir, mem_cap_gb, dryrun)
 
-    if effective_with_counts and effective_with_coordinates:
-        raise ValueError(
-            "Count-aware and coordinate-aware modes are mutually exclusive in this workflow. "
-            "Choose either count formats (--with-counts / int_* / row_diff_int_*) or "
-            "coordinate formats (--with-coords / *_coord)."
-        )
+    _invoke_snakemake(config, output_dir, threads=threads, force=force,
+                      dryrun=dryrun, verbose=verbose,
+                      additional_snakemake_args=additional_snakemake_args)
 
-    if effective_with_counts and not annotation_formats:
-        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_INT_BRWT.value]
-    elif effective_with_coordinates and not annotation_formats:
-        config['annotation_formats'] = [AnnotationFormats.ROW_DIFF_BRWT_COORD.value]
-    else:
-        config['annotation_formats'] = [af.value for af in
-                                        annotation_formats] if annotation_formats else config['annotation_formats']
 
-    if effective_with_counts:
-        invalid_formats = [af.value for af in annotation_formats if af not in COUNT_COMPATIBLE_FORMATS]
-        if invalid_formats:
-            raise ValueError(
-                "Count-aware mode is enabled (--with-counts or count-capable --annotation-format), "
-                "--annotation-format must be one of: "
-                + ", ".join(sorted([f.value for f in COUNT_COMPATIBLE_FORMATS]))
-                + f". Got: {', '.join(invalid_formats)}"
-            )
-    if effective_with_coordinates:
-        invalid_formats = [af.value for af in annotation_formats if af not in COORD_COMPATIBLE_FORMATS]
-        if invalid_formats:
-            raise ValueError(
-                "Coordinate-aware mode is enabled (--with-coords or *_coord --annotation-format), "
-                "--annotation-format must be one of: "
-                + ", ".join(sorted([f.value for f in COORD_COMPATIBLE_FORMATS]))
-                + f". Got: {', '.join(invalid_formats)}"
-            )
-    config['with_counts'] = effective_with_counts
-    config['with_coordinates'] = effective_with_coordinates
-    if count_width is not None and not (2 <= count_width <= 32):
-        raise ValueError(f"--count-width must be in range [2, 32], got {count_width}")
-    if count_width is not None and not effective_with_counts:
-        raise ValueError("--count-width can only be used with count-aware mode (--with-counts or count formats).")
-    if count_width is not None:
-        config['count_width'] = count_width
-
-    config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
-    if not dryrun:
-        _validate_metagraph_cmd(config['metagraph_cmd'])
-    config['max_threads'] = threads if threads else _default_threads_auto()
-    if annotate_threads_each is not None:
-        if annotate_threads_each < 1:
-            raise ValueError(
-                f"--annotate-threads-each must be >= 1, got {annotate_threads_each}")
-        config['annotate_threads_each'] = annotate_threads_each
-
-    if disk_swap_dir is not None:
-        config['tmpdir'] = str(disk_swap_dir)
-
-    if mem_cap_gb is not None:
-        if mem_cap_gb <= 0:
-            raise ValueError(f"--mem-cap-gb must be > 0, got {mem_cap_gb}")
-        config['max_memory_mb'] = int(mem_cap_gb * 1024)
+def _invoke_snakemake(config, output_dir, threads, force, dryrun, verbose,
+                      additional_snakemake_args):
+    """Write the merged config to <output_dir>/config.yaml, run snakemake,
+    and emit the run summary. Raises RuntimeError on snakemake failure."""
+    snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
+    output_dir_path = Path(output_dir)
 
     if verbose:
         importlib.reload(logging)
@@ -600,31 +619,20 @@ def run_build_workflow(
         for k, v in sorted(config.items(), key=lambda t: t[0]):
             logging.info(f"\t{k}: {v}")
 
-    additional_args = additional_snakemake_args if additional_snakemake_args else {}
-
-    # Build snakemake command
-    cmd = ['python', '-m', 'snakemake', '--snakefile', str(snakefile_path)]
-
-    # Add config file
-    output_dir_path = Path(output_dir)
     config_file = output_dir_path / 'config.yaml'
     config_file.parent.mkdir(parents=True, exist_ok=True)
     with open(config_file, 'w') as f:
         yaml.dump(config, f)
-    cmd.extend(['--configfile', str(config_file)])
 
-    # Add other arguments
+    cmd = ['python', '-m', 'snakemake', '--snakefile', str(snakefile_path),
+           '--configfile', str(config_file)]
     if force:
         cmd.append('--forceall')
     if dryrun:
         cmd.append('--dry-run')
-    if threads:
-        cmd.extend(['--cores', str(threads)])
-    else:
-        # Add default cores if not specified
-        cmd.extend(['--cores', str(_default_threads_auto())])
+    cmd.extend(['--cores', str(threads if threads else _default_threads_auto())])
 
-    # Add additional arguments
+    additional_args = additional_snakemake_args if additional_snakemake_args else {}
     for key, value in additional_args.items():
         if isinstance(value, bool):
             if value:
@@ -632,85 +640,134 @@ def run_build_workflow(
         else:
             cmd.extend([f'--{key}', str(value)])
 
-    # Run snakemake
     # Keep stdout/stderr attached so Snakemake preserves colors and rich formatting.
     run_started_at = time.time()
     result = subprocess.run([' '.join(cmd)], shell=True)
 
     if result.returncode != 0:
-        raise RuntimeError(_summarize_snakemake_failure_for_run(Path(output_dir), run_started_at))
-    _print_run_summary(Path(output_dir), dryrun)
+        raise RuntimeError(_summarize_snakemake_failure_for_run(output_dir_path, run_started_at))
+    _print_run_summary(output_dir_path, dryrun)
 
 
-def setup_build_parser(parser):
+def run_annotate_workflow(
+        output_dir: Path,
+        graph: Path,
+        seqs_file_list_path: Optional[Path] = None,
+        seqs_dir_path: Optional[Path] = None,
+        base_name: Optional[str] = None,
+        annotation_formats: Iterable[AnnotationFormats] = (),
+        annotation_labels_source: Optional[AnnotationLabelsSource] = None,
+        with_counts: bool = False,
+        with_coordinates: bool = False,
+        count_width: Optional[int] = None,
+        annotate_threads_each: Optional[int] = None,
+        disk_swap_dir: Optional[Path] = None,
+        mem_cap_gb: Optional[float] = None,
+        metagraph_cmd: Optional[str] = None,
+        threads: Optional[int] = None,
+        force: bool = False,
+        verbose: bool = False,
+        dryrun: bool = False,
+        additional_snakemake_args: Optional[Dict[str, Any]] = None
+) -> None:
+    """Annotation + row-diff pipeline on a pre-existing graph (no build).
+
+    The user-provided graph is symlinked into the workflow output dir as
+    ``<base_name>.dbg`` so the existing rules can pick it up as input
+    without rebuilding. The build pipeline (build.smk) is skipped via
+    ``config[external_graph] = True``.
+    """
+    with open(default_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    if not seqs_file_list_path and not seqs_dir_path:
+        raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
+
+    graph_path = Path(graph).expanduser().resolve()
+    if not graph_path.exists():
+        raise ValueError(f"Graph file not found: {graph_path}")
+
+    if seqs_file_list_path:
+        config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
+    if seqs_dir_path:
+        config[SEQS_DIR_PATH] = str(seqs_dir_path)
+
+    config['output_directory'] = str(output_dir)
+    config['base_name'] = base_name if base_name else config['base_name']
+    config['external_graph'] = True
+    # Per-sample primarization depends on build.smk rules; it can't run
+    # without the build pipeline.
+    config['primarize_samples_separately'] = False
+    config['build_primary_graph'] = False  # irrelevant without build
+
+    _apply_annotation_options(config, annotation_formats, annotation_labels_source,
+                              with_counts, with_coordinates, count_width)
+    _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
+                           disk_swap_dir, mem_cap_gb, dryrun)
+
+    # Symlink the user's graph as <base_name>.dbg so downstream rules
+    # see it as a satisfied input and snakemake doesn't try to rebuild.
+    output_dir_path = Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+    target = output_dir_path / f"{config['base_name']}.dbg"
+    if target.is_symlink() or target.exists():
+        target.unlink()
+    target.symlink_to(graph_path)
+
+    _invoke_snakemake(config, output_dir, threads=threads, force=force,
+                      dryrun=dryrun, verbose=verbose,
+                      additional_snakemake_args=additional_snakemake_args)
+
+
+def _add_seq_input_args(group, required=True):
+    """Add --seqs-file-list-path / --seqs-dir-path / -o / --output_dir.
+
+    Returns the mutually-exclusive group so callers can attach more
+    members before the parse, if needed.
+    """
+    xor = group.add_mutually_exclusive_group(required=required)
+    xor.add_argument('--seqs-file-list-path',
+                     metavar='PATH',
+                     help='Path to a text file with sample paths (one per line) []')
+    xor.add_argument('--seqs-dir-path',
+                     metavar='DIR',
+                     help="Directory containing samples []")
+    group.add_argument('-o', '--output_dir', type=Path, required=True,
+                       help='Output directory [required]')
+    return xor
+
+
+def _add_annotation_args(annotation):
+    """Add the shared annotation argument group (anno-source, annotation-format,
+    with-counts, count-width, with-coords) with help text that highlights the
+    per-mode default formats inline."""
     label_sources = [v.value for v in AnnotationLabelsSource]
     count_formats = sorted([f.value for f in COUNT_COMPATIBLE_FORMATS])
-    count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
     coord_formats = sorted([f.value for f in COORD_COMPATIBLE_FORMATS])
+    count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
     coord_formats_display = [_help_color(fmt, "35") for fmt in coord_formats]
     classic_fmt_names = [
         "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt",
         "rb_brwt", "row_diff_brwt", "relax.row_diff_brwt",
     ]
-    classic_formats_display = [_help_color(fmt, "36") for fmt in classic_fmt_names]
 
     def _with_default(name: str, color: str, default_name: str) -> str:
-        """Colored format name, with `[<name>]` suffix if it's the default."""
         colored = _help_color(name, color)
-        if name == default_name:
-            return f"[{colored}]"
-        return colored
+        return f"[{colored}]" if name == default_name else colored
 
-    # Variants used only in the --annotation-format help block: each format
-    # carries its own `[<name>]` suffix when it is the default for that
-    # mode (binary / counts / coordinates).
     classic_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt") for f in classic_fmt_names]
     count_fmt_help = [_with_default(f, "33", "row_diff_int_brwt") for f in count_formats]
     coord_fmt_help = [_with_default(f, "35", "row_diff_brwt_coord") for f in coord_formats]
-
-    with_counts_label = _help_color("--with-counts", "33")
-    with_coords_label = _help_color("--with-coords", "35")
     default_count_width = _help_color("8", "33")
     zero_count_width = _help_color("0", "36")
 
-    parser.description = (
-        "Build a MetaGraph graph + annotation workflow from a sequence list or directory."
-    )
-    parser.epilog = (
-        "Examples:\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt -k 31 -o out/\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt --with-counts -o out/\n"
-        "  metagraph-workflows build --seqs-file-list-path files.txt --with-coords -o out/"
-    )
-
-    input_seq_group = parser.add_argument_group('input/output')
-
-    input_seq_group_xor = input_seq_group.add_mutually_exclusive_group(required=True)
-    input_seq_group_xor.add_argument('--seqs-file-list-path',
-                                     metavar='PATH',
-                                     help='Path to a text file with sample paths (one per line) []')
-    input_seq_group_xor.add_argument('--seqs-dir-path',
-                                     metavar='DIR',
-                                     help="Directory containing samples []")
-    input_seq_group.add_argument('-o', '--output_dir', type=Path, required=True,
-                                 help='Output directory [required]')
-
-    graph = parser.add_argument_group('graph')
-    graph.add_argument('-k', type=int, default=31, metavar='K',
-                       help='k-mer length [31]')
-    graph.add_argument('--base-name', default='graph', metavar='NAME',
-                       help='Base output name [graph]')
-    graph.add_argument('--primary', dest='build_primary_graph', default=False,
-                       action='store_true',
-                       help='Build canonical graph first, then derive/build primary graph [False]')
-
-    annotation = parser.add_argument_group('annotation')
     all_formats_help = "\n".join([
         f"    {classic_fmt_help[0]}, {classic_fmt_help[1]}, {classic_fmt_help[2]}, {classic_fmt_help[3]}, {classic_fmt_help[4]}, {classic_fmt_help[5]}, {classic_fmt_help[6]},",
         f"             {classic_fmt_help[7]}, {classic_fmt_help[8]}",
         f"    {count_fmt_help[0]}, {count_fmt_help[1]}, {count_fmt_help[2]}",
         f"    {coord_fmt_help[0]}, {coord_fmt_help[2]}, {coord_fmt_help[1]}, {coord_fmt_help[3]}",
     ])
+
     annotation.add_argument('--anno-source',
                             dest='annotation_labels_source',
                             type=AnnotationLabelsSource,
@@ -733,10 +790,12 @@ def setup_build_parser(parser):
                                  "  ")
     annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
                             help=f"Index with k-mer positions [False]\n"
-                                 f"  Supported for {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]},\n"
-                                 f"             {coord_formats_display[3]}")
+                                 f"  Supported for {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]}, {coord_formats_display[3]}")
 
-    workflow = parser.add_argument_group('other')
+
+def _add_workflow_args(workflow):
+    """Add the shared `other` argument group (threads, disk/mem, force,
+    verbose, dryrun, metagraph-cmd, extra-args)."""
     workflow.add_argument('--threads', type=int, default=None, metavar='N',
                           help='Max cores for Snakemake execution [num_cores]')
     workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
@@ -759,9 +818,44 @@ def setup_build_parser(parser):
     workflow.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
                           help='Extra arguments to pass to snakemake [none]\n'
                                '  Example: --extra-args="arg1=val1 arg2=val2"')
+
+
+def _add_help_arg(parser):
     options = parser.add_argument_group('options')
     options.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
                          help='Show this help message and exit')
+
+
+def setup_build_parser(parser):
+    parser.description = (
+        "Build a MetaGraph graph + annotation workflow from a sequence list or directory.\n"
+        "\n"
+        "Inputs are assumed to be contigs with deduplicated k-mers (one fasta.gz\n"
+        "per sample). When building a primary graph (--primary), they must be\n"
+        "primary contigs. For --with-coords, inputs must instead be the full,\n"
+        "non-deduplicated samples."
+    )
+    parser.epilog = (
+        "Examples:\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt -k 31 -o out/\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt --with-counts -o out/\n"
+        "  metagraph-workflows build --seqs-file-list-path files.txt --with-coords -o out/"
+    )
+
+    _add_seq_input_args(parser.add_argument_group('input/output'))
+
+    graph = parser.add_argument_group('graph')
+    graph.add_argument('-k', type=int, default=31, metavar='K',
+                       help='k-mer length [31]')
+    graph.add_argument('--base-name', default='graph', metavar='NAME',
+                       help='Base output name [graph]')
+    graph.add_argument('--primary', dest='build_primary_graph', default=False,
+                       action='store_true',
+                       help='Build canonical graph first, then derive/build primary graph [False]')
+
+    _add_annotation_args(parser.add_argument_group('annotation'))
+    _add_workflow_args(parser.add_argument_group('other'))
+    _add_help_arg(parser)
 
     parser.set_defaults(func=init_build)
 
@@ -819,6 +913,63 @@ def init_build(args):
     )
 
 
+def setup_annotate_parser(parser):
+    parser.description = (
+        "Annotate an existing MetaGraph graph: run column annotation and the\n"
+        "row-diff / BRWT transforms against a caller-supplied .dbg file. Skips\n"
+        "the build pipeline.\n"
+        "\n"
+        "Inputs are assumed to be contigs with deduplicated k-mers (one fasta.gz\n"
+        "per sample); when --graph is a primary graph, they must be primary\n"
+        "contigs. For --with-coords, inputs must instead be the full,\n"
+        "non-deduplicated samples."
+    )
+    parser.epilog = (
+        "Examples:\n"
+        "  metagraph-workflows annotate --graph mouse.dbg \\\n"
+        "      --seqs-file-list-path files.txt -o out/"
+    )
+
+    io_group = parser.add_argument_group('input/output')
+    io_group.add_argument('--graph', type=Path, required=True, metavar='PATH',
+                          help='Existing .dbg graph to annotate (must already be built) [required]')
+    _add_seq_input_args(io_group)
+    io_group.add_argument('--base-name', default='graph', metavar='NAME',
+                          help='Base output name (annotations are <NAME>.<fmt>.annodbg) [graph]')
+
+    _add_annotation_args(parser.add_argument_group('annotation'))
+    _add_workflow_args(parser.add_argument_group('other'))
+    _add_help_arg(parser)
+
+    parser.set_defaults(func=init_annotate)
+
+
+def init_annotate(args):
+    run_annotate_workflow(
+        args.output_dir,
+        graph=args.graph,
+        seqs_file_list_path=args.seqs_file_list_path,
+        seqs_dir_path=args.seqs_dir_path,
+        base_name=args.base_name,
+        annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
+        annotation_labels_source=args.annotation_labels_source,
+        with_counts=args.with_counts,
+        with_coordinates=args.with_coordinates,
+        count_width=args.count_width,
+        annotate_threads_each=args.annotate_threads_each,
+        disk_swap_dir=args.disk_swap_dir,
+        mem_cap_gb=args.mem_cap_gb,
+        metagraph_cmd=args.metagraph_cmd,
+        threads=args.threads,
+        force=args.force,
+        verbose=args.verbose,
+        dryrun=args.dryrun,
+        additional_snakemake_args=_parse_additional_snakemake_args(
+            getattr(args, "additional_snakemake_args", "")
+        )
+    )
+
+
 def main(args=tuple(sys.argv[1:])):
     parser = argparse.ArgumentParser(
         description='MetaGraph workflow utilities',
@@ -839,6 +990,14 @@ def main(args=tuple(sys.argv[1:])):
         add_help=False,
     )
     setup_build_parser(build_parser)
+
+    annotate_parser = subparsers.add_parser(
+        "annotate",
+        help="Annotate an existing graph (skip the build pipeline)",
+        formatter_class=_help_formatter,
+        add_help=False,
+    )
+    setup_annotate_parser(annotate_parser)
 
     parsed_arguments = parser.parse_args(args)
 

@@ -3,6 +3,18 @@ k: 31
 base_name: 'graph'
 build_primary_graph: False
 
+# Input assumption for `metagraph-workflows`:
+#   - Each input sample is assumed to be a contig file with deduplicated
+#     k-mers (one fasta.gz per sample). For a primary graph (--primary),
+#     the contigs must already be primary contigs (canonicalized).
+#   - For coordinate annotations (`--with-coords`), inputs must instead
+#     be the full, non-deduplicated samples, since coordinate annotation
+#     needs the original sequence positions.
+#
+# `primarize_samples_separately: True` makes the workflow build a
+# canonical graph per sample and primarize it before joint build /
+# annotation. Use only if your inputs are raw / non-primarized reads
+# that the workflow itself should primarize.
 primarize_samples_separately: False
 
 kmc_mem_mb_per_thread: 2048

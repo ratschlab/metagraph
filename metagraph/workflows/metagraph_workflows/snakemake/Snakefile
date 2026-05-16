@@ -68,14 +68,18 @@ if not config[workflow_configs.SAMPLE_IDS_PATH]:
 
 localrules: generate_column_list
 
+external_graph = config.get('external_graph', False)
+
 rule all:
     input:
         graph_path,
-        small_graph_path,
+        # Skip the small-state graph in annotate-only mode: the user
+        # already has their built graph; we don't want to re-transform it.
+        *([small_graph_path] if not external_graph else []),
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
 
 
-if not config.get('external_graph', False):
+if not external_graph:
     include: 'build.smk'
 
 

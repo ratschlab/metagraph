@@ -386,7 +386,7 @@ def test_annotate_threads_each_default_is_eight(sample_list_path, output_dir):
     cfg = (output_dir / "config.yaml").read()
     assert "annotate_threads_each: 8" in cfg
     out = proc.stdout.decode()
-    assert "--parallel 2" in out
+    assert "-p 2" in out
     assert "--threads-each 8" in out
 
 
@@ -405,7 +405,7 @@ def test_annotate_threads_each_overrides_default(sample_list_path, output_dir):
     cfg = (output_dir / "config.yaml").read()
     assert "annotate_threads_each: 4" in cfg
     out = proc.stdout.decode()
-    assert "--parallel 4" in out
+    assert "-p 4" in out
     assert "--threads-each 4" in out
 
 
@@ -422,7 +422,7 @@ def test_annotate_threads_each_redistributes_leftover(sample_list_path, output_d
     ])
     assert proc.returncode == 0
     out = proc.stdout.decode()
-    assert "--parallel 2" in out
+    assert "-p 2" in out
     assert "--threads-each 6" in out
 
 
@@ -439,7 +439,7 @@ def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path,
     ])
     assert proc.returncode == 0
     out = proc.stdout.decode()
-    assert "--parallel 2" in out
+    assert "-p 2" in out
     assert "--threads-each 7" in out
 
 
@@ -512,6 +512,66 @@ def test_mem_cap_gb_must_be_positive(sample_list_path, output_dir):
     ])
     assert proc.returncode != 0
     assert "--mem-cap-gb must be > 0" in proc.stdout.decode()
+
+
+@pytest.fixture
+def stub_graph_path(tmpdir):
+    p = tmpdir / "graph_in.dbg"
+    p.write("")  # zero-byte placeholder is enough for snakemake's existence check
+    return p
+
+
+def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path, output_dir):
+    proc = run_wrapper([
+        'annotate',
+        '--graph', stub_graph_path,
+        '--seqs-file-list-path', sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        '-o', output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    # The build pipeline must not appear in annotate-mode DAG.
+    for build_rule in (
+        "build_joint_graph",
+        "build_joint_primary",
+        "build_canonical_graph_single_sample",
+        "primarize_joint_graph",
+        "primarize_canonical_graph_single_sample",
+        "extract_kmer_counts",
+    ):
+        assert build_rule not in out, f"unexpected build rule in annotate DAG: {build_rule}"
+    # Annotate + transforms still run.
+    for kept_rule in (
+        "rule annotate:",
+        "rule transform_rd_stage0",
+        "rule transform_rd_stage1",
+        "rule transform_rd_stage2",
+        "rule annotate_row_diff_brwt",
+    ):
+        assert kept_rule in out, f"missing rule in annotate DAG: {kept_rule}"
+    # Small-state graph is intentionally skipped in annotate-only mode.
+    assert "rule build_small_graph" not in out
+
+    cfg = (output_dir / "config.yaml").read()
+    assert "external_graph: true" in cfg
+    # The user's graph must be symlinked into the output dir.
+    target = output_dir / "graph.dbg"
+    assert target.exists()
+
+
+def test_annotate_subcommand_requires_existing_graph(sample_list_path, output_dir, tmpdir):
+    missing = tmpdir / "does_not_exist.dbg"
+    proc = run_wrapper([
+        'annotate',
+        '--graph', missing,
+        '--seqs-file-list-path', sample_list_path,
+        '--dryrun',
+        '-o', output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "Graph file not found" in proc.stdout.decode()
 
 
 def test_annotate_threads_each_must_be_positive(sample_list_path, output_dir):
