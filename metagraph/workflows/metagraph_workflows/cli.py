@@ -3,7 +3,6 @@ import difflib
 import importlib
 import logging
 import os
-import re
 import shlex
 import shutil
 import sys
@@ -12,8 +11,6 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional, Dict, Any
 
-import snakemake
-import snakemake.io
 import snakemake.utils
 import yaml
 
@@ -573,10 +570,10 @@ def _set_samples_config(config, samples, output_dir):
 def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun):
     """Apply runtime / resource fields to config; raise on invalid values."""
-    config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
+    config['metagraph_cmd'] = metagraph_cmd or config['metagraph_cmd']
     if not dryrun:
         _validate_metagraph_cmd(config['metagraph_cmd'])
-    config['max_threads'] = threads if threads else _default_threads_auto()
+    config['max_threads'] = threads or _default_threads_auto()
     if annotate_threads_each is not None:
         if annotate_threads_each < 1:
             raise ValueError(
@@ -594,9 +591,11 @@ def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd
         config['brwt_linkage_subsample'] = brwt_subsample
 
 
-def run_build_workflow(
+def run_workflow(
         output_dir: Path,
         samples: Path,
+        *,
+        graph: Optional[Path] = None,
         k: Optional[int] = None,
         base_name: Optional[str] = None,
         build_primary_graph: bool = False,
@@ -614,22 +613,49 @@ def run_build_workflow(
         force: bool = False,
         verbose: bool = False,
         dryrun: bool = False,
-        additional_snakemake_args: Optional[Dict[str, Any]] = None
+        additional_snakemake_args: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """Run the metagraph-workflows pipeline.
+
+    With ``graph=None`` (default), build a fresh graph + annotation
+    from ``samples``. With ``graph`` pointing at an existing .dbg file,
+    skip the build pipeline and run annotation-only against that graph
+    (the file is symlinked into the output dir as ``<base_name>.dbg``).
+    """
     with open(default_path, 'r') as f:
         config = yaml.safe_load(f)
 
     _set_samples_config(config, samples, output_dir)
-
     config['output_directory'] = str(output_dir)
-    config['k'] = k if k else config['k']
-    config['base_name'] = base_name if base_name else config['base_name']
-    config['build_primary_graph'] = build_primary_graph
+    config['base_name'] = base_name or config['base_name']
+
+    if graph is not None:
+        graph_path = Path(graph).expanduser().resolve()
+        if not graph_path.exists():
+            raise ValueError(f"Graph file not found: {graph_path}")
+        config['external_graph'] = True
+        # Per-sample primarization needs build.smk rules; not available.
+        config['primarize_samples_separately'] = False
+        config['build_primary_graph'] = False  # irrelevant without build
+    else:
+        config['k'] = k or config['k']
+        config['build_primary_graph'] = build_primary_graph
 
     _apply_annotation_options(config, annotation_formats, annotation_labels_source,
                               with_counts, with_coordinates, count_width)
     _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun)
+
+    if graph is not None:
+        # Symlink the user's graph as <base_name>.dbg so downstream
+        # rules see it as a satisfied input and snakemake doesn't try
+        # to rebuild it.
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        target = output_dir_path / f"{config['base_name']}.dbg"
+        if target.is_symlink() or target.exists():
+            target.unlink()
+        target.symlink_to(graph_path)
 
     _invoke_snakemake(config, output_dir, threads=threads, force=force,
                       dryrun=dryrun, verbose=verbose,
@@ -679,69 +705,6 @@ def _invoke_snakemake(config, output_dir, threads, force, dryrun, verbose,
         raise RuntimeError(_summarize_snakemake_failure_for_run(output_dir_path, run_started_at))
     _print_run_summary(output_dir_path, dryrun)
 
-
-def run_annotate_workflow(
-        output_dir: Path,
-        graph: Path,
-        samples: Path,
-        base_name: Optional[str] = None,
-        annotation_formats: Iterable[AnnotationFormats] = (),
-        annotation_labels_source: Optional[AnnotationLabelsSource] = None,
-        with_counts: bool = False,
-        with_coordinates: bool = False,
-        count_width: Optional[int] = None,
-        annotate_threads_each: Optional[int] = None,
-        disk_swap_dir: Optional[Path] = None,
-        mem_gb: Optional[float] = None,
-        brwt_subsample: Optional[int] = None,
-        metagraph_cmd: Optional[str] = None,
-        threads: Optional[int] = None,
-        force: bool = False,
-        verbose: bool = False,
-        dryrun: bool = False,
-        additional_snakemake_args: Optional[Dict[str, Any]] = None
-) -> None:
-    """Annotation + row-diff pipeline on a pre-existing graph (no build).
-
-    The user-provided graph is symlinked into the workflow output dir as
-    ``<base_name>.dbg`` so the existing rules can pick it up as input
-    without rebuilding. The build pipeline (build.smk) is skipped via
-    ``config[external_graph] = True``.
-    """
-    with open(default_path, 'r') as f:
-        config = yaml.safe_load(f)
-
-    graph_path = Path(graph).expanduser().resolve()
-    if not graph_path.exists():
-        raise ValueError(f"Graph file not found: {graph_path}")
-
-    _set_samples_config(config, samples, output_dir)
-
-    config['output_directory'] = str(output_dir)
-    config['base_name'] = base_name if base_name else config['base_name']
-    config['external_graph'] = True
-    # Per-sample primarization depends on build.smk rules; it can't run
-    # without the build pipeline.
-    config['primarize_samples_separately'] = False
-    config['build_primary_graph'] = False  # irrelevant without build
-
-    _apply_annotation_options(config, annotation_formats, annotation_labels_source,
-                              with_counts, with_coordinates, count_width)
-    _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
-                           disk_swap_dir, mem_gb, brwt_subsample, dryrun)
-
-    # Symlink the user's graph as <base_name>.dbg so downstream rules
-    # see it as a satisfied input and snakemake doesn't try to rebuild.
-    output_dir_path = Path(output_dir)
-    output_dir_path.mkdir(parents=True, exist_ok=True)
-    target = output_dir_path / f"{config['base_name']}.dbg"
-    if target.is_symlink() or target.exists():
-        target.unlink()
-    target.symlink_to(graph_path)
-
-    _invoke_snakemake(config, output_dir, threads=threads, force=force,
-                      dryrun=dryrun, verbose=verbose,
-                      additional_snakemake_args=additional_snakemake_args)
 
 
 def _add_seq_input_args(group):
@@ -899,60 +862,32 @@ def setup_build_parser(parser):
 def _convert_type(v: str) -> Any:
     if v.lower() == 'true' or v == '1':
         return True
-    elif v.lower() == 'false' or v == '0':
+    if v.lower() == 'false' or v == '0':
         return False
-
     try:
         return float(v)
-    except:
-        pass
-
-    return v
+    except ValueError:
+        return v
 
 
 def _parse_additional_snakemake_args(arg: str) -> Dict[str, Any]:
     ret = {}
     for a in shlex.split(arg):
         if '=' not in a:
-            raise ValueError("ex")
-
-        k, v = a.split('=')
+            raise ValueError(
+                f"--extra-args expects key=value tokens; got {a!r}. "
+                f"Example: --extra-args=\"keep-going=True jobs=4\""
+            )
+        k, v = a.split('=', 1)
         ret[k] = _convert_type(v)
-
     return ret
 
 
 def init_build(args):
-    # If the user supplied --graph, bypass the build pipeline and run
-    # annotation-only against that graph. Otherwise build from samples.
-    if args.graph is not None:
-        run_annotate_workflow(
-            args.output_dir,
-            graph=args.graph,
-            samples=args.samples,
-            base_name=args.base_name,
-            annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
-            annotation_labels_source=args.annotation_labels_source,
-            with_counts=args.with_counts,
-            with_coordinates=args.with_coordinates,
-            count_width=args.count_width,
-            annotate_threads_each=args.annotate_threads_each,
-            disk_swap_dir=args.disk_swap_dir,
-            mem_gb=args.mem_gb,
-            brwt_subsample=args.brwt_subsample,
-            metagraph_cmd=args.metagraph_cmd,
-            threads=args.threads,
-            force=args.force,
-            verbose=args.verbose,
-            dryrun=args.dryrun,
-            additional_snakemake_args=_parse_additional_snakemake_args(
-                getattr(args, "additional_snakemake_args", "")
-            )
-        )
-        return
-    run_build_workflow(
-        args.output_dir,
+    run_workflow(
+        output_dir=args.output_dir,
         samples=args.samples,
+        graph=args.graph,
         k=args.k,
         base_name=args.base_name,
         build_primary_graph=args.build_primary_graph,
@@ -970,9 +905,7 @@ def init_build(args):
         force=args.force,
         verbose=args.verbose,
         dryrun=args.dryrun,
-        additional_snakemake_args=_parse_additional_snakemake_args(
-            getattr(args, "additional_snakemake_args", "")
-        )
+        additional_snakemake_args=_parse_additional_snakemake_args(args.additional_snakemake_args),
     )
 
 

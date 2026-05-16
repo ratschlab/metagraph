@@ -124,7 +124,7 @@ def test_workflow_invocation_via_python(sample_list_path, output_dir):
     if metagraph_cmd is None and shutil.which("metagraph") is None:
         pytest.skip("metagraph executable not found in PATH and local build/metagraph missing")
 
-    assert cli.run_build_workflow(
+    assert cli.run_workflow(
         output_dir,
         samples=sample_list_path,
         metagraph_cmd=metagraph_cmd,

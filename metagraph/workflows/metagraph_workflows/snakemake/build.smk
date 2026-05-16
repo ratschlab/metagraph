@@ -43,10 +43,7 @@ canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 
 joint_contigs_path=wdir/f'{graph}_primary.fasta.gz'
 
-
-sample_ids_spec = False
 orig_samples_path=wdir/'orig_samples'
-
 
 
 STAGE_SAMPLES_RULE="stage_samples"
@@ -109,13 +106,11 @@ rule extract_kmer_counts:
         {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} > {log} 2>&1
         """
 
-kmer_estimates=True
-
 BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="build_canonical_graph_single_sample"
 rule build_canonical_graph_single_sample:
     input:
         seq=utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict),
-        kmer=kmc_dir/"{sample_id}.json" if kmer_estimates else []
+        kmer=kmc_dir/"{sample_id}.json"
     output:
         graph=temp(canonical_graphs_dir/"{sample_id}.dbg"),
         temp_dir=temp(directory(wdir / "temp_build_canonical_{sample_id}")),

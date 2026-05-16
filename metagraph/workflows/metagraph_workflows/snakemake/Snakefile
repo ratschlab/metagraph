@@ -174,8 +174,6 @@ rule generate_column_list:
             f.write('\n'.join([str(l) for l in input]))
 
 
-max_path_length=None
-
 GENERATE_BRWT_LINKAGE_RULE="generate_brwt_linkage"
 rule generate_brwt_linkage:
     input:
