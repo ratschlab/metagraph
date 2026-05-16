@@ -976,62 +976,6 @@ def init_build(args):
     )
 
 
-def setup_annotate_parser(parser):
-    parser.description = (
-        "Annotate an existing MetaGraph graph: run column annotation and the\n"
-        "row-diff / BRWT transforms against a caller-supplied .dbg file. Skips\n"
-        "the build pipeline.\n"
-        "\n"
-        "Inputs are assumed to be contigs with deduplicated k-mers (one fasta.gz\n"
-        "per sample); when --graph is a primary graph, they must be primary\n"
-        "contigs. For --with-coords, inputs must instead be the full,\n"
-        "non-deduplicated samples."
-    )
-    parser.epilog = (
-        "Examples:\n"
-        "  metagraph-workflows annotate --graph mouse.dbg files.txt -o out/"
-    )
-
-    io_group = parser.add_argument_group('input/output')
-    io_group.add_argument('--graph', type=Path, required=True, metavar='PATH',
-                          help='Existing .dbg graph to annotate (must already be built) [required]')
-    _add_seq_input_args(io_group)
-    io_group.add_argument('--base-name', default='graph', metavar='NAME',
-                          help='Base output name (annotations are <NAME>.<fmt>.annodbg) [graph]')
-
-    _add_annotation_args(parser.add_argument_group('annotation'))
-    _add_workflow_args(parser.add_argument_group('other'))
-    _add_help_arg(parser)
-
-    parser.set_defaults(func=init_annotate)
-
-
-def init_annotate(args):
-    run_annotate_workflow(
-        args.output_dir,
-        graph=args.graph,
-        samples=args.samples,
-        base_name=args.base_name,
-        annotation_formats=[_parse_annotation_format_value(af) for af in args.annotation_format],
-        annotation_labels_source=args.annotation_labels_source,
-        with_counts=args.with_counts,
-        with_coordinates=args.with_coordinates,
-        count_width=args.count_width,
-        annotate_threads_each=args.annotate_threads_each,
-        disk_swap_dir=args.disk_swap_dir,
-        mem_gb=args.mem_gb,
-        brwt_subsample=args.brwt_subsample,
-        metagraph_cmd=args.metagraph_cmd,
-        threads=args.threads,
-        force=args.force,
-        verbose=args.verbose,
-        dryrun=args.dryrun,
-        additional_snakemake_args=_parse_additional_snakemake_args(
-            getattr(args, "additional_snakemake_args", "")
-        )
-    )
-
-
 def main(args=tuple(sys.argv[1:])):
     parser = argparse.ArgumentParser(
         description='MetaGraph workflow utilities',
@@ -1052,14 +996,6 @@ def main(args=tuple(sys.argv[1:])):
         add_help=False,
     )
     setup_build_parser(build_parser)
-
-    annotate_parser = subparsers.add_parser(
-        "annotate",
-        help="Annotate an existing graph (skip the build pipeline)",
-        formatter_class=_help_formatter,
-        add_help=False,
-    )
-    setup_annotate_parser(annotate_parser)
 
     parsed_arguments = parser.parse_args(args)
 

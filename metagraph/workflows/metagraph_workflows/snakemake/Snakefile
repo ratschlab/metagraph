@@ -2,7 +2,6 @@ from pathlib import Path
 
 import metagraph_workflows.utils
 from metagraph_workflows import workflow_configs, utils
-from metagraph_workflows.utils import take_value_or_default
 from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
     AnnotationFormats
 from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, AnnotateResources, ResourceConfig
@@ -40,7 +39,7 @@ if workflow_configs.ANNOTATE_THREADS_EACH not in config:
 metagraph_cmd=config['metagraph_cmd']
 time_cmd=utils.get_gnu_time_command(config)
 
-max_threads=take_value_or_default(workflow_configs.MAX_THREADS, workflow.cores, config)
+max_threads = config.get(workflow_configs.MAX_THREADS) or workflow.cores
 
 verbose_opt=' -v '
 
@@ -111,6 +110,8 @@ rule build_small_graph:
 
 
 ANNOTATE_RULE="annotate"
+_annotate_resources = AnnotateResources(config)
+
 rule annotate:
     input:
         seqs=utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
@@ -125,8 +126,8 @@ rule annotate:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
         separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        threads_each=lambda wildcards, threads: AnnotateResources(config).get_effective_threads_each(threads),
-        parallel_cols=lambda wildcards, threads: AnnotateResources(config).get_parallel_cols(threads),
+        threads_each=lambda wildcards, threads: _annotate_resources.get_effective_threads_each(threads),
+        parallel_cols=lambda wildcards, threads: _annotate_resources.get_parallel_cols(threads),
         # `--mem-cap-gb` and `--disk-swap` only matter when annotating
         # with counts or coordinates (the per-k-mer payload is large
         # enough that the buffer can overflow). For binary annotation,
@@ -134,7 +135,7 @@ rule annotate:
         # spill path. Matches experiments/large_index_scripts.md.
         mem_cap_arg=(
             (lambda wildcards, input, threads, resources:
-                f"--mem-cap-gb {AnnotateResources(config).get_mem_buffer_gib()(wildcards, input, threads, resources)}")
+                f"--mem-cap-gb {_annotate_resources.get_mem_buffer_gib()(wildcards, input, threads, resources)}")
             if (with_counts or with_coordinates) else ''
         ),
         tempdir_opt=utils.temp_dir_config(config) if (with_counts or with_coordinates) else '',
@@ -160,7 +161,6 @@ rule annotate:
           {count_kmers_opt} \
           {coordinates_opt} \
           {count_width_opt} \
-          --anno-type column \
           --separately \
           -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
         """

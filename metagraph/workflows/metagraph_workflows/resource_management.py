@@ -166,11 +166,18 @@ class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, 
 
         unique_kmers = kmc_data[self.KMC_STATS_KEY][self.KMC_UNIQUE_KMER_CNT]
 
-        bytes_per_kmer = 2.6
-        kmer_count = 2.6 * unique_kmers  # 2x canonical+non-canonical +  ~30% for dummy kmers (typically it's 10%)
-        required_ram = int(math.ceil(kmer_count * bytes_per_kmer / 1024**2))
-        required_ram_mb = max(required_ram, 1024)
-
+        # Two independent factors:
+        #   - expansion factor 2.6: 2x for canonical+reverse, ~30% extra
+        #     for dummy k-mers (typically 10-30%); ~= 2 * 1.3.
+        #   - 2.6 bytes per stored k-mer during succinct-graph
+        #     construction (peak working-set per k-mer, empirical).
+        # Total peak RSS ~= 6.76 bytes per unique k-mer reported by KMC.
+        # If this underestimates on a particular dataset, override via
+        # `rules.<rule>.mem_buffer_mb` in the workflow config.
+        EXPANSION_FACTOR = 2.6
+        BYTES_PER_KMER = 2.6
+        required_ram_bytes = unique_kmers * EXPANSION_FACTOR * BYTES_PER_KMER
+        required_ram_mb = max(int(math.ceil(required_ram_bytes / 1024**2)), 1024)
         return required_ram_mb
 
 

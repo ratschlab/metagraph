@@ -27,10 +27,6 @@ def get_seqs_file_list_path(wdir, config):
     return seqs_file_list_path
 
 
-def take_value_or_default(key, default, config):
-    return config[key] if key in config else default
-
-
 def create_transcript_path_list(path: Union[Path, str], transcript_path: Union[Path, str], suffix=''):
     paths = [str(p.absolute()) for p in Path(path).glob(f'*{suffix}')]
 

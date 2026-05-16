@@ -598,9 +598,9 @@ def stub_graph_path(tmpdir):
     return p
 
 
-def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path, output_dir):
+def test_build_with_graph_skips_build_rules(sample_list_path, stub_graph_path, output_dir):
     proc = run_wrapper([
-        'annotate',
+        'build',
         '--graph', stub_graph_path,
         sample_list_path,
         '--dryrun',
@@ -609,7 +609,7 @@ def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path
     ])
     assert proc.returncode == 0, proc.stdout.decode()
     out = proc.stdout.decode()
-    # The build pipeline must not appear in annotate-mode DAG.
+    # The build pipeline must not appear when --graph is provided.
     for build_rule in (
         "build_joint_graph",
         "build_joint_primary",
@@ -618,7 +618,7 @@ def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path
         "primarize_canonical_graph_single_sample",
         "extract_kmer_counts",
     ):
-        assert build_rule not in out, f"unexpected build rule in annotate DAG: {build_rule}"
+        assert build_rule not in out, f"unexpected build rule in DAG: {build_rule}"
     # Annotate + transforms still run.
     for kept_rule in (
         "rule annotate:",
@@ -627,8 +627,8 @@ def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path
         "rule transform_rd_stage2",
         "rule annotate_row_diff_brwt",
     ):
-        assert kept_rule in out, f"missing rule in annotate DAG: {kept_rule}"
-    # Small-state graph is intentionally skipped in annotate-only mode.
+        assert kept_rule in out, f"missing rule in DAG: {kept_rule}"
+    # Small-state graph is intentionally skipped when --graph is provided.
     assert "rule build_small_graph" not in out
 
     cfg = (output_dir / "config.yaml").read()
@@ -638,10 +638,10 @@ def test_annotate_subcommand_skips_build_rules(sample_list_path, stub_graph_path
     assert target.exists()
 
 
-def test_annotate_subcommand_requires_existing_graph(sample_list_path, output_dir, tmpdir):
+def test_build_with_graph_requires_existing_graph(sample_list_path, output_dir, tmpdir):
     missing = tmpdir / "does_not_exist.dbg"
     proc = run_wrapper([
-        'annotate',
+        'build',
         '--graph', missing,
         sample_list_path,
         '--dryrun',
