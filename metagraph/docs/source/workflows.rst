@@ -10,15 +10,19 @@ for the most common scenarios.
 Installation
 ------------
 
-
-Set up a conda environment and install the necessary packages using:
+The ``metagraph-workflows`` CLI ships as a separate Python package. The
+``metagraph`` conda recipe only installs the C++ binary, so the workflow
+wrapper needs an extra ``pip install`` step alongside it:
 
 .. code-block:: bash
 
    conda create -n metagraph-workflows python=3.8
    conda activate metagraph-workflows
-   conda install -c bioconda -c conda-forge metagraph
+   conda install -c bioconda -c conda-forge metagraph       # the metagraph binary
    pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+
+After this, the ``metagraph`` binary and the ``metagraph-workflows``
+command are both available on ``PATH``.
 
 
 Creating graphs and annotations

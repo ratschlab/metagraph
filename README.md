@@ -107,7 +107,18 @@ To compile from source (e.g., for builds with custom alphabet or other configura
 
 For most users, the easiest entry point is the Snakemake wrapper, which
 runs the full indexing pipeline — graph construction, annotation, and
-all row-diff / BRWT transforms — as a single command:
+all row-diff / BRWT transforms — as a single command.
+
+The wrapper ships as a separate Python package; the `metagraph` conda
+recipe only installs the C++ binary, so the workflow CLI needs an extra
+`pip install` step:
+
+```bash
+conda install -c bioconda -c conda-forge metagraph     # the metagraph binary
+pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+```
+
+Then run the full pipeline as:
 
 ```bash
 metagraph-workflows build samples.txt -o out/ --primary
