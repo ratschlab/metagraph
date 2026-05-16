@@ -492,6 +492,7 @@ def run_build_workflow(
         with_counts: bool = False,
         with_coordinates: bool = False,
         count_width: Optional[int] = None,
+        annotate_threads_each: Optional[int] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
@@ -576,6 +577,11 @@ def run_build_workflow(
     if not dryrun:
         _validate_metagraph_cmd(config['metagraph_cmd'])
     config['max_threads'] = threads if threads else _default_threads_auto()
+    if annotate_threads_each is not None:
+        if annotate_threads_each < 1:
+            raise ValueError(
+                f"--annotate-threads-each must be >= 1, got {annotate_threads_each}")
+        config['annotate_threads_each'] = annotate_threads_each
 
     if verbose:
         importlib.reload(logging)
@@ -714,6 +720,12 @@ def setup_build_parser(parser):
     workflow = parser.add_argument_group('other')
     workflow.add_argument('--threads', type=int, default=None, metavar='N',
                           help='Max cores for Snakemake execution [num_cores]')
+    workflow.add_argument('--annotate-threads-each', type=int, default=None, metavar='N',
+                          help='Threads per file in `metagraph annotate --separately`.\n'
+                               '  Parallel columns built at once = --threads // N. The\n'
+                               '  per-column --mem-cap-gb buffer scales as\n'
+                               '  mem_budget / parallel_cols, so raise N to give each\n'
+                               '  column more buffer (and disk-swap less). [8]')
     workflow.add_argument('--force', default=False, action='store_true',
                           help='Force re-run all rules [False]')
     workflow.add_argument('--verbose', default=False, action='store_true',
@@ -771,6 +783,7 @@ def init_build(args):
         with_counts=args.with_counts,
         with_coordinates=args.with_coordinates,
         count_width=args.count_width,
+        annotate_threads_each=args.annotate_threads_each,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,

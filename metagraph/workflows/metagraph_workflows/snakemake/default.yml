@@ -15,6 +15,12 @@ annotation_labels_source: 'sequence_headers'
 with_counts: false
 with_coordinates: false
 count_width: 8
+# Threads used per file when annotating with --separately. The annotate
+# rule runs (max_threads // annotate_threads_each) columns in parallel,
+# and --mem-cap-gb is allocated per column, so raising this value reduces
+# parallel columns and increases each column's buffer budget.
+# Default of 8 matches the value most large-index runs use in practice.
+annotate_threads_each: 8
 
 brwt_relax_arity: 32
 brwt_parallel_nodes: 5

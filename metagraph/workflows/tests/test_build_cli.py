@@ -369,3 +369,86 @@ def test_count_width_out_of_range_fails(sample_list_path, output_dir, invalid_co
     ])
     assert proc.returncode != 0
     assert "--count-width must be in range [2, 32]" in proc.stdout.decode()
+
+
+def test_annotate_threads_each_default_is_eight(sample_list_path, output_dir):
+    # 16 threads / threads_each=8 -> parallel_cols=2, effective_each=8.
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--threads', '16',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "annotate_threads_each: 8" in cfg
+    out = proc.stdout.decode()
+    assert "--parallel 2" in out
+    assert "--threads-each 8" in out
+
+
+def test_annotate_threads_each_overrides_default(sample_list_path, output_dir):
+    # 16 threads / threads_each=4 -> parallel_cols=4, effective_each=4.
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--threads', '16',
+        '--annotate-threads-each', '4',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "annotate_threads_each: 4" in cfg
+    out = proc.stdout.decode()
+    assert "--parallel 4" in out
+    assert "--threads-each 4" in out
+
+
+def test_annotate_threads_each_redistributes_leftover(sample_list_path, output_dir):
+    # 12 threads / threads_each=8 -> parallel_cols=ceil(12/8)=2,
+    # effective_each=ceil(12/2)=6, total used = 12 (no waste).
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--threads', '12',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "--parallel 2" in out
+    assert "--threads-each 6" in out
+
+
+def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path, output_dir):
+    # 13 threads / threads_each=8 -> parallel_cols=ceil(13/8)=2,
+    # effective_each=ceil(13/2)=7, total=14 (1-thread overcommit).
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--threads', '13',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "--parallel 2" in out
+    assert "--threads-each 7" in out
+
+
+def test_annotate_threads_each_must_be_positive(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--annotate-threads-each', '0',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "--annotate-threads-each must be >= 1" in proc.stdout.decode()

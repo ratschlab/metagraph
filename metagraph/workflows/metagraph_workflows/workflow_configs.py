@@ -42,6 +42,8 @@ WITH_COUNTS = 'with_counts'
 COUNT_WIDTH = 'count_width'
 WITH_COORDINATES = 'with_coordinates'
 
+ANNOTATE_THREADS_EACH = 'annotate_threads_each'
+
 
 class AnnotationLabelsSource(Enum):
     SEQUENCE_HEADERS = 'sequence_headers'

@@ -5,7 +5,7 @@ from metagraph_workflows import workflow_configs, utils
 from metagraph_workflows.utils import take_value_or_default
 from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
     AnnotationFormats
-from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
+from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, AnnotateResources, ResourceConfig
 
 wdir=utils.get_wdir(config)
 
@@ -94,6 +94,9 @@ rule annotate:
     params:
         separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=utils.temp_dir_config(config),
+        threads_each=lambda wildcards, threads: AnnotateResources(config).get_effective_threads_each(threads),
+        parallel_cols=lambda wildcards, threads: AnnotateResources(config).get_parallel_cols(threads),
+        mem_buffer=AnnotateResources(config).get_mem_buffer_gib(),
     log: utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
@@ -108,7 +111,9 @@ rule annotate:
         mkdir -p $OUT_DIR
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
           {verbose_opt} \
-          --parallel {threads} \
+          --parallel {params.parallel_cols} \
+          --threads-each {params.threads_each} \
+          --mem-cap-gb {params.mem_buffer} \
           -i {input.dbg_graph} \
           {annotation_labels_opt} \
           {count_kmers_opt} \
