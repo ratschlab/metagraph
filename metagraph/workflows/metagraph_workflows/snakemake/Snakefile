@@ -513,9 +513,11 @@ rule annotate_row_diff_binary:
     """Binary row-diff annotation in flat / sparse / disk form.
 
     The three formats share the same input (row-diff stage-2 columns +
-    graph) and CLI shape. `--mem-cap-gb` is only meaningful for
-    row_diff_disk (which materializes the row-diff buffer to disk);
-    flat / sparse don't use it, matching the convention in
+    graph) and CLI shape. Only row_diff_disk actually consumes
+    `--mem-cap-gb` (the other two have `mem_bytes` commented out in
+    metagraph's convert_to_row_diff implementation); none of them use
+    `--disk-swap` internally, so neither is emitted for flat / sparse
+    and only --mem-cap-gb is emitted for disk. Matches
     experiments/large_index_scripts.md.
     """
     input:
@@ -534,7 +536,6 @@ rule annotate_row_diff_binary:
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BINARY_RULE, config).get_mem(),
     params:
-        tempdir_opt=utils.temp_dir_config(config),
         mem_cap_arg=(
             lambda wildcards, input, threads, resources:
                 f"--mem-cap-gb {TransformRdStage2Resources(config).get_mem_buffer_gib()(wildcards, input, threads, resources)}"
@@ -548,7 +549,7 @@ rule annotate_row_diff_binary:
             -p {threads} \
             {params.mem_cap_arg} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} > {log} 2>&1
         """
 
 
