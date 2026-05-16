@@ -75,7 +75,30 @@ rule all:
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
 
 
-include: 'build.smk'
+if not config.get('external_graph', False):
+    include: 'build.smk'
+
+
+BUILD_SMALL_GRAPH_RULE="build_small_graph"
+rule build_small_graph:
+    input: graph_path
+    output: small_graph_path
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(BUILD_SMALL_GRAPH_RULE, config).get_mem(),
+    log: utils.get_log_path(BUILD_SMALL_GRAPH_RULE, config)
+    shell:
+        # `metagraph transform -o` takes a basename and appends `.dbg`,
+        # so strip the suffix before passing.
+        """
+        OUT_BASE={output}
+        {time_cmd} {metagraph_cmd} transform {verbose_opt} \
+        --state small \
+        -p {threads} \
+        -o ${{OUT_BASE%.dbg}} \
+        {input} > {log} 2>&1
+        """
+
 
 ANNOTATE_RULE="annotate"
 rule annotate:
@@ -273,7 +296,7 @@ rule transform_rd_stage0:
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
         mkdir -p $COLS_DIR
-        
+
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
             --row-diff-stage 0 \

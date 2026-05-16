@@ -255,22 +255,3 @@ rule build_joint_primary:
         """
 
 
-BUILD_SMALL_GRAPH_RULE="build_small_graph"
-rule build_small_graph:
-    input: graph_path
-    output: small_graph_path
-    threads: max_threads
-    resources:
-        mem_mb=ResourceConfig(BUILD_SMALL_GRAPH_RULE, config).get_mem(),
-    log: utils.get_log_path(BUILD_SMALL_GRAPH_RULE, config)
-    shell:
-        # `metagraph transform -o` takes a basename and appends `.dbg`,
-        # so strip the suffix before passing.
-        """
-        OUT_BASE={output}
-        {time_cmd} {metagraph_cmd} transform {verbose_opt} \
-        --state small \
-        -p {threads} \
-        -o ${{OUT_BASE%.dbg}} \
-        {input} > {log} 2>&1
-        """
