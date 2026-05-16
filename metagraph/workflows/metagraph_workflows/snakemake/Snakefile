@@ -42,6 +42,7 @@ DONE="DONE"
 
 ## Paths
 graph_path=wdir/f'{graph}.dbg'
+small_graph_path=wdir/f'{graph}_small.dbg'
 if with_counts:
     annotation_mode_suffix = f'counts.w{count_width}'
 elif with_coordinates:
@@ -70,6 +71,7 @@ localrules: generate_column_list
 rule all:
     input:
         graph_path,
+        small_graph_path,
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
 
 
@@ -108,7 +110,7 @@ rule annotate:
         mkdir -p $OUT_DIR
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
           {verbose_opt} \
-          --parallel {params.parallel_cols} \
+          -p {params.parallel_cols} \
           --threads-each {params.threads_each} \
           --mem-cap-gb {params.mem_buffer} \
           -i {input.dbg_graph} \
@@ -154,7 +156,7 @@ rule generate_brwt_linkage:
             --linkage \
             --greedy \
             --subsample {params.subsample} \
-            --parallel {threads} \
+            -p {threads} \
             -o {output.linkage} > {log} 2>&1
         """
 
@@ -185,7 +187,7 @@ rule transform_annotation:
         """        
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
-            --parallel {threads} \
+            -p {threads} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
 
@@ -213,7 +215,7 @@ rule annotate_brwt:
             --anno-type brwt \
             --parallel-nodes {params.parallel_nodes} \
             --greedy \
-            --parallel {threads} \
+            -p {threads} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
 
@@ -236,7 +238,7 @@ rule relax_brwt:
             -o {output.annotations} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
-            --parallel {threads} \
+            -p {threads} \
             {input.brwt_annots} > {log} 2>&1
         """
 
@@ -276,7 +278,7 @@ rule transform_rd_stage0:
             --anno-type row_diff \
             --row-diff-stage 0 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
@@ -315,7 +317,7 @@ rule transform_rd_stage1:
             --anno-type row_diff \
             --row-diff-stage 1 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
@@ -358,7 +360,7 @@ rule transform_rd_stage2:
             --anno-type row_diff \
             --row-diff-stage 2 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
@@ -394,7 +396,7 @@ rule annotate_row_diff_brwt:
             --anno-type row_diff_brwt \
             --greedy \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -418,7 +420,7 @@ rule relax_row_diff_brwt:
             -o {output.annotations_relaxed} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
-            --parallel {threads} \
+            -p {threads} \
             {input.brwt_annots} > {log} 2>&1
         """
 
@@ -449,7 +451,7 @@ rule annotate_row_diff_int_brwt:
             --anno-type row_diff_int_brwt \
             --greedy \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -477,7 +479,7 @@ rule annotate_row_diff_int_disk:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_int_disk \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -509,7 +511,7 @@ rule annotate_row_diff_brwt_coord:
             --anno-type row_diff_brwt_coord \
             --greedy \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -537,7 +539,7 @@ rule annotate_row_diff_coord:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_coord \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
@@ -565,7 +567,7 @@ rule annotate_row_diff_disk_coord:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_disk_coord \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """

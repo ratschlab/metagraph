@@ -25,7 +25,7 @@ rule build:
     shell:
         """
         cat {input} | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
@@ -145,7 +145,7 @@ rule build_canonical_graph_single_sample:
         fi
         
         $INPUT_CMD | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode canonical \
         -k {params.k} \
         -o {output.graph} \
@@ -169,7 +169,7 @@ rule primarize_canonical_graph_single_sample:
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
-        --parallel {threads} \
+        -p {threads} \
         -o {output} > {log} 2>&1
         """
 
@@ -199,7 +199,7 @@ rule build_joint_graph:
         fi
 
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode canonical \
         -k {params.k} \
         -o {output} \
@@ -222,7 +222,7 @@ rule primarize_joint_graph:
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
-        --parallel {threads} \
+        -p {threads} \
         -o {output} > {log} 2>&1
         """
 
@@ -244,7 +244,7 @@ rule build_joint_primary:
     shell:
         """
         {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode primary \
         -k {params.k} \
         -o {output} \
@@ -252,4 +252,25 @@ rule build_joint_primary:
         --disk-cap-gb {params.disk_cap} \
         {input} \
         {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+BUILD_SMALL_GRAPH_RULE="build_small_graph"
+rule build_small_graph:
+    input: graph_path
+    output: small_graph_path
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(BUILD_SMALL_GRAPH_RULE, config).get_mem(),
+    log: utils.get_log_path(BUILD_SMALL_GRAPH_RULE, config)
+    shell:
+        # `metagraph transform -o` takes a basename and appends `.dbg`,
+        # so strip the suffix before passing.
+        """
+        OUT_BASE={output}
+        {time_cmd} {metagraph_cmd} transform {verbose_opt} \
+        --state small \
+        -p {threads} \
+        -o ${{OUT_BASE%.dbg}} \
+        {input} > {log} 2>&1
         """

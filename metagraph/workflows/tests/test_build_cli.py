@@ -472,6 +472,22 @@ def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
     assert "--disk-swap" not in out
 
 
+def test_small_graph_step_runs(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "rule build_small_graph" in out
+    # The transform step writes <base>_small.dbg via `-o <base>_small`.
+    assert "metagraph transform" in out
+    assert "--state small" in out
+
+
 def test_mem_cap_gb_sets_max_memory_mb(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
