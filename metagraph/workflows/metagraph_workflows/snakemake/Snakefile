@@ -10,7 +10,7 @@ from metagraph_workflows.resource_management import TransformRdStage0Resources, 
 wdir=utils.get_wdir(config)
 
 graph=config['base_name']
-build_primary=take_value_or_default('build_primary_graph', False, config)
+build_primary=config['build_primary_graph']
 
 annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
 
@@ -20,12 +20,12 @@ for af in annotation_formats:
     # TODO: make a nicer error
 
 annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
-with_counts = take_value_or_default(workflow_configs.WITH_COUNTS, False, config)
-with_coordinates = take_value_or_default(workflow_configs.WITH_COORDINATES, False, config)
+with_counts = config[workflow_configs.WITH_COUNTS]
+with_coordinates = config[workflow_configs.WITH_COORDINATES]
 if with_counts and with_coordinates:
     raise RuntimeError(
         'with_counts and with_coordinates cannot both be true (same constraint as metagraph row-diff).')
-count_width = take_value_or_default(workflow_configs.COUNT_WIDTH, 8, config)
+count_width = config[workflow_configs.COUNT_WIDTH]
 count_kmers_opt = '--count-kmers' if with_counts else ''
 coordinates_opt = '--coordinates' if with_coordinates else ''
 count_width_opt = f'--count-width {count_width}' if with_counts else ''
@@ -35,9 +35,6 @@ metagraph_cmd=config['metagraph_cmd']
 time_cmd=utils.get_gnu_time_command(config)
 
 max_threads=take_value_or_default(workflow_configs.MAX_THREADS, workflow.cores, config)
-
-# TODO
-max_memory_mb=take_value_or_default('max_memory_mb', 4000, config)
 
 verbose_opt=' -v '
 

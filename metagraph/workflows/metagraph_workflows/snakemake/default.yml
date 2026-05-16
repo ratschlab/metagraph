@@ -28,9 +28,9 @@ brwt_linkage_subsample: 100000
 
 metagraph_cmd: 'metagraph'
 
-default_disk_mb: 10000
+max_disk_mb: 1048576  # 1 TiB; surfaces as --disk-cap-gb 1024 in metagraph stages
 max_memory_mb: 4048
-max_buffer_size_mb: 51200
+max_buffer_size_mb: 81920
 
 sample_ids_path: ''
 sample_staging_script_path: ''

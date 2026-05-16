@@ -28,7 +28,7 @@ def get_seqs_file_list_path(wdir, config):
 
 
 def take_value_or_default(key, default, config):
-    return config[key] if (key in config.keys() and config[key]) else default
+    return config[key] if key in config else default
 
 
 def create_transcript_path_list(path: Union[Path, str], transcript_path: Union[Path, str], suffix=''):
