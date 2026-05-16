@@ -232,16 +232,15 @@ rule relax_brwt:
         mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
     params:
         relax_arity=config[workflow_configs.BRWT_RELAX_ARITY],
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
-        """        
+        """
         {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+            {input.brwt_annots} > {log} 2>&1
         """
 
 rd_cols_dir = wdir/f'rd_cols.{annotation_mode_suffix}'
@@ -415,16 +414,15 @@ rule relax_row_diff_brwt:
         mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         relax_arity = config[workflow_configs.BRWT_RELAX_ARITY],
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
-        """        
+        """
         {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations_relaxed} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+            {input.brwt_annots} > {log} 2>&1
         """
 
 

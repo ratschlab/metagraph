@@ -42,7 +42,7 @@ COORD_COMPATIBLE_FORMATS = {
 
 
 def _help_formatter(prog: str):
-    return argparse.RawTextHelpFormatter(prog, width=100, max_help_position=34)
+    return argparse.RawTextHelpFormatter(prog, width=120, max_help_position=34)
 
 
 def _help_color(text: str, color_code: str) -> str:
@@ -493,6 +493,8 @@ def run_build_workflow(
         with_coordinates: bool = False,
         count_width: Optional[int] = None,
         annotate_threads_each: Optional[int] = None,
+        disk_swap_dir: Optional[Path] = None,
+        mem_cap_gb: Optional[float] = None,
         metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
@@ -583,6 +585,14 @@ def run_build_workflow(
                 f"--annotate-threads-each must be >= 1, got {annotate_threads_each}")
         config['annotate_threads_each'] = annotate_threads_each
 
+    if disk_swap_dir is not None:
+        config['tmpdir'] = str(disk_swap_dir)
+
+    if mem_cap_gb is not None:
+        if mem_cap_gb <= 0:
+            raise ValueError(f"--mem-cap-gb must be > 0, got {mem_cap_gb}")
+        config['max_memory_mb'] = int(mem_cap_gb * 1024)
+
     if verbose:
         importlib.reload(logging)
         logging.basicConfig(format=LOGGING_FORMAT, level=logging.INFO)
@@ -638,18 +648,28 @@ def setup_build_parser(parser):
     count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
     coord_formats = sorted([f.value for f in COORD_COMPATIBLE_FORMATS])
     coord_formats_display = [_help_color(fmt, "35") for fmt in coord_formats]
-    classic_formats_display = [
-        _help_color(fmt, "36")
-        for fmt in [
-            "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt",
-            "rb_brwt", "row_diff_brwt", "relax.row_diff_brwt",
-        ]
+    classic_fmt_names = [
+        "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt",
+        "rb_brwt", "row_diff_brwt", "relax.row_diff_brwt",
     ]
+    classic_formats_display = [_help_color(fmt, "36") for fmt in classic_fmt_names]
+
+    def _with_default(name: str, color: str, default_name: str) -> str:
+        """Colored format name, with `[<name>]` suffix if it's the default."""
+        colored = _help_color(name, color)
+        if name == default_name:
+            return f"[{colored}]"
+        return colored
+
+    # Variants used only in the --annotation-format help block: each format
+    # carries its own `[<name>]` suffix when it is the default for that
+    # mode (binary / counts / coordinates).
+    classic_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt") for f in classic_fmt_names]
+    count_fmt_help = [_with_default(f, "33", "row_diff_int_brwt") for f in count_formats]
+    coord_fmt_help = [_with_default(f, "35", "row_diff_brwt_coord") for f in coord_formats]
+
     with_counts_label = _help_color("--with-counts", "33")
     with_coords_label = _help_color("--with-coords", "35")
-    default_base_fmt = _help_color("relax.row_diff_brwt", "36")
-    default_count_fmt = _help_color("row_diff_int_brwt", "33")
-    default_coord_fmt = _help_color("row_diff_brwt_coord", "35")
     default_count_width = _help_color("8", "33")
     zero_count_width = _help_color("0", "36")
 
@@ -686,10 +706,10 @@ def setup_build_parser(parser):
 
     annotation = parser.add_argument_group('annotation')
     all_formats_help = "\n".join([
-        f"    {classic_formats_display[0]}, {classic_formats_display[1]}, {classic_formats_display[2]}, {classic_formats_display[3]}, {classic_formats_display[4]}, {classic_formats_display[5]}, {classic_formats_display[6]},",
-        f"             {classic_formats_display[7]}, {classic_formats_display[8]}",
-        f"    {count_formats_display[0]}, {count_formats_display[1]}, {count_formats_display[2]}",
-        f"    {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]}, {coord_formats_display[3]}",
+        f"    {classic_fmt_help[0]}, {classic_fmt_help[1]}, {classic_fmt_help[2]}, {classic_fmt_help[3]}, {classic_fmt_help[4]}, {classic_fmt_help[5]}, {classic_fmt_help[6]},",
+        f"             {classic_fmt_help[7]}, {classic_fmt_help[8]}",
+        f"    {count_fmt_help[0]}, {count_fmt_help[1]}, {count_fmt_help[2]}",
+        f"    {coord_fmt_help[0]}, {coord_fmt_help[2]}, {coord_fmt_help[1]}, {coord_fmt_help[3]}",
     ])
     annotation.add_argument('--anno-source',
                             dest='annotation_labels_source',
@@ -703,7 +723,6 @@ def setup_build_parser(parser):
                             metavar='FORMAT',
                             help=f"Annotation format (can be used multiple times).\n"
                                  f"{all_formats_help}\n"
-                                 f"  [{default_base_fmt}/{default_count_fmt}/{default_coord_fmt}]\n"
                                  "  ")
     annotation.add_argument('--with-counts', default=False, action='store_true',
                             help=f"Index with k-mer counts [False]\n"
@@ -715,17 +734,20 @@ def setup_build_parser(parser):
     annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
                             help=f"Index with k-mer positions [False]\n"
                                  f"  Supported for {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]},\n"
-                                 f"                     {coord_formats_display[3]}.")
+                                 f"             {coord_formats_display[3]}")
 
     workflow = parser.add_argument_group('other')
     workflow.add_argument('--threads', type=int, default=None, metavar='N',
                           help='Max cores for Snakemake execution [num_cores]')
+    workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
+                          metavar='DIR',
+                          help='Directory for on-disk buffers (passed as --disk-swap). Omit to keep everything in RAM. [none]')
+    workflow.add_argument('--mem-cap-gb', dest='mem_cap_gb', type=float, default=None,
+                          metavar='GB',
+                          help='Per-rule memory budget; drives the auto --mem-cap-gb of each metagraph stage. [4]')
     workflow.add_argument('--annotate-threads-each', type=int, default=None, metavar='N',
-                          help='Threads per file in `metagraph annotate --separately`.\n'
-                               '  Parallel columns built at once = --threads // N. The\n'
-                               '  per-column --mem-cap-gb buffer scales as\n'
-                               '  mem_budget / parallel_cols, so raise N to give each\n'
-                               '  column more buffer (and disk-swap less). [8]')
+                          help='Threads per file in `annotate --separately`. Parallel columns = --threads // N;\n'
+                               '  raise N to give each column more --mem-cap-gb buffer. [8]')
     workflow.add_argument('--force', default=False, action='store_true',
                           help='Force re-run all rules [False]')
     workflow.add_argument('--verbose', default=False, action='store_true',
@@ -784,6 +806,8 @@ def init_build(args):
         with_coordinates=args.with_coordinates,
         count_width=args.count_width,
         annotate_threads_each=args.annotate_threads_each,
+        disk_swap_dir=args.disk_swap_dir,
+        mem_cap_gb=args.mem_cap_gb,
         metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,

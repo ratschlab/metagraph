@@ -277,9 +277,10 @@ def test_build_help_mentions_defaults():
     # Argparse may insert newlines + indentation into long help strings;
     # normalize all whitespace so substring checks are stable.
     out_norm = re.sub(r'\s+', ' ', out).strip()
-    assert "[relax.row_diff_brwt/row_diff_int_brwt/row_diff_brwt_coord]" in out_norm
-    assert "row_diff_int_brwt" in out
-    assert "row_diff_brwt_coord" in out
+    # Default formats are rendered bracketed in the list, e.g. `[relax.row_diff_brwt]`.
+    assert "[relax.row_diff_brwt]" in out_norm
+    assert "[row_diff_int_brwt]" in out_norm
+    assert "[row_diff_brwt_coord]" in out_norm
 
 
 def test_dryrun_prints_summary(sample_list_path, output_dir):
@@ -440,6 +441,61 @@ def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path,
     out = proc.stdout.decode()
     assert "--parallel 2" in out
     assert "--threads-each 7" in out
+
+
+def test_disk_swap_dir_propagates_to_metagraph_stages(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--disk-swap-dir', '/var/tmp/test-swap',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "tmpdir: /var/tmp/test-swap" in cfg
+    out = proc.stdout.decode()
+    assert "--disk-swap /var/tmp/test-swap" in out
+
+
+def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "--disk-swap" not in out
+
+
+def test_mem_cap_gb_sets_max_memory_mb(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--mem-cap-gb', '12',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    # 12 GB -> 12 * 1024 = 12288 MB
+    assert "max_memory_mb: 12288" in cfg
+
+
+def test_mem_cap_gb_must_be_positive(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        '--seqs-file-list-path', sample_list_path,
+        '--mem-cap-gb', '0',
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "--mem-cap-gb must be > 0" in proc.stdout.decode()
 
 
 def test_annotate_threads_each_must_be_positive(sample_list_path, output_dir):

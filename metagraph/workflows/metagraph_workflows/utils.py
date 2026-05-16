@@ -140,7 +140,7 @@ def get_log_path(rule_name, config, wildcards=None):
 
 
 def temp_dir_config(config):
-    return f"--disk-swap {config[TMP_DIR]}" if TMP_DIR in config else '',
+    return f"--disk-swap {config[TMP_DIR]}" if TMP_DIR in config else ''
 
 
 def get_rule_specific_config(rule, key, config):
