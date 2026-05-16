@@ -80,7 +80,10 @@ class SeqSearchResult {
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
     typedef std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> LabelSigVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
-    typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> LabelCountCoordsVec;
+    // (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target). The last
+    // element is 0 when no CoordToHeader mapping is loaded (the label refers to
+    // a whole annotation column rather than a single indexed sequence).
+    typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>> LabelCountCoordsVec;
 
     typedef std::variant<LabelVec,
                          LabelCountVec,
@@ -92,6 +95,7 @@ class SeqSearchResult {
     static constexpr auto SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
     static constexpr auto KMER_COUNT_FIELD = "kmer_count";
     static constexpr auto KMER_COORDINATE_FIELD = "kmer_coords";
+    static constexpr auto KMERS_IN_TARGET_FIELD = "kmers_in_target";
     static constexpr auto SIGNATURE_FIELD = "signature";
     static constexpr auto KMER_ABUNDANCE_FIELD = "kmer_abundances";
     static constexpr auto SCORE_JSON_FIELD = "score";

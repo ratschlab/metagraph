@@ -256,7 +256,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                                    discovery_fraction, presence_fraction);
         std::vector<Label> result;
         result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords] : kmer_coord_res) {
+        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
             result.emplace_back(std::move(label));
         }
         return result;
@@ -359,7 +359,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                                                    discovery_fraction, presence_fraction);
         std::vector<StringCountPair> result;
         result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords] : kmer_coord_res) {
+        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
             if (with_kmer_counts) {
                 count = 0;
                 for (const auto &tuple : coords) {
@@ -530,7 +530,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                                                    discovery_fraction, presence_fraction);
         std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
         result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords] : kmer_coord_res) {
+        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
             result.emplace_back(std::move(label), count, coords.size());
             auto &counts = std::get<2>(result.back());
             for (size_t i = 0; i < coords.size(); ++i) {
@@ -583,7 +583,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     return get_results(enumerate_row_values);
 }
 
-std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
+std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
 AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
@@ -679,13 +679,14 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         }
         rows_tuples.clear();
 
-        std::vector<std::tuple<std::string, Count, std::vector<Tuple>>> result;
+        std::vector<std::tuple<std::string, Count, std::vector<Tuple>, size_t>> result;
         result.reserve(counts.size());
         for (const auto &[h, count] : counts) {
             const auto &[col, header] = h;
             auto &coords = coords_map[h];
             result.emplace_back(coord_to_header_->get_headers(col)[header],
-                                count, std::move(coords));
+                                count, std::move(coords),
+                                coord_to_header_->num_kmers_in_sequence(col, header));
         }
 
         return result;
@@ -698,7 +699,16 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
         call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
     assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
-    return results;
+
+    // Without a CoordToHeader mapping, the label refers to a whole annotation
+    // column rather than a single indexed sequence, so num_kmers_in_target is
+    // undefined.
+    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>> with_lengths;
+    with_lengths.reserve(results.size());
+    for (auto &[label, count, coords] : results) {
+        with_lengths.emplace_back(std::move(label), count, std::move(coords), 0);
+    }
+    return with_lengths;
 }
 
 std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
@@ -736,7 +746,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                                    discovery_fraction, presence_fraction);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
-        for (auto &[label, count, coords] : kmer_coord_res) {
+        for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
             assert(coords.size() == sequence.size() - dbg_.get_k() + 1);
             result.emplace_back(std::move(label), count, coords.size());
             auto &mask = std::get<2>(result.back());

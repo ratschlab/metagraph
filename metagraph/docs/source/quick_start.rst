@@ -547,6 +547,18 @@ Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is pass
 
         metagraph query --query-mode coords --no-coord-mapping ...
 
+.. note::
+    When the ``.seqs`` mapping is in use, each hit is annotated with the k-mer count of the
+    target sequence it was found in, so callers can compute the breadth of coverage (the
+    fraction of the target covered by matched k-mers). In the default TSV output the count
+    appears right after the header inside the angle brackets, separated by ``/``::
+
+        0    query1    <seq1>/6:0-1-5    <seq3>/24:1-4:1-0-3
+
+    Here ``seq1`` has 6 k-mers total and was hit at coords ``1..5`` from query position 0.
+    In JSON output the same number is exposed as the ``kmers_in_target`` field next to
+    ``kmer_coords``. The target sequence's nucleotide length is ``kmers_in_target + k - 1``.
+
 .. _transform annotation:
 
 Transform annotation

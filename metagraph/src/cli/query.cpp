@@ -268,9 +268,14 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
         }
     } else {
         // Kmer coordinates
-        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
+        for (const auto &[label, count, tuples, num_kmers_in_target]
+                : std::get<LabelCountCoordsVec>(result_)) {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
             label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
+            if (num_kmers_in_target) {
+                label_obj[KMERS_IN_TARGET_FIELD]
+                    = static_cast<Json::Int64>(num_kmers_in_target);
+            }
             if (verbose_output) {
                 std::vector<std::string> segments;
                 segments.reserve(tuples.size());
@@ -362,8 +367,12 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         }
     } else {
         // Kmer coordinates
-        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
+        for (const auto &[label, count, tuples, num_kmers_in_target]
+                : std::get<LabelCountCoordsVec>(result_)) {
             output += "\t<" + label + ">";
+            if (num_kmers_in_target) {
+                output += fmt::format("/{}", num_kmers_in_target);
+            }
 
             if (verbose_output) {
                 for (const auto &coords : tuples) {
