@@ -11,13 +11,16 @@ from metagraph_workflows.workflow_configs import MEM_MB_KEY, DISK_MB_KEY, \
 from metagraph_workflows.utils import logger, get_rule_specific_config
 
 BASE_MEM = 1 * 1024
+# Floor on the auto-derived `--mem-cap-gb` buffer (in MiB); avoids zero
+# or absurdly tiny buffers when the rule's RAM budget is very small.
+MIN_MEM_BUFFER_MB = 1024
 FALLBACK_MAX_MEM = 4 * 1024
 FALLBACK_MAX_DISK = 10 * 1024
 
 
 
 def _get_max_memory(config):
-    return config.get(workflow_configs.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
+    return config.get(workflow_configs.MEMORY_MB, FALLBACK_MAX_MEM)
 
 
 def _get_max_disk(config):
@@ -49,11 +52,17 @@ class ResourceConfig:
             if not mem_mb:
                 mem_mb = self._get_mem_estimate(wildcards, input, threads)
 
-                max_mem = _get_max_memory(self.config)
-                if mem_mb > max_mem:
-                    logger.warning(
-                        f"The estimated memory of {mem_mb} MB "
-                        f"is larger than the max memory {max_mem}.")
+                # `_get_mem_estimate` returns TBDString() when an input
+                # the estimate depends on isn't materialized yet (e.g.
+                # at dryrun / DAG-construction time). Skip the
+                # over-budget warning in that case -- it'd fail in
+                # snakemake 9.21+ where TBDString rejects comparisons.
+                if not isinstance(mem_mb, TBDString):
+                    max_mem = _get_max_memory(self.config)
+                    if mem_mb > max_mem:
+                        logger.warning(
+                            f"The estimated memory of {mem_mb} MB "
+                            f"is larger than the max memory {max_mem}.")
 
             return mem_mb
 
@@ -78,6 +87,13 @@ class SupportsMemBufferSize(ResourceConfig):
 
     CAP_MEM_FRACTION = 0.85
 
+    # If True, clip the auto-derived buffer to `max_buffer_size_mb`.
+    # build/annotate need this (their --mem-cap-gb is a preallocated
+    # buffer that competes with other in-memory state). Row-diff
+    # transforms scale with annotation size and routinely need
+    # >> max_buffer_size_mb, so those subclasses opt out.
+    APPLY_MAX_BUFFER_CAP = True
+
     def get_mem_buffer_gib(self):
         """
         value for the `--mem-cap-gb` parameter (in GiB)
@@ -90,7 +106,8 @@ class SupportsMemBufferSize(ResourceConfig):
                 mem_cap_mb = self._mem_buf_estimate(wildcards, resources, input, threads)
                 if mem_cap_mb == TBDString():
                     return TBDString()
-                mem_cap_mb = min(mem_cap_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
+                if self.APPLY_MAX_BUFFER_CAP:
+                    mem_cap_mb = min(mem_cap_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
 
             return int(math.ceil(mem_cap_mb / 1024.0))
 
@@ -108,7 +125,7 @@ class SupportsMemBufferSize(ResourceConfig):
 
         if avail_mem_mb == TBDString():
             return TBDString()
-        return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), 1024) # TODO: parametrize constant?
+        return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), MIN_MEM_BUFFER_MB)
 
 
 class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
@@ -131,18 +148,11 @@ class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
         return mem_cap_mib + max(int(mem_cap_mib/self.CAP_MEM_FRACTION * (1-self.CAP_MEM_FRACTION)), BASE_MEM)
 
 
-class SupportsDiskCap(ResourceConfig):
-    def get_disk_cap(self):
-        def _get_disk_cap(wildcards):
-            return int(self.get_disk()(wildcards) / 1024)
-        return _get_disk_cap # TODO: come up with a heuristic
-
-
-class BuildGraphResources(SupportsMemBufferSize, SupportsDiskCap):
+class BuildGraphResources(SupportsMemBufferSize):
     pass
 
 
-class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, SupportsDiskCap):
+class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation):
 
     KMC_STATS_KEY = "Stats"
     KMC_UNIQUE_KMER_CNT = "#Unique_counted_k-mers"
@@ -158,11 +168,18 @@ class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, 
 
         unique_kmers = kmc_data[self.KMC_STATS_KEY][self.KMC_UNIQUE_KMER_CNT]
 
-        bytes_per_kmer = 2.6
-        kmer_count = 2.6 * unique_kmers  # 2x canonical+non-canonical +  ~30% for dummy kmers (typically it's 10%)
-        required_ram = int(math.ceil(kmer_count * bytes_per_kmer / 1024**2))
-        required_ram_mb = max(required_ram, 1024)
-
+        # Two independent factors:
+        #   - expansion factor 2.6: 2x for canonical+reverse, ~30% extra
+        #     for dummy k-mers (typically 10-30%); ~= 2 * 1.3.
+        #   - 2.6 bytes per stored k-mer during succinct-graph
+        #     construction (peak working-set per k-mer, empirical).
+        # Total peak RSS ~= 6.76 bytes per unique k-mer reported by KMC.
+        # If this underestimates on a particular dataset, override via
+        # `rules.<rule>.mem_buffer_mb` in the workflow config.
+        EXPANSION_FACTOR = 2.6
+        BYTES_PER_KMER = 2.6
+        required_ram_bytes = unique_kmers * EXPANSION_FACTOR * BYTES_PER_KMER
+        required_ram_mb = max(int(math.ceil(required_ram_bytes / 1024**2)), MIN_MEM_BUFFER_MB)
         return required_ram_mb
 
 
@@ -185,6 +202,8 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
 
 
 class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage0', config)
 
@@ -195,10 +214,78 @@ class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
 
 
 class TransformRdStage1Resources(SupportsMemBufferSize):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage1', config)
 
 
 class TransformRdStage2Resources(SupportsMemBufferSize):
+    APPLY_MAX_BUFFER_CAP = False
+
     def __init__(self, config):
         super().__init__('transform_rd_stage2', config)
+
+
+class AnnotateResources(SupportsMemBufferSize):
+    """
+    `metagraph annotate --mem-cap-gb` is a *per-column* buffer, applied
+    independently to each column constructed in parallel under --separately.
+    Total memory used is approximately `mem_cap_gb * parallel_cols`, where
+    `parallel_cols = ceil(max_threads / threads_each)`. Override the buffer
+    heuristic accordingly.
+    """
+
+    def __init__(self, config):
+        super().__init__('annotate', config)
+        threads_each = config.get(workflow_configs.ANNOTATE_THREADS_EACH, 1) or 1
+        self.threads_each = max(int(threads_each), 1)
+
+    def get_parallel_cols(self, threads):
+        """Number of columns built in parallel.
+
+        Ceiling division: when `threads` is not a multiple of
+        `threads_each` we'd rather fit one extra column than leave
+        Snakemake-reserved cores idle.
+        """
+        return max(math.ceil(int(threads) / self.threads_each), 1)
+
+    def get_effective_threads_each(self, threads):
+        """Threads passed to `--threads-each`.
+
+        Ceiling division so no reserved core sits idle when `threads` is
+        not divisible by `parallel_cols`. May overcommit by up to
+        `parallel_cols - 1` threads at boundary inputs (e.g. 13/8 -> 2*7
+        = 14), which the OS scheduler absorbs.
+        """
+        return max(math.ceil(int(threads) / self.get_parallel_cols(threads)), 1)
+
+    def get_mem_buffer_gib(self):
+        """
+        Returns the per-column buffer in GiB for `--mem-cap-gb`. If
+        `mem_buffer_mb` is set in the rule config, treat it as the
+        per-column value (matches the CLI semantic). Otherwise split the
+        global mem budget across columns built in parallel.
+        """
+        def _get_mem_buffer(wildcards, input, threads, resources):
+            mem_cap_mb = get_rule_specific_config(self.rule_name,
+                                                  MEM_BUFFER_MB_KEY, self.config)
+
+            if not mem_cap_mb:
+                avail_mem_mb = get_rule_specific_config(self.rule_name, MEM_MB_KEY,
+                                                        self.config)
+                if not avail_mem_mb:
+                    avail_mem_mb = resources.get('mem_mb', _get_max_memory(self.config))
+
+                if avail_mem_mb == TBDString():
+                    return TBDString()
+
+                total_buf_mb = max(int(self.CAP_MEM_FRACTION * avail_mem_mb), MIN_MEM_BUFFER_MB)
+                total_buf_mb = min(total_buf_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
+
+                parallel_cols = self.get_parallel_cols(threads)
+                mem_cap_mb = max(total_buf_mb // parallel_cols, MIN_MEM_BUFFER_MB)
+
+            return int(math.ceil(mem_cap_mb / 1024.0))
+
+        return _get_mem_buffer

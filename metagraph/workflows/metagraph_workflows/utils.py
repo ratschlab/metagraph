@@ -27,10 +27,6 @@ def get_seqs_file_list_path(wdir, config):
     return seqs_file_list_path
 
 
-def take_value_or_default(key, default, config):
-    return config[key] if (key in config.keys() and config[key]) else default
-
-
 def create_transcript_path_list(path: Union[Path, str], transcript_path: Union[Path, str], suffix=''):
     paths = [str(p.absolute()) for p in Path(path).glob(f'*{suffix}')]
 
@@ -56,7 +52,7 @@ def derive_sample_dictionary(transcript_path_list_path: Union[Path, str]):
 
 def get_build_single_sample_input(config, orig_samples_path, seq_ids_dict):
     def _sample_input(wildcards):
-        sample_id = wildcards[0] # TODO:
+        sample_id = wildcards[0]
 
         if config[workflow_configs.SAMPLE_IDS_PATH]:
             return orig_samples_path / f"{{sample_id}}{config[workflow_configs.SAMPLE_STAGING_FILE_ENDING]}"
@@ -124,11 +120,6 @@ def get_time_wrapper_command(config):
     return " ".join(module_call)
 
 
-def get_gnu_time_command(config):
-    """Backward-compatible alias for old Snakefiles."""
-    return get_time_wrapper_command(config)
-
-
 def get_log_path(rule_name, config, wildcards=None):
     log_dir = get_wdir(config)/'logs'
 
@@ -140,7 +131,15 @@ def get_log_path(rule_name, config, wildcards=None):
 
 
 def temp_dir_config(config):
-    return f"--disk-swap {config[TMP_DIR]}" if TMP_DIR in config else '',
+    """Return the `--disk-swap` flag for a metagraph invocation.
+
+    Always emit the flag explicitly so transform_anno doesn't fall back
+    to its `[OUT_BASEDIR]` default (which would silently spill temp
+    files next to the output). `metagraph build` and `metagraph annotate`
+    both default to off and accept an empty string identically, so the
+    explicit `--disk-swap ""` form is safe for all callers.
+    """
+    return f'--disk-swap "{config[TMP_DIR]}"' if TMP_DIR in config else '--disk-swap ""'
 
 
 def get_rule_specific_config(rule, key, config):

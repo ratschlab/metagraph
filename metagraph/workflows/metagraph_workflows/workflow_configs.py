@@ -26,7 +26,7 @@ BRWT_PARALLEL_NODES="brwt_parallel_nodes"
 BRWT_LINKAGE_SUBSAMPLE="brwt_linkage_subsample"
 
 MAX_THREADS = 'max_threads'
-MAX_MEMORY_MB = 'max_memory_mb'
+MEMORY_MB = 'memory_mb'
 MAX_DISK_MB = 'max_disk_mb'
 MAX_BUFFER_SIZE_MB = 'max_buffer_size_mb'
 
@@ -36,28 +36,29 @@ MEM_MB_KEY = 'mem_mb'
 DISK_MB_KEY = 'disk_mb'
 
 MEM_BUFFER_MB_KEY = 'mem_buffer_mb'
-DISK_CAP_MB_KEY = 'disk_cap_mb'
 
 WITH_COUNTS = 'with_counts'
 COUNT_WIDTH = 'count_width'
 WITH_COORDINATES = 'with_coordinates'
 
+ANNOTATE_THREADS_EACH = 'annotate_threads_each'
+
 
 class AnnotationLabelsSource(Enum):
-    SEQUENCE_HEADERS = 'sequence_headers'
-    FILE_NAMES = 'file_names'
+    # Values mirror the metagraph CLI flags: --anno-header and --anno-filename.
+    HEADER = 'header'
+    FILENAME = 'filename'
 
     def to_annotation_cmd_option(self):
-        if self == self.FILE_NAMES:
+        if self == self.FILENAME:
             return '--anno-filename'
-        elif self == self.SEQUENCE_HEADERS:
+        elif self == self.HEADER:
             return '--anno-header'
         else:
             raise ValueError(f"Invalid value of AnnotationLabelsSource: got {self}")
 
 
 class AnnotationFormats(Enum):
-    # COLUMN = 'column' # TODO: need special case in the workflow
     ROW = 'row'
     BIN_REL_WT = 'bin_rel_wt'
     FLAT = 'flat'
@@ -66,6 +67,9 @@ class AnnotationFormats(Enum):
     RELAXED_BRWT = 'relax.brwt'
     RB_BRWT = 'rb_brwt'
     #RELAXED_RB_BRWT = 'relax.rb_brwt' # not possible
+    ROW_DIFF_FLAT = 'row_diff_flat'
+    ROW_DIFF_SPARSE = 'row_diff_sparse'
+    ROW_DIFF_DISK = 'row_diff_disk'
     ROW_DIFF_BRWT = 'row_diff_brwt'
     RELAXED_ROW_DIFF_BRWT = 'relax.row_diff_brwt'
     INT_BRWT = 'int_brwt'

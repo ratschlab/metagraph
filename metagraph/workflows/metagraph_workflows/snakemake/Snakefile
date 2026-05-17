@@ -2,49 +2,69 @@ from pathlib import Path
 
 import metagraph_workflows.utils
 from metagraph_workflows import workflow_configs, utils
-from metagraph_workflows.utils import take_value_or_default
 from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
     AnnotationFormats
-from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
+from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, AnnotateResources, ResourceConfig
 
 wdir=utils.get_wdir(config)
 
 graph=config['base_name']
-build_primary=take_value_or_default('build_primary_graph', False, config)
+build_primary=config['build_primary_graph']
 
 annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
 
-# validate values
+# Validate annotation_formats values. The CLI parses these through
+# `_parse_annotation_format_value` (which already produces a friendlier
+# error with format suggestions), so we should only land here when the
+# Snakefile is invoked directly with a hand-written configfile.
 for af in annotation_formats:
-    AnnotationFormats(af)
-    # TODO: make a nicer error
+    try:
+        AnnotationFormats(af)
+    except ValueError:
+        valid = ', '.join(v.value for v in AnnotationFormats)
+        raise ValueError(
+            f"Unsupported annotation format {af!r} in config['annotation_formats']. "
+            f"Valid values: {valid}."
+        )
 
 annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
-with_counts = take_value_or_default(workflow_configs.WITH_COUNTS, False, config)
-with_coordinates = take_value_or_default(workflow_configs.WITH_COORDINATES, False, config)
+with_counts = config[workflow_configs.WITH_COUNTS]
+with_coordinates = config[workflow_configs.WITH_COORDINATES]
 if with_counts and with_coordinates:
     raise RuntimeError(
         'with_counts and with_coordinates cannot both be true (same constraint as metagraph row-diff).')
-count_width = take_value_or_default(workflow_configs.COUNT_WIDTH, 8, config)
+count_width = config[workflow_configs.COUNT_WIDTH]
 count_kmers_opt = '--count-kmers' if with_counts else ''
 coordinates_opt = '--coordinates' if with_coordinates else ''
 count_width_opt = f'--count-width {count_width}' if with_counts else ''
 
+# Auto-derive `annotate_threads_each` from annotation mode if not set
+# by the user. Coordinate annotation has larger per-k-mer work, so each
+# column gets more threads and fewer columns run in parallel.
+if workflow_configs.ANNOTATE_THREADS_EACH not in config:
+    config[workflow_configs.ANNOTATE_THREADS_EACH] = 16 if with_coordinates else 8
+
 
 metagraph_cmd=config['metagraph_cmd']
-time_cmd=utils.get_gnu_time_command(config)
+time_cmd=utils.get_time_wrapper_command(config)
 
-max_threads=take_value_or_default(workflow_configs.MAX_THREADS, workflow.cores, config)
+max_threads = config.get(workflow_configs.MAX_THREADS) or workflow.cores
 
-# TODO
-max_memory_mb=take_value_or_default('max_memory_mb', 4000, config)
+# Always pass -v to metagraph so logs are complete; whether the user
+# sees that on their terminal is controlled by `log_tail` below.
+verbose_opt = ' -v '
 
-verbose_opt=' -v '
+# Tail of the `tee {log}` pipeline: when the workflow is verbose, tee's
+# stdout falls through to the caller's terminal so the user sees all
+# metagraph progress / traces live; otherwise we silence tee's stdout
+# and the same content lives in {log} only.
+log_tail = '' if config.get('verbose', False) else '> /dev/null'
 
 DONE="DONE"
 
 ## Paths
 graph_path=wdir/f'{graph}.dbg'
+small_graph_path=wdir/f'{graph}_small.dbg'
 if with_counts:
     annotation_mode_suffix = f'counts.w{count_width}'
 elif with_coordinates:
@@ -62,6 +82,17 @@ column_anno_paths = utils.generate_col_paths(annotation_cols_path, seqs_file_lis
 column_counts_paths = [Path(str(p) + '.counts') for p in column_anno_paths] if with_counts else []
 column_coords_paths = [Path(str(p) + '.coords') for p in column_anno_paths] if with_coordinates else []
 
+
+# When the user sets --keep-columns / --keep-rd-columns, the per-sample
+# column files survive past the rules that produce them; otherwise
+# snakemake's `temp()` marker tells it to delete them once no live
+# job needs them.
+def _maybe_temp_columns(paths):
+    return paths if config.get('keep_columns', False) else temp(paths)
+
+def _maybe_temp_rd_columns(paths):
+    return paths if config.get('keep_rd_columns', False) else temp(paths)
+
 contigs_dir=wdir/'contigs'
 
 seq_ids_dict = {}
@@ -70,30 +101,102 @@ if not config[workflow_configs.SAMPLE_IDS_PATH]:
 
 localrules: generate_column_list
 
+external_graph = config.get('external_graph', False)
+
+# The CoordToHeader sidecar (.seqs) maps file-level coord ranges to the
+# original sequence headers. It only makes sense when:
+#   - the annotation is coordinate-aware (`with_coordinates`), AND
+#   - the annotation columns are keyed by file (`--anno-filename`).
+# In `--anno-header` mode each sequence already gets its own column, so
+# coords are per-sequence and no sidecar is needed.
+#
+# The consumer (load_annotated_graph.cpp) strips the annotation's full
+# kExtension (e.g. `.row_diff_brwt_coord.annodbg`) from the annotation
+# path and appends `.seqs`, so all coord formats sharing the same graph
+# look for the SAME path: `<graph>.seqs`. We can only emit one. BRWT
+# clustering may reorder columns differently per format, so the .seqs
+# content is only correct for one format -- we derive it from the first
+# coord format in the requested list (the typical workflow request is
+# `--with-coords` which defaults to a single format).
+coord_sidecar_anno_type = next(
+    (af for af in annotation_formats
+     if AnnotationFormats(af) in {AnnotationFormats.BRWT_COORD,
+                                  AnnotationFormats.ROW_DIFF_COORD,
+                                  AnnotationFormats.ROW_DIFF_BRWT_COORD,
+                                  AnnotationFormats.ROW_DIFF_DISK_COORD}),
+    None,
+)
+build_coord_sidecar = (
+    with_coordinates
+    and AnnotationLabelsSource(config['annotation_labels_source']) == AnnotationLabelsSource.FILENAME
+    and coord_sidecar_anno_type is not None
+)
+
 rule all:
     input:
         graph_path,
-        [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
+        # Skip the small-state graph in annotate-only mode: the user
+        # already has their built graph; we don't want to re-transform it.
+        *([small_graph_path] if not external_graph else []),
+        [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats],
+        *([wdir/f'{graph}.seqs'] if build_coord_sidecar else []),
 
 
-include: 'build.smk'
+if not external_graph:
+    include: 'build.smk'
+
+
+BUILD_SMALL_GRAPH_RULE="build_small_graph"
+rule build_small_graph:
+    input: graph_path
+    output: small_graph_path
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(BUILD_SMALL_GRAPH_RULE, config).get_mem(),
+    log: utils.get_log_path(BUILD_SMALL_GRAPH_RULE, config)
+    shell:
+        # `metagraph transform -o` takes a basename and appends `.dbg`,
+        # so strip the suffix before passing.
+        """
+        OUT_BASE={output}
+        {time_cmd} {metagraph_cmd} transform {verbose_opt} \
+        --state small \
+        -p {threads} \
+        -o ${{OUT_BASE%.dbg}} \
+        {input} 2>&1 | tee {log} {log_tail}
+        """
+
 
 ANNOTATE_RULE="annotate"
+_annotate_resources = AnnotateResources(config)
+
 rule annotate:
     input:
         seqs=utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=temp(column_anno_paths),
-        column_count_files=(temp(column_counts_paths) if with_counts else []),
-        column_coord_files=(temp(column_coords_paths) if with_coordinates else []),
+        column_anno_files=_maybe_temp_columns(column_anno_paths),
+        column_count_files=(_maybe_temp_columns(column_counts_paths) if with_counts else []),
+        column_coord_files=(_maybe_temp_columns(column_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
         separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        tempdir_opt=utils.temp_dir_config(config),
+        threads_each=lambda wildcards, threads: _annotate_resources.get_effective_threads_each(threads),
+        parallel_cols=lambda wildcards, threads: _annotate_resources.get_parallel_cols(threads),
+        # `--mem-cap-gb` and `--disk-swap` only matter when annotating
+        # with counts or coordinates (the per-k-mer payload is large
+        # enough that the buffer can overflow). For binary annotation,
+        # omit both: per-column buffers are tiny and never need a
+        # spill path. Matches experiments/large_index_scripts.md.
+        mem_cap_arg=(
+            (lambda wildcards, input, threads, resources:
+                f"--mem-cap-gb {_annotate_resources.get_mem_buffer_gib()(wildcards, input, threads, resources)}")
+            if (with_counts or with_coordinates) else ''
+        ),
+        tempdir_opt=utils.temp_dir_config(config) if (with_counts or with_coordinates) else '',
     log: utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
@@ -108,16 +211,68 @@ rule annotate:
         mkdir -p $OUT_DIR
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
           {verbose_opt} \
-          --parallel {threads} \
+          -p {params.parallel_cols} \
+          --threads-each {params.threads_each} \
+          {params.mem_cap_arg} \
           -i {input.dbg_graph} \
           {annotation_labels_opt} \
           {count_kmers_opt} \
           {coordinates_opt} \
           {count_width_opt} \
-          --anno-type column \
           --separately \
-          -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
+          -o $OUT_DIR {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
+
+INDEX_HEADER_COORDS_RULE="index_header_coords"
+if build_coord_sidecar:
+    rule index_header_coords:
+        """Build the CoordToHeader (.seqs) sidecar used by coord queries.
+
+        `metagraph annotate --index-header-coords` is a separate pass
+        that re-reads the input fastas; the file labels and coord
+        offsets line up with the annotation only if the inputs are
+        passed in the same order as the columns in the final
+        annotation. BRWT clustering reorders columns, so the order we
+        annotated with no longer matches the order in the transformed
+        annotation -- we recover it from the annotation itself via
+        `stats --print-col-names`. Each coord-aware column label is the
+        absolute fasta path (see annotate.cpp:
+        `labels.push_back(file)` in `--anno-filename` mode), so the
+        column-name list piped from `stats` is exactly what `annotate
+        --index-header-coords` expects on stdin.
+
+        The output is `<graph>.seqs` because the consumer
+        (load_annotated_graph.cpp) strips the annotation's full
+        kExtension (e.g. `.row_diff_brwt_coord.annodbg`) and appends
+        `.seqs` -- so every coord format looks at the same path.
+        """
+        input:
+            annotation=wdir/f'{graph}.{coord_sidecar_anno_type}.annodbg',
+            dbg_graph=graph_path,
+        output:
+            seqs_sidecar=wdir/f'{graph}.seqs',
+        threads: max_threads
+        resources:
+            mem_mb=ResourceConfig(INDEX_HEADER_COORDS_RULE, config).get_mem(),
+        log: utils.get_log_path(INDEX_HEADER_COORDS_RULE, config)
+        shell:
+            """
+            OUT_BASE={output.seqs_sidecar}
+            # `stats --print-col-names` interleaves a logger
+            # `[info] Scanning ...` line on stdout and then
+            # `Number of columns: N` followed by one column label per
+            # line. We want only the labels, so drop everything up to
+            # (and including) the "Number of columns:" marker.
+            {metagraph_cmd} stats --print-col-names -a {input.annotation} 2>>{log} \
+                | awk '/^Number of columns:/ {{found=1; next}} found' \
+                | {time_cmd} {metagraph_cmd} annotate {verbose_opt} \
+                    --anno-filename \
+                    --index-header-coords \
+                    -p {threads} \
+                    -i {input.dbg_graph} \
+                    -o ${{OUT_BASE%.seqs}} 2>&1 | tee -a {log} {log_tail}
+            """
+
 
 GENERATE_COLUMN_LIST_RULE="generate_column_list"
 rule generate_column_list:
@@ -127,8 +282,6 @@ rule generate_column_list:
         with open(output[0], 'w') as f:
             f.write('\n'.join([str(l) for l in input]))
 
-
-max_path_length=None
 
 GENERATE_BRWT_LINKAGE_RULE="generate_brwt_linkage"
 rule generate_brwt_linkage:
@@ -152,8 +305,8 @@ rule generate_brwt_linkage:
             --linkage \
             --greedy \
             --subsample {params.subsample} \
-            --parallel {threads} \
-            -o {output.linkage} > {log} 2>&1
+            -p {threads} \
+            -o {output.linkage} 2>&1 | tee {log} {log_tail}
         """
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
@@ -163,6 +316,7 @@ ruleorder: annotate_row_diff_int_disk > transform_annotation
 ruleorder: annotate_row_diff_brwt_coord > transform_annotation
 ruleorder: annotate_row_diff_coord > transform_annotation
 ruleorder: annotate_row_diff_disk_coord > transform_annotation
+ruleorder: annotate_row_diff_binary > transform_annotation
 
 TRANSFORM_ANNOTATION_RULE="transform_annotation"
 rule transform_annotation:
@@ -183,8 +337,8 @@ rule transform_annotation:
         """        
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
-            --parallel {threads} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -p {threads} \
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -203,16 +357,18 @@ rule annotate_brwt:
         mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
-        """        
+        """
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type brwt \
-            --parallel-nodes {params.parallel_nodes} \
             --greedy \
-            --parallel {threads} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            --subsample {params.subsample} \
+            --parallel-nodes {params.parallel_nodes} \
+            -p {threads} \
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -227,16 +383,15 @@ rule relax_brwt:
         mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
     params:
         relax_arity=config[workflow_configs.BRWT_RELAX_ARITY],
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
-        """        
+        """
         {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
-            --parallel {threads} \
-            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+            -p {threads} \
+            {input.brwt_annots} 2>&1 | tee {log} {log_tail}
         """
 
 rd_cols_dir = wdir/f'rd_cols.{annotation_mode_suffix}'
@@ -246,8 +401,6 @@ rd_col_annodbg_suffix = '.column.annodbg' if (with_counts or with_coordinates) e
 rd_col_annodbg_paths = utils.generate_col_paths(rd_cols_dir, seqs_file_list_path, config, suffix=rd_col_annodbg_suffix)
 rd_col_counts_paths = [Path(str(p) + '.counts') for p in rd_col_annodbg_paths] if with_counts else []
 rd_col_coords_paths = [Path(str(p) + '.coords') for p in rd_col_annodbg_paths] if with_coordinates else []
-
-from metagraph_workflows.resource_management import TransformRdStage0Resources
 
 TRANSFORM_RD_STAGE0_RULE="transform_rd_stage0"
 rule transform_rd_stage0:
@@ -264,23 +417,25 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage0Resources(config).get_mem_buffer_gib(),
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
+        # Stage 0 builds the row-count vector in RAM only; metagraph
+        # does not use --disk-swap at this stage, so the flag is
+        # intentionally omitted (matches large_index_scripts.md).
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
         mkdir -p $COLS_DIR
-        
+
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
             --row-diff-stage 0 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
+            -o {output.columns_rd_row_count} 2>&1 | tee {log} {log_tail}
         """
 
 TRANSFORM_RD_STAGE1_RULE="transform_rd_stage1"
@@ -293,11 +448,18 @@ rule transform_rd_stage1:
         column_coord_files=rules.annotate.output.column_coord_files,
         columns_rd_row_count=rules.transform_rd_stage0.output.columns_rd_row_count
     output:
+        # pred/succ/pred_boundary/succ_boundary/row_reduction are
+        # consumed only by `transform_rd_stage2`; keep them temp()
+        # regardless. `rd_succ` is also an input to every
+        # `annotate_row_diff_*` rule, so it gets kept by
+        # `--keep-rd-columns` (paired with `anchors` from stage 2)
+        # to let the BRWT-clustering step be re-run with different
+        # parameters without redoing stages 1-2.
         pred=temp(wdir / f'{graph}.dbg.pred'),
         pred_boundary=temp(wdir / f'{graph}.dbg.pred_boundary'),
         succ=temp(wdir / f'{graph}.dbg.succ'),
         succ_boundary=temp(wdir / f'{graph}.dbg.succ_boundary'),
-        rd_succ=temp(wdir / f'{graph}.dbg.rd_succ'),
+        rd_succ=_maybe_temp_rd_columns(wdir / f'{graph}.dbg.rd_succ'),
         row_reduction=temp(rd_cols_dir / 'vector.row_reduction'),
         stage1_done=touch(rd_cols_dir / 'stage1.DONE')
     threads: max_threads
@@ -314,12 +476,12 @@ rule transform_rd_stage1:
             --anno-type row_diff \
             --row-diff-stage 1 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.row_reduction} {params.tempdir_opt} > {log} 2>&1
+            -o {output.row_reduction} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -339,11 +501,11 @@ rule transform_rd_stage2:
         rd_succ=rules.transform_rd_stage1.output.rd_succ,
         stage1_done=rules.transform_rd_stage1.output.stage1_done
     output:
-        anchors=temp(wdir/f'{graph}.dbg.anchors'),
+        anchors=_maybe_temp_rd_columns(wdir/f'{graph}.dbg.anchors'),
         rd_cols_done=touch(rd_cols_dir/DONE),
-        rd_col_annodbg_files=temp(rd_col_annodbg_paths),
-        rd_col_count_files=(temp(rd_col_counts_paths) if with_counts else []),
-        rd_col_coord_files=(temp(rd_col_coords_paths) if with_coordinates else []),
+        rd_col_annodbg_files=_maybe_temp_rd_columns(rd_col_annodbg_paths),
+        rd_col_count_files=(_maybe_temp_rd_columns(rd_col_counts_paths) if with_counts else []),
+        rd_col_coord_files=(_maybe_temp_rd_columns(rd_col_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=TransformRdStage2Resources(config).get_mem(),
@@ -357,12 +519,12 @@ rule transform_rd_stage2:
             --anno-type row_diff \
             --row-diff-stage 2 \
             -i {input.dbg_graph} \
-            --parallel {threads} \
+            -p {threads} \
             {count_kmers_opt} \
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
+            -o {output.rd_cols_done} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -384,18 +546,19 @@ rule annotate_row_diff_brwt:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
         r"""
-        echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -410,16 +573,15 @@ rule relax_row_diff_brwt:
         mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         relax_arity = config[workflow_configs.BRWT_RELAX_ARITY],
-        tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
-        """        
+        """
         {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations_relaxed} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
-            --parallel {threads} \
-            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+            -p {threads} \
+            {input.brwt_annots} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -441,6 +603,7 @@ rule annotate_row_diff_int_brwt:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_INT_BRWT_RULE, config)
     shell:
@@ -448,10 +611,56 @@ rule annotate_row_diff_int_brwt:
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_int_brwt \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
+        """
+
+
+ANNOTATE_ROW_DIFF_BINARY_RULE="annotate_row_diff_binary"
+rule annotate_row_diff_binary:
+    """Binary row-diff annotation in flat / sparse / disk form.
+
+    The three formats share the same input (row-diff stage-2 columns +
+    graph) and CLI shape. Only row_diff_disk actually consumes
+    `--mem-cap-gb` (the other two have `mem_bytes` commented out in
+    metagraph's convert_to_row_diff implementation); none of them use
+    `--disk-swap` internally, so neither is emitted for flat / sparse
+    and only --mem-cap-gb is emitted for disk. Matches
+    experiments/large_index_scripts.md.
+    """
+    input:
+        rd_succ=rules.transform_rd_stage1.output.rd_succ,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        rd_col_annodbg_files=rules.transform_rd_stage2.output.rd_col_annodbg_files,
+        rd_col_count_files=rules.transform_rd_stage2.output.rd_col_count_files,
+        rd_col_coord_files=rules.transform_rd_stage2.output.rd_col_coord_files,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
+    wildcard_constraints:
+        anno_type="row_diff_flat|row_diff_sparse|row_diff_disk",
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BINARY_RULE, config).get_mem(),
+    params:
+        mem_cap_arg=(
+            lambda wildcards, input, threads, resources:
+                f"--mem-cap-gb {TransformRdStage2Resources(config).get_mem_buffer_gib()(wildcards, input, threads, resources)}"
+                if wildcards.anno_type == "row_diff_disk" else ""
+        ),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_BINARY_RULE, config, ['anno_type'])
+    shell:
+        r"""
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type {wildcards.anno_type} \
+            -p {threads} \
+            {params.mem_cap_arg} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -477,9 +686,9 @@ rule annotate_row_diff_int_disk:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_int_disk \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -501,6 +710,7 @@ rule annotate_row_diff_brwt_coord:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config).get_mem(),
     params:
         parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_COORD_RULE, config)
     shell:
@@ -508,10 +718,11 @@ rule annotate_row_diff_brwt_coord:
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt_coord \
             --greedy \
+            --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -537,9 +748,9 @@ rule annotate_row_diff_coord:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_coord \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -565,7 +776,7 @@ rule annotate_row_diff_disk_coord:
         r"""
         find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_disk_coord \
-            --parallel {threads} \
+            -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """

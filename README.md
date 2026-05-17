@@ -103,6 +103,61 @@ All different versions of the container image are listed [here](https://github.c
 To compile from source (e.g., for builds with custom alphabet or other configurations), see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source).
 
 
+## Quick start: build an index in one command
+
+For most users, the easiest entry point is the Snakemake wrapper, which
+runs the full indexing pipeline — graph construction, annotation, and
+all row-diff / BRWT transforms — as a single command.
+
+The wrapper ships as a separate Python package; the `metagraph` conda
+recipe only installs the C++ binary, so the workflow CLI needs an extra
+`pip install` step:
+
+```bash
+conda install -c bioconda -c conda-forge metagraph     # the metagraph binary
+pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+```
+
+Then run the full pipeline as:
+
+```bash
+metagraph-workflows build samples.txt -o out/ --primary
+```
+
+`samples.txt` is a text file listing your input sample paths (one per
+line); a directory of sample files works just as well. `out/` will
+contain `graph.dbg`, `graph_small.dbg`, and the requested annotation
+artifacts. You can also feed a list inline with process substitution:
+
+```bash
+metagraph-workflows build <(ls /data/samples/*.fa) -o out/ --primary
+```
+
+Tell the workflow how much hardware to use; everything else (memory
+caps per stage, per-column buffer sizing, BRWT clustering parameters)
+is derived automatically:
+
+```bash
+metagraph-workflows build samples.txt -o out/ --primary \
+  -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+```
+
+Useful switches:
+- `-p N` — maximum CPU cores to use (defaults to all cores)
+- `--mem-gb GB` — approximate RAM budget per rule (default 16)
+- `--disk-swap-dir DIR` — directory for on-disk spill buffers
+- `--primary` — build a primary graph (recommended for most workloads)
+- `--anno-type FMT` — request a specific annotation format
+  (repeat for multiple outputs); the default is `relax.row_diff_brwt`
+- `--with-counts` / `--with-coords` — count- or coordinate-aware
+  annotation (mutually exclusive)
+- `--graph EXISTING.dbg` — reuse an already-built graph and only run
+  the annotation + transforms
+
+See `metagraph/workflows/README.rst` for setup and the full option
+list (`metagraph-workflows build --help`).
+
+
 ## Typical workflow
 1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
 `./metagraph build`

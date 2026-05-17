@@ -17,11 +17,6 @@ def test_get_sample_name(case, expected):
     assert metagraph_workflows.utils.get_sample_name(case) == expected
 
 
-def test_get_gnu_time_command_uses_python_wrapper():
-    cmd = metagraph_workflows.utils.get_gnu_time_command({})
-    assert "metagraph_workflows.time_wrapper" in cmd
-
-
 def test_get_time_wrapper_command_uses_python_wrapper():
     cmd = metagraph_workflows.utils.get_time_wrapper_command({})
     assert "metagraph_workflows.time_wrapper" in cmd

@@ -3,6 +3,18 @@ k: 31
 base_name: 'graph'
 build_primary_graph: False
 
+# Input assumption for `metagraph-workflows`:
+#   - Each input sample is assumed to be a contig file with deduplicated
+#     k-mers (one fasta.gz per sample). For a primary graph (--primary),
+#     the contigs must already be primary contigs (canonicalized).
+#   - For coordinate annotations (`--with-coords`), inputs must instead
+#     be the full, non-deduplicated samples, since coordinate annotation
+#     needs the original sequence positions.
+#
+# `primarize_samples_separately: True` makes the workflow build a
+# canonical graph per sample and primarize it before joint build /
+# annotation. Use only if your inputs are raw / non-primarized reads
+# that the workflow itself should primarize.
 primarize_samples_separately: False
 
 kmc_mem_mb_per_thread: 2048
@@ -11,20 +23,33 @@ kmc_mem_overhead_factor: 1.1
 
 # annotation options
 annotation_formats: ['relax.row_diff_brwt']
-annotation_labels_source: 'sequence_headers'
+annotation_labels_source: 'filename'
 with_counts: false
 with_coordinates: false
 count_width: 8
+# `annotate_threads_each` (threads used per file in `metagraph annotate
+# --separately`) is mode-derived in the Snakefile when unset here: 8 for
+# binary and counts mode (per-k-mer payload is small), 16 for coordinate
+# mode (positions inflate per-k-mer work, so each column gets more
+# threads and fewer columns run in parallel). Set explicitly to override.
 
 brwt_relax_arity: 32
-brwt_parallel_nodes: 5
-brwt_linkage_subsample: 100000
+# Number of BRWT tree nodes processed in parallel during row_diff_brwt /
+# brwt construction. Scripts in experiments/large_index_scripts.md use 10
+# (FUNGI, Random100, Mouse).
+brwt_parallel_nodes: 10
+# Bits subsampled for distance estimation during BRWT column
+# clustering (--subsample). Larger values give more accurate clustering
+# at the cost of more memory/time. Scripts in
+# experiments/large_index_scripts.md range from 2e5 (FUNGI) to 1e7
+# (Random100); 1e6 is a reasonable middle ground.
+brwt_linkage_subsample: 1000000
 
 metagraph_cmd: 'metagraph'
 
-default_disk_mb: 10000
-max_memory_mb: 4048
-max_buffer_size_mb: 51200
+max_disk_mb: 1048576  # 1 TiB; declared as a Snakemake `disk_mb` resource on build rules (no metagraph flag)
+memory_mb: 16384  # 16 GiB default RAM budget per rule
+max_buffer_size_mb: 81920
 
 sample_ids_path: ''
 sample_staging_script_path: ''
