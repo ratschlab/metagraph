@@ -183,14 +183,14 @@ def _print_run_summary(output_dir: Path, dryrun: bool) -> None:
         print("1) Executed steps: unavailable (no timing entries found).")
 
     def _is_final_artifact(path: Path) -> bool:
-        # Final .dbg / .annodbg files live at the top of output_dir;
-        # per-column intermediates live in subdirectories
+        # Final .dbg / .annodbg / .seqs files live at the top of
+        # output_dir; per-column intermediates live in subdirectories
         # (columns.<mode>/, rd_cols.<mode>/). Build sidecars like
         # graph.dbg.pred / .succ / .anchors have a different suffix
         # so they're naturally excluded.
         if path.parent != output_dir:
             return False
-        return path.suffix in ('.dbg', '.annodbg')
+        return path.suffix in ('.dbg', '.annodbg', '.seqs')
 
     total_size = _directory_size(output_dir)
     final_artifacts = []

@@ -483,6 +483,54 @@ def test_small_graph_step_runs(sample_list_path, output_dir):
     assert "--state small" in out
 
 
+@pytest.mark.parametrize("fmt", [
+    "brwt_coord", "row_diff_coord", "row_diff_brwt_coord", "row_diff_disk_coord",
+])
+def test_index_header_coords_fires_in_coords_filenames_mode(sample_list_path, output_dir, fmt):
+    # `.seqs` only makes sense for coord-aware annotations indexed with
+    # --anno-filename: the sidecar maps file-level coord ranges back to
+    # original sequence headers.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--annotation-format', fmt,
+        '--anno-source', 'file_names',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    assert "rule index_header_coords" in out
+    # Per-format output: <graph>.<fmt>.seqs sits next to <graph>.<fmt>.annodbg.
+    assert f"graph.{fmt}.seqs" in out
+    # Column order comes from the final annotation (not the input file list),
+    # so BRWT-reordered columns line up.
+    assert "stats --print-col-names" in out
+    assert "--index-header-coords" in out
+
+
+@pytest.mark.parametrize("flags,reason", [
+    (["--with-coords"], "sequence_headers is the default anno-source"),
+    (["--anno-source", "file_names"], "no --with-coords -> binary mode"),
+    (["--with-counts", "--anno-source", "file_names"], "counts + file_names doesn't need .seqs"),
+])
+def test_index_header_coords_does_not_fire_outside_coords_filenames(
+        sample_list_path, output_dir, flags, reason):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        *flags,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    # Match the rule line specifically -- pytest's tmpdir path may contain
+    # the substring "index_header_coords" when the test name does.
+    assert "rule index_header_coords" not in proc.stdout.decode(), reason
+    assert "--index-header-coords" not in proc.stdout.decode(), reason
+
+
 def test_coords_mode_auto_picks_threads_each_16(sample_list_path, output_dir):
     # Snakefile derives annotate_threads_each from mode when unset; for
     # coords it becomes 16, so parallel_cols=ceil(16/16)=1.
