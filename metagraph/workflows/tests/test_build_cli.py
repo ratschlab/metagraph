@@ -87,8 +87,28 @@ def sample_list_path(tmpdir):
     return list_path
 
 
-@pytest.mark.parametrize('primary,annotation_format,annotation_label_src', list(product([False], [AnnotationFormats.ROW_DIFF_BRWT], [AnnotationLabelsSource.HEADER])) +
-    list(product([False, True], AnnotationFormats, [AnnotationLabelsSource.FILENAME])))
+# Representatives of distinct workflow code paths. Each `AnnotationFormats`
+# value is already exercised at the dry-run level by other tests (resolved
+# `--anno-type FMT` is asserted in `test_with_*_respects_explicit_*` etc.),
+# so this end-to-end matrix only needs one format per Snakefile rule branch:
+#
+#   BRWT                  -> annotate_brwt + relax_brwt (default uses RELAXED_BRWT)
+#   RELAXED_ROW_DIFF_BRWT -> row-diff stages 0-2 + annotate_row_diff_brwt + relax_row_diff_brwt
+#   ROW_DIFF_DISK         -> annotate_row_diff_binary wildcard rule
+#   ROW_DIFF_INT_BRWT     -> row-diff counts pipeline (annotate_row_diff_int_brwt)
+#   ROW_DIFF_BRWT_COORD   -> row-diff coords + .seqs sidecar (index_header_coords)
+_INTEGRATION_FORMATS = [
+    AnnotationFormats.BRWT,
+    AnnotationFormats.RELAXED_ROW_DIFF_BRWT,
+    AnnotationFormats.ROW_DIFF_DISK,
+    AnnotationFormats.ROW_DIFF_INT_BRWT,
+    AnnotationFormats.ROW_DIFF_BRWT_COORD,
+]
+
+
+@pytest.mark.parametrize('primary,annotation_format,annotation_label_src',
+    list(product([False], [AnnotationFormats.ROW_DIFF_BRWT], [AnnotationLabelsSource.HEADER])) +
+    list(product([False, True], _INTEGRATION_FORMATS, [AnnotationLabelsSource.FILENAME])))
 def test_build_workflow(primary, annotation_format, annotation_label_src, sample_list_path, output_dir):
 
     base_args = ['build',
