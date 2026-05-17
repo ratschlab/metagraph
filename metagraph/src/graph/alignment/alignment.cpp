@@ -36,25 +36,40 @@ std::string Alignment::format_coords(const annot::LabelEncoder<> &encoder) const
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
-std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) const {
-    if (!label_coordinates.size())
-        return "";
+namespace {
 
-    assert(label_columns.size());
+// JSON field names emitted inside each `annotation.labels[]` entry by
+// `to_json`. `LABEL_SAMPLE_FIELD` is intentionally duplicated from
+// `cli/query::SeqSearchResult::LABEL_SAMPLE_FIELD` rather than imported,
+// to keep graph-layer code free of a cli-layer dependency; the value
+// must stay in lockstep (covered by integration tests that assert
+// `sample` from both producers).
+constexpr auto LABEL_SAMPLE_FIELD = "sample";
+constexpr auto NT_LENGTH_FIELD = "nt_length";
+constexpr auto NT_COORDS_FIELD = "nt_coords";
+
+// (column, seq_id, list of [start, end_inclusive] 0-based local ranges).
+using PerTargetRanges = VectorMap<std::pair<Alignment::Column, size_t>,
+                                  std::vector<std::pair<uint64_t, uint64_t>>>;
+
+// Split a flat set of (column, global-coord) entries into per-(column, seq_id)
+// local-coordinate ranges using `cth`. Used by both `format_coords` (TSV) and
+// `to_json` (JSON) so they stay in lockstep.
+PerTargetRanges
+split_coords_by_target(const Alignment::Columns &label_columns,
+                       const Alignment::CoordinateSet &label_coordinates,
+                       const annot::CoordToHeader &cth,
+                       uint64_t alignment_nt_length,
+                       size_t k) {
     assert(label_coordinates.size() == label_columns.size());
     assert(k > 0 && "k must be >0 when CoordToHeader is in use");
-
-    using Key = std::pair<Column, size_t>;  // (column, seq_id)
-    // Per-key list of local (start, end_inclusive) ranges, 0-based.
-    VectorMap<Key, std::vector<std::pair<uint64_t, uint64_t>>> seq_ranges;
-
-    const uint64_t L = sequence_.size();
+    PerTargetRanges seq_ranges;
     for (size_t i = 0; i < label_columns.size(); ++i) {
-        Column col = label_columns[i];
+        auto col = label_columns[i];
         const size_t n_seqs = cth.num_sequences(col);
         for (uint64_t coord : label_coordinates[i]) {
             auto [seq_id, local_coord] = cth.map_single_coord(col, coord);
-            uint64_t remaining = L;
+            uint64_t remaining = alignment_nt_length;
             uint64_t cur_local = local_coord;
             size_t cur_seq_id = seq_id;
             while (remaining) {
@@ -76,14 +91,30 @@ std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) 
             }
         }
     }
+    return seq_ranges;
+}
 
+} // namespace
+
+std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) const {
+    if (!label_coordinates.size())
+        return "";
+
+    auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
+                                             cth, sequence_.size(), k);
+
+    // Emit `<header>/<nt_length>:<start>-<end>...` per target so callers can
+    // compute the fraction of the target covered from the nt range that
+    // follows (1-based inclusive).
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(seq_ranges.size());
     for (const auto &[key, ranges] : seq_ranges) {
         const auto &[col, seq_id] = key;
-        decoded_labels.emplace_back(cth.get_headers(col)[seq_id]);
+        uint64_t nt_length = cth.num_kmers_in_sequence(col, seq_id) + k - 1;
+        decoded_labels.emplace_back(fmt::format("{}/{}",
+                                                cth.get_headers(col)[seq_id],
+                                                nt_length));
         for (auto [start, end] : ranges) {
-            // 1-based inclusive ranges
             decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
         }
     }
@@ -883,7 +914,10 @@ Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
 Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,
-                               const std::string &label) const {
+                               const std::string &label,
+                               const annot::LabelEncoder<> *encoder,
+                               const annot::CoordToHeader *cth,
+                               bool include_path_mapping) const {
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -912,8 +946,59 @@ Json::Value Alignment::to_json(size_t node_size,
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
 
-    // encode path
-    if (nodes_.size())
+    // `nt_coords` / `nt_length` use nucleotide units, to distinguish from
+    // query.cpp's `kmer_coords` / `kmers_in_target` (which are k-mer-indexed).
+    if (encoder && label_columns.size()) {
+        Json::Value labels = Json::arrayValue;
+        if (!label_coordinates.size()) {
+            for (auto col : label_columns) {
+                Json::Value entry;
+                entry[LABEL_SAMPLE_FIELD] = encoder->decode(col);
+                labels.append(entry);
+            }
+        } else if (cth) {
+            auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
+                                                     *cth, sequence_.size(), node_size);
+            for (const auto &[key, ranges] : seq_ranges) {
+                const auto &[col, seq_id] = key;
+                Json::Value entry;
+                entry[LABEL_SAMPLE_FIELD] = cth->get_headers(col)[seq_id];
+                entry[NT_LENGTH_FIELD] = static_cast<Json::Int64>(
+                        cth->num_kmers_in_sequence(col, seq_id) + node_size - 1);
+                std::vector<std::string> range_strs;
+                range_strs.reserve(ranges.size());
+                for (auto [start, end] : ranges) {
+                    range_strs.push_back(fmt::format("{}-{}", start + 1, end + 1));
+                }
+                entry[NT_COORDS_FIELD] = fmt::format("{}", fmt::join(range_strs, ":"));
+                labels.append(entry);
+            }
+        } else {
+            // No CTH: each coord spans the alignment's nucleotide length on
+            // the column.
+            assert(label_coordinates.size() == label_columns.size());
+            for (size_t i = 0; i < label_columns.size(); ++i) {
+                Json::Value entry;
+                entry[LABEL_SAMPLE_FIELD] = encoder->decode(label_columns[i]);
+                std::vector<std::string> range_strs;
+                range_strs.reserve(label_coordinates[i].size());
+                for (uint64_t coord : label_coordinates[i]) {
+                    range_strs.push_back(fmt::format("{}-{}",
+                                                     coord + 1,
+                                                     coord + sequence_.size()));
+                }
+                entry[NT_COORDS_FIELD] = fmt::format("{}", fmt::join(range_strs, ":"));
+                labels.append(entry);
+            }
+        }
+        alignment["annotation"]["labels"] = std::move(labels);
+    }
+
+    // Encode path (VG-style protobuf-as-JSON). Off by default — the
+    // `path.mapping[]` list is bulky and currently has no in-tree consumer;
+    // top-level `cigar` already encodes the edit script. Callers needing
+    // VG interop opt in via `include_path_mapping`.
+    if (include_path_mapping && nodes_.size())
         alignment["path"] = path_json(nodes_, cigar_, node_size, query_view_, offset_, label);
 
     alignment["score"] = static_cast<int32_t>(score_);
@@ -962,6 +1047,11 @@ Json::Value Alignment::to_json(size_t node_size,
     return alignment;
 }
 
+// Reconstructs an Alignment from a JSON object produced by `to_json`. Reads
+// `path.mapping[]` to recover nodes and edits, so the encoder must have been
+// called with `include_path_mapping=true`. The `annotation.labels[]` block
+// is *not* read back here — it's derivable from the reconstructed alignment
+// plus the loaded annotator.
 void Alignment::load_from_json(const Json::Value &alignment,
                                const DeBruijnGraph &graph,
                                std::string *query_sequence) {

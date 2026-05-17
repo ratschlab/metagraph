@@ -270,10 +270,29 @@ class Alignment {
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
+    // `encoder` and `cth` are optional. When `encoder` is supplied, the
+    // returned object includes an `annotation.labels` array; the shape of
+    // each entry depends on what coord information is available:
+    //   - no `label_coordinates` (label-only annotator): `{sample}` only.
+    //   - `label_coordinates` + `cth` set: `{sample, nt_length, nt_coords}`
+    //     per target sequence (`.seqs` maps global column coords to
+    //     per-sequence local positions).
+    //   - `label_coordinates` set, `cth` null: `{sample, nt_coords}`
+    //     per annotation column; `nt_length` is omitted because the column
+    //     does not correspond to a single indexed sequence.
+    //
+    // `include_path_mapping` controls whether the bulky VG-style
+    // `path.mapping[]` object is emitted. Off by default: the path lists
+    // every visited node with redundant `edit` blocks (already in `cigar`)
+    // and dominates the JSON size for long alignments; no in-tree consumer
+    // currently reads it.
     Json::Value to_json(size_t node_size,
                         bool is_secondary = false,
                         const std::string &name = {},
-                        const std::string &label = {}) const;
+                        const std::string &label = {},
+                        const annot::LabelEncoder<> *encoder = nullptr,
+                        const annot::CoordToHeader *cth = nullptr,
+                        bool include_path_mapping = false) const;
 
     // writes to |query_str| the string which will be referenced in this object
     void load_from_json(const Json::Value &alignment,

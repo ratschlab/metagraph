@@ -503,22 +503,30 @@ a new annotation label will be created for every sequence in the input, and the 
 will be re-set to 0 for every sequence. Note, however, that this assumes that all sequence headers in the FASTA file are unique
 and do not repeat. If this condition is not met, an error will be returned.
 
+.. _index_header_coords:
+
 Map file coordinates to sequence headers
 """"""""""""""""""""""""""""""""""""""""
 When indexing coordinates with ``--anno-filename``, one can additionally build a mapping from file-level coordinates
-to original sequence headers using ``--index-header-coords``.
+to original sequence headers using ``--index-header-coords``. **This step is what lets callers compute the
+fraction of each target sequence covered by a hit**: it produces a ``.seqs`` sidecar file
+alongside the annotation so that both ``metagraph query --query-mode coords``
+(see :ref:`query_kmer_coordinates`) and ``metagraph align`` (see :ref:`align_nt_coordinates`)
+can report per-sequence positions and the per-target sequence length. Without it, both fall back
+to file-level coordinates and omit the per-target length.
 
 This is a second ``metagraph annotate`` run: the first run creates the annotation (``*.annodbg`` + ``*.coords``),
 and the second run creates only the coordinate-to-header (``CoordToHeader``) mapping (``*.seqs``)::
 
-    # 1) build coordinate-aware annotation
+    # 1) build coordinate-aware annotation (possibly in multiple chunks or with --separately)
     metagraph annotate -v -i graph.dbg --anno-filename --coordinates -p 4 \
                        -o annotation transcripts_1000.fa
 
     # ... optionally transform annotation to the final query representation
     #     (e.g., row_diff_brwt_coord)
 
-    # 2) build the CoordToHeader mapping
+    # 2) build the CoordToHeader mapping ONCE, against the final annotation,
+    #    with the FULL set of input FASTAs (in the order matching the final column layout)
     metagraph annotate -v -i graph.dbg --anno-filename --index-header-coords -p 4 \
                        -o annotation transcripts_1000.fa
 
@@ -528,7 +536,14 @@ Pass these files in an order that is consistent with the final transformed annot
 During query, MetaGraph loads ``annotation.*.annodbg.seqs`` (where ``*`` is the final transformed annotation type)
 automatically and reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
 
+The ``--index-header-coords`` step is a one-shot run against the final merged annotation. If the annotation
+was built in multiple chunks (multiple ``metagraph annotate`` invocations with disjoint FASTA subsets) or
+with ``--separately``, run ``--index-header-coords`` once after all annotation/transform steps are complete,
+passing every input FASTA in column order. ``metagraph stats --print-col-names`` will show the column order.
+
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
+
+.. _query_kmer_coordinates:
 
 Query k-mer coordinates
 """""""""""""""""""""""
@@ -546,6 +561,60 @@ Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is pass
     behavior and keep file-level coordinates in outputs, pass::
 
         metagraph query --query-mode coords --no-coord-mapping ...
+
+.. note::
+    When the ``.seqs`` mapping is in use (see :ref:`index_header_coords`), each hit is annotated
+    with the k-mer count of the target sequence it was found in, so callers can compute the
+    fraction of the target covered. The count appears after the ``>`` of the bracketed header,
+    separated by ``/``::
+
+        0    query1    <seq1>/6:0-1-5    <seq3>/24:1-4:1-0-3
+
+    Here ``seq1`` has 6 k-mers total and was hit at target k-mer coords ``1..5`` starting at
+    query k-mer position ``0`` (positions are k-mer-indexed and 0-based; each ``pos-first-last``
+    triplet describes one matched run).
+
+    In JSON output the same number is exposed as the ``kmers_in_target`` field next to
+    ``kmer_coords``. The target sequence's nucleotide length is ``kmers_in_target + k - 1``.
+
+    Targets hit at multiple positions produce multiple ``pos-first-last`` triplets. For an
+    actual fraction-of-target-covered figure, take the **union** of the k-mer positions
+    those triplets cover (merging any overlaps) and divide by ``kmers_in_target``.
+
+.. _align_nt_coordinates:
+
+Align nucleotide coordinates
+""""""""""""""""""""""""""""
+``metagraph align`` also reports per-target-sequence coordinates when the index is
+coordinate-aware and a ``.seqs`` mapping is present (same setup as for query, see
+:ref:`index_header_coords`). Unlike the query-side output, align coordinates are
+**1-based inclusive nucleotide positions on the target** (not k-mer indices), to match
+the alignment length given by the CIGAR.
+
+The last TSV column of each alignment is a semicolon-separated list of
+``<header>/<nt_length>:<start>-<end>`` entries. Multiple ``:<start>-<end>`` ranges after the
+same header correspond to multiple alignment positions for the same target::
+
+    q1    GCTAGCTA    +    GCTAGCTA    26    8    8=    0    seq2/16:1-8:5-12:9-16
+
+Here ``seq2`` is 16 nt long and the 8 nt query matched it at three different starting positions.
+
+In JSON output (``--json``) the same information appears as ``annotation.labels[]``::
+
+    "annotation": {
+      "cigar": "8=",
+      "labels": [{"sample": "seq2", "nt_length": 16, "nt_coords": "1-8:5-12:9-16"}],
+      "ref_sequence": "GCTAGCTA"
+    }
+
+The fraction of the target covered by a given alignment range is ``(end - start + 1) / nt_length``.
+When a target carries multiple ranges, take the **union** of their nt positions (overlapping ranges
+should be merged) — not the sum of individual spans — before dividing by ``nt_length``.
+
+.. note::
+    By default the JSON output omits the bulky VG-style ``path.mapping[]`` object
+    (one entry per visited graph node, duplicating the edit script already in
+    ``cigar``). Pass ``--align-output-path`` to include it for VG/Cactus interop.
 
 .. _transform annotation:
 
@@ -784,7 +853,9 @@ To query a MetaGraph index (graph + annotation) using the command line interface
                     --min-kmers-fraction-label 0.1 \
                     transcripts_1000.fa
 
-For alignment, see ``metagraph align``.
+For alignment, see ``metagraph align``. When the index is coordinate-aware and a ``.seqs`` mapping is loaded,
+alignments include per-target-sequence positions and lengths so the fraction of each target covered
+can be derived directly from the output — see :ref:`align_nt_coordinates`.
 
 To load up a MetaGraph index in server mode for querying it with the Python API or via HTTP requests, run::
 

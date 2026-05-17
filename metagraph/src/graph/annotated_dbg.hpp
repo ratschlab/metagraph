@@ -123,8 +123,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                     double discovery_fraction,
                     double presence_fraction) const;
 
-    // returns tuples (label, num_kmer_matches, kmer_coordinates)
-    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
+    // returns tuples (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target).
+    // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
+    // label refers to a whole annotation column rather than a single indexed
+    // sequence).
+    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
