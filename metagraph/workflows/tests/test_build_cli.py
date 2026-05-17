@@ -450,10 +450,16 @@ def test_disk_swap_dir_propagates_to_metagraph_stages(sample_list_path, output_d
     cfg = (output_dir / "config.yaml").read()
     assert "tmpdir: /var/tmp/test-swap" in cfg
     out = proc.stdout.decode()
-    assert "--disk-swap /var/tmp/test-swap" in out
+    # The dir is quoted (so empty/whitespace paths round-trip safely too).
+    assert '--disk-swap "/var/tmp/test-swap"' in out
 
 
 def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
+    # `metagraph transform_anno --disk-swap` defaults to OUT_BASEDIR (not
+    # off), so without an explicit --disk-swap-dir the workflow must pass
+    # `--disk-swap ""` to actually disable disk spill. Every occurrence
+    # of --disk-swap in the dryrun output should be the empty-string
+    # form, not a real path.
     proc = run_wrapper([
         'build',
         sample_list_path,
@@ -463,7 +469,10 @@ def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
     ])
     assert proc.returncode == 0
     out = proc.stdout.decode()
-    assert "--disk-swap" not in out
+    for line in out.splitlines():
+        if '--disk-swap' not in line:
+            continue
+        assert '--disk-swap ""' in line, f"Unexpected --disk-swap target: {line}"
 
 
 def test_small_graph_step_runs(sample_list_path, output_dir):

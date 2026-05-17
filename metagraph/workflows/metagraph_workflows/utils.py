@@ -136,7 +136,15 @@ def get_log_path(rule_name, config, wildcards=None):
 
 
 def temp_dir_config(config):
-    return f"--disk-swap {config[TMP_DIR]}" if TMP_DIR in config else ''
+    """Return the `--disk-swap` flag for a metagraph invocation.
+
+    Always emit the flag explicitly so transform_anno doesn't fall back
+    to its `[OUT_BASEDIR]` default (which would silently spill temp
+    files next to the output). `metagraph build` and `metagraph annotate`
+    both default to off and accept an empty string identically, so the
+    explicit `--disk-swap ""` form is safe for all callers.
+    """
+    return f'--disk-swap "{config[TMP_DIR]}"' if TMP_DIR in config else '--disk-swap ""'
 
 
 def get_rule_specific_config(rule, key, config):
