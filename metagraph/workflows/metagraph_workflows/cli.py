@@ -3,6 +3,7 @@ import difflib
 import importlib
 import logging
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -39,12 +40,13 @@ COORD_COMPATIBLE_FORMATS = {
 
 
 # Colorize a few flag names in --help so users can see at a glance which
-# flags belong to count-aware (yellow, 33) vs coord-aware (purple, 35)
-# modes. Matches the colors already used for the format-name lists in
-# `_add_annotation_args`.
+# flags belong to count-aware (orange, 38;5;208) vs coord-aware (purple, 35)
+# modes. Matches the colors used for the format-name lists in
+# `_add_annotation_args`. We deliberately avoid yellow (33) and cyan (36)
+# because argparse 3.14 already uses those for metavars and option strings.
 _FLAG_COLORS = {
-    '--with-counts': '33',
-    '--count-width': '33',
+    '--with-counts': '38;5;208',
+    '--count-width': '38;5;208',
     '--with-coords': '35',
 }
 
@@ -55,7 +57,42 @@ class _ColorHelpFormatter(argparse.RawTextHelpFormatter):
     We wrap the flag in ANSI codes after argparse has already computed
     its column widths, so the alignment of the help text is unaffected
     (ANSI escape codes render at zero width in the terminal).
+
+    Also overrides argparse 3.14 theme defaults so the palette stays
+    readable on both dark and light terminal backgrounds: flag names,
+    positionals and metavars render in plain default fg (no hue, no
+    bold) instead of argparse's bold magenta / cyan / green / yellow.
+    The prog name keeps a bold weight so it stands out at the start of
+    the usage line. The custom highlights (orange / magenta / cyan)
+    come from our own coloring on top.
     """
+
+    def _set_color(self, color):
+        super()._set_color(color)
+        if color and getattr(self._theme, "prog", None):
+            import dataclasses
+            self._theme = dataclasses.replace(
+                self._theme,
+                # Prog name: bold default fg.
+                prog="\033[1m",
+                prog_extra="",
+                # Flag names, positionals, metavars: no styling.
+                long_option="",
+                short_option="",
+                action="",
+                label="",
+                summary_long_option="",
+                summary_short_option="",
+                summary_action="",
+                summary_label="",
+            )
+
+    # Bold the contents of [..] defaults at end of help lines. We skip
+    # bracket pairs that already contain an ANSI escape so existing
+    # color-coded defaults (e.g. [row_diff_int_brwt], [0/8]) keep their
+    # own styling. The negative lookbehind avoids matching `[` characters
+    # that are part of an ANSI escape sequence (i.e. `\x1b[`).
+    _DEFAULT_BRACKET_RE = re.compile(r"(?<!\x1b)\[([^\[\]\n\x1b]+)\]")
 
     def _format_action(self, action):
         text = super()._format_action(action)
@@ -63,7 +100,9 @@ class _ColorHelpFormatter(argparse.RawTextHelpFormatter):
             return text
         for flag, code in _FLAG_COLORS.items():
             if flag in action.option_strings:
-                return text.replace(flag, f"\033[{code}m{flag}\033[0m", 1)
+                text = text.replace(flag, f"\033[{code}m{flag}\033[0m", 1)
+                break
+        text = self._DEFAULT_BRACKET_RE.sub(r"[\033[1m\1\033[0m]", text)
         return text
 
 
@@ -774,7 +813,7 @@ def _add_seq_input_args(group):
                             '  paths (one per line). The type is auto-detected.')
     group.add_argument('-o', dest='output_dir', type=Path, required=True,
                        metavar='DIR',
-                       help='Output directory [required]')
+                       help='Output directory []')
     group.add_argument('--base-name', default='graph', metavar='NAME',
                        help='Base output name [graph]')
 
@@ -786,7 +825,7 @@ def _add_annotation_args(annotation):
     label_sources = [v.value for v in AnnotationLabelsSource]
     count_formats = sorted([f.value for f in COUNT_COMPATIBLE_FORMATS])
     coord_formats = sorted([f.value for f in COORD_COMPATIBLE_FORMATS])
-    count_formats_display = [_help_color(fmt, "33") for fmt in count_formats]
+    count_formats_display = [_help_color(fmt, "38;5;208") for fmt in count_formats]
     coord_formats_display = [_help_color(fmt, "35") for fmt in coord_formats]
     plain_fmt_names = [
         "row", "bin_rel_wt", "flat", "rbfish", "brwt", "relax.brwt", "rb_brwt",
@@ -796,16 +835,21 @@ def _add_annotation_args(annotation):
         "row_diff_flat", "row_diff_sparse", "row_diff_disk",
     ]
 
-    def _with_default(name: str, color: str, default_name: str) -> str:
-        colored = _help_color(name, color)
-        return f"[{colored}]" if name == default_name else colored
+    def _with_default(name: str, color: str, default_name: str, bold_default: bool = False) -> str:
+        if name == default_name:
+            highlight = f"1;{color}" if bold_default else color
+            return f"[{_help_color(name, highlight)}]"
+        return _help_color(name, color)
 
-    plain_fmt_help = [_with_default(f, "36", "") for f in plain_fmt_names]
-    rd_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt") for f in rd_fmt_names]
-    count_fmt_help = [_with_default(f, "33", "row_diff_int_brwt") for f in count_formats]
+    # Binary (plain + row-diff) formats: cyan, with only the default
+    # additionally bolded. Count / coord formats keep the orange /
+    # magenta family coloring (no extra bold on default).
+    plain_fmt_help = [_with_default(f, "36", "", bold_default=True) for f in plain_fmt_names]
+    rd_fmt_help = [_with_default(f, "36", "relax.row_diff_brwt", bold_default=True) for f in rd_fmt_names]
+    count_fmt_help = [_with_default(f, "38;5;208", "row_diff_int_brwt") for f in count_formats]
     coord_fmt_help = [_with_default(f, "35", "row_diff_brwt_coord") for f in coord_formats]
-    default_count_width = _help_color("8", "33")
-    zero_count_width = _help_color("0", "36")
+    default_count_width = _help_color("8", "38;5;208")
+    zero_count_width = _help_color("0", "1")
 
     all_formats_help = "\n".join([
         f"    {', '.join(plain_fmt_help)}",
@@ -819,7 +863,7 @@ def _add_annotation_args(annotation):
                             type=AnnotationLabelsSource,
                             default=AnnotationLabelsSource.FILENAME,
                             metavar='SOURCE',
-                            help=f"Column label source: {', '.join(label_sources)} [filename]\n"
+                            help=f"Column label source: {'/'.join(label_sources)} [filename]\n"
                                  "  ")
     annotation.add_argument('--anno-type', action='append',
                             dest='annotation_format',
@@ -829,14 +873,14 @@ def _add_annotation_args(annotation):
                                  f"{all_formats_help}\n"
                                  "  ")
     annotation.add_argument('--with-counts', default=False, action='store_true',
-                            help=f"Index with k-mer counts [False]\n"
+                            help=f"Index with k-mer counts [off]\n"
                                  f"  Supported for {', '.join(count_formats_display)}.")
     annotation.add_argument('--count-width', type=int, default=None,
                             metavar='BITS',
                             help=f"Bit width for count values (passed to annotate/transform_anno) [{zero_count_width}/{default_count_width}]\n"
                                  "  ")
     annotation.add_argument('--with-coords', dest='with_coordinates', default=False, action='store_true',
-                            help=f"Index with k-mer positions [False]\n"
+                            help=f"Index with k-mer positions [off]\n"
                                  f"  Supported for {coord_formats_display[0]}, {coord_formats_display[2]}, {coord_formats_display[1]}, {coord_formats_display[3]}")
 
 
@@ -861,58 +905,61 @@ def _add_workflow_args(workflow):
                                '  columns (passed as --subsample to transform_anno --anno-type *_brwt*) [1e6]')
     workflow.add_argument('--keep-columns', default=False, action='store_true',
                           help='Keep per-sample column annotations (columns.<mode>/) after the\n'
-                               '  final annotation is built [False]')
+                               '  final annotation is built [off]')
     workflow.add_argument('--keep-rd-columns', default=False, action='store_true',
                           help='Keep per-sample row-diff column annotations (rd_cols.<mode>/) and\n'
                                '  the rd_succ / anchors graph sidecars, so the BRWT clustering\n'
-                               '  step can be re-run with different parameters [False]')
+                               '  step can be re-run with different parameters [off]')
 
 
 def _add_help_arg(parser):
     options = parser.add_argument_group('options')
     options.add_argument('-v', '--verbose', default=False, action='store_true',
-                         help='Stream metagraph progress to the terminal (logs always capture full -v output) [False]')
+                         help='Stream metagraph progress to the terminal (logs always capture full -v output) [off]')
     options.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',
-                         help='Path/command for metagraph executable [metagraph from PATH]')
+                         help='Path/command for metagraph executable [metagraph]')
     options.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
                          help='Extra arguments to pass to snakemake [none]\n'
                               '  Example: --extra-args="arg1=val1 arg2=val2"')
     options.add_argument('--force', default=False, action='store_true',
-                         help='Force re-run all rules [False]')
+                         help='Force re-run all rules [off]')
     options.add_argument('--dryrun', default=False, action='store_true',
-                         help='Render DAG and config only; do not execute rules [False]')
+                         help='Render DAG and config only; do not execute rules [off]')
     options.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
                          help='Show this help message and exit')
 
 
 def setup_build_parser(parser):
+    primary_flag = "--primary"
+    with_counts_flag = _help_color("--with-counts", "38;5;208")
+    with_coords_flag = _help_color("--with-coords", "35")
     parser.description = (
         "Build a MetaGraph graph + annotation workflow from a sequence list or directory.\n"
         "\n"
         "Inputs are assumed to be contigs with deduplicated k-mers (one fasta.gz\n"
-        "per sample). When building a primary graph (--primary), they must be\n"
-        "primary contigs. For --with-coords, inputs must instead be the full,\n"
+        f"per sample). When building a primary graph ({primary_flag}), they must be\n"
+        f"primary contigs. For {with_coords_flag}, inputs must instead be the full,\n"
         "non-deduplicated samples."
     )
     parser.epilog = (
         "Examples:\n"
         "  metagraph-workflows build samples_dir/ -k 31 -o out/\n"
         "  metagraph-workflows build <(ls /data/samples/*.fa) -k 31 -o out/\n"
-        "  metagraph-workflows build files.txt --with-counts -o out/\n"
-        "  metagraph-workflows build samples_dir/ --with-coords -o out/"
+        f"  metagraph-workflows build files.txt {with_counts_flag} -o out/\n"
+        f"  metagraph-workflows build samples_dir/ {with_coords_flag} -o out/"
     )
 
     _add_seq_input_args(parser.add_argument_group('input/output'))
 
     graph = parser.add_argument_group('graph')
     graph.add_argument('--graph', type=Path, default=None, metavar='PATH',
-                       help='Reuse an existing .dbg graph instead of building one from SAMPLES.\n'
+                       help='Reuse an existing .dbg graph instead of building one from SAMPLES []\n'
                             '  Skips the build pipeline; runs annotation + row-diff transforms only.')
     graph.add_argument('-k', type=int, default=31, metavar='K',
                        help='k-mer length [31]')
     graph.add_argument('--primary', dest='build_primary_graph', default=False,
                        action='store_true',
-                       help='Build canonical graph first, then derive/build primary graph [False]')
+                       help='Build canonical graph first, then derive/build primary graph [off]')
 
     _add_annotation_args(parser.add_argument_group('annotation'))
     _add_workflow_args(parser.add_argument_group('other'))
