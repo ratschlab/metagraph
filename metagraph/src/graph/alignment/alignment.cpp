@@ -909,7 +909,8 @@ Json::Value Alignment::to_json(size_t node_size,
                                const std::string &read_name,
                                const std::string &label,
                                const annot::LabelEncoder<> *encoder,
-                               const annot::CoordToHeader *cth) const {
+                               const annot::CoordToHeader *cth,
+                               bool include_path_mapping) const {
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -990,8 +991,11 @@ Json::Value Alignment::to_json(size_t node_size,
         alignment["annotation"]["labels"] = std::move(labels);
     }
 
-    // encode path
-    if (nodes_.size())
+    // Encode path (VG-style protobuf-as-JSON). Off by default — the
+    // `path.mapping[]` list is bulky and currently has no in-tree consumer;
+    // top-level `cigar` already encodes the edit script. Callers needing
+    // VG interop opt in via `include_path_mapping`.
+    if (include_path_mapping && nodes_.size())
         alignment["path"] = path_json(nodes_, cigar_, node_size, query_view_, offset_, label);
 
     alignment["score"] = static_cast<int32_t>(score_);

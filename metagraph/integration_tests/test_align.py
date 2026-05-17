@@ -344,7 +344,10 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
-        stats_command = '{exe} align --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        # The fixture includes the VG-style `path.mapping[]` object, which is
+        # now opt-in via --align-output-path (off by default).
+        stats_command = ('{exe} align --json --align-output-path -i {graph} '
+                         '--align-min-exact-match 0.0 {reads}').format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -370,7 +373,11 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('16438', params['nodes (k)'])
         self.assertEqual('basic', params['mode'])
 
-        stats_command = '{exe} align --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        # See note in test_simple_align_all_graphs: --align-output-path opts in
+        # to the bulky path.mapping[] object that the fixture pins.
+        stats_command = ('{exe} align --json --align-output-path '
+                         '--align-edit-distance -i {graph} '
+                         '--align-min-exact-match 0.0 {reads}').format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -726,6 +733,12 @@ class TestAlignCoordToHeader(TestingBase):
 
         records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
         self.assertEqual(len(records), 2)
+
+        # Default JSON omits the bulky VG-style `path.mapping[]` object;
+        # callers opt in via --align-output-path.
+        for record in records:
+            self.assertNotIn('path', record,
+                             "`path` must be opt-in via --align-output-path")
 
         # query1 -> seq1 (10 nt), 1-based inclusive range 2-10.
         labels1 = records[0]['annotation']['labels']

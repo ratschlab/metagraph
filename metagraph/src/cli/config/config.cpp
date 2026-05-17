@@ -248,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             align_sequences = true;
         } else if (!strcmp(argv[i], "--align-only-forwards")) {
             align_only_forwards = true;
+        } else if (!strcmp(argv[i], "--align-output-path")) {
+            align_output_path = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
@@ -1097,6 +1099,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --align-output-path \t\t\t\twith --json, also emit the bulky VG-style path.mapping object [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
