@@ -577,6 +577,10 @@ Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is pass
     In JSON output the same number is exposed as the ``kmers_in_target`` field next to
     ``kmer_coords``. The target sequence's nucleotide length is ``kmers_in_target + k - 1``.
 
+    Targets hit at multiple positions produce multiple ``pos-first-last`` triplets. For an
+    actual fraction-of-target-covered figure, take the **union** of the k-mer positions
+    those triplets cover (merging any overlaps) and divide by ``kmers_in_target``.
+
 .. _align_nt_coordinates:
 
 Align nucleotide coordinates
@@ -604,6 +608,8 @@ In JSON output (``--json``) the same information appears as ``annotation.labels[
     }
 
 The fraction of the target covered by a given alignment range is ``(end - start + 1) / nt_length``.
+When a target carries multiple ranges, take the **union** of their nt positions (overlapping ranges
+should be merged) — not the sum of individual spans — before dividing by ``nt_length``.
 
 .. note::
     By default the JSON output omits the bulky VG-style ``path.mapping[]`` object

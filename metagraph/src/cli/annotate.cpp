@@ -519,7 +519,7 @@ int annotate_graph(Config *config) {
     // FASTAs (run it after any transform/merge step). It is a separate step
     // because the column order may shift during transforms and a single
     // annotate call may only see a subset of the inputs.
-    if (config->coordinates && config->filename_anno
+    if (config->coordinates && config->filename_anno && !config->index_header_coords
             && !config->annotate_sequence_headers && config->anno_labels.empty()) {
         logger->info("To enable per-sequence coordinate reporting "
                      "(`<seq>/N:...` in TSV; JSON `kmers_in_target` for query, "
@@ -527,7 +527,10 @@ int annotate_graph(Config *config) {
                      "once against the final merged annotation with all input "
                      "FASTAs:\n"
                      "    metagraph annotate --anno-filename --index-header-coords "
-                     "-i <graph> -o <final_anno_basename> <all_input_fastas>");
+                     "-i {} -o {} <all_input_fastas>",
+                     !config->infbase.empty() ? config->infbase : "<graph>",
+                     !config->outfbase.empty() ? config->outfbase
+                                               : "<final_anno_basename>");
     }
 
     return 0;

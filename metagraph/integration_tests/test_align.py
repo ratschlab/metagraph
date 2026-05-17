@@ -425,13 +425,13 @@ class TestAlignCoordToHeader(TestingBase):
     That is a larger change — design to be worked out separately.
     """
 
-    # Strip the per-target k-mer count (`/N`) emitted in CoordToHeader mode
-    # from a label-coord string so it can be compared against the
+    # Strip the per-target nucleotide length (`/N`) emitted in CoordToHeader
+    # mode from a label-coord string so it can be compared against the
     # --anno-header mode output (which has no `/N`).
-    _STRIP_KMERS_RE = re.compile(r'(^|;)([^:;]+)/\d+:')
+    _STRIP_NT_LENGTH_RE = re.compile(r'(^|;)([^:;]+)/\d+:')
     @classmethod
-    def _strip_kmers_in_target(cls, s):
-        return cls._STRIP_KMERS_RE.sub(r'\1\2:', s)
+    def _strip_nt_length(cls, s):
+        return cls._STRIP_NT_LENGTH_RE.sub(r'\1\2:', s)
 
     def setUp(self):
         self.tempdir = TemporaryDirectory()
@@ -494,7 +494,7 @@ class TestAlignCoordToHeader(TestingBase):
     def _assert_cth_matches_anno_header(self, rows_a, rows_b):
         """Check per-row CIGAR + label equivalence between CoordToHeader and
         per-sequence-column modes. CoordToHeader mode prefixes each header
-        with the per-target k-mer count (`/N`); strip it so the label set
+        with the per-target nucleotide length (`/N`); strip it so the label set
         matches --anno-header mode output, and sort to ignore label order."""
         self.assertEqual(len(rows_a), len(rows_b))
         for row_a, row_b in zip(rows_a, rows_b):
@@ -502,7 +502,7 @@ class TestAlignCoordToHeader(TestingBase):
             self.assertEqual(row_a[6], row_b[6],
                              f"CIGAR mismatch for {row_a[0]}: "
                              f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
-            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
+            labels_a = sorted(self._strip_nt_length(row_a[8]).split(';'))
             labels_b = sorted(row_b[8].split(';'))
             self.assertEqual(labels_a, labels_b,
                              f"label mismatch for {row_a[0]}: "
