@@ -571,6 +571,37 @@ Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is pass
     In JSON output the same number is exposed as the ``kmers_in_target`` field next to
     ``kmer_coords``. The target sequence's nucleotide length is ``kmers_in_target + k - 1``.
 
+.. _align_kmer_coordinates:
+
+Align k-mer coordinates
+"""""""""""""""""""""""
+``metagraph align`` also reports per-target-sequence coordinates when the index is
+coordinate-aware and a ``.seqs`` mapping is present (same setup as for query, see
+:ref:`query_kmer_coordinates`). The last TSV column of each alignment is a
+semicolon-separated list of ``<header>/<nt_length>:<start>-<end>`` entries, where ``<start>``
+and ``<end>`` are 1-based inclusive nucleotide positions on the target. Multiple ``:<start>-<end>``
+ranges after the same header correspond to multiple alignment positions for the same target::
+
+    q1    GCTAGCTA    +    GCTAGCTA    26    8    8=    0    seq2/16:1-8:5-12:9-16
+
+Here ``seq2`` is 16 nt long and the 8 nt query matched it at three different starting positions.
+
+In JSON output (``--json``) the same information appears as ``annotation.labels[]``::
+
+    "annotation": {
+      "cigar": "8=",
+      "labels": [{"sample": "seq2", "nt_length": 16, "nt_coords": "1-8:5-12:9-16"}],
+      "ref_sequence": "GCTAGCTA"
+    }
+
+The fraction of the target covered by a given alignment range is
+``(end - start + 1) / nt_length``.
+
+.. note::
+    By default the JSON output omits the bulky VG-style ``path.mapping[]`` object
+    (one entry per visited graph node, duplicating the edit script already in
+    ``cigar``). Pass ``--align-output-path`` to include it for VG/Cactus interop.
+
 .. _transform annotation:
 
 Transform annotation
@@ -808,7 +839,9 @@ To query a MetaGraph index (graph + annotation) using the command line interface
                     --min-kmers-fraction-label 0.1 \
                     transcripts_1000.fa
 
-For alignment, see ``metagraph align``.
+For alignment, see ``metagraph align``. When the index is coordinate-aware and a ``.seqs`` mapping is loaded,
+alignments include per-target-sequence positions and lengths so the fraction of each target covered
+can be derived directly from the output — see :ref:`align_kmer_coordinates`.
 
 To load up a MetaGraph index in server mode for querying it with the Python API or via HTTP requests, run::
 
