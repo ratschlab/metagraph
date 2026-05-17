@@ -139,11 +139,11 @@ is derived automatically:
 
 ```bash
 metagraph-workflows build samples.txt -o out/ --primary \
-  --threads 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+  -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 ```
 
 Useful switches:
-- `--threads N` — maximum CPU cores to use (defaults to all cores)
+- `-p N` — maximum CPU cores to use (defaults to all cores)
 - `--mem-gb GB` — approximate RAM budget per rule (default 16)
 - `--disk-swap-dir DIR` — directory for on-disk spill buffers
 - `--primary` — build a primary graph (recommended for most workloads)

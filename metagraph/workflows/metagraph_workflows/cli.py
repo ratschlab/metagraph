@@ -821,40 +821,39 @@ def _add_annotation_args(annotation):
 
 
 def _add_workflow_args(workflow):
-    """Add the shared `other` argument group (threads, disk/mem, force,
-    verbose, dryrun, metagraph-cmd, extra-args)."""
-    workflow.add_argument('--threads', type=int, default=None, metavar='N',
+    """Add the shared `other` argument group (threads, disk/mem,
+    verbose, metagraph-cmd, extra-args, force, dryrun)."""
+    workflow.add_argument('-p', dest='threads', type=int, default=None, metavar='N',
                           help='Maximum CPU cores to use [num_cores]')
-    workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
-                          metavar='DIR',
-                          help='Directory for on-disk buffers; omit to stay in RAM [none]')
     workflow.add_argument('--mem-gb', type=float, default=None,
                           metavar='GB',
                           help='Approximate RAM budget in GB; used to derive --mem-cap-gb for each stage [16]')
+    workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
+                          metavar='DIR',
+                          help='Directory for on-disk buffers; omit to stay in RAM [none]')
     workflow.add_argument('--anno-threads-each', dest='annotate_threads_each',
                           type=int, default=None, metavar='N',
-                          help='Threads used to annotate each input file. Parallel columns = ceil(--threads / N);\n'
+                          help='Threads used to annotate each input file. Parallel columns = ceil(-p / N);\n'
                                '  raise N to give each column more --mem-cap-gb buffer.\n'
                                '  [8 for binary/counts, 16 for coords]')
-    workflow.add_argument('--brwt-subsample', type=int, default=None, metavar='N',
+    workflow.add_argument('--brwt-subsample', type=_int_or_sci, default=None, metavar='N',
                           help='Number of bits subsampled for distance estimation when clustering BRWT\n'
-                               '  columns (passed as --subsample to transform_anno --anno-type *_brwt*). [1000000]')
-    workflow.add_argument('--force', default=False, action='store_true',
-                          help='Force re-run all rules [False]')
-    workflow.add_argument('-v', '--verbose', default=False, action='store_true',
-                          help='Print verbose config/runtime logs and pass -v to each\n'
-                               '  underlying metagraph invocation [False]')
-    workflow.add_argument('--dryrun', default=False, action='store_true',
-                          help='Render DAG and config only; do not execute rules [False]')
-    workflow.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',
-                          help='Path/command for metagraph executable [metagraph from PATH]')
-    workflow.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
-                          help='Extra arguments to pass to snakemake [none]\n'
-                               '  Example: --extra-args="arg1=val1 arg2=val2"')
+                               '  columns (passed as --subsample to transform_anno --anno-type *_brwt*) [1e6]')
 
 
 def _add_help_arg(parser):
     options = parser.add_argument_group('options')
+    options.add_argument('-v', '--verbose', default=False, action='store_true',
+                         help='Print verbose config/runtime logs and pass -v to metagraph [False]')
+    options.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',
+                         help='Path/command for metagraph executable [metagraph from PATH]')
+    options.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
+                         help='Extra arguments to pass to snakemake [none]\n'
+                              '  Example: --extra-args="arg1=val1 arg2=val2"')
+    options.add_argument('--force', default=False, action='store_true',
+                         help='Force re-run all rules [False]')
+    options.add_argument('--dryrun', default=False, action='store_true',
+                         help='Render DAG and config only; do not execute rules [False]')
     options.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
                          help='Show this help message and exit')
 
@@ -893,6 +892,19 @@ def setup_build_parser(parser):
     _add_help_arg(parser)
 
     parser.set_defaults(func=init_build)
+
+
+def _int_or_sci(value: str) -> int:
+    """Argparse type that accepts plain ints and scientific notation
+    (e.g. `1e6`). Useful for knobs like --brwt-subsample where typical
+    values are powers of ten."""
+    try:
+        f = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected integer, got {value!r}")
+    if not f.is_integer():
+        raise argparse.ArgumentTypeError(f"expected integer, got {value!r}")
+    return int(f)
 
 
 def _convert_type(v: str) -> Any:

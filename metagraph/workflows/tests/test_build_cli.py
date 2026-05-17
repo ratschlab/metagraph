@@ -373,7 +373,7 @@ def test_annotate_threads_each_default_is_eight(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--threads', '16',
+        '-p', '16',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -389,7 +389,7 @@ def test_annotate_threads_each_overrides_default(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--threads', '16',
+        '-p', '16',
         '--anno-threads-each', '4',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -409,7 +409,7 @@ def test_annotate_threads_each_redistributes_leftover(sample_list_path, output_d
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--threads', '12',
+        '-p', '12',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -426,7 +426,7 @@ def test_annotate_threads_each_ceiling_overcommits_at_boundary(sample_list_path,
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--threads', '13',
+        '-p', '13',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -621,7 +621,7 @@ def test_coords_mode_auto_picks_threads_each_16(sample_list_path, output_dir):
         'build',
         sample_list_path,
         '--anno-type', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
-        '--threads', '16',
+        '-p', '16',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -690,6 +690,20 @@ def test_brwt_subsample_default_and_override(sample_list_path, output_dir, tmpdi
     ])
     assert proc.returncode == 0
     assert "--subsample 200000" in proc.stdout.decode()
+
+
+@pytest.mark.parametrize("expr,expanded", [("1e6", 1000000), ("2.5e4", 25000)])
+def test_brwt_subsample_accepts_scientific_notation(sample_list_path, output_dir, expr, expanded):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--brwt-subsample', expr,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    assert f"--subsample {expanded}" in proc.stdout.decode()
 
 
 @pytest.mark.parametrize("bad", [0, 1, 999])

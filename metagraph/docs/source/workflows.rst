@@ -65,7 +65,7 @@ Typically, the following steps would be performed:
 
    Important parameters you may want to set:
 
-   * ``--threads N`` and ``--mem-gb GB`` for the hardware budget
+   * ``-p N`` and ``--mem-gb GB`` for the hardware budget
    * ``-k`` for k-mer length (default 31)
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
@@ -82,7 +82,7 @@ Typically, the following steps would be performed:
 
      metagraph-workflows build samples.txt -o /tmp/mygraph \
          -k 31 --primary \
-         --threads 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+         -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 
 Count-aware annotations
 ^^^^^^^^^^^^^^^^^^^^^^^
