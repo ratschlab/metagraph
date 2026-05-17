@@ -506,12 +506,31 @@ def test_default_silences_metagraph_terminal_output(sample_list_path, output_dir
         assert '> /dev/null' in line, f"non-verbose tee missing silencer: {line}"
 
 
-def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
-    # `metagraph transform_anno --disk-swap` defaults to OUT_BASEDIR (not
-    # off), so without an explicit --disk-swap-dir the workflow must pass
-    # `--disk-swap ""` to actually disable disk spill. Every occurrence
-    # of --disk-swap in the dryrun output should be the empty-string
-    # form, not a real path.
+def test_disk_swap_dir_empty_string_disables_swap(sample_list_path, output_dir):
+    # `--disk-swap-dir ""` is the explicit-off sentinel: every metagraph
+    # invocation gets `--disk-swap ""` so nothing spills to disk.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--disk-swap-dir', '',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    for line in out.splitlines():
+        if '--disk-swap' not in line:
+            continue
+        assert '--disk-swap ""' in line, f"Unexpected --disk-swap target: {line}"
+    cfg = (output_dir / "config.yaml").read()
+    assert "tmpdir:" not in cfg
+
+
+def test_disk_swap_dir_defaults_to_output_temp(sample_list_path, output_dir):
+    # When --disk-swap-dir is omitted, the workflow defaults to
+    # <output_dir>/temp so metagraph transform_anno doesn't fall back to
+    # its OUT_BASEDIR default and silently spill next to artifacts.
     proc = run_wrapper([
         'build',
         sample_list_path,
@@ -521,10 +540,13 @@ def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
     ])
     assert proc.returncode == 0
     out = proc.stdout.decode()
+    expected = f'--disk-swap "{output_dir}/temp"'
     for line in out.splitlines():
         if '--disk-swap' not in line:
             continue
-        assert '--disk-swap ""' in line, f"Unexpected --disk-swap target: {line}"
+        assert expected in line, f"Unexpected --disk-swap target: {line}"
+    cfg = (output_dir / "config.yaml").read()
+    assert f"tmpdir: {output_dir}/temp" in cfg
 
 
 def test_small_graph_step_runs(sample_list_path, output_dir):

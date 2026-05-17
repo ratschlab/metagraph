@@ -596,7 +596,7 @@ def _set_samples_config(config, samples, output_dir):
     raise ValueError(f"samples path not found: {samples_path}")
 
 
-def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
+def _apply_runtime_options(config, output_dir, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun):
     """Apply runtime / resource fields to config; raise on invalid values."""
     config['metagraph_cmd'] = metagraph_cmd or config['metagraph_cmd']
@@ -608,8 +608,24 @@ def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd
             raise ValueError(
                 f"--anno-threads-each must be >= 1, got {annotate_threads_each}")
         config['annotate_threads_each'] = annotate_threads_each
-    if disk_swap_dir is not None:
+    # Disk swap:
+    #   None  -> default to <output_dir>/temp so metagraph stages can spill
+    #            without surprising fallback to OUT_BASEDIR (transform_anno's
+    #            default).
+    #   ""    -> explicit "off": don't set tmpdir; temp_dir_config will emit
+    #            `--disk-swap ""` and keep everything in RAM.
+    #   path  -> use as given.
+    if disk_swap_dir is None:
+        config['tmpdir'] = str(Path(output_dir) / 'temp')
+    elif str(disk_swap_dir) == '':
+        config.pop('tmpdir', None)
+    else:
         config['tmpdir'] = str(disk_swap_dir)
+
+    # metagraph stages create temp files in the swap dir and expect the
+    # directory itself to already exist; create it eagerly.
+    if 'tmpdir' in config and not dryrun:
+        Path(config['tmpdir']).mkdir(parents=True, exist_ok=True)
     if mem_gb is not None:
         if mem_gb <= 0:
             raise ValueError(f"--mem-gb must be > 0, got {mem_gb}")
@@ -672,7 +688,7 @@ def run_workflow(
 
     _apply_annotation_options(config, annotation_formats, annotation_labels_source,
                               with_counts, with_coordinates, count_width)
-    _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd,
+    _apply_runtime_options(config, output_dir, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun)
 
     if graph is not None:
@@ -828,9 +844,9 @@ def _add_workflow_args(workflow):
     workflow.add_argument('--mem-gb', type=float, default=None,
                           metavar='GB',
                           help='Approximate RAM budget in GB; used to derive --mem-cap-gb for each stage [16]')
-    workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
-                          metavar='DIR',
-                          help='Directory for on-disk buffers; omit to stay in RAM [none]')
+    workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir',
+                          type=_disk_swap_dir_value, default=None, metavar='DIR',
+                          help='Directory for disk swap; pass "" to disable [<OUTPUT_DIR>/temp]')
     workflow.add_argument('--anno-threads-each', dest='annotate_threads_each',
                           type=int, default=None, metavar='N',
                           help='Threads used to annotate each input file. Parallel columns = ceil(-p / N);\n'
@@ -892,6 +908,15 @@ def setup_build_parser(parser):
     _add_help_arg(parser)
 
     parser.set_defaults(func=init_build)
+
+
+def _disk_swap_dir_value(value: str):
+    """argparse type for --disk-swap-dir.
+
+    Empty string is the explicit "off" sentinel (keeps everything in RAM);
+    any other value is treated as a directory path.
+    """
+    return '' if value == '' else Path(value)
 
 
 def _int_or_sci(value: str) -> int:
