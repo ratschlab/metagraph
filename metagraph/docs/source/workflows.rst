@@ -70,7 +70,7 @@ Typically, the following steps would be performed:
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
    * ``--anno-source`` (``header`` or ``filename``; default ``filename``)
-   * ``--annotation-format FMT`` to choose / add output annotation formats
+   * ``--anno-type FMT`` to choose / add output annotation formats
    * ``--with-counts`` or ``--with-coords`` for count- / coordinate-aware
      annotation (mutually exclusive)
    * ``--graph EXISTING.dbg`` to reuse an already-built graph and run
@@ -99,11 +99,11 @@ the default switches from ``relax.row_diff_brwt`` to ``row_diff_int_brwt``::
     metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
         -k 31 --primary --with-counts --count-width 12
 
-You can also select a count-aware format directly via ``--annotation-format``; this
+You can also select a count-aware format directly via ``--anno-type``; this
 automatically enables count-aware mode::
 
     metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
-        -k 31 --primary --annotation-format row_diff_int_brwt --count-width 12
+        -k 31 --primary --anno-type row_diff_int_brwt --count-width 12
 
 Use ``--count-width`` to control the stored numeric range for counts
 (valid range: ``2..32``, default: ``8``).
@@ -127,11 +127,11 @@ the default switches from ``relax.row_diff_brwt`` to ``row_diff_brwt_coord``::
     metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
         -k 31 --with-coords
 
-You can also select a coordinate-aware format directly via ``--annotation-format``; this
+You can also select a coordinate-aware format directly via ``--anno-type``; this
 automatically enables coordinate-aware mode::
 
     metagraph-workflows build transcript_paths.txt -o [OUTPUT_DIR] \
-        -k 31 --annotation-format row_diff_brwt_coord
+        -k 31 --anno-type row_diff_brwt_coord
 
 Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
 For this use case, primary graph mode is usually not recommended.

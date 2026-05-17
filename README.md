@@ -147,7 +147,7 @@ Useful switches:
 - `--mem-gb GB` — approximate RAM budget per rule (default 16)
 - `--disk-swap-dir DIR` — directory for on-disk spill buffers
 - `--primary` — build a primary graph (recommended for most workloads)
-- `--annotation-format FMT` — request a specific annotation format
+- `--anno-type FMT` — request a specific annotation format
   (repeat for multiple outputs); the default is `relax.row_diff_brwt`
 - `--with-counts` / `--with-coords` — count- or coordinate-aware
   annotation (mutually exclusive)

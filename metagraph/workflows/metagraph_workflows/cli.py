@@ -543,8 +543,8 @@ def _apply_annotation_options(config, annotation_formats, annotation_labels_sour
         invalid = [af.value for af in annotation_formats if af not in COUNT_COMPATIBLE_FORMATS]
         if invalid:
             raise ValueError(
-                "Count-aware mode is enabled (--with-counts or count-capable --annotation-format), "
-                "--annotation-format must be one of: "
+                "Count-aware mode is enabled (--with-counts or count-capable --anno-type), "
+                "--anno-type must be one of: "
                 + ", ".join(sorted([f.value for f in COUNT_COMPATIBLE_FORMATS]))
                 + f". Got: {', '.join(invalid)}"
             )
@@ -552,8 +552,8 @@ def _apply_annotation_options(config, annotation_formats, annotation_labels_sour
         invalid = [af.value for af in annotation_formats if af not in COORD_COMPATIBLE_FORMATS]
         if invalid:
             raise ValueError(
-                "Coordinate-aware mode is enabled (--with-coords or *_coord --annotation-format), "
-                "--annotation-format must be one of: "
+                "Coordinate-aware mode is enabled (--with-coords or *_coord --anno-type), "
+                "--anno-type must be one of: "
                 + ", ".join(sorted([f.value for f in COORD_COMPATIBLE_FORMATS]))
                 + f". Got: {', '.join(invalid)}"
             )
@@ -606,7 +606,7 @@ def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd
     if annotate_threads_each is not None:
         if annotate_threads_each < 1:
             raise ValueError(
-                f"--annotate-threads-each must be >= 1, got {annotate_threads_each}")
+                f"--anno-threads-each must be >= 1, got {annotate_threads_each}")
         config['annotate_threads_each'] = annotate_threads_each
     if disk_swap_dir is not None:
         config['tmpdir'] = str(disk_swap_dir)
@@ -737,7 +737,7 @@ def _invoke_snakemake(config, output_dir, threads, force, dryrun, verbose,
 
 
 def _add_seq_input_args(group):
-    """Add the positional `samples` and `-o/--output_dir` arguments.
+    """Add the positional `samples`, `-o`, and `--base-name` arguments.
 
     `samples` accepts either a directory (interpreted as a directory of
     sample files) or a regular file (interpreted as a text file listing
@@ -748,12 +748,15 @@ def _add_seq_input_args(group):
     group.add_argument('samples', type=Path, metavar='SAMPLES',
                        help='Either a directory of sample files OR a text file listing sample\n'
                             '  paths (one per line). The type is auto-detected.')
-    group.add_argument('-o', '--output_dir', type=Path, required=True,
+    group.add_argument('-o', dest='output_dir', type=Path, required=True,
+                       metavar='DIR',
                        help='Output directory [required]')
+    group.add_argument('--base-name', default='graph', metavar='NAME',
+                       help='Base output name [graph]')
 
 
 def _add_annotation_args(annotation):
-    """Add the shared annotation argument group (anno-source, annotation-format,
+    """Add the shared annotation argument group (anno-source, anno-type,
     with-counts, count-width, with-coords) with help text that highlights the
     per-mode default formats inline."""
     label_sources = [v.value for v in AnnotationLabelsSource]
@@ -794,7 +797,8 @@ def _add_annotation_args(annotation):
                             metavar='SOURCE',
                             help=f"Column label source: {', '.join(label_sources)} [filename]\n"
                                  "  ")
-    annotation.add_argument('--annotation-format', action='append',
+    annotation.add_argument('--anno-type', action='append',
+                            dest='annotation_format',
                             default=[],
                             metavar='FORMAT',
                             help=f"Annotation format (can be used multiple times).\n"
@@ -824,7 +828,8 @@ def _add_workflow_args(workflow):
                           metavar='GB',
                           help='Approximate RAM budget per rule (in GB); drives the auto --mem-cap-gb\n'
                                '  passed to each metagraph stage. [16]')
-    workflow.add_argument('--annotate-threads-each', type=int, default=None, metavar='N',
+    workflow.add_argument('--anno-threads-each', dest='annotate_threads_each',
+                          type=int, default=None, metavar='N',
                           help='Threads used to annotate each input file. Parallel columns = ceil(--threads / N);\n'
                                '  raise N to give each column more --mem-cap-gb buffer.\n'
                                '  [8 for binary/counts, 16 for coords]')
@@ -875,8 +880,6 @@ def setup_build_parser(parser):
                             '  Skips the build pipeline; runs annotation + row-diff transforms only.')
     graph.add_argument('-k', type=int, default=31, metavar='K',
                        help='k-mer length [31]')
-    graph.add_argument('--base-name', default='graph', metavar='NAME',
-                       help='Base output name [graph]')
     graph.add_argument('--primary', dest='build_primary_graph', default=False,
                        action='store_true',
                        help='Build canonical graph first, then derive/build primary graph [False]')

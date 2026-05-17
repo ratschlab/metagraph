@@ -49,12 +49,11 @@ def run_wrapper(args_list):
     code_base = Path(os.path.realpath(__file__)).parent.parent
     normalized_args = list(args_list)
     if normalized_args and normalized_args[0] == "build":
-        has_output_flag = any(arg in ("-o", "--output_dir") for arg in normalized_args)
-        if not has_output_flag and len(normalized_args) > 1:
+        if "-o" not in normalized_args and len(normalized_args) > 1:
             last = normalized_args[-1]
             last_str = str(last)
             if not last_str.startswith("-"):
-                normalized_args = normalized_args[:-1] + ["--output_dir", last]
+                normalized_args = normalized_args[:-1] + ["-o", last]
 
     process_args = ['python', '-m', 'metagraph_workflows.cli'] + normalized_args
 
@@ -95,7 +94,7 @@ def test_build_workflow(primary, annotation_format, annotation_label_src, sample
     base_args = ['build',
                  sample_list_path,
                  '-k', 5,
-                 '--annotation-format', annotation_format.value,
+                 '--anno-type', annotation_format.value,
                  '--anno-source', annotation_label_src.value]
     if annotation_format in COUNT_FORMATS:
         base_args += ['--with-counts']
@@ -161,7 +160,7 @@ def test_with_counts_rejects_incompatible_annotation_format(sample_list_path, ou
         'build',
         sample_list_path,
         '--with-counts',
-        '--annotation-format', AnnotationFormats.BRWT.value,
+        '--anno-type', AnnotationFormats.BRWT.value,
         '--dryrun',
         output_dir,
     ])
@@ -189,7 +188,7 @@ def test_with_coordinates_rejects_incompatible_annotation_format(sample_list_pat
         'build',
         sample_list_path,
         '--with-coords',
-        '--annotation-format', AnnotationFormats.BRWT.value,
+        '--anno-type', AnnotationFormats.BRWT.value,
         '--dryrun',
         output_dir,
     ])
@@ -202,7 +201,7 @@ def test_with_counts_respects_explicit_annotation_format(sample_list_path, outpu
         'build',
         sample_list_path,
         '--with-counts',
-        '--annotation-format', AnnotationFormats.INT_BRWT.value,
+        '--anno-type', AnnotationFormats.INT_BRWT.value,
         '--dryrun',
         output_dir,
     ])
@@ -216,7 +215,7 @@ def test_count_capable_format_auto_enables_with_counts(sample_list_path, output_
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_INT_DISK.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_INT_DISK.value,
         '--dryrun',
         output_dir,
     ])
@@ -230,7 +229,7 @@ def test_coord_capable_format_auto_enables_with_coordinates(sample_list_path, ou
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
         '--dryrun',
         output_dir,
     ])
@@ -257,8 +256,8 @@ def test_mixed_count_and_coord_formats_are_mutually_exclusive(sample_list_path, 
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
         '--dryrun',
         output_dir,
     ])
@@ -308,7 +307,7 @@ def test_invalid_annotation_format_shows_suggestion(sample_list_path, output_dir
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', 'row_diff_int_brwt1',
+        '--anno-type', 'row_diff_int_brwt1',
         '--dryrun',
         output_dir,
     ])
@@ -322,7 +321,7 @@ def test_invalid_coord_annotation_format_shows_suggestion(sample_list_path, outp
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', 'row_diff_brwt_coord1',
+        '--anno-type', 'row_diff_brwt_coord1',
         '--dryrun',
         output_dir,
     ])
@@ -337,7 +336,7 @@ def test_count_width_is_propagated_to_count_build_steps(sample_list_path, output
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--count-width', str(count_width),
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -359,7 +358,7 @@ def test_count_width_out_of_range_fails(sample_list_path, output_dir, invalid_co
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_INT_BRWT.value,
         '--count-width', str(invalid_count_width),
         '--dryrun',
         output_dir,
@@ -391,7 +390,7 @@ def test_annotate_threads_each_overrides_default(sample_list_path, output_dir):
         'build',
         sample_list_path,
         '--threads', '16',
-        '--annotate-threads-each', '4',
+        '--anno-threads-each', '4',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -493,7 +492,7 @@ def test_index_header_coords_fires_in_coords_filenames_mode(sample_list_path, ou
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', fmt,
+        '--anno-type', fmt,
         '--anno-source', 'filename',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -554,7 +553,7 @@ def test_coords_mode_auto_picks_threads_each_16(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
+        '--anno-type', AnnotationFormats.ROW_DIFF_BRWT_COORD.value,
         '--threads', '16',
         '--dryrun',
         '--extra-args=printshellcmds=True',
@@ -571,7 +570,7 @@ def test_row_diff_binary_formats_reach_shell(sample_list_path, output_dir, fmt):
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotation-format', fmt,
+        '--anno-type', fmt,
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -716,9 +715,9 @@ def test_annotate_threads_each_must_be_positive(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
         sample_list_path,
-        '--annotate-threads-each', '0',
+        '--anno-threads-each', '0',
         '--dryrun',
         output_dir,
     ])
     assert proc.returncode != 0
-    assert "--annotate-threads-each must be >= 1" in proc.stdout.decode()
+    assert "--anno-threads-each must be >= 1" in proc.stdout.decode()
