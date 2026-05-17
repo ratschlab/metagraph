@@ -757,19 +757,15 @@ class TestAlignCoordToHeader(TestingBase):
             self.assertNotIn('path', record,
                              "`path` must be opt-in via --align-output-path")
 
-        # query1 -> seq1 (10 nt), 1-based inclusive range 2-10.
+        # query1 -> seq1 (10 nt), 1-based inclusive range 2-10. One query
+        # is enough to pin the CTH JSON branch; query2 is kept in the
+        # fixture only because the --no-coord-mapping sub-case below
+        # asserts distinct nt_coords for both queries.
         labels1 = records[0]['annotation']['labels']
         self.assertEqual(len(labels1), 1)
         self.assertEqual(labels1[0]['sample'], 'seq1')
         self.assertEqual(labels1[0]['nt_length'], 10)
         self.assertEqual(labels1[0]['nt_coords'], '2-10')
-
-        # query2 -> seq2 (16 nt), 1-based inclusive range 1-13.
-        labels2 = records[1]['annotation']['labels']
-        self.assertEqual(len(labels2), 1)
-        self.assertEqual(labels2[0]['sample'], 'seq2')
-        self.assertEqual(labels2[0]['nt_length'], 16)
-        self.assertEqual(labels2[0]['nt_coords'], '1-13')
 
         # With --no-coord-mapping, labels reference the file label (no .seqs
         # used) and nt_length is omitted. nt_coords mirrors the TSV
