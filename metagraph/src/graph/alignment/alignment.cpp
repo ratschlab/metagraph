@@ -939,11 +939,14 @@ Json::Value Alignment::to_json(size_t node_size,
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
 
-    // Emit label/coord info when an encoder is available. With CTH, labels
-    // are per-target-sequence (`<header>/N` + nt ranges); without CTH, labels
-    // are per-annotation-column (decoded label + global column nt ranges).
-    // The `nt_coords` field is named to distinguish from query.cpp's
-    // `kmer_coords`, which encodes k-mer-indexed positions instead.
+    // Emit label/coord info when an encoder is available. Three sub-cases:
+    //   * `label_coordinates` empty: labels-only, no positions.
+    //   * `cth` present: per-target-sequence labels (`<header>/N` + nt ranges).
+    //   * `cth` absent: per-annotation-column labels (decoded label + global
+    //     column nt ranges, where each coord spans the alignment length).
+    // The `nt_coords` / `nt_length` field names use nucleotide units to
+    // distinguish from query.cpp's `kmer_coords` / `kmers_in_target`, which
+    // are k-mer-indexed.
     if (encoder && label_columns.size()) {
         Json::Value labels = Json::arrayValue;
         if (!label_coordinates.size()) {
@@ -954,6 +957,7 @@ Json::Value Alignment::to_json(size_t node_size,
                 labels.append(entry);
             }
         } else if (cth) {
+            assert(label_coordinates.size() == label_columns.size());
             auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
                                                      *cth, sequence_.size(), node_size);
             for (const auto &[key, ranges] : seq_ranges) {
@@ -1044,6 +1048,11 @@ Json::Value Alignment::to_json(size_t node_size,
     return alignment;
 }
 
+// Reconstructs an Alignment from a JSON object produced by `to_json`. Reads
+// `path.mapping[]` to recover nodes and edits, so the encoder must have been
+// called with `include_path_mapping=true`. The `annotation.labels[]` block
+// is *not* read back here — it's derivable from the reconstructed alignment
+// plus the loaded annotator.
 void Alignment::load_from_json(const Json::Value &alignment,
                                const DeBruijnGraph &graph,
                                std::string *query_sequence) {

@@ -1320,7 +1320,7 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(output[-1], "", "Output should contain two query results")
         self.assertEqual(output[0].split('\t')[:2], ["0", "query1"])
         # `/N` after each header is the target sequence's k-mer count (k=5):
-        # seq1 (10bp)->6, seq3 (34bp)->30, seq4 (17bp)->13, seq2 (16bp)->12.
+        # seq1 (10 nt)->6, seq3 (34 nt)->30, seq4 (17 nt)->13, seq2 (16 nt)->12.
         self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>/6:0-1-5", "<seq3>/30:1-4:1-0-3", "<seq4>/13:0-0-4:1-5-8:1-9-12"})
         self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
         self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>/12:0-0-3:0-4-7:0-8-11", "<seq3>/30:0-28-29"})
@@ -1406,7 +1406,7 @@ class TestCoordToHeader(TestingBase):
                 self.assertEqual(set(out), expected_output)
 
         # `/N` after each header is the target sequence's k-mer count (k=5):
-        # seq1 TATCGATC (8bp)->4, seq2 GTATCGATCGATCGATCG (18bp)->14, seq3 ATCGATCG (8bp)->4.
+        # seq1 TATCGATC (8 nt)->4, seq2 GTATCGATCGATCGATCG (18 nt)->14, seq3 ATCGATCG (8 nt)->4.
         test_stdout('--num-top-labels 1',
             '0\tquery1\t<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
         test_stdout('--num-top-labels 2',

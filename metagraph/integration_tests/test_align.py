@@ -766,6 +766,21 @@ class TestAlignCoordToHeader(TestingBase):
                                  "nt_length must only appear when .seqs is loaded")
                 self.assertEqual(entry['sample'], test_fa)
 
+        # With --align-output-path, the bulky `path.mapping[]` is re-enabled,
+        # AND `annotation.labels[]` with `nt_length` is still present.
+        align_cmd_with_path = align_cmd + ' --align-output-path'
+        res = subprocess.run([align_cmd_with_path], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        for record in records:
+            self.assertIn('path', record, "--align-output-path should emit the path field")
+            self.assertIn('mapping', record['path'])
+            self.assertGreater(len(record['path']['mapping']), 0)
+            # Both views coexist: labels still carries the per-target info.
+            for entry in record['annotation']['labels']:
+                self.assertIn('nt_length', entry)
+                self.assertIn('nt_coords', entry)
+
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_coord_to_header_matches_per_sequence_columns(self, anno_repr):
         """CoordToHeader output matches per-sequence-column annotation output.

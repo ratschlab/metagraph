@@ -54,10 +54,11 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                                                             annotation.file_extension());
             logger->warn("No CoordToHeader mapping found at '{}'. Coords output will use "
                          "file-level positions (e.g., '<file_37.fa>:0-1086-1090') instead of "
-                         "per-sequence positions (e.g., '<seq_9>:0-1-5'), and the "
-                         "'kmers_in_target' field needed to compute the fraction of the "
-                         "target covered will be omitted. To enable per-sequence reporting, "
-                         "run once against the final annotation with all input FASTAs:\n"
+                         "per-sequence positions (e.g., '<seq_9>:0-1-5'), and the per-target "
+                         "sequence length needed to compute the fraction of the target covered "
+                         "('kmers_in_target' for query, 'nt_length' for align) will be omitted. "
+                         "To enable per-sequence reporting, run once against the final annotation "
+                         "with all input FASTAs:\n"
                          "    metagraph annotate --anno-filename --index-header-coords "
                          "-i {} -o {} <input_fastas>\n"
                          "Pass '--no-coord-mapping' to suppress this warning.",
