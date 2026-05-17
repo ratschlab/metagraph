@@ -52,11 +52,17 @@ class ResourceConfig:
             if not mem_mb:
                 mem_mb = self._get_mem_estimate(wildcards, input, threads)
 
-                max_mem = _get_max_memory(self.config)
-                if mem_mb > max_mem:
-                    logger.warning(
-                        f"The estimated memory of {mem_mb} MB "
-                        f"is larger than the max memory {max_mem}.")
+                # `_get_mem_estimate` returns TBDString() when an input
+                # the estimate depends on isn't materialized yet (e.g.
+                # at dryrun / DAG-construction time). Skip the
+                # over-budget warning in that case -- it'd fail in
+                # snakemake 9.21+ where TBDString rejects comparisons.
+                if not isinstance(mem_mb, TBDString):
+                    max_mem = _get_max_memory(self.config)
+                    if mem_mb > max_mem:
+                        logger.warning(
+                            f"The estimated memory of {mem_mb} MB "
+                            f"is larger than the max memory {max_mem}.")
 
             return mem_mb
 
