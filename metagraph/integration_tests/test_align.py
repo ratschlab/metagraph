@@ -772,16 +772,23 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(labels2[0]['nt_coords'], '1-13')
 
         # With --no-coord-mapping, labels reference the file label (no .seqs
-        # used) and nt_length is omitted.
+        # used) and nt_length is omitted. nt_coords mirrors the TSV
+        # `<file>:start-end` output of test_align_no_coord_mapping_flag
+        # (1-based inclusive, in global k-mer coords + alignment nt length).
         align_cmd_nomap = align_cmd + ' --no-coord-mapping'
         res = subprocess.run([align_cmd_nomap], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        self.assertEqual(len(records), 2)
+        expected_nt_coords = {'query1': '2-10', 'query2': '7-19'}
         for record in records:
-            for entry in record['annotation']['labels']:
-                self.assertNotIn('nt_length', entry,
-                                 "nt_length must only appear when .seqs is loaded")
-                self.assertEqual(entry['sample'], test_fa)
+            labels = record['annotation']['labels']
+            self.assertEqual(len(labels), 1)
+            entry = labels[0]
+            self.assertNotIn('nt_length', entry,
+                             "nt_length must only appear when .seqs is loaded")
+            self.assertEqual(entry['sample'], test_fa)
+            self.assertEqual(entry['nt_coords'], expected_nt_coords[record['name']])
 
         # With --align-output-path, the bulky `path.mapping[]` is re-enabled,
         # AND `annotation.labels[]` with `nt_length` is still present.
@@ -797,6 +804,108 @@ class TestAlignCoordToHeader(TestingBase):
             for entry in record['annotation']['labels']:
                 self.assertIn('nt_length', entry)
                 self.assertIn('nt_coords', entry)
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_json_labels_multi_target(self, anno_repr):
+        """`annotation.labels[]` carries multiple entries when one alignment
+        spans (or shares k-mers with) multiple indexed sequences. JSON twin
+        of `test_align_shared_kmers_multiple_labels`."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),                       # 10 nt
+            ('seq2', 'GCTAGCTAGCTAGCTA'),                 # 16 nt
+            ('seq3', 'ATCGATCGAAAAACCCCCGGGGGTTTTT'),     # 28 nt
+        ])
+        # ATCGATCG appears in both seq1 (pos 3-10) and seq3 (pos 1-8).
+        query_fa = self._write_fa('query.fa', [('shared_query', 'ATCGATCG')])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        align_cmd = (f'{METAGRAPH} align --align-only-forwards --json '
+                     f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
+        res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
+
+        records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        self.assertEqual(len(records), 1)
+        labels = records[0]['annotation']['labels']
+        # Order across columns/sequences isn't guaranteed; index by sample.
+        by_sample = {entry['sample']: entry for entry in labels}
+        self.assertEqual(set(by_sample), {'seq1', 'seq3'})
+        # seq1 GTATCGATCG (10 nt), match at local 3-10.
+        self.assertEqual(by_sample['seq1']['nt_length'], 10)
+        self.assertEqual(by_sample['seq1']['nt_coords'], '3-10')
+        # seq3 ATCGATCG... (28 nt), match at local 1-8.
+        self.assertEqual(by_sample['seq3']['nt_length'], 28)
+        self.assertEqual(by_sample['seq3']['nt_coords'], '1-8')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_json_cross_sequence_boundary(self, anno_repr):
+        """JSON twin of `test_align_cross_sequence_boundary`. When one
+        alignment path spans two indexed sequences (sharing a boundary
+        k-1-mer), `annotation.labels[]` must contain two entries with
+        per-target nt ranges from the `while (remaining)` loop inside
+        `split_coords_by_target`."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'AAAAACGTACGT'),  # 12 nt; ends with ACGT
+            ('seq2', 'ACGTTTTTTTTT'),  # 12 nt; starts with ACGT
+        ])
+        query_fa = self._write_fa('query.fa', [
+            ('q_concat', 'AAAAACGTACGTACGTTTTTTTTT'),
+        ])
+
+        graph, anno = self._setup_graph(test_fa, anno_repr)
+        align_cmd = (f'{METAGRAPH} align --align-only-forwards --json '
+                     f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
+        res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
+
+        records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['annotation']['cigar'], '8S16=')
+        by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
+        self.assertEqual(set(by_sample), {'seq1', 'seq2'})
+        # 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        self.assertEqual(by_sample['seq1']['nt_length'], 12)
+        self.assertEqual(by_sample['seq1']['nt_coords'], '5-12')
+        self.assertEqual(by_sample['seq2']['nt_length'], 12)
+        self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
+
+    @parameterized.expand(COORD_ANNO_TYPES)
+    def test_align_missing_seqs_warning(self, anno_repr):
+        """When a coord-aware annotation is loaded without its `.seqs`
+        sidecar, `metagraph align` must emit the rewritten warning that
+        points at `--index-header-coords` and mentions both output fields
+        whose per-target length will be omitted."""
+        test_fa = self._write_fa('seqs.fa', [
+            ('seq1', 'GTATCGATCG'),
+            ('seq2', 'GCTAGCTAGCTAGCTA'),
+        ])
+        query_fa = self._write_fa('query.fa', [('query1', 'TATCGATCG')])
+
+        # Build a coord-aware annotation but skip --index-header-coords.
+        graph_base = self.tempdir.name + '/graph_nosseqs'
+        graph = graph_base + '.dbg'
+        anno_base = self.tempdir.name + '/anno_nosseqs'
+        anno = anno_base + coord_anno_file_extension[anno_repr]
+        self._build_graph(test_fa, graph_base, k=5, repr='succinct', mode='basic')
+        self._annotate_graph(test_fa, graph, anno_base, anno_repr, anno_type='filename')
+        self.assertFalse(os.path.exists(anno_base + '.seqs'))
+
+        align_cmd = (f'{METAGRAPH} align --align-only-forwards '
+                     f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
+        res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
+        stderr = res.stderr.decode()
+        self.assertIn('No CoordToHeader mapping found', stderr)
+        self.assertIn('--index-header-coords', stderr)
+        self.assertIn('kmers_in_target', stderr)
+        self.assertIn('nt_length', stderr)
+        self.assertIn('--no-coord-mapping', stderr)
+
+        # With --no-coord-mapping the warning must be suppressed.
+        res = subprocess.run([align_cmd + ' --no-coord-mapping'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertNotIn('No CoordToHeader mapping found', res.stderr.decode())
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_coord_to_header_matches_per_sequence_columns(self, anno_repr):

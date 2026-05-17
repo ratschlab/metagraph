@@ -1213,6 +1213,15 @@ class TestCoordToHeader(TestingBase):
 
         records = parse_records(res.stdout.decode())
         self.assertEqual(len(records), 2)
+        # Pin the multi-target case explicitly: query1 hits seq1 and seq3
+        # (shared ATCGATCG), query2 hits seq2 only. Mirrors the TSV
+        # expectation in test_query_coords.
+        by_name = {record['seq_description']: record for record in records}
+        self.assertEqual(set(by_name), {'query1', 'query2'})
+        self.assertEqual({r['sample'] for r in by_name['query1']['results']},
+                         {'seq1', 'seq3'})
+        self.assertEqual({r['sample'] for r in by_name['query2']['results']},
+                         {'seq2'})
         for record in records:
             for result in record['results']:
                 self.assertIn('kmers_in_target', result,
