@@ -454,6 +454,58 @@ def test_disk_swap_dir_propagates_to_metagraph_stages(sample_list_path, output_d
     assert '--disk-swap "/var/tmp/test-swap"' in out
 
 
+def test_metagraph_always_runs_with_v(sample_list_path, output_dir):
+    # `-v` is always passed to metagraph so log files capture every
+    # trace; the workflow's --verbose only controls whether that output
+    # also streams to the terminal.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    assert "metagraph build  -v" in out
+
+
+@pytest.mark.parametrize("flag", ["-v", "--verbose"])
+def test_verbose_streams_metagraph_output_to_terminal(sample_list_path, output_dir, flag):
+    # With --verbose, tee's stdout goes through; otherwise it's silenced
+    # (> /dev/null) so metagraph output lives in {log} only.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        flag,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    assert "tee" in out
+    assert "/dev/null" not in out
+
+
+def test_default_silences_metagraph_terminal_output(sample_list_path, output_dir):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    out = proc.stdout.decode()
+    # Without --verbose, every tee redirects stdout to /dev/null so
+    # the user's terminal only sees Snakemake job-status lines.
+    for line in out.splitlines():
+        if 'tee ' not in line:
+            continue
+        assert '> /dev/null' in line, f"non-verbose tee missing silencer: {line}"
+
+
 def test_disk_swap_dir_unset_means_in_ram(sample_list_path, output_dir):
     # `metagraph transform_anno --disk-swap` defaults to OUT_BASEDIR (not
     # off), so without an explicit --disk-swap-dir the workflow must pass

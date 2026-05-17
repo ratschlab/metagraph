@@ -698,6 +698,10 @@ def _invoke_snakemake(config, output_dir, threads, force, dryrun, verbose,
     snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
     output_dir_path = Path(output_dir)
 
+    # The Snakefile reads `verbose` from config to decide whether to add
+    # `-v` to each metagraph invocation.
+    config['verbose'] = verbose
+
     if verbose:
         importlib.reload(logging)
         logging.basicConfig(format=LOGGING_FORMAT, level=logging.INFO)
@@ -838,8 +842,9 @@ def _add_workflow_args(workflow):
                                '  columns (passed as --subsample to transform_anno --anno-type *_brwt*). [1000000]')
     workflow.add_argument('--force', default=False, action='store_true',
                           help='Force re-run all rules [False]')
-    workflow.add_argument('--verbose', default=False, action='store_true',
-                          help='Print verbose config/runtime logs [False]')
+    workflow.add_argument('-v', '--verbose', default=False, action='store_true',
+                          help='Print verbose config/runtime logs and pass -v to each\n'
+                               '  underlying metagraph invocation [False]')
     workflow.add_argument('--dryrun', default=False, action='store_true',
                           help='Render DAG and config only; do not execute rules [False]')
     workflow.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',

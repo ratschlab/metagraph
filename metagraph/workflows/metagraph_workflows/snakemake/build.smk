@@ -28,7 +28,7 @@ rule build:
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -55,7 +55,7 @@ rule stage_samples:
     log: utils.get_log_path(STAGE_SAMPLES_RULE, config, ['sample_id'])
     shell:
         """
-        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} > {log} 2>&1
+        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} 2>&1 | tee {log} {log_tail}
         """
 
 EXTRACT_KMER_COUNTS_RULE="extract_kmer_counts"
@@ -101,7 +101,7 @@ rule extract_kmer_counts:
              FORMAT_FLAG="-fm"
         fi
         
-        {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} > {log} 2>&1
+        {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} 2>&1 | tee {log} {log_tail}
         """
 
 BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="build_canonical_graph_single_sample"
@@ -141,7 +141,7 @@ rule build_canonical_graph_single_sample:
         -k {params.k} \
         -o {output.graph} \
         --mem-cap-gb {params.mem_buffer} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -160,7 +160,7 @@ rule primarize_canonical_graph_single_sample:
         --to-fasta \
         --primary-kmers \
         -p {threads} \
-        -o {output} > {log} 2>&1
+        -o {output} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -193,7 +193,7 @@ rule build_joint_graph:
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 PRIMARIZE_JOINT_GRAPH_RULE="primarize_joint_graph"
@@ -210,7 +210,7 @@ rule primarize_joint_graph:
         --to-fasta \
         --primary-kmers \
         -p {threads} \
-        -o {output} > {log} 2>&1
+        -o {output} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -236,7 +236,7 @@ rule build_joint_primary:
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
         {input} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 

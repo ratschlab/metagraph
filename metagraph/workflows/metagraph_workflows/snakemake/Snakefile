@@ -41,7 +41,15 @@ time_cmd=utils.get_gnu_time_command(config)
 
 max_threads = config.get(workflow_configs.MAX_THREADS) or workflow.cores
 
-verbose_opt=' -v '
+# Always pass -v to metagraph so logs are complete; whether the user
+# sees that on their terminal is controlled by `log_tail` below.
+verbose_opt = ' -v '
+
+# Tail of the `tee {log}` pipeline: when the workflow is verbose, tee's
+# stdout falls through to the caller's terminal so the user sees all
+# metagraph progress / traces live; otherwise we silence tee's stdout
+# and the same content lives in {log} only.
+log_tail = '' if config.get('verbose', False) else '> /dev/null'
 
 DONE="DONE"
 
@@ -135,7 +143,7 @@ rule build_small_graph:
         --state small \
         -p {threads} \
         -o ${{OUT_BASE%.dbg}} \
-        {input} > {log} 2>&1
+        {input} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -192,7 +200,7 @@ rule annotate:
           {coordinates_opt} \
           {count_width_opt} \
           --separately \
-          -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
+          -o $OUT_DIR {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 INDEX_HEADER_COORDS_RULE="index_header_coords"
@@ -242,7 +250,7 @@ if build_coord_sidecar:
                     --index-header-coords \
                     -p {threads} \
                     -i {input.dbg_graph} \
-                    -o ${{OUT_BASE%.seqs}} >> {log} 2>&1
+                    -o ${{OUT_BASE%.seqs}} 2>&1 | tee -a {log} {log_tail}
             """
 
 
@@ -278,7 +286,7 @@ rule generate_brwt_linkage:
             --greedy \
             --subsample {params.subsample} \
             -p {threads} \
-            -o {output.linkage} > {log} 2>&1
+            -o {output.linkage} 2>&1 | tee {log} {log_tail}
         """
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
@@ -310,7 +318,7 @@ rule transform_annotation:
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
             -p {threads} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -340,7 +348,7 @@ rule annotate_brwt:
             --subsample {params.subsample} \
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -363,7 +371,7 @@ rule relax_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             -p {threads} \
-            {input.brwt_annots} > {log} 2>&1
+            {input.brwt_annots} 2>&1 | tee {log} {log_tail}
         """
 
 rd_cols_dir = wdir/f'rd_cols.{annotation_mode_suffix}'
@@ -407,7 +415,7 @@ rule transform_rd_stage0:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.columns_rd_row_count} > {log} 2>&1
+            -o {output.columns_rd_row_count} 2>&1 | tee {log} {log_tail}
         """
 
 TRANSFORM_RD_STAGE1_RULE="transform_rd_stage1"
@@ -446,7 +454,7 @@ rule transform_rd_stage1:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.row_reduction} {params.tempdir_opt} > {log} 2>&1
+            -o {output.row_reduction} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -489,7 +497,7 @@ rule transform_rd_stage2:
             {coordinates_opt} \
             {count_width_opt} \
             --mem-cap-gb {params.mem_buffer} \
-            -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
+            -o {output.rd_cols_done} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -524,7 +532,7 @@ rule annotate_row_diff_brwt:
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -547,7 +555,7 @@ rule relax_row_diff_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             -p {threads} \
-            {input.brwt_annots} > {log} 2>&1
+            {input.brwt_annots} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -581,7 +589,7 @@ rule annotate_row_diff_int_brwt:
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -626,7 +634,7 @@ rule annotate_row_diff_binary:
             -p {threads} \
             {params.mem_cap_arg} \
             -i {input.dbg_graph} \
-            -o {output.annotations} > {log} 2>&1
+            -o {output.annotations} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -654,7 +662,7 @@ rule annotate_row_diff_int_disk:
             --anno-type row_diff_int_disk \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -688,7 +696,7 @@ rule annotate_row_diff_brwt_coord:
             --parallel-nodes {params.parallel_nodes} \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -716,7 +724,7 @@ rule annotate_row_diff_coord:
             --anno-type row_diff_coord \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -744,5 +752,5 @@ rule annotate_row_diff_disk_coord:
             --anno-type row_diff_disk_coord \
             -p {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
