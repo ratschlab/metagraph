@@ -827,7 +827,7 @@ def _add_workflow_args(workflow):
                           help='Maximum CPU cores to use [num_cores]')
     workflow.add_argument('--disk-swap-dir', dest='disk_swap_dir', type=Path, default=None,
                           metavar='DIR',
-                          help='Directory for on-disk buffers (passed as --disk-swap). Omit to keep everything in RAM. [none]')
+                          help='Directory for on-disk buffers; omit to stay in RAM [none]')
     workflow.add_argument('--mem-gb', type=float, default=None,
                           metavar='GB',
                           help='Approximate RAM budget per rule (in GB); drives the auto --mem-cap-gb\n'
