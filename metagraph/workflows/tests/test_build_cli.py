@@ -506,6 +506,41 @@ def test_default_silences_metagraph_terminal_output(sample_list_path, output_dir
         assert '> /dev/null' in line, f"non-verbose tee missing silencer: {line}"
 
 
+@pytest.mark.parametrize("flag,cfg_key", [
+    ("--keep-columns", "keep_columns"),
+    ("--keep-rd-columns", "keep_rd_columns"),
+])
+def test_keep_columns_flags_propagate_to_config(sample_list_path, output_dir, flag, cfg_key):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        flag,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    cfg = (output_dir / "config.yaml").read()
+    assert f"{cfg_key}: true" in cfg
+
+
+def test_default_marks_columns_as_temp(sample_list_path, output_dir):
+    # Without --keep-columns, the per-sample column annotations are
+    # `temp()` outputs of `rule annotate` and disappear from the
+    # snakemake DAG's "Removing temporary" notices during a real run.
+    # In a dryrun the flag itself isn't surfaced; we instead check that
+    # the config keys default to false.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode == 0
+    cfg = (output_dir / "config.yaml").read()
+    assert "keep_columns: false" in cfg
+    assert "keep_rd_columns: false" in cfg
+
+
 def test_disk_swap_dir_empty_string_disables_swap(sample_list_path, output_dir):
     # `--disk-swap-dir ""` is the explicit-off sentinel: every metagraph
     # invocation gets `--disk-swap ""` so nothing spills to disk.

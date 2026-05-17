@@ -82,6 +82,17 @@ column_anno_paths = utils.generate_col_paths(annotation_cols_path, seqs_file_lis
 column_counts_paths = [Path(str(p) + '.counts') for p in column_anno_paths] if with_counts else []
 column_coords_paths = [Path(str(p) + '.coords') for p in column_anno_paths] if with_coordinates else []
 
+
+# When the user sets --keep-columns / --keep-rd-columns, the per-sample
+# column files survive past the rules that produce them; otherwise
+# snakemake's `temp()` marker tells it to delete them once no live
+# job needs them.
+def _maybe_temp_columns(paths):
+    return paths if config.get('keep_columns', False) else temp(paths)
+
+def _maybe_temp_rd_columns(paths):
+    return paths if config.get('keep_rd_columns', False) else temp(paths)
+
 contigs_dir=wdir/'contigs'
 
 seq_ids_dict = {}
@@ -165,9 +176,9 @@ rule annotate:
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=temp(column_anno_paths),
-        column_count_files=(temp(column_counts_paths) if with_counts else []),
-        column_coord_files=(temp(column_coords_paths) if with_coordinates else []),
+        column_anno_files=_maybe_temp_columns(column_anno_paths),
+        column_count_files=(_maybe_temp_columns(column_counts_paths) if with_counts else []),
+        column_coord_files=(_maybe_temp_columns(column_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
@@ -437,11 +448,18 @@ rule transform_rd_stage1:
         column_coord_files=rules.annotate.output.column_coord_files,
         columns_rd_row_count=rules.transform_rd_stage0.output.columns_rd_row_count
     output:
+        # pred/succ/pred_boundary/succ_boundary/row_reduction are
+        # consumed only by `transform_rd_stage2`; keep them temp()
+        # regardless. `rd_succ` is also an input to every
+        # `annotate_row_diff_*` rule, so it gets kept by
+        # `--keep-rd-columns` (paired with `anchors` from stage 2)
+        # to let the BRWT-clustering step be re-run with different
+        # parameters without redoing stages 1-2.
         pred=temp(wdir / f'{graph}.dbg.pred'),
         pred_boundary=temp(wdir / f'{graph}.dbg.pred_boundary'),
         succ=temp(wdir / f'{graph}.dbg.succ'),
         succ_boundary=temp(wdir / f'{graph}.dbg.succ_boundary'),
-        rd_succ=temp(wdir / f'{graph}.dbg.rd_succ'),
+        rd_succ=_maybe_temp_rd_columns(wdir / f'{graph}.dbg.rd_succ'),
         row_reduction=temp(rd_cols_dir / 'vector.row_reduction'),
         stage1_done=touch(rd_cols_dir / 'stage1.DONE')
     threads: max_threads
@@ -483,11 +501,11 @@ rule transform_rd_stage2:
         rd_succ=rules.transform_rd_stage1.output.rd_succ,
         stage1_done=rules.transform_rd_stage1.output.stage1_done
     output:
-        anchors=temp(wdir/f'{graph}.dbg.anchors'),
+        anchors=_maybe_temp_rd_columns(wdir/f'{graph}.dbg.anchors'),
         rd_cols_done=touch(rd_cols_dir/DONE),
-        rd_col_annodbg_files=temp(rd_col_annodbg_paths),
-        rd_col_count_files=(temp(rd_col_counts_paths) if with_counts else []),
-        rd_col_coord_files=(temp(rd_col_coords_paths) if with_coordinates else []),
+        rd_col_annodbg_files=_maybe_temp_rd_columns(rd_col_annodbg_paths),
+        rd_col_count_files=(_maybe_temp_rd_columns(rd_col_counts_paths) if with_counts else []),
+        rd_col_coord_files=(_maybe_temp_rd_columns(rd_col_coords_paths) if with_coordinates else []),
     threads: max_threads
     resources:
         mem_mb=TransformRdStage2Resources(config).get_mem(),

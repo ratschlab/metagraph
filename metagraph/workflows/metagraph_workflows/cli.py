@@ -658,6 +658,8 @@ def run_workflow(
         force: bool = False,
         verbose: bool = False,
         dryrun: bool = False,
+        keep_columns: bool = False,
+        keep_rd_columns: bool = False,
         additional_snakemake_args: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Run the metagraph-workflows pipeline.
@@ -690,6 +692,8 @@ def run_workflow(
                               with_counts, with_coordinates, count_width)
     _apply_runtime_options(config, output_dir, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun)
+    config['keep_columns'] = keep_columns
+    config['keep_rd_columns'] = keep_rd_columns
 
     if graph is not None:
         # Symlink the user's graph as <base_name>.dbg so downstream
@@ -855,6 +859,13 @@ def _add_workflow_args(workflow):
     workflow.add_argument('--brwt-subsample', type=_int_or_sci, default=None, metavar='N',
                           help='Number of bits subsampled for distance estimation when clustering BRWT\n'
                                '  columns (passed as --subsample to transform_anno --anno-type *_brwt*) [1e6]')
+    workflow.add_argument('--keep-columns', default=False, action='store_true',
+                          help='Keep per-sample column annotations (columns.<mode>/) after the\n'
+                               '  final annotation is built [False]')
+    workflow.add_argument('--keep-rd-columns', default=False, action='store_true',
+                          help='Keep per-sample row-diff column annotations (rd_cols.<mode>/) and\n'
+                               '  the rd_succ / anchors graph sidecars, so the BRWT clustering\n'
+                               '  step can be re-run with different parameters [False]')
 
 
 def _add_help_arg(parser):
@@ -978,6 +989,8 @@ def init_build(args):
         force=args.force,
         verbose=args.verbose,
         dryrun=args.dryrun,
+        keep_columns=args.keep_columns,
+        keep_rd_columns=args.keep_rd_columns,
         additional_snakemake_args=_parse_additional_snakemake_args(args.additional_snakemake_args),
     )
 
