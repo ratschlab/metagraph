@@ -38,8 +38,37 @@ COORD_COMPATIBLE_FORMATS = {
 }
 
 
+# Colorize a few flag names in --help so users can see at a glance which
+# flags belong to count-aware (yellow, 33) vs coord-aware (purple, 35)
+# modes. Matches the colors already used for the format-name lists in
+# `_add_annotation_args`.
+_FLAG_COLORS = {
+    '--with-counts': '33',
+    '--count-width': '33',
+    '--with-coords': '35',
+}
+
+
+class _ColorHelpFormatter(argparse.RawTextHelpFormatter):
+    """RawTextHelpFormatter that colorizes specific option strings.
+
+    We wrap the flag in ANSI codes after argparse has already computed
+    its column widths, so the alignment of the help text is unaffected
+    (ANSI escape codes render at zero width in the terminal).
+    """
+
+    def _format_action(self, action):
+        text = super()._format_action(action)
+        if not sys.stdout.isatty():
+            return text
+        for flag, code in _FLAG_COLORS.items():
+            if flag in action.option_strings:
+                return text.replace(flag, f"\033[{code}m{flag}\033[0m", 1)
+        return text
+
+
 def _help_formatter(prog: str):
-    return argparse.RawTextHelpFormatter(prog, width=120, max_help_position=34)
+    return _ColorHelpFormatter(prog, width=120, max_help_position=34)
 
 
 def _help_color(text: str, color_code: str) -> str:
