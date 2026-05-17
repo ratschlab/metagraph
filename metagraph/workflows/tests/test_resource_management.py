@@ -39,13 +39,13 @@ def test_TransformRdStage1Resources(config):
 
 def test_AnnotateResources_per_column_buffer(config):
     # annotate --mem-cap-gb is per-column, so the global budget must be
-    # divided across columns built in parallel (= threads // threads_each).
+    # divided across columns built in parallel (= ceil(threads / threads_each)).
     mem = 64000  # MB available to the rule
     config[workflow_configs.ANNOTATE_THREADS_EACH] = 8
     inst = rm.AnnotateResources(config)
 
     threads = 64
-    parallel_cols = threads // 8  # 8 parallel columns
+    parallel_cols = math.ceil(threads / 8)  # 8 parallel columns (64/8 is exact)
 
     assert inst.get_parallel_cols(threads) == parallel_cols
 
@@ -75,3 +75,20 @@ def test_AnnotateResources_per_column_buffer(config):
     }
     inst3 = rm.AnnotateResources(config3)
     assert inst3.get_mem_buffer_gib()(None, None, 16, {'mem_mb': 16000}) == int(math.ceil(3000 / 1024))
+
+
+@pytest.mark.parametrize("threads,threads_each,expected_cols", [
+    (8, 8, 1),     # exact divisor
+    (12, 8, 2),    # ceil(12/8) = 2, the "redistribute leftover" case
+    (13, 8, 2),    # ceil(13/8) = 2, the overcommit case
+    (16, 8, 2),    # exact
+    (1, 8, 1),     # min clamp
+])
+def test_get_parallel_cols_ceil_behavior(threads, threads_each, expected_cols):
+    config = {
+        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MAX_BUFFER_SIZE_MB: 50000,
+        workflow_configs.ANNOTATE_THREADS_EACH: threads_each,
+    }
+    inst = rm.AnnotateResources(config)
+    assert inst.get_parallel_cols(threads) == expected_cols

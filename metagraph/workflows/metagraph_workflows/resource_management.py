@@ -223,7 +223,7 @@ class AnnotateResources(SupportsMemBufferSize):
     `metagraph annotate --mem-cap-gb` is a *per-column* buffer, applied
     independently to each column constructed in parallel under --separately.
     Total memory used is approximately `mem_cap_gb * parallel_cols`, where
-    `parallel_cols = max_threads // threads_each`. Override the buffer
+    `parallel_cols = ceil(max_threads / threads_each)`. Override the buffer
     heuristic accordingly.
     """
 

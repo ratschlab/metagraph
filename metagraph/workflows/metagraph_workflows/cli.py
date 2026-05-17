@@ -844,7 +844,7 @@ def _add_workflow_args(workflow):
 def _add_help_arg(parser):
     options = parser.add_argument_group('options')
     options.add_argument('-v', '--verbose', default=False, action='store_true',
-                         help='Print verbose config/runtime logs and pass -v to metagraph [False]')
+                         help='Stream metagraph progress to the terminal (logs always capture full -v output) [False]')
     options.add_argument('--metagraph-cmd', type=str, default=None, metavar='CMD',
                          help='Path/command for metagraph executable [metagraph from PATH]')
     options.add_argument('--extra-args', dest='additional_snakemake_args', metavar='ARGS', type=str, default='',
