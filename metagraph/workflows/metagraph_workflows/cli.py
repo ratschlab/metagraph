@@ -615,8 +615,8 @@ def _apply_runtime_options(config, threads, annotate_threads_each, metagraph_cmd
             raise ValueError(f"--mem-gb must be > 0, got {mem_gb}")
         config['max_memory_mb'] = int(mem_gb * 1024)
     if brwt_subsample is not None:
-        if brwt_subsample < 1:
-            raise ValueError(f"--brwt-subsample must be >= 1, got {brwt_subsample}")
+        if brwt_subsample < 1000:
+            raise ValueError(f"--brwt-subsample must be >= 1000, got {brwt_subsample}")
         config['brwt_linkage_subsample'] = brwt_subsample
 
 

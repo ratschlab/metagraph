@@ -138,16 +138,21 @@ For this use case, primary graph mode is usually not recommended.
 
 When coordinate-aware annotation is built with ``--anno-source filename``
 (the default; one column per input file), the workflow additionally builds
-a ``CoordToHeader`` sidecar (``<graph>.<format>.seqs``) for each requested
-coord format. This is a second ``metagraph annotate --index-header-coords``
-pass over the input fastas; the pass uses the column order recovered from
-the final annotation via ``metagraph stats --print-col-names`` so that file
-labels and coord offsets stay aligned even after BRWT clustering reorders
-columns. The sidecar lets ``metagraph query --query-mode coords`` and
-``metagraph align`` report hits as ``<header>/<N>:<positions>`` instead of
-file-based coordinates. In ``--anno-source header`` mode each sequence
-already has its own column, so no sidecar is needed and the rule is
-skipped.
+a ``CoordToHeader`` sidecar at ``<graph>.seqs``. This is a second
+``metagraph annotate --index-header-coords`` pass over the input fastas;
+the pass uses the column order recovered from the final annotation via
+``metagraph stats --print-col-names`` so that file labels and coord
+offsets stay aligned even after BRWT clustering reorders columns. The
+sidecar lets ``metagraph query --query-mode coords`` and ``metagraph
+align`` report hits as ``<header>/<N>:<positions>`` instead of file-based
+coordinates. In ``--anno-source header`` mode each sequence already has
+its own column, so no sidecar is needed and the rule is skipped.
+
+The loader always looks at ``<graph>.seqs`` (it strips the full
+annotation extension and appends ``.seqs``), so a single sidecar is
+emitted regardless of how many coord formats are requested. When
+multiple are requested, the sidecar is derived from the first one in
+the list -- pick that format when querying with coords.
 
 Count-aware and coordinate-aware modes are mutually exclusive in this workflow.
 

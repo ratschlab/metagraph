@@ -81,9 +81,27 @@ external_graph = config.get('external_graph', False)
 #   - the annotation columns are keyed by file (`--anno-filename`).
 # In `--anno-header` mode each sequence already gets its own column, so
 # coords are per-sequence and no sidecar is needed.
+#
+# The consumer (load_annotated_graph.cpp) strips the annotation's full
+# kExtension (e.g. `.row_diff_brwt_coord.annodbg`) from the annotation
+# path and appends `.seqs`, so all coord formats sharing the same graph
+# look for the SAME path: `<graph>.seqs`. We can only emit one. BRWT
+# clustering may reorder columns differently per format, so the .seqs
+# content is only correct for one format -- we derive it from the first
+# coord format in the requested list (the typical workflow request is
+# `--with-coords` which defaults to a single format).
+coord_sidecar_anno_type = next(
+    (af for af in annotation_formats
+     if AnnotationFormats(af) in {AnnotationFormats.BRWT_COORD,
+                                  AnnotationFormats.ROW_DIFF_COORD,
+                                  AnnotationFormats.ROW_DIFF_BRWT_COORD,
+                                  AnnotationFormats.ROW_DIFF_DISK_COORD}),
+    None,
+)
 build_coord_sidecar = (
     with_coordinates
     and AnnotationLabelsSource(config['annotation_labels_source']) == AnnotationLabelsSource.FILENAME
+    and coord_sidecar_anno_type is not None
 )
 
 rule all:
@@ -93,13 +111,7 @@ rule all:
         # already has their built graph; we don't want to re-transform it.
         *([small_graph_path] if not external_graph else []),
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats],
-        # One .seqs sidecar per requested coord format. The loader strips
-        # `.annodbg` from the annotation path and appends `.seqs`, so the
-        # paths must match per-format. The content can differ across
-        # formats because BRWT clustering reorders columns, so we build
-        # one .seqs per format using each annotation's own column order.
-        *([wdir/f'{graph}.{anno_type}.seqs' for anno_type in annotation_formats]
-          if build_coord_sidecar else []),
+        *([wdir/f'{graph}.seqs'] if build_coord_sidecar else []),
 
 
 if not external_graph:
@@ -184,47 +196,54 @@ rule annotate:
         """
 
 INDEX_HEADER_COORDS_RULE="index_header_coords"
-rule index_header_coords:
-    """Build the CoordToHeader (.seqs) sidecar used by coord queries.
+if build_coord_sidecar:
+    rule index_header_coords:
+        """Build the CoordToHeader (.seqs) sidecar used by coord queries.
 
-    `metagraph annotate --index-header-coords` is a separate pass that
-    re-reads the input fastas; the file labels and coord offsets line up
-    with the annotation only if the inputs are passed in the same order
-    as the columns in the final annotation. BRWT clustering reorders
-    columns, so the order we annotated with no longer matches the order
-    in the transformed annotation -- we recover it from the annotation
-    itself via `stats --print-col-names`. Each coord-aware column label
-    is the absolute fasta path (see annotate.cpp: `labels.push_back(file)`
-    in `--anno-filename` mode), so the column-name list piped from
-    `stats` is exactly what `annotate --index-header-coords` expects on
-    stdin.
-    """
-    input:
-        annotation=wdir/f'{graph}.{{anno_type}}.annodbg',
-        dbg_graph=graph_path,
-    output:
-        seqs_sidecar=wdir/f'{graph}.{{anno_type}}.seqs',
-    wildcard_constraints:
-        anno_type="brwt_coord|row_diff_coord|row_diff_brwt_coord|row_diff_disk_coord",
-    threads: max_threads
-    resources:
-        mem_mb=ResourceConfig(INDEX_HEADER_COORDS_RULE, config).get_mem(),
-    log: utils.get_log_path(INDEX_HEADER_COORDS_RULE, config, ['anno_type'])
-    shell:
+        `metagraph annotate --index-header-coords` is a separate pass
+        that re-reads the input fastas; the file labels and coord
+        offsets line up with the annotation only if the inputs are
+        passed in the same order as the columns in the final
+        annotation. BRWT clustering reorders columns, so the order we
+        annotated with no longer matches the order in the transformed
+        annotation -- we recover it from the annotation itself via
+        `stats --print-col-names`. Each coord-aware column label is the
+        absolute fasta path (see annotate.cpp:
+        `labels.push_back(file)` in `--anno-filename` mode), so the
+        column-name list piped from `stats` is exactly what `annotate
+        --index-header-coords` expects on stdin.
+
+        The output is `<graph>.seqs` because the consumer
+        (load_annotated_graph.cpp) strips the annotation's full
+        kExtension (e.g. `.row_diff_brwt_coord.annodbg`) and appends
+        `.seqs` -- so every coord format looks at the same path.
         """
-        OUT_BASE={output.seqs_sidecar}
-        # `stats --print-col-names` prints "Number of columns: N" on the
-        # first line, then one column label per line in annotation order.
-        # Skip the header line and pipe the rest to annotate.
-        {metagraph_cmd} stats --print-col-names -a {input.annotation} 2>>{log} \
-            | tail -n +2 \
-            | {time_cmd} {metagraph_cmd} annotate {verbose_opt} \
-                --anno-filename \
-                --index-header-coords \
-                -p {threads} \
-                -i {input.dbg_graph} \
-                -o ${{OUT_BASE%.seqs}} >> {log} 2>&1
-        """
+        input:
+            annotation=wdir/f'{graph}.{coord_sidecar_anno_type}.annodbg',
+            dbg_graph=graph_path,
+        output:
+            seqs_sidecar=wdir/f'{graph}.seqs',
+        threads: max_threads
+        resources:
+            mem_mb=ResourceConfig(INDEX_HEADER_COORDS_RULE, config).get_mem(),
+        log: utils.get_log_path(INDEX_HEADER_COORDS_RULE, config)
+        shell:
+            """
+            OUT_BASE={output.seqs_sidecar}
+            # `stats --print-col-names` interleaves a logger
+            # `[info] Scanning ...` line on stdout and then
+            # `Number of columns: N` followed by one column label per
+            # line. We want only the labels, so drop everything up to
+            # (and including) the "Number of columns:" marker.
+            {metagraph_cmd} stats --print-col-names -a {input.annotation} 2>>{log} \
+                | awk '/^Number of columns:/ {{found=1; next}} found' \
+                | {time_cmd} {metagraph_cmd} annotate {verbose_opt} \
+                    --anno-filename \
+                    --index-header-coords \
+                    -p {threads} \
+                    -i {input.dbg_graph} \
+                    -o ${{OUT_BASE%.seqs}} >> {log} 2>&1
+            """
 
 
 GENERATE_COLUMN_LIST_RULE="generate_column_list"

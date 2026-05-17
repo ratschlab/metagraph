@@ -501,8 +501,12 @@ def test_index_header_coords_fires_in_coords_filenames_mode(sample_list_path, ou
     assert proc.returncode == 0, proc.stdout.decode()
     out = proc.stdout.decode()
     assert "rule index_header_coords" in out
-    # Per-format output: <graph>.<fmt>.seqs sits next to <graph>.<fmt>.annodbg.
-    assert f"graph.{fmt}.seqs" in out
+    # The loader (load_annotated_graph.cpp) strips the annotation's full
+    # kExtension (e.g. `.row_diff_brwt_coord.annodbg`) and appends `.seqs`,
+    # so it always looks for `<graph>.seqs`. A per-format file would never
+    # be picked up.
+    assert "/graph.seqs" in out
+    assert f"/graph.{fmt}.seqs" not in out
     # Column order comes from the final annotation (not the input file list),
     # so BRWT-reordered columns line up.
     assert "stats --print-col-names" in out
@@ -524,6 +528,8 @@ def test_with_coords_alone_fires_seqs_sidecar(sample_list_path, output_dir):
     out = proc.stdout.decode()
     assert "rule index_header_coords" in out
     assert "--index-header-coords" in out
+    # Loader looks for <graph>.seqs, not per-format.
+    assert "/graph.seqs" in out
 
 
 @pytest.mark.parametrize("flags,reason", [
@@ -623,6 +629,19 @@ def test_brwt_subsample_default_and_override(sample_list_path, output_dir, tmpdi
     ])
     assert proc.returncode == 0
     assert "--subsample 200000" in proc.stdout.decode()
+
+
+@pytest.mark.parametrize("bad", [0, 1, 999])
+def test_brwt_subsample_below_1000_rejected(sample_list_path, output_dir, bad):
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--brwt-subsample', str(bad),
+        '--dryrun',
+        output_dir,
+    ])
+    assert proc.returncode != 0
+    assert "--brwt-subsample must be >= 1000" in proc.stdout.decode()
 
 
 def test_mem_gb_sets_max_memory_mb(sample_list_path, output_dir):
