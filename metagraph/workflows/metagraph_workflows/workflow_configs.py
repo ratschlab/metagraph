@@ -45,13 +45,14 @@ ANNOTATE_THREADS_EACH = 'annotate_threads_each'
 
 
 class AnnotationLabelsSource(Enum):
-    SEQUENCE_HEADERS = 'sequence_headers'
-    FILE_NAMES = 'file_names'
+    # Values mirror the metagraph CLI flags: --anno-header and --anno-filename.
+    HEADER = 'header'
+    FILENAME = 'filename'
 
     def to_annotation_cmd_option(self):
-        if self == self.FILE_NAMES:
+        if self == self.FILENAME:
             return '--anno-filename'
-        elif self == self.SEQUENCE_HEADERS:
+        elif self == self.HEADER:
             return '--anno-header'
         else:
             raise ValueError(f"Invalid value of AnnotationLabelsSource: got {self}")

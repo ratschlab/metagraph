@@ -69,7 +69,7 @@ Typically, the following steps would be performed:
    * ``-k`` for k-mer length (default 31)
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
-   * ``--anno-source`` (``sequence_headers`` or ``file_names``)
+   * ``--anno-source`` (``header`` or ``filename``; default ``filename``)
    * ``--annotation-format FMT`` to choose / add output annotation formats
    * ``--with-counts`` or ``--with-coords`` for count- / coordinate-aware
      annotation (mutually exclusive)
@@ -81,7 +81,7 @@ Typically, the following steps would be performed:
    .. code-block:: bash
 
      metagraph-workflows build samples.txt -o /tmp/mygraph \
-         -k 31 --primary --anno-source sequence_headers \
+         -k 31 --primary \
          --threads 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 
 Count-aware annotations
@@ -136,18 +136,18 @@ automatically enables coordinate-aware mode::
 Coordinates are typically indexed for reference sequences, where preserving the original sequence context is important.
 For this use case, primary graph mode is usually not recommended.
 
-When coordinate-aware annotation is built with ``--anno-source file_names``
-(i.e. one column per input file), the workflow additionally builds a
-``CoordToHeader`` sidecar (``<graph>.<format>.seqs``) for each requested
+When coordinate-aware annotation is built with ``--anno-source filename``
+(the default; one column per input file), the workflow additionally builds
+a ``CoordToHeader`` sidecar (``<graph>.<format>.seqs``) for each requested
 coord format. This is a second ``metagraph annotate --index-header-coords``
 pass over the input fastas; the pass uses the column order recovered from
 the final annotation via ``metagraph stats --print-col-names`` so that file
 labels and coord offsets stay aligned even after BRWT clustering reorders
 columns. The sidecar lets ``metagraph query --query-mode coords`` and
 ``metagraph align`` report hits as ``<header>/<N>:<positions>`` instead of
-file-based coordinates. In ``--anno-source sequence_headers`` mode each
-sequence already has its own column, so no sidecar is needed and the rule
-is skipped.
+file-based coordinates. In ``--anno-source header`` mode each sequence
+already has its own column, so no sidecar is needed and the rule is
+skipped.
 
 Count-aware and coordinate-aware modes are mutually exclusive in this workflow.
 
@@ -194,4 +194,4 @@ directly invoke the snakemake workflow (assuming you checked out the `metagraph 
     cd metagraph/workflows
     snakemake --forceall --configfile default.yml \
         --config k=5 seqs_file_list_path='transcript_paths.txt' output_directory=/tmp/mygraph \
-        annotation_labels_source=sequence_headers --cores 2
+        annotation_labels_source=header --cores 2

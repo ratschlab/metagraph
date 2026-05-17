@@ -761,9 +761,9 @@ def _add_annotation_args(annotation):
     annotation.add_argument('--anno-source',
                             dest='annotation_labels_source',
                             type=AnnotationLabelsSource,
-                            default=AnnotationLabelsSource.SEQUENCE_HEADERS,
+                            default=AnnotationLabelsSource.FILENAME,
                             metavar='SOURCE',
-                            help=f"Column label source: {', '.join(label_sources)} [sequence_headers]\n"
+                            help=f"Column label source: {', '.join(label_sources)} [filename]\n"
                                  "  ")
     annotation.add_argument('--annotation-format', action='append',
                             default=[],

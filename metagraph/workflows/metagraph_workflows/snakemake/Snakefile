@@ -83,7 +83,7 @@ external_graph = config.get('external_graph', False)
 # coords are per-sequence and no sidecar is needed.
 build_coord_sidecar = (
     with_coordinates
-    and AnnotationLabelsSource(config['annotation_labels_source']) == AnnotationLabelsSource.FILE_NAMES
+    and AnnotationLabelsSource(config['annotation_labels_source']) == AnnotationLabelsSource.FILENAME
 )
 
 rule all:

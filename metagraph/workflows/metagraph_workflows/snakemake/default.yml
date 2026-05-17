@@ -23,7 +23,7 @@ kmc_mem_overhead_factor: 1.1
 
 # annotation options
 annotation_formats: ['relax.row_diff_brwt']
-annotation_labels_source: 'sequence_headers'
+annotation_labels_source: 'filename'
 with_counts: false
 with_coordinates: false
 count_width: 8

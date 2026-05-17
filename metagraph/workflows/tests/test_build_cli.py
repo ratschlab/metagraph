@@ -88,8 +88,8 @@ def sample_list_path(tmpdir):
     return list_path
 
 
-@pytest.mark.parametrize('primary,annotation_format,annotation_label_src', list(product([False], [AnnotationFormats.ROW_DIFF_BRWT], [AnnotationLabelsSource.SEQUENCE_HEADERS])) +
-    list(product([False, True], AnnotationFormats, [AnnotationLabelsSource.FILE_NAMES])))
+@pytest.mark.parametrize('primary,annotation_format,annotation_label_src', list(product([False], [AnnotationFormats.ROW_DIFF_BRWT], [AnnotationLabelsSource.HEADER])) +
+    list(product([False, True], AnnotationFormats, [AnnotationLabelsSource.FILENAME])))
 def test_build_workflow(primary, annotation_format, annotation_label_src, sample_list_path, output_dir):
 
     base_args = ['build',
@@ -494,7 +494,7 @@ def test_index_header_coords_fires_in_coords_filenames_mode(sample_list_path, ou
         'build',
         sample_list_path,
         '--annotation-format', fmt,
-        '--anno-source', 'file_names',
+        '--anno-source', 'filename',
         '--dryrun',
         '--extra-args=printshellcmds=True',
         output_dir,
@@ -510,10 +510,27 @@ def test_index_header_coords_fires_in_coords_filenames_mode(sample_list_path, ou
     assert "--index-header-coords" in out
 
 
+def test_with_coords_alone_fires_seqs_sidecar(sample_list_path, output_dir):
+    # The default --anno-source is `filename`, so `--with-coords` alone is
+    # enough to trigger the .seqs sidecar rule.
+    proc = run_wrapper([
+        'build',
+        sample_list_path,
+        '--with-coords',
+        '--dryrun',
+        '--extra-args=printshellcmds=True',
+        output_dir,
+    ])
+    assert proc.returncode == 0, proc.stdout.decode()
+    out = proc.stdout.decode()
+    assert "rule index_header_coords" in out
+    assert "--index-header-coords" in out
+
+
 @pytest.mark.parametrize("flags,reason", [
-    (["--with-coords"], "sequence_headers is the default anno-source"),
-    (["--anno-source", "file_names"], "no --with-coords -> binary mode"),
-    (["--with-counts", "--anno-source", "file_names"], "counts + file_names doesn't need .seqs"),
+    (["--with-coords", "--anno-source", "header"], "header mode doesn't need .seqs"),
+    (["--anno-source", "filename"], "no --with-coords -> binary mode"),
+    (["--with-counts", "--anno-source", "filename"], "counts + filename doesn't need .seqs"),
 ])
 def test_index_header_coords_does_not_fire_outside_coords_filenames(
         sample_list_path, output_dir, flags, reason):
