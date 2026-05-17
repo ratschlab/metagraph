@@ -7,7 +7,7 @@ from metagraph_workflows import workflow_configs
 @pytest.fixture()
 def config():
     return {
-        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MEMORY_MB: 16000,
         workflow_configs.MAX_BUFFER_SIZE_MB: 50000
     }
 
@@ -59,7 +59,7 @@ def test_AnnotateResources_per_column_buffer(config):
     # threads_each not set in config -> falls back to 1 (workflow default
     # comes from default.yml, see ANNOTATE_THREADS_EACH there).
     config2 = {
-        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MEMORY_MB: 16000,
         workflow_configs.MAX_BUFFER_SIZE_MB: 50000,
     }
     inst2 = rm.AnnotateResources(config2)
@@ -68,7 +68,7 @@ def test_AnnotateResources_per_column_buffer(config):
 
     # explicit mem_buffer_mb is treated as the per-column value
     config3 = {
-        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MEMORY_MB: 16000,
         workflow_configs.MAX_BUFFER_SIZE_MB: 50000,
         workflow_configs.ANNOTATE_THREADS_EACH: 4,
         'rules': {'annotate': {'mem_buffer_mb': 3000}},
@@ -86,7 +86,7 @@ def test_AnnotateResources_per_column_buffer(config):
 ])
 def test_get_parallel_cols_ceil_behavior(threads, threads_each, expected_cols):
     config = {
-        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MEMORY_MB: 16000,
         workflow_configs.MAX_BUFFER_SIZE_MB: 50000,
         workflow_configs.ANNOTATE_THREADS_EACH: threads_each,
     }

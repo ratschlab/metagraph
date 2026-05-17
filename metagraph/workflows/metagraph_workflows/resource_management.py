@@ -17,7 +17,7 @@ FALLBACK_MAX_DISK = 10 * 1024
 
 
 def _get_max_memory(config):
-    return config.get(workflow_configs.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
+    return config.get(workflow_configs.MEMORY_MB, FALLBACK_MAX_MEM)
 
 
 def _get_max_disk(config):

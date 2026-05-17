@@ -719,7 +719,7 @@ def test_brwt_subsample_below_1000_rejected(sample_list_path, output_dir, bad):
     assert "--brwt-subsample must be >= 1000" in proc.stdout.decode()
 
 
-def test_mem_gb_sets_max_memory_mb(sample_list_path, output_dir):
+def test_mem_gb_sets_memory_mb(sample_list_path, output_dir):
     proc = run_wrapper([
         'build',
         sample_list_path,
@@ -730,7 +730,7 @@ def test_mem_gb_sets_max_memory_mb(sample_list_path, output_dir):
     assert proc.returncode == 0
     cfg = (output_dir / "config.yaml").read()
     # 12 GiB -> 12 * 1024 = 12288 MB.
-    assert "max_memory_mb: 12288" in cfg
+    assert "memory_mb: 12288" in cfg
 
 
 def test_mem_gb_must_be_positive(sample_list_path, output_dir):

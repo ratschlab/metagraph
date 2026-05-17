@@ -26,7 +26,7 @@ BRWT_PARALLEL_NODES="brwt_parallel_nodes"
 BRWT_LINKAGE_SUBSAMPLE="brwt_linkage_subsample"
 
 MAX_THREADS = 'max_threads'
-MAX_MEMORY_MB = 'max_memory_mb'
+MEMORY_MB = 'memory_mb'
 MAX_DISK_MB = 'max_disk_mb'
 MAX_BUFFER_SIZE_MB = 'max_buffer_size_mb'
 
