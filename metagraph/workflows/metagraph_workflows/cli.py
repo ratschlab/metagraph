@@ -830,8 +830,7 @@ def _add_workflow_args(workflow):
                           help='Directory for on-disk buffers; omit to stay in RAM [none]')
     workflow.add_argument('--mem-gb', type=float, default=None,
                           metavar='GB',
-                          help='Approximate RAM budget per rule (in GB); drives the auto --mem-cap-gb\n'
-                               '  passed to each metagraph stage. [16]')
+                          help='Approximate RAM budget in GB [16]')
     workflow.add_argument('--anno-threads-each', dest='annotate_threads_each',
                           type=int, default=None, metavar='N',
                           help='Threads used to annotate each input file. Parallel columns = ceil(--threads / N);\n'
