@@ -13,10 +13,19 @@ build_primary=config['build_primary_graph']
 
 annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
 
-# validate values
+# Validate annotation_formats values. The CLI parses these through
+# `_parse_annotation_format_value` (which already produces a friendlier
+# error with format suggestions), so we should only land here when the
+# Snakefile is invoked directly with a hand-written configfile.
 for af in annotation_formats:
-    AnnotationFormats(af)
-    # TODO: make a nicer error
+    try:
+        AnnotationFormats(af)
+    except ValueError:
+        valid = ', '.join(v.value for v in AnnotationFormats)
+        raise ValueError(
+            f"Unsupported annotation format {af!r} in config['annotation_formats']. "
+            f"Valid values: {valid}."
+        )
 
 annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
 with_counts = config[workflow_configs.WITH_COUNTS]
@@ -37,7 +46,7 @@ if workflow_configs.ANNOTATE_THREADS_EACH not in config:
 
 
 metagraph_cmd=config['metagraph_cmd']
-time_cmd=utils.get_gnu_time_command(config)
+time_cmd=utils.get_time_wrapper_command(config)
 
 max_threads = config.get(workflow_configs.MAX_THREADS) or workflow.cores
 

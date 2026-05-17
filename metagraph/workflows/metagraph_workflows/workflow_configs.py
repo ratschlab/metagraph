@@ -59,7 +59,6 @@ class AnnotationLabelsSource(Enum):
 
 
 class AnnotationFormats(Enum):
-    # COLUMN = 'column' # TODO: need special case in the workflow
     ROW = 'row'
     BIN_REL_WT = 'bin_rel_wt'
     FLAT = 'flat'

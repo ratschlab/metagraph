@@ -11,6 +11,9 @@ from metagraph_workflows.workflow_configs import MEM_MB_KEY, DISK_MB_KEY, \
 from metagraph_workflows.utils import logger, get_rule_specific_config
 
 BASE_MEM = 1 * 1024
+# Floor on the auto-derived `--mem-cap-gb` buffer (in MiB); avoids zero
+# or absurdly tiny buffers when the rule's RAM budget is very small.
+MIN_MEM_BUFFER_MB = 1024
 FALLBACK_MAX_MEM = 4 * 1024
 FALLBACK_MAX_DISK = 10 * 1024
 
@@ -116,7 +119,7 @@ class SupportsMemBufferSize(ResourceConfig):
 
         if avail_mem_mb == TBDString():
             return TBDString()
-        return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), 1024) # TODO: parametrize constant?
+        return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), MIN_MEM_BUFFER_MB)
 
 
 class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
@@ -170,7 +173,7 @@ class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation):
         EXPANSION_FACTOR = 2.6
         BYTES_PER_KMER = 2.6
         required_ram_bytes = unique_kmers * EXPANSION_FACTOR * BYTES_PER_KMER
-        required_ram_mb = max(int(math.ceil(required_ram_bytes / 1024**2)), 1024)
+        required_ram_mb = max(int(math.ceil(required_ram_bytes / 1024**2)), MIN_MEM_BUFFER_MB)
         return required_ram_mb
 
 
@@ -271,11 +274,11 @@ class AnnotateResources(SupportsMemBufferSize):
                 if avail_mem_mb == TBDString():
                     return TBDString()
 
-                total_buf_mb = max(int(self.CAP_MEM_FRACTION * avail_mem_mb), 1024)
+                total_buf_mb = max(int(self.CAP_MEM_FRACTION * avail_mem_mb), MIN_MEM_BUFFER_MB)
                 total_buf_mb = min(total_buf_mb, self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
 
                 parallel_cols = self.get_parallel_cols(threads)
-                mem_cap_mb = max(total_buf_mb // parallel_cols, 1024)
+                mem_cap_mb = max(total_buf_mb // parallel_cols, MIN_MEM_BUFFER_MB)
 
             return int(math.ceil(mem_cap_mb / 1024.0))
 

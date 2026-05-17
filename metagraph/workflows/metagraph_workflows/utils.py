@@ -52,7 +52,7 @@ def derive_sample_dictionary(transcript_path_list_path: Union[Path, str]):
 
 def get_build_single_sample_input(config, orig_samples_path, seq_ids_dict):
     def _sample_input(wildcards):
-        sample_id = wildcards[0] # TODO:
+        sample_id = wildcards[0]
 
         if config[workflow_configs.SAMPLE_IDS_PATH]:
             return orig_samples_path / f"{{sample_id}}{config[workflow_configs.SAMPLE_STAGING_FILE_ENDING]}"
@@ -118,11 +118,6 @@ def get_time_wrapper_command(config):
     del config
     module_call = [shlex.quote(os.environ.get("PYTHON", "python")), "-m", "metagraph_workflows.time_wrapper"]
     return " ".join(module_call)
-
-
-def get_gnu_time_command(config):
-    """Backward-compatible alias for old Snakefiles."""
-    return get_time_wrapper_command(config)
 
 
 def get_log_path(rule_name, config, wildcards=None):
