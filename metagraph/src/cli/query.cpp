@@ -163,7 +163,7 @@ Json::Value get_label_as_json(const std::string &label) {
     std::vector<std::string> label_parts = utils::split_string(label, ";");
 
     // First field is always the sample
-    label_root["sample"] = label_parts[0];
+    label_root[SeqSearchResult::LABEL_SAMPLE_FIELD] = label_parts[0];
 
     // Fill properties if existant
     Json::Value properties = Json::objectValue;

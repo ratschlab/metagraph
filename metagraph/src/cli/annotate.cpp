@@ -527,7 +527,7 @@ int annotate_graph(Config *config) {
                      "once against the final merged annotation with all input "
                      "FASTAs:\n"
                      "    metagraph annotate --anno-filename --index-header-coords "
-                     "-i {} -o {} <all_input_fastas>",
+                     "-i {} -o {} <input_fastas>",
                      !config->infbase.empty() ? config->infbase : "<graph>",
                      !config->outfbase.empty() ? config->outfbase
                                                : "<final_anno_basename>");

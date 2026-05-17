@@ -39,8 +39,11 @@ std::string Alignment::format_coords(const annot::LabelEncoder<> &encoder) const
 namespace {
 
 // JSON field names emitted inside each `annotation.labels[]` entry by
-// `to_json`. `LABEL_SAMPLE_FIELD` mirrors the inline `"sample"` literal in
-// `cli/query.cpp:get_label_as_json`; the two must stay in lockstep.
+// `to_json`. `LABEL_SAMPLE_FIELD` is intentionally duplicated from
+// `cli/query::SeqSearchResult::LABEL_SAMPLE_FIELD` rather than imported,
+// to keep graph-layer code free of a cli-layer dependency; the value
+// must stay in lockstep (covered by integration tests that assert
+// `sample` from both producers).
 constexpr auto LABEL_SAMPLE_FIELD = "sample";
 constexpr auto NT_LENGTH_FIELD = "nt_length";
 constexpr auto NT_COORDS_FIELD = "nt_coords";

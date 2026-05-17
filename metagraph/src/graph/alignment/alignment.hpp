@@ -271,10 +271,15 @@ class Alignment {
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
     // `encoder` and `cth` are optional. When `encoder` is supplied, the
-    // returned object includes an `annotation.labels` array. With `cth` the
-    // labels are per-target-sequence (using `.seqs` to map global column
-    // coordinates to per-sequence positions); without it, the labels are
-    // per-annotation-column.
+    // returned object includes an `annotation.labels` array; the shape of
+    // each entry depends on what coord information is available:
+    //   - no `label_coordinates` (label-only annotator): `{sample}` only.
+    //   - `label_coordinates` + `cth` set: `{sample, nt_length, nt_coords}`
+    //     per target sequence (`.seqs` maps global column coords to
+    //     per-sequence local positions).
+    //   - `label_coordinates` set, `cth` null: `{sample, nt_coords}`
+    //     per annotation column; `nt_length` is omitted because the column
+    //     does not correspond to a single indexed sequence.
     //
     // `include_path_mapping` controls whether the bulky VG-style
     // `path.mapping[]` object is emitted. Off by default: the path lists

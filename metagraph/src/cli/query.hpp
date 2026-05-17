@@ -93,6 +93,7 @@ class SeqSearchResult {
 
     // JSON Field Keys
     static constexpr auto SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
+    static constexpr auto LABEL_SAMPLE_FIELD = "sample";
     static constexpr auto KMER_COUNT_FIELD = "kmer_count";
     static constexpr auto KMER_COORDINATE_FIELD = "kmer_coords";
     static constexpr auto KMERS_IN_TARGET_FIELD = "kmers_in_target";
