@@ -95,19 +95,18 @@ std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) 
     auto seq_ranges = split_coords_by_target(label_columns, label_coordinates,
                                              cth, sequence_.size(), k);
 
+    // Emit `<header>/<nt_length>:<start>-<end>...` per target so callers can
+    // compute the fraction of the target covered from the nt range that
+    // follows (1-based inclusive).
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(seq_ranges.size());
     for (const auto &[key, ranges] : seq_ranges) {
         const auto &[col, seq_id] = key;
-        // `<header>/<nt_length>` exposes the target's nucleotide length so
-        // callers can compute the fraction of the target covered directly
-        // from the nt coord range (1-based inclusive) that follows.
         uint64_t nt_length = cth.num_kmers_in_sequence(col, seq_id) + k - 1;
         decoded_labels.emplace_back(fmt::format("{}/{}",
                                                 cth.get_headers(col)[seq_id],
                                                 nt_length));
         for (auto [start, end] : ranges) {
-            // 1-based inclusive ranges
             decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
         }
     }

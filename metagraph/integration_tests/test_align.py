@@ -491,6 +491,23 @@ class TestAlignCoordToHeader(TestingBase):
                 f.write(f'>{header}\n{seq}\n')
         return path
 
+    def _assert_cth_matches_anno_header(self, rows_a, rows_b):
+        """Check per-row CIGAR + label equivalence between CoordToHeader and
+        per-sequence-column modes. CoordToHeader mode prefixes each header
+        with the per-target k-mer count (`/N`); strip it so the label set
+        matches --anno-header mode output, and sort to ignore label order."""
+        self.assertEqual(len(rows_a), len(rows_b))
+        for row_a, row_b in zip(rows_a, rows_b):
+            self.assertEqual(row_a[0], row_b[0])  # query name
+            self.assertEqual(row_a[6], row_b[6],
+                             f"CIGAR mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
+            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
+            labels_b = sorted(row_b[8].split(';'))
+            self.assertEqual(labels_a, labels_b,
+                             f"label mismatch for {row_a[0]}: "
+                             f"CoordToHeader={row_a[8]!r} vs per-sequence={row_b[8]!r}")
+
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_with_seqs_maps_coords_to_headers(self, anno_repr):
         """Core test: .seqs resolves global coords to per-sequence header:start-end."""
@@ -815,22 +832,7 @@ class TestAlignCoordToHeader(TestingBase):
         self._annotate_graph(test_fa, graph_b, anno_b_base, anno_repr, anno_type='header')
         rows_b = self._run_align(graph_b, anno_b, query_fa, only_forwards=False)
 
-        # The CIGAR (col 6) and label field (col 8) must match between modes.
-        self.assertEqual(len(rows_a), len(rows_b))
-        for row_a, row_b in zip(rows_a, rows_b):
-            self.assertEqual(row_a[0], row_b[0])  # query name
-            self.assertEqual(row_a[6], row_b[6],
-                             f"CIGAR mismatch for {row_a[0]}: "
-                             f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
-            # Normalize semicolon-separated labels (order may vary across
-            # modes). CoordToHeader mode prefixes each header with the
-            # per-target k-mer count; strip it so the label-equivalence
-            # check matches --anno-header mode output.
-            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
-            labels_b = sorted(row_b[8].split(';'))
-            self.assertEqual(labels_a, labels_b,
-                             f"label mismatch for {row_a[0]}: "
-                             f"CoordToHeader={row_a[8]!r} vs per-sequence={row_b[8]!r}")
+        self._assert_cth_matches_anno_header(rows_a, rows_b)
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_coord_to_header_matches_per_sequence_columns_two_files(self, anno_repr):
@@ -880,18 +882,7 @@ class TestAlignCoordToHeader(TestingBase):
         self._annotate_graph(combined_fa, graph_b, anno_b_base, anno_repr, anno_type='header')
         rows_b = self._run_align(graph_b, anno_b, query_fa, only_forwards=False)
 
-        # Per-row CIGAR + label equivalence, as in the single-file case.
-        self.assertEqual(len(rows_a), len(rows_b))
-        for row_a, row_b in zip(rows_a, rows_b):
-            self.assertEqual(row_a[0], row_b[0])
-            self.assertEqual(row_a[6], row_b[6],
-                             f"CIGAR mismatch for {row_a[0]}: "
-                             f"CoordToHeader={row_a[6]!r} vs per-sequence={row_b[6]!r}")
-            labels_a = sorted(self._strip_kmers_in_target(row_a[8]).split(';'))
-            labels_b = sorted(row_b[8].split(';'))
-            self.assertEqual(labels_a, labels_b,
-                             f"label mismatch for {row_a[0]}: "
-                             f"CoordToHeader={row_a[8]!r} vs per-sequence={row_b[8]!r}")
+        self._assert_cth_matches_anno_header(rows_a, rows_b)
 
 
 if __name__ == '__main__':
