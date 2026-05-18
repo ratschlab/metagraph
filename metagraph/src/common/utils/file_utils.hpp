@@ -62,6 +62,18 @@ void madvise_random_range(std::istream &f,
                           std::streamoff start = 0,
                           std::streamoff length = -1);
 
+// Hint MADV_WILLNEED on `[addr, addr + length)`, triggering async prefetch
+// of those pages into the page cache. Page-aligns the start address.
+// No-op when `with_madvise()` is false or `addr` is null.
+void madvise_willneed(void *addr, size_t length);
+
+// Returns a pointer into the mmap region backing `f` at byte `offset` from
+// the start of the file, or `nullptr` if `f` is not an `sdsl::mmap_ifstream`.
+// The pointer remains valid as long as the underlying mmap context is alive
+// (the context is shared with sdsl objects loaded from `f`, so it outlives
+// `f` itself when those objects keep a reference to it).
+void *get_mmap_data(std::istream &f, std::streamoff offset = 0);
+
 // Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
 // `fn` so the caller can load from it, then (if `with_madvise()`) hint
 // MADV_RANDOM on the whole file mapping.

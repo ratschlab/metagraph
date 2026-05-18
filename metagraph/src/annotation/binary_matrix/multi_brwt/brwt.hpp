@@ -44,6 +44,10 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
+    // Hint MADV_WILLNEED on this node's nonzero_rows_ mmap when |num_queries|
+    // is large enough to amortize (threshold ~10% of bitmap span in pages).
+    void prefetch_if_dense(size_t num_queries) const;
+
     // number of ones in the matrix
     uint64_t num_relations() const override;
 
@@ -88,6 +92,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     std::unique_ptr<bit_vector> nonzero_rows_;
     // generally, these child matrices can be abstract BinaryMatrix instances
     std::vector<std::unique_ptr<BRWT>> child_nodes_;
+
+    void *nonzero_rows_mmap_addr_ = nullptr;
+    size_t nonzero_rows_mmap_size_ = 0;
 };
 
 } // namespace matrix

@@ -108,6 +108,26 @@ void madvise_random_range(std::istream &f, std::streamoff start, std::streamoff 
     }
 }
 
+void madvise_willneed(void *addr, size_t length) {
+    if (!with_madvise() || !addr || !length)
+        return;
+    const size_t pagesize = sysconf(_SC_PAGESIZE);
+    auto raw = reinterpret_cast<uintptr_t>(addr);
+    auto aligned = raw & ~(pagesize - 1u);
+    size_t total = length + (raw - aligned);
+    if (madvise(reinterpret_cast<void *>(aligned), total, MADV_WILLNEED)) {
+        logger->warn("madvise(MADV_WILLNEED) failed for [{}, {})",
+                     addr, static_cast<char *>(addr) + length);
+    }
+}
+
+void *get_mmap_data(std::istream &f, std::streamoff offset) {
+    auto *mmap_in = dynamic_cast<sdsl::mmap_ifstream *>(&f);
+    if (!mmap_in)
+        return nullptr;
+    return mmap_in->get_mmap_context()->data() + offset;
+}
+
 void load_mmap_random(const std::string &filename, std::streamoff offset,
                       const std::function<void(std::istream &)> &fn) {
     sdsl::mmap_ifstream in(filename);

@@ -44,6 +44,7 @@ class RowDisk : public BinaryMatrix {
     const bit_vector_small& get_boundary() const { return boundary_; }
 
   private:
+    void prefetch_boundary() const;
     // For the multithreading to work properly, we open int_vector_buffer<> in
     // a special View class that has an actual implementation of the method.
     class View {
@@ -80,6 +81,9 @@ class RowDisk : public BinaryMatrix {
     uint64_t num_relations_ = 0;
 
     size_t iv_size_on_disk_ = 0; // for non-static serialization
+
+    void *boundary_mmap_addr_ = nullptr;
+    size_t boundary_mmap_size_ = 0;
 };
 
 } // namespace matrix

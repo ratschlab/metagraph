@@ -11,8 +11,13 @@ namespace matrix {
 
 using mtg::common::logger;
 
+void RowDisk::prefetch_boundary() const {
+    utils::madvise_willneed(boundary_mmap_addr_, boundary_mmap_size_);
+}
+
 std::vector<BinaryMatrix::SetBitPositions>
 RowDisk::get_rows(const std::vector<Row> &row_ids) const {
+    prefetch_boundary();
     View view = get_view();
     std::vector<SetBitPositions> rows(row_ids.size());
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -61,9 +66,20 @@ bool RowDisk::load(std::istream &f) {
         assert(boundary_start >= buffer_params_.offset);
         iv_size_on_disk_ = boundary_start - buffer_params_.offset;
 
+        boundary_mmap_addr_ = nullptr;
+        boundary_mmap_size_ = 0;
         // boundary_ is too large to load into RAM, always mmap it.
         utils::load_mmap_random(buffer_params_.filename, boundary_start,
-                                [&](std::istream &in) { boundary_.load(in); });
+                                [&](std::istream &in) {
+            const auto boundary_byte_start = static_cast<std::streamoff>(in.tellg());
+            boundary_.load(in);
+            if (void *base = utils::get_mmap_data(in, boundary_byte_start)) {
+                const auto boundary_byte_end = static_cast<std::streamoff>(in.tellg());
+                boundary_mmap_addr_ = base;
+                boundary_mmap_size_
+                    = static_cast<size_t>(boundary_byte_end - boundary_byte_start);
+            }
+        });
 
         num_rows_ = boundary_.num_set_bits();
         num_relations_ = boundary_.size() - num_rows_;

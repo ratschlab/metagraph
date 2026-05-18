@@ -12,8 +12,10 @@
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -1249,6 +1251,24 @@ size_t query_fasta(const std::string &file,
                    const graph::AnnotatedDBG &anno_graph,
                    const graph::align::DBGAlignerConfig *aligner_config) {
     logger->trace("Parsing sequences from file '{}'", file);
+
+    // Warm the suffix-ranges index pages before processing this file so that
+    // page faults (from mmap eviction under memory pressure) are amortized
+    // by an async prefetch instead of stalling individual k-mer lookups.
+    // Handles the PRIMARY graph case where DBGSuccinct is wrapped in CanonicalDBG.
+    {
+        const DeBruijnGraph *graph = &anno_graph.get_graph();
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph))
+            graph = &canonical->get_graph();
+        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(graph)) {
+            dbg_succ->prefetch_suffix_ranges();
+            dbg_succ->prefetch_bloom_filter();
+        }
+    }
+
+    if (const auto *rd = dynamic_cast<const annot::matrix::IRowDiff *>(
+            &anno_graph.get_annotator().get_matrix()))
+        rd->prefetch();
 
     seq_io::FastaParser fasta_parser(file, config.forward_and_reverse);
 

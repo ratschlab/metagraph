@@ -63,6 +63,7 @@ class CoordRowDisk : public BinaryMatrix, public MultiIntMatrix {
     const BinaryMatrix& get_binary_matrix() const { return *this; }
 
   private:
+    void prefetch_boundary() const;
     // For the multithreading to work properly, we open int_vector_buffer<> in
     // a special View class that has an actual implementation of the method.
     class View {
@@ -129,6 +130,9 @@ class CoordRowDisk : public BinaryMatrix, public MultiIntMatrix {
     uint64_t bits_for_number_of_vals_ = 0;
     uint64_t bits_for_single_value_ = 0;
     uint64_t num_rows_ = 0;
+
+    void *boundary_mmap_addr_ = nullptr;
+    size_t boundary_mmap_size_ = 0;
 };
 
 } // namespace matrix
