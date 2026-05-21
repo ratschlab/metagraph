@@ -10,7 +10,6 @@
 [![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#1-install)
 [![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#-docker)
 [![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-sources)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![DOI](https://img.shields.io/badge/DOI-10.1038%2Fs41586--025--09603--w-blue)](https://doi.org/10.1038/s41586-025-09603-w)
 [![documentation](https://img.shields.io/badge/📖-online%20docs-blue.svg)](https://metagraph.ethz.ch/static/docs/index.html)
 
@@ -38,6 +37,7 @@ flowchart LR
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
+- 🔤 **Custom alphabets.** Support for `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
 
 <details>
@@ -104,7 +104,7 @@ metagraph query --query-mode matches -p 8 \
     metagraph/tests/data/transcripts_100.fa
 ```
 
-Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment, [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
+Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment (acts as a read mapper when given a coordinate-aware annotator); `metagraph query --align` to find labels via alignment scoring instead of exact *k*-mer matching (useful for divergent or noisy queries); [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
 
 ## Minimal example
 
@@ -155,8 +155,19 @@ metagraph build -v -p 8 -k 31 --mem-cap-gb 10 --disk-swap /scratch/swap -o graph
 # Annotate a graph with file-based labels (one label per input file)
 metagraph annotate -v -p 8 --anno-filename -i graph.dbg -o annotation data.fa.gz
 
-# Align reads against a graph
+# Align sequences to the graph (sequence-to-graph alignment).
 metagraph align -v -i graph.dbg query.fa
+
+# Read-mapper mode: with a coordinate-aware annotator, alignments are
+# constrained to walks where source coordinates step by ±1, so hits map
+# cleanly to source positions. Use this for read mapping over indexed
+# genomes.
+metagraph align -v -i graph.dbg -a annotation.row_diff_brwt_coord.annodbg reads.fq
+
+# query --align: align each query to the graph (ignoring annotations),
+# then fetch labels for the highest-scoring walk. Use when exact k-mer
+# matching is too strict (divergent or noisy queries).
+metagraph query --align -i graph.dbg -a annotation.row_diff_brwt.annodbg query.fa
 
 # Assemble unitigs from a graph
 metagraph assemble -v graph.dbg -o assembled.fa --unitigs
@@ -220,8 +231,6 @@ metagraph server_query -i graph.dbg -a annotation.annodbg --port 5555 --parallel
 ```
 
 </details>
-
-For manual Multi-BRWT clustering (linkage trees, memory formulas, column-count tradeoffs), see [the annotation-transform docs](https://metagraph.ethz.ch/static/docs/quick_start.html#transform-annotation).
 
 ## 📦 Install
 
