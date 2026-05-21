@@ -28,40 +28,30 @@ flowchart LR
     Q --> R["matches<br/>labels · counts · positions"]
 ```
 
-### What you can do
-
-- 🔎 **Search public sequencing data.** Find a CRISPR spacer, AMR gene, or variant across 50+ PB of public reads via the hosted instance at [metagraph.ethz.ch](https://metagraph.ethz.ch).
-- 📊 **Index your own cohort.** Build a *k*-mer index over an RNA-seq, metagenome, or pangenome cohort and recover per-sample expression or presence.
-- 📍 **Lossless source recovery.** Index *k*-mer coordinates and queries come back with per-target hit positions — the index *is* the data.
-
 ### Features
 
-- ⚡ **Scale.** Indexes with trillions of *k*-mers and millions of annotation labels; petabase-scale collections of public sequencing data have been indexed end-to-end.
-- 🔢 **[k-mer counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts).** Optional abundance payload — for expression levels, depth-of-coverage, or weighted graph cleaning.
-- 📏 **[k-mer coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).** Optional position payload — losslessly encodes source sequences and returns per-target hit positions.
+- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 50+ petabases of public DNA, RNA, and protein data — think BLAST at petabase scale.
+- 📊 **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
-- 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by user-defined JSON rules.
+- 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
 - 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
 
 <details>
-<summary>Design choices under the hood</summary>
+<summary>Under the hood</summary>
 
 - **Succinct data structures** — the default `succinct` (BOSS) graph representation uses only 2–4 bits per *k*-mer.
-- **Memory-mapped loading** — near-zero RAM at query time and instant cold start; supported across most graph and annotation representations.
-- **Batched algorithms** — operations are designed around the access patterns succinct structures favor (batched lookups over random access).
-- **Modular representations** — multiple annotation formats (`ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants) trade compression vs. query speed; pick the one that fits your scale.
-- **Custom alphabets** — `{A,C,G,T}`, `{A,C,G,T,N}`, case-sensitive DNA, protein, or compile-time custom alphabets.
-- **Extensible interfaces** — adding a new index representation requires little code overhead.
+- **Modular annotation formats** — `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
+- **Memory-mapped loading** — pass `--mmap` to any subcommand for fast cold start and low query-time RAM (NVMe recommended; SSD works but slower).
+- **Scales to trillions of *k*-mers and millions of labels** — petabase-scale collections have been indexed end-to-end.
 
 </details>
 
-> 📖 **Full documentation:** <https://metagraph.ethz.ch/static/docs/index.html>
-> &nbsp; · &nbsp; Offline docs: [`metagraph/docs/source`](metagraph/docs/source)
+> 📖 **Full documentation:** <https://metagraph.ethz.ch/static/docs/index.html> &nbsp;·&nbsp; Offline: [`metagraph/docs/source`](metagraph/docs/source)
 
 ## 🌐 MetaGraph Online
 
-Try MetaGraph without installing anything: <https://metagraph.ethz.ch> hosts a public search engine over 50+ petabases of DNA, RNA, and protein sequences, indexing SRA, ENA, DRA, RefSeq, UniProt, and more. Paste a query sequence at the top of the page and pick which indexed datasets to search against.
+Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over 50+ petabases of public DNA, RNA, and protein archives — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
 
 ## 🚀 Quick start
 
@@ -74,7 +64,7 @@ conda install -c bioconda -c conda-forge metagraph
 pip install --force-reinstall "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
 ```
 
-`metagraph` ships the compiled binary; `metagraph-workflows` is the Python wrapper that drives the full build pipeline.
+`metagraph` is the compiled binary; `metagraph-workflows` is the Python wrapper that drives the full build pipeline.
 
 ### 2. Build an index
 
@@ -85,18 +75,21 @@ git clone https://github.com/ratschlab/metagraph.git && cd metagraph
 metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary
 ```
 
-`--primary` builds a *primary* graph — one strand kept per *k*-mer pair, about half the size of indexing both strands; recommended for DNA data. The positional argument accepts a file list (one path per line), a directory, or — as above — process substitution.
+`--primary` indexes one strand per *k*-mer pair (about half the size; appropriate when read strand orientation is unknown, e.g. typical short-read sequencing).
 
-For real workloads, supply your own sample list and a hardware budget:
+Internally this chains `metagraph build → annotate → row-diff transform → BRWT clustering → BRWT relaxation` and produces `graph.dbg`, the more compact `graph_small.dbg` (smaller, slower at access — useful when RAM or storage is tight), and the default annotation `graph.relax.row_diff_brwt.annodbg` (`RowDiff<Multi-BRWT>`). See the [pipeline docs](https://metagraph.ethz.ch/static/docs/quick_start.html) for each stage.
+
+<details>
+<summary>Real-workload example with file list and hardware budget</summary>
 
 ```bash
 metagraph-workflows build samples.txt -o out/ --primary \
   -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 ```
 
-Per-stage memory caps, thread packing, and BRWT parameters are derived from the budget. See `metagraph-workflows build --help` for all options.
+The positional argument accepts a file list (one path per line), a directory, or process substitution. Per-stage memory caps, thread packing, and BRWT parameters are derived from the budget. See `metagraph-workflows build --help` for all options.
 
-Outputs: `graph.dbg` (the de Bruijn graph), `graph_small.dbg` (a more compressed, slower-to-load representation of the same graph), and `graph.relax.row_diff_brwt.annodbg` (the default `RowDiff<Multi-BRWT>` annotation). Internally this chains `metagraph build → annotate → transform_anno --anno-type row_diff → transform_anno --anno-type *_brwt` — see [the pipeline docs](https://metagraph.ethz.ch/static/docs/quick_start.html) for each stage.
+</details>
 
 ### 3. Query
 
@@ -108,18 +101,11 @@ metagraph query --query-mode matches -p 8 \
     metagraph/tests/data/transcripts_100.fa
 ```
 
-### What next
-
-- 🧬 **Align reads** instead of querying — see [Minimal example](#-minimal-example) and `metagraph align --help`.
-- 🐍 **Drive from Python or HTTP** — load the index with `metagraph server_query`, then call it from the [Python API](https://metagraph.ethz.ch/static/docs/api.html).
-- 🔀 **Differential assembly** — extract sequences present in some labels and absent in others (see [More recipes](#-more-recipes) below).
-- 📚 **Full docs** — <https://metagraph.ethz.ch/static/docs/index.html>.
+Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment, [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#-minimal-example) below walks through each step on a smaller dataset.
 
 ## 💡 Minimal example
 
-For a guaranteed-working end-to-end demo with the bundled test data, using `metagraph` directly (no workflow wrapper, no row-diff/BRWT — just the column-compressed annotation, which is plenty at this scale).
-
-A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record (1000 labels for 1000 transcripts).
+For a hands-on demo using `metagraph` directly (no workflow wrapper, no row-diff/BRWT — just the column-compressed annotation, which is plenty at this scale). A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record (1000 labels for 1000 transcripts).
 
 ```bash
 cd metagraph/tests/data
@@ -140,19 +126,13 @@ metagraph query -i transcripts_1000.dbg -a transcripts_1000.column.annodbg \
 metagraph stats -a transcripts_1000.column.annodbg transcripts_1000.dbg
 ```
 
-Outputs:
-- `transcripts_1000.dbg` — the de Bruijn graph (613,859 *k*-mers at k=31).
-- `transcripts_1000.column.annodbg` — annotation in the `ColumnCompressed` format (1,000 labels).
-
-Sample query output (tab-separated: query index, query header, matching labels joined by `:`):
+Outputs `transcripts_1000.dbg` (the de Bruijn graph, 613,859 *k*-mers at k=31) and `transcripts_1000.column.annodbg` (`ColumnCompressed` annotation, 1000 labels). Sample query output (tab-separated: query index, query header, matching labels joined by `:`):
 
 ```
 3   ENST00000619216.1|...|MIR6859-1|68|miRNA|   ENST00000619216.1|...|MIR6859-1|68|miRNA|:ENST00000612080.1|...|MIR6859-2|68|miRNA|
 ```
 
-Here `MIR6859-1` matches both itself *and* its paralog `MIR6859-2` — they share enough *k*-mers to clear the 80% threshold.
-
-For larger indexes, the column-compressed annotation gets transformed into more compact representations (`RowDiff<Multi-BRWT>`, `RowDiff<RowSparse>`, `Rainbowfish`, …). The `metagraph-workflows build` command in [Quick start](#-quick-start) chains those transforms automatically.
+`MIR6859-1` matches both itself *and* its paralog `MIR6859-2` — they share enough *k*-mers to clear the 80% threshold. For larger indexes, the column-compressed annotation gets transformed into more compact representations (`RowDiff<Multi-BRWT>`, `RowDiff<RowSparse>`, …) — `metagraph-workflows build` chains those transforms automatically.
 
 ## 🔧 More recipes
 
@@ -239,7 +219,7 @@ For manual Multi-BRWT clustering (linkage trees, memory formulas, column-count t
 
 ## 📦 Install
 
-The recommended conda + pip install is covered in [Quick start](#-quick-start). MetaGraph runs on Linux and macOS (x86-64 and arm64); the Minimal example needs < 1 GB RAM, while petabase-scale builds use disk swap and 70+ GB. The bioconda install gives a single `metagraph` binary built for the `DNA` alphabet — for `DNA5`, `Protein`, or custom alphabets, use the Docker image (which bundles all three variants) or build from source.
+Covered in [Quick start](#-quick-start). MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
 
 ### 🐳 Docker
 
