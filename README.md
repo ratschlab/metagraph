@@ -30,8 +30,8 @@ flowchart LR
 
 ### Features
 
-- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 50+ petabases of public DNA, RNA, and protein data — think BLAST at petabase scale.
-- 📊 **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
+- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — think BLAST at petabase scale.
+- 🗄️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
@@ -51,7 +51,7 @@ flowchart LR
 
 ## 🌐 MetaGraph Online
 
-Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over 50+ petabases of public DNA, RNA, and protein archives — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
+Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
 
 ## 🚀 Quick start
 
@@ -101,9 +101,9 @@ metagraph query --query-mode matches -p 8 \
     metagraph/tests/data/transcripts_100.fa
 ```
 
-Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment, [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#-minimal-example) below walks through each step on a smaller dataset.
+Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment, [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
 
-## 💡 Minimal example
+## Minimal example
 
 For a hands-on demo using `metagraph` directly (no workflow wrapper, no row-diff/BRWT — just the column-compressed annotation, which is plenty at this scale). A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record (1000 labels for 1000 transcripts).
 
