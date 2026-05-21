@@ -33,12 +33,14 @@ flowchart LR
 ### Features
 
 - 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — think BLAST at petabase scale.
-- 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
+- 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
+- 🔢 **[k-mer counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts).** Optional abundance payload — for expression levels, depth-of-coverage, or weighted graph cleaning.
+- 📏 **[k-mer coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).** Optional position payload — losslessly encodes source sequences and returns per-target hit positions.
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
-- 🔤 **Custom alphabets.** Support for `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
+- 🔤 **Custom alphabets.** Support for `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 
 <details>
 <summary>Under the hood</summary>
