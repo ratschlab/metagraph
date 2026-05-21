@@ -108,34 +108,36 @@ Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/stati
 
 ## Minimal example
 
-For a hands-on demo using `metagraph` directly (no workflow wrapper, no row-diff/BRWT — just the column-compressed annotation, which is plenty at this scale). A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record (1000 labels for 1000 transcripts).
+A hands-on demo using `metagraph` directly (no workflow wrapper). A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record.
 
 ```bash
 cd metagraph/tests/data
 
 # 1. Build a de Bruijn graph (k-mer index) with k=31
-metagraph build -v -p 4 -k 31 -o transcripts_1000 transcripts_1000.fa
+metagraph build -v -p 4 -k 31 -o samples metasub_fake_data_simple.fa
 
 # 2. Construct an annotation matrix linking each k-mer to its source label.
-metagraph annotate -v -p 4 -i transcripts_1000.dbg --anno-header \
-                   -o transcripts_1000 transcripts_1000.fa
+metagraph annotate -v -p 4 -i samples.dbg --anno-header \
+                   -o samples metasub_fake_data_simple.fa
 
 # 3. Query: for each query sequence, report all labels whose k-mers cover ≥80% of it.
-metagraph query -i transcripts_1000.dbg -a transcripts_1000.column.annodbg \
+metagraph query -i samples.dbg -a samples.column.annodbg \
                 --min-kmers-fraction-label 0.8 \
-                transcripts_1000.fa
+                metasub_fake_data_simple.fa
 
 # 4. Print graph + annotation stats.
-metagraph stats -a transcripts_1000.column.annodbg transcripts_1000.dbg
+metagraph stats -a samples.column.annodbg samples.dbg
 ```
 
-Outputs `transcripts_1000.dbg` (the de Bruijn graph, 613,859 *k*-mers at k=31) and `transcripts_1000.column.annodbg` (`ColumnCompressed` annotation, 1000 labels). Sample query output (tab-separated: query index, query header, matching labels joined by `:`):
+Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labels, one per fasta record). Sample query output (tab-separated: query index, query header, matching labels joined by `:`):
 
 ```
-3   ENST00000619216.1|...|MIR6859-1|68|miRNA|   ENST00000619216.1|...|MIR6859-1|68|miRNA|:ENST00000612080.1|...|MIR6859-2|68|miRNA|
+0   kl_sample   kl_sample
+1   zh_sample   kl_sample:zh_sample
+2   tk_sample   kl_sample:tk_sample
 ```
 
-`MIR6859-1` matches both itself *and* its paralog `MIR6859-2` — they share enough *k*-mers to clear the 80% threshold. For larger indexes, the column-compressed annotation gets transformed into more compact representations (`RowDiff<Multi-BRWT>`, `RowDiff<RowSparse>`, …) — `metagraph-workflows build` chains those transforms automatically.
+Each query matches at least its own label; `zh_sample` and `tk_sample` also match `kl_sample` because most of their *k*-mers are contained in it.
 
 ## 🔧 More recipes
 
