@@ -121,7 +121,8 @@ metagraph annotate -v -p 4 -i samples.dbg --anno-header \
                    -o samples metasub_fake_data_simple.fa
 
 # 3. Query: for each query sequence, report all labels whose k-mers cover ≥80% of it.
-metagraph query -i samples.dbg -a samples.column.annodbg \
+metagraph query --query-mode matches \
+                -i samples.dbg -a samples.column.annodbg \
                 --min-kmers-fraction-label 0.8 \
                 metasub_fake_data_simple.fa
 
@@ -129,15 +130,15 @@ metagraph query -i samples.dbg -a samples.column.annodbg \
 metagraph stats -a samples.column.annodbg samples.dbg
 ```
 
-Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labels, one per fasta record). Sample query output (tab-separated: query index, query header, matching labels joined by `:`):
+Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labels, one per fasta record). Sample query output (tab-separated: query index, query header, then one `<label>:k-mer-count` entry per matching label):
 
 ```
-0   kl_sample   kl_sample
-1   zh_sample   kl_sample:zh_sample
-2   tk_sample   kl_sample:tk_sample
+0   kl_sample   <kl_sample>:330
+1   zh_sample   <kl_sample>:243   <zh_sample>:243
+2   tk_sample   <kl_sample>:207   <tk_sample>:207
 ```
 
-Each query matches at least its own label; `zh_sample` and `tk_sample` also match `kl_sample` because most of their *k*-mers are contained in it.
+Each query matches at least its own label. `zh_sample`'s 243 *k*-mers are fully contained in `kl_sample` (243/243), and same for `tk_sample` (207/207) — they share enough content to clear the 80% threshold. `kl_sample` matches only itself: its 330 *k*-mers aren't fully covered by either of the shorter samples.
 
 ## 🔧 More recipes
 
