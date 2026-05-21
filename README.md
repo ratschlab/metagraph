@@ -7,6 +7,9 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
 [![Bioconda version](https://img.shields.io/conda/vn/bioconda/metagraph)](https://bioconda.github.io/recipes/metagraph/README.html)
 [![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#1-install)
+[![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#-docker)
+[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#-install-from-sources)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![DOI](https://img.shields.io/badge/DOI-10.1038%2Fs41586--025--09603--w-blue)](https://doi.org/10.1038/s41586-025-09603-w)
 [![documentation](https://img.shields.io/badge/📖-online%20docs-blue.svg)](https://metagraph.ethz.ch/static/docs/index.html)
@@ -31,7 +34,7 @@ flowchart LR
 ### Features
 
 - 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — think BLAST at petabase scale.
-- 🗄️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
+- 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; queries return matching labels with optional [counts (abundances)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) or [coordinates (positions in source)](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
