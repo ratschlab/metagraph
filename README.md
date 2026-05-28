@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="metagraph/docs/source/images/metagraph_logo.png" alt="MetaGraph" width="420">
+  <img src="metagraph/docs/source/images/metagraph_logo.png" alt="MetaGraph" width="260">
 </p>
 
 [![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-brightgreen)](#-quick-start)
