@@ -76,13 +76,15 @@ pip install --force-reinstall "git+https://github.com/ratschlab/metagraph.git#su
 Clone the repo for the bundled test data, then build:
 
 ```bash
+# Only to fetch the bundled example *.fa files — skip this if you have your own data
 git clone https://github.com/ratschlab/metagraph.git && cd metagraph
+
 metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary
 ```
 
 `--primary` indexes one strand per *k*-mer pair (about half the size; appropriate when read strand orientation is unknown, e.g. typical short-read sequencing).
 
-Internally this chains `metagraph build → annotate → row-diff transform → BRWT clustering → BRWT relaxation` and produces `graph.dbg`, the more compact `graph_small.dbg` (smaller, slower at access — useful when RAM or storage is tight), and the default annotation `graph.relax.row_diff_brwt.annodbg` (`RowDiff<Multi-BRWT>`). See the [pipeline docs](https://metagraph.ethz.ch/static/docs/quick_start.html) for each stage.
+Internally this chains `metagraph build → annotate → row-diff transform → BRWT clustering → BRWT relaxation` and produces `graph.dbg`, the more compact `graph_small.dbg` (smaller, slower at access — useful when RAM or storage is tight), and the default annotation `graph.relax.row_diff_brwt.annodbg` (`RowDiff<Multi-BRWT>`). See the [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) in the docs for a step-by-step of index construction.
 
 <details>
 <summary>Real-workload example with file list and hardware budget</summary>
@@ -109,6 +111,9 @@ metagraph query --query-mode matches -p 8 \
 Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/sequence_search.html#sequence-to-graph-alignment) for sequence-to-graph alignment (acts as a read mapper when given a coordinate-aware annotator); `metagraph query --align` to find labels via alignment scoring instead of exact *k*-mer matching (useful for divergent or noisy queries); [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
 
 ## Minimal example
+
+<details>
+<summary>Step-by-step walkthrough with the <code>metagraph</code> CLI (build → annotate → query → stats)</summary>
 
 A hands-on demo using `metagraph` directly (no workflow wrapper). A *label* is whatever tag you want each *k*-mer associated with — a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record.
 
@@ -141,6 +146,8 @@ Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labe
 ```
 
 Each query matches at least its own label. `zh_sample`'s 243 *k*-mers are fully contained in `kl_sample` (243/243), and same for `tk_sample` (207/207) — they share enough content to clear the 80% threshold. `kl_sample` matches only itself: its 330 *k*-mers aren't fully covered by either of the shorter samples.
+
+</details>
 
 ## 🔧 More recipes
 
