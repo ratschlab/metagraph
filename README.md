@@ -34,19 +34,18 @@ flowchart LR
 
 - 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data — see [MetaGraph Online](#-metagraph-online).
 - 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
-- 🔢 **[k-mer counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts).** Optional abundance payload — for expression levels, depth-of-coverage, or weighted graph cleaning.
-- 📏 **[k-mer coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).** Optional position payload — losslessly encodes source sequences and returns per-target hit positions.
+- 🔢 **Optional per-*k*-mer payloads** — attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, for expression levels, coverage, or weighted cleaning) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions — losslessly encode source sequences and return per-target hit positions).
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
 - 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
-- 🔤 **Custom alphabets.** Support for `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 
 <details>
 <summary>Under the hood</summary>
 
 - **Succinct data structures** — the default `succinct` (BOSS) graph representation uses only 2–4 bits per *k*-mer.
 - **Modular annotation formats** — `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
+- **Custom alphabets** — `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - **Memory-mapped loading** — pass `--mmap` to any subcommand for fast cold start and low query-time RAM (NVMe recommended; SSD works but slower).
 - **Scales to trillions of *k*-mers and millions of labels** — petabase-scale collections have been indexed end-to-end.
 
@@ -237,9 +236,9 @@ metagraph server_query -i graph.dbg -a annotation.row_diff_brwt.annodbg --port 5
 
 </details>
 
-## 📦 Install
+## 📦 More install options
 
-Covered in [Quick start](#-quick-start). MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
+The recommended conda install is in [Quick start](#-quick-start). MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
 
 ### 🐳 Docker
 
