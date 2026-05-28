@@ -45,6 +45,7 @@ flowchart LR
 - **Succinct data structures** — the default `succinct` (BOSS) graph representation uses only 2–4 bits per *k*-mer.
 - **Modular annotation formats** — `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
 - **Custom alphabets** — `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
+- **Extensible by design** — generic interfaces let developers add new graph/annotation representations or algorithms with little code.
 - **Memory-mapped loading** — pass `--mmap` to any subcommand for fast cold start and low query-time RAM (NVMe recommended; SSD works but slower).
 - **Scales to trillions of *k*-mers and millions of labels** — petabase-scale collections have been indexed end-to-end.
 
