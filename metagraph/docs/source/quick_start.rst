@@ -676,6 +676,16 @@ The conversion to ``Multi-BRWT`` can be done either
     changing the value passed with flag ``--subsample <INT>``. The 1M rows subsampled by default are usually enough
     even for very large annotations. Increasing this value usually does not lead to any significantly better compression.
 
+.. note::
+    Rough RAM requirements of the two stages above:
+
+    *   computing the column clustering (linkage) needs about ``N*R/8 + 6*N^2`` bytes, where ``N``
+        is the number of columns (labels) and ``R`` the number of subsampled rows
+        (flag ``--subsample``, 1M by default);
+    *   constructing the Multi-BRWT needs about ``M*V/8 + Size(BRWT)`` bytes, where ``M`` is the
+        number of rows in the annotation and ``V`` the number of nodes processed in parallel
+        (flag ``--parallel-nodes``).
+
 Finally, the internal structure of the BRWT tree can be relaxed (which is always recommended to do) to increase
 the arity of its internal nodes and enhance the compression::
 

@@ -32,7 +32,7 @@ flowchart LR
 
 ### Features
 
-- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — think BLAST at petabase scale.
+- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data — see [MetaGraph Online](#-metagraph-online).
 - 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
 - 🔢 **[k-mer counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts).** Optional abundance payload — for expression levels, depth-of-coverage, or weighted graph cleaning.
 - 📏 **[k-mer coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates).** Optional position payload — losslessly encodes source sequences and returns per-target hit positions.
@@ -56,7 +56,7 @@ flowchart LR
 
 ## 🌐 MetaGraph Online
 
-Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over indexes built from 50+ petabases of public DNA, RNA, and protein sequencing data — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
+Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over indexes built from 56 petabases of public DNA, RNA, and protein sequencing data — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
 
 ## 🚀 Quick start
 
@@ -106,7 +106,7 @@ metagraph query --query-mode matches -p 8 \
     metagraph/tests/data/transcripts_100.fa
 ```
 
-Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/quick_start.html#query-index) for sequence-to-graph alignment (acts as a read mapper when given a coordinate-aware annotator); `metagraph query --align` to find labels via alignment scoring instead of exact *k*-mer matching (useful for divergent or noisy queries); [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
+Other ways to use the index: [`metagraph align`](https://metagraph.ethz.ch/static/docs/sequence_search.html#sequence-to-graph-alignment) for sequence-to-graph alignment (acts as a read mapper when given a coordinate-aware annotator); `metagraph query --align` to find labels via alignment scoring instead of exact *k*-mer matching (useful for divergent or noisy queries); [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html) for Python/HTTP queries. The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
 
 ## Minimal example
 
@@ -157,29 +157,32 @@ metagraph build -v -p 8 -k 31 --mem-cap-gb 10 --disk-swap /scratch/swap -o graph
 # Annotate a graph with file-based labels (one label per input file)
 metagraph annotate -v -p 8 --anno-filename -i graph.dbg -o annotation data.fa.gz
 
-# Align sequences to the graph (sequence-to-graph alignment).
+# Align sequences to the graph (plain sequence-to-graph alignment, no labels).
 metagraph align -v -i graph.dbg query.fa
 
-# Read-mapper mode: with a coordinate-aware annotator, alignments are
-# constrained to walks where source coordinates step by ±1, so hits map
-# cleanly to source positions. Use this for read mapping over indexed
-# genomes.
+# Labeled alignment: with -a, the walk is label-trace-consistent — every
+# k-mer of the reported path lies in every reported label.
+metagraph align -v -i graph.dbg -a annotation.row_diff_brwt.annodbg reads.fq
+
+# Same, but with a coordinate-aware annotator: the walk is additionally
+# coordinate-consistent (positions step by ±1 per node), so hits map to
+# source positions. Functions as a read mapper over indexed genomes.
 metagraph align -v -i graph.dbg -a annotation.row_diff_brwt_coord.annodbg reads.fq
 
-# query --align: align each query to the graph (ignoring annotations),
-# then fetch labels for the highest-scoring walk. Use when exact k-mer
+# query --align: aligns each query to the graph WITHOUT label constraints,
+# then fetches labels for the highest-scoring walk. Use when exact k-mer
 # matching is too strict (divergent or noisy queries).
 metagraph query --align -i graph.dbg -a annotation.row_diff_brwt.annodbg query.fa
 
-# Assemble unitigs from a graph
-metagraph assemble -v graph.dbg -o assembled.fa --unitigs
+# Assemble unitigs from a graph (writes assembled.fasta.gz)
+metagraph assemble -v graph.dbg -o assembled --unitigs
 
 # Differential assembly — JSON rules define which label groups must be present vs. absent.
 # Sample rule files: metagraph/tests/data/example.diff.json, example_simple.diff.json.
 metagraph assemble -v graph.dbg --unitigs \
     -a annotation.column.annodbg \
     --diff-assembly-rules diff_assembly_rules.json \
-    -o diff_assembled.fa
+    -o diff_assembled
 
 # Stats — graph only, annotation only, or both
 metagraph stats graph.dbg
@@ -216,7 +219,7 @@ Add `--count-kmers` to keep the KMC abundance counts as a weight vector alongsid
 # Filter labels with low k-mer coverage (default 0.7)
 metagraph query --min-kmers-fraction-label 0.8 ...
 
-# Pick a label-list separator other than ":"
+# Change the separator joining labels in the default `labels` mode (default ":")
 metagraph query --labels-delimiter ", " ...
 
 # Per-k-mer presence/absence bitmask per matching label
@@ -229,7 +232,7 @@ metagraph query --query-mode counts ...
 metagraph query --query-mode coords ...
 
 # Server mode (Python API / HTTP queries)
-metagraph server_query -i graph.dbg -a annotation.annodbg --port 5555 --parallel 8
+metagraph server_query -i graph.dbg -a annotation.row_diff_brwt.annodbg --port 5555 --parallel 8
 ```
 
 </details>
@@ -305,8 +308,9 @@ If MetaGraph or its index resources are useful in your work, please cite:
   doi={10.1038/s41586-025-09603-w}
 }
 ```
+
 </details>
 
 ## ⚖️ License
 
-MetaGraph is distributed under the GPLv3 License (see [LICENSE](LICENSE)). See also [AUTHORS](AUTHORS) and [COPYRIGHTS](COPYRIGHTS).
+MetaGraph is distributed under the GPLv3 License (see [LICENSE](LICENSE)). See also [AUTHORS](AUTHORS) and [COPYRIGHT](COPYRIGHT).
