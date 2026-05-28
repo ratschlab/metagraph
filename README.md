@@ -31,13 +31,13 @@ flowchart LR
 
 ### Features
 
-- 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data — see [MetaGraph Online](#-metagraph-online).
+- 🌐 **Search in public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data — see [MetaGraph Online](#-metagraph-online).
 - 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
-- 🔢 **Optional per-*k*-mer payloads** — attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, e.g. expression or coverage) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions — losslessly encode source sequences and return per-target hit positions).
-- 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
-- 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
+- 🔢 **Optional per-*k*-mer payloads.** Attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, e.g. expression or coverage) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions — losslessly encode source sequences and return per-target hit positions).
+- 🧬 **Sequence alignment.** Align sequences to the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
+- 🧹 **Scalable graph cleaning.** Strip sequencing errors out of very large de Bruijn graphs.
 - 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another.
-- 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
+- ☁️ **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
 
 <details>
 <summary>Under the hood</summary>
@@ -55,6 +55,8 @@ flowchart LR
 ## 🌐 MetaGraph Online
 
 Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over indexes built from 56 petabases of public DNA, RNA, and protein sequencing data — RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
+
+Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data](https://registry.opendata.aws/metagraph/) for download (no AWS account needed) and offline querying — see [Preconstructed indexes](https://metagraph.ethz.ch/static/docs/resources.html#preconstructed-indexes).
 
 ## 🚀 Quick start
 
