@@ -2,8 +2,7 @@
   <img src="metagraph/docs/source/images/metagraph_logo.png" alt="MetaGraph" width="420">
 </p>
 
-[![Linux](https://img.shields.io/badge/Linux-supported-brightgreen?logo=linux&logoColor=white)](#-quick-start)
-[![macOS](https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple&logoColor=white)](#-quick-start)
+[![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-brightgreen)](#-quick-start)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
 [![Bioconda version](https://img.shields.io/conda/vn/bioconda/metagraph)](https://bioconda.github.io/recipes/metagraph/README.html)
 [![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
@@ -34,10 +33,10 @@ flowchart LR
 
 - 🔎 **Search public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data — see [MetaGraph Online](#-metagraph-online).
 - 🏗️ **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
-- 🔢 **Optional per-*k*-mer payloads** — attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, for expression levels, coverage, or weighted cleaning) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions — losslessly encode source sequences and return per-target hit positions).
+- 🔢 **Optional per-*k*-mer payloads** — attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, e.g. expression or coverage) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions — losslessly encode source sequences and return per-target hit positions).
 - 🧬 **Sequence alignment** against the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - 🧹 **Scalable graph cleaning** to strip sequencing errors out of very large de Bruijn graphs.
-- 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another, driven by JSON rules.
+- 🔀 **[Differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly).** Extract sequences present in one group of samples and absent from another.
 - 🐍 **[Python API & HTTP server](https://metagraph.ethz.ch/static/docs/api.html).** Drive MetaGraph from Python or query a running instance over HTTP.
 
 <details>
@@ -283,7 +282,25 @@ See the [installation guide](https://metagraph.ethz.ch/static/docs/installation.
 
 ## 🤝 Contributing
 
-Development notes — docker build, Makefile shortcuts, and the release process — live in [CONTRIBUTING.md](CONTRIBUTING.md).
+<details>
+<summary>Developer notes — docker build, Makefile, releases</summary>
+
+**Build a docker container.** Run `docker build .`
+
+**Makefile.** The top-level `Makefile` conveniently wraps the common build / test invocations. Supported arguments:
+
+- `env`: `""` (host) or `docker`
+- `alphabet`: e.g. `DNA`, `DNA5`, `Protein` (default `DNA`)
+- `cmake_args`: extra CMake flags forwarded to the build (overrides the default `-DBUILD_KMC=OFF`)
+
+```bash
+# compile in a docker container for the DNA alphabet
+make build-metagraph env=docker alphabet=DNA
+```
+
+**Releases.** Three steps: 1) bump the version in `package.json`; 2) tag the commit with that version; 3) create a GitHub release.
+
+</details>
 
 ## 📝 Citation
 
