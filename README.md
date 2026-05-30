@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">MetaGraph: The Metagenome Graph Project</h1>
+# MetaGraph: Metagenome Graph Project
 
 [![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-brightgreen)](#quick-start)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
