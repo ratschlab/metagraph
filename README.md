@@ -72,7 +72,7 @@ Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data
 conda create -n metagraph python
 conda activate metagraph
 conda install -c bioconda -c conda-forge metagraph
-pip install --force-reinstall "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+pip install "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
 ```
 
 `metagraph` is the compiled binary; `metagraph-workflows` is the Python wrapper that drives the full build pipeline.
@@ -238,8 +238,8 @@ Add `--count-kmers` to keep the KMC abundance counts as a weight vector alongsid
 # Filter labels with low k-mer coverage (default 0.7)
 metagraph query --min-kmers-fraction-label 0.8 ...
 
-# Change the separator joining labels in the default `labels` mode (default ":")
-metagraph query --labels-delimiter ", " ...
+# Delimiter joining labels in `--query-mode labels` output (default ":")
+metagraph query --query-mode labels --labels-delimiter ", " ...
 
 # Per-k-mer presence/absence bitmask per matching label
 metagraph query --query-mode signature ...
