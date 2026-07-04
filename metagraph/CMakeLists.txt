@@ -18,6 +18,24 @@ include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
 
+# Building the pymetagraph Python extension requires every static library in the
+# link chain (including vendored deps and HTSLIB) to be position-independent.
+# This is opt-in so the default static `metagraph` binary build is unaffected.
+option(BUILD_PYTHON_BINDINGS "Build the pymetagraph pybind11 extension" OFF)
+if(BUILD_PYTHON_BINDINGS)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+  # jemalloc (pulled in via folly, if present on the system) uses a TLS model
+  # that can make dlopen()-ing this extension fail at import time with
+  # "cannot allocate memory in static TLS block", which would otherwise force
+  # every user of the plugin to remember to LD_PRELOAD libjemalloc. This is a
+  # non-power-user-facing plugin, so trade away jemalloc's allocator
+  # optimizations here for an extension that just imports cleanly. This only
+  # affects the Python extension -- the regular static `metagraph` binary
+  # build still picks up jemalloc normally.
+  set(CMAKE_DISABLE_FIND_PACKAGE_Jemalloc ON)
+endif()
+
 enable_testing()
 include(GoogleTest)
 
@@ -404,16 +422,23 @@ make_osx_arch_flags(OSX_ARCH_FLAGS)
 
 include(ExternalProject)
 set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
+# HTSLIB is built via autoconf/make, outside CMAKE_POSITION_INDEPENDENT_CODE's reach,
+# so -fPIC has to be injected into its CFLAGS/CPPFLAGS by hand when building the
+# Python extension (see BUILD_PYTHON_BINDINGS above).
+set(HTSLIB_PIC_FLAG "")
+if(BUILD_PYTHON_BINDINGS)
+  set(HTSLIB_PIC_FLAG "-fPIC ")
+endif()
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
-      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
-      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CPPFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
-  BUILD_COMMAND $(MAKE) -j${N} lib-static
+  BUILD_COMMAND make -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
   # Install only static lib to avoid the dependency
   INSTALL_COMMAND
@@ -458,6 +483,7 @@ list(REVERSE metagraph_core_files)
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*/pybindings/.*")
 
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
@@ -468,6 +494,23 @@ file(GLOB metagraph_cli_files
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
+
+#-------------------
+# pymetagraph Python extension
+#-------------------
+if(BUILD_PYTHON_BINDINGS)
+  execute_process(
+    COMMAND python3 -m pybind11 --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  find_package(pybind11 CONFIG REQUIRED)
+
+  pybind11_add_module(_pymetagraph_core src/pybindings/pymetagraph_bindings.cpp)
+  target_link_libraries(_pymetagraph_core PRIVATE metagraph-cli metagraph-core)
+  add_dependencies(_pymetagraph_core HTSLIB)
+  install(TARGETS _pymetagraph_core DESTINATION pymetagraph COMPONENT _pymetagraph_core)
+endif()
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")

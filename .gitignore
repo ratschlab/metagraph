@@ -21,6 +21,8 @@ database-cli
 *._*
 metagraph/build*
 metagraph/**/build*
+metagraph/api/python/pymetagraph/pymetagraph/_pymetagraph_core*
+*.egg-info
 .*.swp
 .ipynb_checkpoints
 *lsf.o*

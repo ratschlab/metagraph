@@ -1,0 +1,28 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pymetagraph"
+version = "0.1.0"
+description = "Readfish-compatible Aligner plugin backed by a metagraph index"
+readme = "README.md"
+authors = [
+    { name = "ratschlab", email = "grlab@ratschlab.org" },
+]
+requires-python = ">=3.9"
+dependencies = ["readfish"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[tool.scikit-build]
+build-dir = "build"
+cmake.source-dir = "../../.."
+cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON"]
+cmake.build-type = "Release"
+wheel.packages = ["pymetagraph"]
+build.targets = ["_pymetagraph_core"]
+install.components = ["_pymetagraph_core"]
