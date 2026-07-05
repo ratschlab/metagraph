@@ -14,20 +14,44 @@ from . import _pymetagraph_core
 class Aligner(AlignerABC):
     """Readfish Aligner plugin backed by a metagraph graph + annotation index.
 
-    This reports label-presence hits (via ``AnnotatedDBG::get_top_labels``)
-    rather than real base-level alignments: ``Alignment.r_st``/``r_en``/``strand``
-    are placeholder values (``0``, ``len(seq)``, ``+1``) since only the matched
-    label is meaningful for accept/reject decisions here.
+    Two unrelated query methods are available, picked via ``method``:
+
+    - ``"query"`` (default): label-presence hits via
+      ``AnnotatedDBG::get_top_labels``. ``Alignment.r_st``/``r_en``/``strand``
+      are placeholder values (``0``, ``len(seq)``, ``+1``) since only the
+      matched label is meaningful for accept/reject decisions in this mode.
+    - ``"align"``: real seed-and-extend alignment via metagraph's
+      alignment_redone module, the same code path backing the ``metagraph
+      align`` CLI command and the server's ``/align`` endpoint (see the old
+      client's ``GraphClient.align``). ``r_st``/``r_en``/``strand`` reflect
+      the actual matched region and orientation of the read.
 
     :param debug_log: Filename (or ``"stdout"``/``"stderr"``) for debug logging.
     :keyword input: Path to the metagraph graph file (``.dbg``).
     :keyword annotator: Path to the metagraph annotation file.
     :keyword threads: Number of threads to use for querying (default: 1).
+    :keyword method: Either ``"query"`` (default) or ``"align"``.
     :keyword num_top_labels: Max number of labels to consider per query.
+        Only used by ``method="query"``.
     :keyword discovery_fraction: Min fraction of k-mers required to be present
-        in a label for it to count as a hit (default: 0.7).
+        in a label for it to count as a hit (default: 0.7). Only used by
+        ``method="query"``.
     :keyword presence_fraction: Min fraction of k-mers required to be present
-        in the graph at all before querying labels (default: 0.0).
+        in the graph at all before querying labels (default: 0.0). Only used
+        by ``method="query"``.
+    :keyword seed_length: Minimum seed length. Only used by ``method="align"``.
+    :keyword max_alternative_alignments: Number of alternative paths to
+        consider per seed (default: 1). Only used by ``method="align"``.
+    :keyword max_num_nodes_per_seq_char: Max nodes to consider per sequence
+        character during extension. Only used by ``method="align"``.
+    :keyword min_exact_match: Min fraction of nucleotides covered by seeds
+        required to align (default: 0.7). Only used by ``method="align"``.
+    :keyword connect_anchors: If ``True`` (default), traverse the graph to
+        align query regions falling between anchors. Only used by
+        ``method="align"``.
+    :keyword extend_chains: If ``True`` (default), perform ends-free
+        extension from the first/last anchors in a chain. Only used by
+        ``method="align"``.
     """
 
     def __init__(self, debug_log: Optional[str] = None, **kwargs):

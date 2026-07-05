@@ -26,6 +26,13 @@ def aligner():
     a.disconnect()
 
 
+@pytest.fixture
+def align_aligner():
+    a = Aligner(debug_log=None, input=GRAPH, annotator=ANNOTATOR, method="align")
+    yield a
+    a.disconnect()
+
+
 def test_validate_missing_input():
     with pytest.raises(AttributeError):
         Aligner(debug_log=None)
@@ -52,5 +59,25 @@ def test_map_reads(aligner):
     assert len(by_id) == 3
     assert by_id["matching"].alignment_data
     assert by_id["matching"].alignment_data[0].ctg == EXPECTED_LABEL
+    assert by_id["no_seq"].alignment_data == []
+    assert by_id["garbage"].alignment_data == []
+
+
+def test_map_reads_align_method(align_aligner):
+    results = [
+        Result(channel=1, read_id="matching", seq=MATCHING_SEQ),
+        Result(channel=2, read_id="no_seq", seq=""),
+        Result(channel=3, read_id="garbage", seq="N" * 100),
+    ]
+
+    by_id = {r.read_id: r for r in align_aligner.map_reads(iter(results))}
+
+    assert len(by_id) == 3
+    matching = by_id["matching"].alignment_data
+    assert matching
+    assert matching[0].ctg == EXPECTED_LABEL
+    # Real coordinates, unlike method="query"'s dummy 0/len(seq)/+1.
+    assert 0 <= matching[0].r_st < matching[0].r_en <= len(MATCHING_SEQ)
+    assert matching[0].strand in (1, -1)
     assert by_id["no_seq"].alignment_data == []
     assert by_id["garbage"].alignment_data == []

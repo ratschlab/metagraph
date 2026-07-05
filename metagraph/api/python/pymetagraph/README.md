@@ -1,9 +1,11 @@
 # pymetagraph
 
 A [Readfish](https://github.com/LooseLab/readfish) `Aligner` plugin backed by a prebuilt
-metagraph graph + annotation index. It reports label-presence hits (which reference sequence(s)
-a read's k-mers match, above a discovery/presence-fraction threshold) rather than real base-level
-alignments — `r_st`/`r_en`/`strand` on the returned alignment objects are placeholder values.
+metagraph graph + annotation index. By default (`method="query"`) it reports label-presence hits
+(which reference sequence(s) a read's k-mers match, above a discovery/presence-fraction threshold)
+rather than real base-level alignments, so `r_st`/`r_en`/`strand` on the returned alignment
+objects are placeholder values. Set `method="align"` for real seed-and-extend alignment with
+actual coordinates and orientation instead — see [Usage](#usage) below.
 
 ## Building
 
@@ -77,20 +79,44 @@ normally when built without `BUILD_PYTHON_BINDINGS`.
 
 ## Usage
 
-```toml
-[mapper_settings.pymetagraph]
-input = "/path/to/graph.dbg"
-annotator = "/path/to/graph.column.annodbg"
-threads = 4
-num_top_labels = 1
-discovery_fraction = .4
-presence_fraction = .1
-```
+Two unrelated query methods are available via the `method` setting:
+
+- `"query"` (default): label-presence hits via `AnnotatedDBG::get_top_labels` — the same
+  primitive backing the CLI's `query` command. Fast and tolerant of sequencing errors, but
+  `r_st`/`r_en`/`strand` are dummy values (`0`, `len(seq)`, `+1`); only `ctg` (the matched label)
+  is meaningful.
+  ```toml
+  [mapper_settings.pymetagraph]
+  input = "/path/to/graph.dbg"
+  annotator = "/path/to/graph.column.annodbg"
+  threads = 4
+  method = "query"
+  num_top_labels = 1
+  discovery_fraction = .4
+  presence_fraction = .1
+  ```
+- `"align"`: real seed-and-extend alignment via metagraph's alignment_redone module — the same
+  code path backing the `metagraph align` CLI command and the server's `/align` endpoint (what
+  the old HTTP client's `GraphClient.align` calls). Slower, but `r_st`/`r_en`/`strand` reflect the
+  actual matched region and orientation of the read.
+  ```toml
+  [mapper_settings.pymetagraph]
+  input = "/path/to/graph.dbg"
+  annotator = "/path/to/graph.column.annodbg"
+  threads = 4
+  method = "align"
+  seed_length = 19
+  max_alternative_alignments = 1
+  max_num_nodes_per_seq_char = 10.0
+  min_exact_match = .7
+  connect_anchors = true
+  extend_chains = true
+  ```
 
 ## Known limitations
 
-- `r_st`/`r_en`/`strand` are always dummy values (`0`, `len(seq)`, `+1`); only `ctg` (the matched
-  label) is meaningful.
+- `r_st`/`r_en`/`strand` are always dummy values (`0`, `len(seq)`, `+1`) under `method="query"`;
+  only `ctg` (the matched label) is meaningful there. `method="align"` reports real values.
 - Exactly one annotator file is supported.
 - Malformed configuration may, in rare cases, abort the process rather than raise a Python
   exception, since metagraph's underlying CLI config parser calls `exit()` on some invalid inputs.
