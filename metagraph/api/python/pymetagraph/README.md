@@ -26,27 +26,38 @@ don't need to pre-install anything Python-side yourself. Recommended workflow:
          -DCMAKE_INSTALL_PREFIX=$(cd .. && pwd) ..
    make -j$(nproc) && make install
    ```
-3. Build and install:
+3. Build and install — this is the only step most users need, and it never requires running
+   `cmake` yourself:
    ```
    cd metagraph/api/python/pymetagraph
    pip install -e .
    ```
+   Under the hood, pip's `scikit-build-core` build backend invokes CMake for you (with
+   `-DBUILD_PYTHON_BINDINGS=ON` already wired in via this project's `pyproject.toml`) inside a
+   throwaway build environment, so you don't need CMake installed in your active environment or
+   any familiarity with its flags.
+
    If you're in a conda environment that ships its own (shared-only) Boost, CMake may pick that up
    ahead of the system Boost metagraph needs (static libs), failing with `boost_iostreams_FOUND to
-   FALSE`. Point CMake at the system Boost explicitly:
+   FALSE`. Since pip's build backend is the one invoking CMake here, pass the override through the
+   standard `CMAKE_ARGS` environment variable, which `scikit-build-core` forwards to it:
    ```
    CMAKE_ARGS="-DBoost_DIR=/usr/lib/x86_64-linux-gnu/cmake/Boost-1.83.0" pip install -e .
    ```
    (adjust the path/version to whatever `find /usr/lib -name 'BoostConfig.cmake'` reports on your
    system).
 
-### Faster iteration on the C++ side
+### Faster iteration on the C++ side (advanced, driving CMake directly)
 
-For repeated rebuilds while developing the binding itself, driving CMake directly and pointing pip
-at the same build directory avoids repeating CMake's configure step and skips fetching build deps
-into a temp env each time:
+The steps above are a *different, independent path* from what follows: `pip install -e .` never
+invokes `cmake` on your command line, it happens inside pip's own build backend. The workflow
+below is only for developers iterating on the C++ binding itself, who want incremental rebuilds
+without re-running pip's build backend (and its temp-env setup) on every change. It talks to CMake
+directly, so **it needs `-D` flags spelled out explicitly** — none of `pyproject.toml`'s settings
+or pip's `CMAKE_ARGS` env var apply here, since pip isn't involved:
 ```
 cmake -S metagraph -B metagraph/api/python/pymetagraph/build -DBUILD_PYTHON_BINDINGS=ON
+# add -DBoost_DIR=... too if you hit the same conda/Boost conflict as above
 cmake --build metagraph/api/python/pymetagraph/build --target _pymetagraph_core -j$(nproc)
 cd metagraph/api/python/pymetagraph
 pip install -e . --no-build-isolation   # requires scikit-build-core + pybind11 pre-installed
