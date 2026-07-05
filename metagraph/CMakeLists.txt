@@ -217,6 +217,19 @@ set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
 # BUILD_KMC controls the standalone executable; the KMC library is always built.
 option(BUILD_KMC "Build the standalone KMC executable" OFF)
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
+# If the outer project's generator changed since the last configure of this
+# same binary dir (e.g. a build tool like scikit-build-core picks Ninja on one
+# run and falls back to Unix Makefiles on another), the KMC subdir's own cache
+# is left stale and CMake refuses to reconfigure it in place. Nuke it so it
+# always regenerates fresh instead of hard-failing the outer configure.
+if(EXISTS ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt)
+  file(STRINGS ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt _kmc_cached_generator
+       REGEX "^CMAKE_GENERATOR:INTERNAL=")
+  if(NOT _kmc_cached_generator STREQUAL "CMAKE_GENERATOR:INTERNAL=${CMAKE_GENERATOR}")
+    file(REMOVE ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt)
+    file(REMOVE_RECURSE ${PROJECT_BINARY_DIR}/KMC/CMakeFiles)
+  endif()
+endif()
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
   -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
   -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
