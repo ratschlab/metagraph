@@ -3,10 +3,20 @@
 
 
 function (findOpenMP)
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_C_FLAGS CACHE)
-unset(OpenMP_CXX_FLAGS CACHE)
+# If OpenMP detection fails once (e.g. a transient toolchain hiccup in a
+# reused build dir), FindOpenMP.cmake happily caches every internal variable
+# it wrote as NOT_FOUND/FALSE, so a later, otherwise-healthy reconfigure of
+# the same build dir keeps reusing that stale failure forever instead of
+# retrying. Clear every OpenMP_*-prefixed cache entry (flags, lib names,
+# library paths, and internal try-compile results like
+# OpenMP_COMPILE_RESULT_<LANG>_<flag>/OpenMP_SPECTEST_<LANG>_) so
+# find_package(OpenMP) below always redetects from scratch.
+get_cmake_property(_cached_vars CACHE_VARIABLES)
+foreach(_var ${_cached_vars})
+  if(_var MATCHES "^OpenMP_")
+    unset(${_var} CACHE)
+  endif()
+endforeach()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
   execute_process(
       COMMAND brew --prefix libomp
