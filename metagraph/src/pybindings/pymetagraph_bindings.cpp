@@ -51,6 +51,7 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
         { "max_alternative_alignments", "--align-alternative-alignments" },
         { "max_num_nodes_per_seq_char", "--align-max-nodes-per-seq-char" },
         { "min_exact_match", "--align-min-exact-match" },
+        { "max_num_seeds_per_locus", "--align-max-num-seeds-per-locus" },
     };
     static const std::unordered_map<std::string, std::string> kNegationFlagAliases = {
         { "connect_anchors", "--align-no-connect-anchors" },

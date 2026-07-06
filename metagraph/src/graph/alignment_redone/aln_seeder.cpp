@@ -890,11 +890,14 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
     for (auto &anchor : anchors) {
         auto [labels_it, coord_it] = anno_buffer_.get_labels_and_coords(anchor.get_path()[0]);
         if (labels_it) {
-            for (size_t i = 0; i < labels_it->size(); ++i) {
-                if (coverages[(*labels_it)[i]].size()) {
+            // Copy out of the buffer before calling cache_column_set()/cache_column()
+            // below: those mutate anno_buffer_'s underlying column_sets_ storage and
+            // can reallocate it, which would invalidate labels_it mid-loop.
+            auto labels = *labels_it;
+            for (size_t i = 0; i < labels.size(); ++i) {
+                if (coverages[labels[i]].size()) {
                     // only pick labels that have sufficient coverage
-                    anchor.set_label_class(anno_buffer_.cache_column_set(labels_it->begin() + i,
-                                                                         labels_it->begin() + i + 1));
+                    anchor.set_label_class(anno_buffer_.cache_column(labels[i]));
                     if (coord_it) {
                         const auto &coords = (*coord_it)[i];
                         for (auto coord : coords) {
