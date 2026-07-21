@@ -1,0 +1,88 @@
+# Run this workflow from metagraph/workflows/differential_assembly.
+samples: "config/samples.tsv"
+output_directory: "results"
+tmpdir: "results/tmp"
+
+metagraph_cmd: "/cluster/customapps/biomed/grlab/users/ttanna/metagraph/metagraph/build/metagraph"
+kmc_cmd: "kmc"
+gnu_time_cmd: "/usr/bin/time -v"
+
+k: 31
+count_width: 16
+kmc_max_count: 65535
+kmc_max_bins: 2000
+
+comparisons:
+  case_vs_control:
+    metadata_column: "phenotype"
+    in_values: ["case"]
+    out_values: ["control"]
+    # Optional overrides of the global assembly settings:
+    # assembly:
+    #   test_by_unitig: true
+
+# Optionally generate one comparison per non-missing categorical value against
+# all other values. Explicit comparisons above and generated comparisons can
+# be used together.
+auto_comparisons:
+  enabled: false
+  metadata_columns: []  # empty means every metadata column in samples.tsv
+  missing_values: ["", "NA", "NaN", "null"]
+  minimum_samples_per_group: 2
+  # assembly:
+  #   test_by_unitig: true
+
+assembly:
+  count_kmers: true
+  clean: false
+  family_wise_error_rate: 0.05
+  test_by_unitig: false
+  test_type: "nbinom_exact"
+  assemble_shared: false
+  min_count: 2
+  min_recurrence: 1
+  min_in_recurrence: 0
+  min_out_recurrence: 0
+  max_in_recurrence: 18446744073709551615
+  max_out_recurrence: 18446744073709551615
+
+assembly_output:
+  enumerate: true
+  unitigs: false
+  prune_tips: 0
+  dump_pvals: true
+
+annotation_threads_each: 1
+
+resources:
+  default:
+    threads: 4
+    mem_mb: 16000
+    runtime: 1440
+    mem_buffer_gb: 12
+    disk_cap_gb: 100
+  kmc:
+    threads: 8
+    mem_mb: 32000
+    mem_buffer_gb: 28
+  build_sample_graph:
+    threads: 8
+  build_joint_canonical:
+    threads: 16
+    mem_mb: 64000
+    mem_buffer_gb: 56
+  build_joint_primary:
+    threads: 16
+    mem_mb: 64000
+    mem_buffer_gb: 56
+  annotate_counts:
+    threads: 16
+    mem_mb: 64000
+    mem_buffer_gb: 56
+  transform_count_annotation:
+    threads: 16
+    mem_mb: 64000
+    mem_buffer_gb: 56
+  differential_assembly:
+    threads: 16
+    mem_mb: 64000

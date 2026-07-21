@@ -1,0 +1,5 @@
+sample	reads	phenotype
+case_1	tests/data/case_1.fa	case
+case_2	tests/data/case_2.fa	case
+control_1	tests/data/control_1.fa	control
+control_2	tests/data/control_2.fa	control

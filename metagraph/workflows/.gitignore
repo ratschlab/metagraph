@@ -1,5 +1,7 @@
 .snakemake
 metagraph_workflows/snakemake/output_dir_example
+differential_assembly/tests/output/
+!differential_assembly/tests/data/*.fa
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

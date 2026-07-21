@@ -1,0 +1,488 @@
+"""Count-aware differential assembly for MetaGraph count_diff_assem."""
+
+import shlex
+import sys
+from pathlib import Path
+
+from snakemake.utils import validate
+
+
+configfile: "config/config.yaml"
+
+WORKFLOW_DIR = Path(workflow.basedir)
+sys.path.insert(0, str(WORKFLOW_DIR))
+
+from scripts.metadata_to_json import (  # noqa: E402
+    COMPARISON_ID_RE,
+    comparison_samples,
+    generate_auto_comparisons,
+    load_samples,
+    make_diff_document,
+    merged_assembly_config,
+    write_diff_document,
+)
+
+
+validate(config, str(WORKFLOW_DIR.parent / "config" / "config.schema.yaml"))
+
+OUTPUT_DIR = Path(config["output_directory"])
+TMP_DIR = Path(config["tmpdir"])
+KMC_DIR = OUTPUT_DIR / "kmc"
+SAMPLE_GRAPH_DIR = OUTPUT_DIR / "sample_graphs"
+SAMPLE_SEQUENCE_DIR = OUTPUT_DIR / "sample_sequences"
+GRAPH_DIR = OUTPUT_DIR / "graph"
+ANNOTATION_DIR = OUTPUT_DIR / "annotations"
+COLUMN_DIR = ANNOTATION_DIR / "columns"
+RULE_DIR = OUTPUT_DIR / "differential_rules"
+ASSEMBLY_DIR = OUTPUT_DIR / "assemblies"
+LOG_DIR = OUTPUT_DIR / "logs"
+
+METAGRAPH = shlex.quote(str(config.get("metagraph_cmd", "metagraph")))
+KMC = shlex.quote(str(config.get("kmc_cmd", "kmc")))
+TIME = str(config.get("gnu_time_cmd", "")).strip()
+
+K = int(config["k"])
+COUNT_WIDTH = int(config["count_width"])
+KMC_MAX_COUNT = int(config["kmc_max_count"])
+KMC_MAX_BINS = int(config.get("kmc_max_bins", 2000))
+if KMC_MAX_COUNT > 2**COUNT_WIDTH - 1:
+    raise ValueError(
+        f"kmc_max_count={KMC_MAX_COUNT} exceeds count_width={COUNT_WIDTH} capacity"
+    )
+
+SAMPLES = load_samples(config["samples"])
+SAMPLE_IDS = list(SAMPLES)
+COMPARISONS = dict(config.get("comparisons", {}))
+for comparison_name, comparison in generate_auto_comparisons(
+    SAMPLES, config.get("auto_comparisons", {})
+).items():
+    if comparison_name in COMPARISONS:
+        raise ValueError(
+            f"Auto-comparison {comparison_name!r} conflicts with an explicit comparison"
+        )
+    COMPARISONS[comparison_name] = comparison
+if not COMPARISONS:
+    raise ValueError("Define at least one explicit or automatic comparison")
+
+for comparison_name, comparison in COMPARISONS.items():
+    if not COMPARISON_ID_RE.fullmatch(comparison_name):
+        raise ValueError(f"Invalid comparison name {comparison_name!r}")
+    comparison_samples(SAMPLES, comparison)
+
+ASSEMBLY_CONFIGS = {
+    name: merged_assembly_config(config["assembly"], comparison)
+    for name, comparison in COMPARISONS.items()
+}
+NEED_INT_ROW = any(c["test_by_unitig"] for c in ASSEMBLY_CONFIGS.values())
+
+OUTPUT_OPTIONS = config.get("assembly_output", {})
+DUMP_PVALS = bool(OUTPUT_OPTIONS.get("dump_pvals", False))
+
+
+def resource_config(rule, key):
+    resources = config.get("resources", {})
+    default = resources.get("default", {})
+    return resources.get(rule, {}).get(key, default.get(key))
+
+
+def threads_for(rule):
+    return int(resource_config(rule, "threads") or 1)
+
+
+def mem_for(rule):
+    return int(resource_config(rule, "mem_mb") or 1000)
+
+
+def runtime_for(rule):
+    return int(resource_config(rule, "runtime") or 60)
+
+
+def buffer_for(rule):
+    configured = resource_config(rule, "mem_buffer_gb")
+    return int(configured or max(1, int(mem_for(rule) * 0.8 / 1024)))
+
+
+def disk_cap_for(rule):
+    return int(resource_config(rule, "disk_cap_gb") or 100)
+
+
+def sequence_format(sample):
+    formats = set()
+    for filename in SAMPLES[sample]["reads"]:
+        name = filename.lower()
+        if name.endswith(".gz"):
+            name = name[:-3]
+        if name.endswith((".fq", ".fastq")):
+            formats.add("-fq")
+        elif name.endswith((".fa", ".fna", ".fasta")):
+            formats.add("-fm")
+        else:
+            raise ValueError(f"Unsupported sequence extension for {filename!r}")
+    if len(formats) != 1:
+        raise ValueError(f"All read files for sample {sample!r} must use one format")
+    return formats.pop()
+
+
+SAMPLE_FASTA_PATTERN = str(SAMPLE_SEQUENCE_DIR / "{sample}.fasta.gz")
+SAMPLE_COUNTS_PATTERN = str(SAMPLE_SEQUENCE_DIR / "{sample}.kmer_counts.gz")
+COLUMN_PATTERN = str(COLUMN_DIR / "{sample}.fasta.gz.column.annodbg")
+COLUMN_COUNTS_PATTERN = str(COLUMN_DIR / "{sample}.fasta.gz.column.annodbg.counts")
+COLUMN_FILES = expand(COLUMN_PATTERN, sample=SAMPLE_IDS)
+COLUMN_COUNT_FILES = expand(COLUMN_COUNTS_PATTERN, sample=SAMPLE_IDS)
+
+JOINT_GRAPH = str(GRAPH_DIR / "joint.dbg")
+INT_ROW_BASE = str(ANNOTATION_DIR / "joint_counts")
+INT_ROW_ANNOTATION = str(ANNOTATION_DIR / "joint_counts.int_row_flat.annodbg")
+
+ASSEMBLY_FASTA_PATTERN = str(ASSEMBLY_DIR / "{comparison}.fasta.gz")
+ASSEMBLY_PVAL_PATTERN = str(ASSEMBLY_DIR / "{comparison}.all.pvals")
+
+
+def sample_labels(sample_ids):
+    return [SAMPLE_FASTA_PATTERN.format(sample=sample) for sample in sample_ids]
+
+
+def annotators_for_comparison(wildcards):
+    if ASSEMBLY_CONFIGS[wildcards.comparison]["test_by_unitig"]:
+        return [INT_ROW_ANNOTATION]
+    return COLUMN_FILES
+
+
+all_targets = [JOINT_GRAPH, *COLUMN_FILES, *COLUMN_COUNT_FILES]
+if NEED_INT_ROW:
+    all_targets.append(INT_ROW_ANNOTATION)
+all_targets.extend(expand(ASSEMBLY_FASTA_PATTERN, comparison=COMPARISONS))
+if DUMP_PVALS:
+    all_targets.extend(expand(ASSEMBLY_PVAL_PATTERN, comparison=COMPARISONS))
+
+
+localrules: all, write_read_list, write_joint_sequence_list, write_column_list, make_diff_rules
+
+
+rule all:
+    input:
+        all_targets
+
+
+rule write_read_list:
+    input:
+        lambda wildcards: SAMPLES[wildcards.sample]["reads"]
+    output:
+        str(OUTPUT_DIR / "read_lists" / "{sample}.txt")
+    run:
+        Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
+        Path(output[0]).write_text("".join(f"{path}\n" for path in input))
+
+
+rule kmc:
+    input:
+        read_list=str(OUTPUT_DIR / "read_lists" / "{sample}.txt")
+    output:
+        pre=temp(str(KMC_DIR / "{sample}.kmc_pre")),
+        suf=temp(str(KMC_DIR / "{sample}.kmc_suf")),
+        summary=temp(str(KMC_DIR / "{sample}.json"))
+    threads: threads_for("kmc")
+    resources:
+        mem_mb=mem_for("kmc"),
+        runtime=runtime_for("kmc")
+    params:
+        base=lambda wildcards: str(KMC_DIR / wildcards.sample),
+        temp=lambda wildcards: str(KMC_DIR / f"temp_{wildcards.sample}"),
+        format=lambda wildcards: sequence_format(wildcards.sample),
+        mem_gb=buffer_for("kmc"),
+        max_bins=KMC_MAX_BINS,
+        max_count=KMC_MAX_COUNT,
+        k=K
+    log:
+        str(LOG_DIR / "kmc" / "{sample}.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output.pre:q})" "$(dirname {log:q})" {params.temp:q}
+        {TIME} {KMC} -v -k{params.k} -m{params.mem_gb} -sm -t{threads} \
+          -ci1 -cs{params.max_count} -n{params.max_bins} -j{output.summary:q} \
+          {params.format} @{input.read_list:q} {params.base:q} {params.temp:q} \
+          > {log:q} 2>&1
+        """
+
+
+rule build_sample_graph:
+    input:
+        pre=str(KMC_DIR / "{sample}.kmc_pre"),
+        suf=str(KMC_DIR / "{sample}.kmc_suf")
+    output:
+        graph=temp(str(SAMPLE_GRAPH_DIR / "{sample}.dbg")),
+        weights=temp(str(SAMPLE_GRAPH_DIR / "{sample}.dbg.weights"))
+    threads: threads_for("build_sample_graph")
+    resources:
+        mem_mb=mem_for("build_sample_graph"),
+        runtime=runtime_for("build_sample_graph")
+    params:
+        outbase=lambda wildcards: str(SAMPLE_GRAPH_DIR / wildcards.sample),
+        mem_gb=buffer_for("build_sample_graph"),
+        disk_cap_gb=disk_cap_for("build_sample_graph"),
+        k=K,
+        count_width=COUNT_WIDTH,
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "build_sample_graph" / "{sample}.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output.graph:q})" "$(dirname {log:q})" {params.tmpdir:q}
+        {TIME} {METAGRAPH} build -v --parallel {threads} --mode canonical \
+          --count-kmers --count-width {params.count_width} -k {params.k} \
+          --mem-cap-gb {params.mem_gb} --disk-cap-gb {params.disk_cap_gb} \
+          --disk-swap {params.tmpdir:q} -o {params.outbase:q} {input.pre:q} \
+          > {log:q} 2>&1
+        """
+
+
+rule export_sample_counts:
+    input:
+        graph=str(SAMPLE_GRAPH_DIR / "{sample}.dbg"),
+        weights=str(SAMPLE_GRAPH_DIR / "{sample}.dbg.weights")
+    output:
+        fasta=SAMPLE_FASTA_PATTERN,
+        counts=SAMPLE_COUNTS_PATTERN
+    threads: threads_for("export_sample_counts")
+    resources:
+        mem_mb=mem_for("export_sample_counts"),
+        runtime=runtime_for("export_sample_counts")
+    params:
+        outbase=lambda wildcards: str(SAMPLE_SEQUENCE_DIR / wildcards.sample)
+    log:
+        str(LOG_DIR / "export_sample_counts" / "{sample}.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output.fasta:q})" "$(dirname {log:q})"
+        {TIME} {METAGRAPH} transform -v --to-fasta --primary-kmers --enumerate \
+          --parallel {threads} -o {params.outbase:q} {input.graph:q} \
+          > {log:q} 2>&1
+        """
+
+
+rule write_joint_sequence_list:
+    input:
+        expand(SAMPLE_FASTA_PATTERN, sample=SAMPLE_IDS)
+    output:
+        str(GRAPH_DIR / "sample_sequences.txt")
+    run:
+        Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
+        Path(output[0]).write_text("".join(f"{path}\n" for path in input))
+
+
+rule build_joint_canonical:
+    input:
+        str(GRAPH_DIR / "sample_sequences.txt")
+    output:
+        temp(str(GRAPH_DIR / "joint_canonical.dbg"))
+    threads: threads_for("build_joint_canonical")
+    resources:
+        mem_mb=mem_for("build_joint_canonical"),
+        runtime=runtime_for("build_joint_canonical")
+    params:
+        outbase=str(GRAPH_DIR / "joint_canonical"),
+        mem_gb=buffer_for("build_joint_canonical"),
+        disk_cap_gb=disk_cap_for("build_joint_canonical"),
+        k=K,
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "build_joint_canonical.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output:q})" "$(dirname {log:q})" {params.tmpdir:q}
+        cat {input:q} | {TIME} {METAGRAPH} build -v --parallel {threads} \
+          --mode canonical -k {params.k} --mem-cap-gb {params.mem_gb} \
+          --disk-cap-gb {params.disk_cap_gb} --disk-swap {params.tmpdir:q} \
+          -o {params.outbase:q} > {log:q} 2>&1
+        """
+
+
+rule export_joint_primary:
+    input:
+        str(GRAPH_DIR / "joint_canonical.dbg")
+    output:
+        temp(str(GRAPH_DIR / "joint_primary.fasta.gz"))
+    threads: threads_for("export_joint_primary")
+    resources:
+        mem_mb=mem_for("export_joint_primary"),
+        runtime=runtime_for("export_joint_primary")
+    params:
+        outbase=str(GRAPH_DIR / "joint_primary")
+    log:
+        str(LOG_DIR / "export_joint_primary.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output:q})" "$(dirname {log:q})"
+        {TIME} {METAGRAPH} transform -v --to-fasta --primary-kmers \
+          --parallel {threads} -o {params.outbase:q} {input:q} \
+          > {log:q} 2>&1
+        """
+
+
+rule build_joint_primary:
+    input:
+        str(GRAPH_DIR / "joint_primary.fasta.gz")
+    output:
+        JOINT_GRAPH
+    threads: threads_for("build_joint_primary")
+    resources:
+        mem_mb=mem_for("build_joint_primary"),
+        runtime=runtime_for("build_joint_primary")
+    params:
+        outbase=str(GRAPH_DIR / "joint"),
+        mem_gb=buffer_for("build_joint_primary"),
+        disk_cap_gb=disk_cap_for("build_joint_primary"),
+        k=K,
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "build_joint_primary.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output:q})" "$(dirname {log:q})" {params.tmpdir:q}
+        {TIME} {METAGRAPH} build -v --parallel {threads} --mode primary \
+          -k {params.k} --mem-cap-gb {params.mem_gb} \
+          --disk-cap-gb {params.disk_cap_gb} --disk-swap {params.tmpdir:q} \
+          -o {params.outbase:q} {input:q} > {log:q} 2>&1
+        """
+
+
+rule annotate_counts:
+    input:
+        graph=JOINT_GRAPH,
+        sequences=expand(SAMPLE_FASTA_PATTERN, sample=SAMPLE_IDS),
+        counts=expand(SAMPLE_COUNTS_PATTERN, sample=SAMPLE_IDS)
+    output:
+        columns=COLUMN_FILES,
+        column_counts=COLUMN_COUNT_FILES
+    threads: threads_for("annotate_counts")
+    resources:
+        mem_mb=mem_for("annotate_counts"),
+        runtime=runtime_for("annotate_counts")
+    params:
+        outdir=str(COLUMN_DIR),
+        mem_gb=buffer_for("annotate_counts"),
+        threads_each=int(config.get("annotation_threads_each", 1)),
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "annotate_counts.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p {params.outdir:q} "$(dirname {log:q})" {params.tmpdir:q}
+        {TIME} {METAGRAPH} annotate -v -i {input.graph:q} --anno-filename \
+          --anno-type column --separately --count-kmers --parallel {threads} \
+          --threads-each {params.threads_each} --mem-cap-gb {params.mem_gb} \
+          --disk-swap {params.tmpdir:q} -o {params.outdir:q} {input.sequences:q} \
+          > {log:q} 2>&1
+        """
+
+
+rule write_column_list:
+    input:
+        COLUMN_FILES,
+        COLUMN_COUNT_FILES
+    output:
+        str(ANNOTATION_DIR / "columns.txt")
+    run:
+        Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
+        Path(output[0]).write_text("".join(f"{path}\n" for path in input[:len(COLUMN_FILES)]))
+
+
+rule transform_count_annotation:
+    input:
+        columns=str(ANNOTATION_DIR / "columns.txt")
+    output:
+        INT_ROW_ANNOTATION
+    threads: threads_for("transform_count_annotation")
+    resources:
+        mem_mb=mem_for("transform_count_annotation"),
+        runtime=runtime_for("transform_count_annotation")
+    params:
+        outbase=INT_ROW_BASE,
+        mem_gb=buffer_for("transform_count_annotation"),
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "transform_count_annotation.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output:q})" "$(dirname {log:q})" {params.tmpdir:q}
+        cat {input.columns:q} | {TIME} {METAGRAPH} transform_anno -v \
+          --anno-type int_row_flat --parallel {threads} \
+          --mem-cap-gb {params.mem_gb} --disk-swap {params.tmpdir:q} \
+          -o {params.outbase:q} > {log:q} 2>&1
+        """
+
+
+rule make_diff_rules:
+    input:
+        manifest=config["samples"],
+        columns=COLUMN_FILES
+    output:
+        str(RULE_DIR / "{comparison}.json")
+    run:
+        comparison = COMPARISONS[wildcards.comparison]
+        in_samples, out_samples = comparison_samples(SAMPLES, comparison)
+        document = make_diff_document(
+            wildcards.comparison,
+            sample_labels(in_samples),
+            sample_labels(out_samples),
+            ASSEMBLY_CONFIGS[wildcards.comparison],
+        )
+        write_diff_document(document, output[0])
+
+
+def assembly_flags():
+    flags = []
+    if bool(OUTPUT_OPTIONS.get("enumerate", True)):
+        flags.append("--enumerate")
+    if bool(OUTPUT_OPTIONS.get("unitigs", False)):
+        flags.append("--unitigs")
+    prune_tips = int(OUTPUT_OPTIONS.get("prune_tips", 0))
+    if prune_tips > 0:
+        flags.extend(["--prune-tips", str(prune_tips)])
+    if DUMP_PVALS:
+        flags.append("--dump-pvals")
+    return " ".join(flags)
+
+
+def annotation_flags(wildcards):
+    return " ".join(
+        f"-a {shlex.quote(str(path))}" for path in annotators_for_comparison(wildcards)
+    )
+
+
+rule differential_assembly:
+    input:
+        graph=JOINT_GRAPH,
+        rules=str(RULE_DIR / "{comparison}.json"),
+        annotators=annotators_for_comparison
+    output:
+        fasta=ASSEMBLY_FASTA_PATTERN,
+        pvals=ASSEMBLY_PVAL_PATTERN if DUMP_PVALS else []
+    threads: threads_for("differential_assembly")
+    resources:
+        mem_mb=mem_for("differential_assembly"),
+        runtime=runtime_for("differential_assembly")
+    params:
+        outbase=lambda wildcards: str(ASSEMBLY_DIR / wildcards.comparison),
+        annotations=annotation_flags,
+        flags=assembly_flags(),
+        tmpdir=str(TMP_DIR)
+    log:
+        str(LOG_DIR / "differential_assembly" / "{comparison}.log")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "$(dirname {output.fasta:q})" "$(dirname {log:q})" {params.tmpdir:q}
+        {TIME} {METAGRAPH} assemble -v --parallel {threads} {params.flags} \
+          {params.annotations} --diff-assembly-rules {input.rules:q} \
+          --disk-swap {params.tmpdir:q} -o {params.outbase:q} {input.graph:q} \
+          > {log:q} 2>&1
+        """

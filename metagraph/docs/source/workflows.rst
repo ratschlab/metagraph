@@ -96,3 +96,18 @@ directly invoke the snakemake workflow (assuming you checked out the `metagraph 
     snakemake --forceall --configfile default.yml \
         --config k=5 seqs_file_list_path='transcript_paths.txt' output_directory=/tmp/mygraph \
         annotation_labels_source=sequence_headers --cores 2
+
+
+Count-aware differential assembly
+---------------------------------
+
+The experimental ``count_diff_assem`` branch also contains a standalone
+Snakemake workflow for differential sequence assembly from metagenomic WGS
+samples. It preserves per-sample k-mer abundances from KMC through counted
+graphs and annotations, constructs the joint primary graph, generates
+comparison rule files from a sample manifest, and runs count- or unitig-level
+statistical assembly.
+
+See ``metagraph/workflows/differential_assembly/README.md`` in the repository
+for the required branch, configuration format, implementation constraints,
+and execution instructions.

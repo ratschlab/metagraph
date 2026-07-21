@@ -1,0 +1,5 @@
+sample	reads	phenotype
+case_1	/path/to/case_1.fastq.gz	case
+case_2	/path/to/case_2.fastq.gz	case
+control_1	/path/to/control_1.fastq.gz	control
+control_2	/path/to/control_2.fastq.gz	control

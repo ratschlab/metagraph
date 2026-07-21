@@ -1,0 +1,79 @@
+samples: "tests/samples.tsv"
+output_directory: "tests/output"
+tmpdir: "tests/output/tmp"
+metagraph_cmd: "metagraph"
+kmc_cmd: "kmc"
+gnu_time_cmd: ""
+k: 5
+count_width: 8
+kmc_max_count: 255
+kmc_max_bins: 64
+comparisons:
+  case_vs_control:
+    metadata_column: phenotype
+    in_values: [case]
+    out_values: [control]
+  case_vs_control_kmer:
+    metadata_column: phenotype
+    in_values: [case]
+    out_values: [control]
+    assembly:
+      test_by_unitig: false
+auto_comparisons:
+  enabled: true
+  metadata_columns: [phenotype]
+  missing_values: ["", "NA", "NaN"]
+  minimum_samples_per_group: 2
+assembly:
+  count_kmers: true
+  clean: false
+  family_wise_error_rate: 0.05
+  test_by_unitig: true
+  test_type: poisson_exact
+  assemble_shared: false
+  min_count: 2
+  min_recurrence: 1
+  min_in_recurrence: 0
+  min_out_recurrence: 0
+  max_in_recurrence: 2
+  max_out_recurrence: 2
+assembly_output:
+  enumerate: true
+  unitigs: false
+  prune_tips: 0
+  dump_pvals: true
+resources:
+  default:
+    threads: 2
+    mem_mb: 1024
+    runtime: 10
+    mem_buffer_gb: 1
+    disk_cap_gb: 1
+  kmc:
+    threads: 2
+    mem_mb: 2048
+    mem_buffer_gb: 2
+  build_sample_graph:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
+  build_joint_canonical:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
+  build_joint_primary:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
+  annotate_counts:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
+  transform_count_annotation:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
+  differential_assembly:
+    threads: 2
+    mem_mb: 1024
+    mem_buffer_gb: 1
