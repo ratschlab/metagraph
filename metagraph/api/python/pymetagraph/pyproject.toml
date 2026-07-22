@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pymetagraph"
-version = "0.1.0"
+version = "0.1.2"
 description = "Readfish-compatible Aligner plugin backed by a metagraph index"
 readme = "README.md"
 authors = [

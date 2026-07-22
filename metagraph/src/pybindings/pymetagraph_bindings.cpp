@@ -21,6 +21,7 @@
 #include "graph/alignment_redone/aln_seeder.hpp"
 #include "graph/alignment_redone/annotation_buffer.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 namespace py = pybind11;
 
@@ -28,11 +29,21 @@ namespace {
 
 // Converts Python kwargs into a fake argv so metagraph's existing CLI argument
 // parser (mtg::cli::Config) can be reused unchanged instead of reimplementing
-// config parsing/validation here. argv[0] is a dummy program name and argv[1]
-// is fixed to "server_query" -- the one identity whose validation rules allow
-// loading a graph/annotation from -i/-a with no positional FASTA files, since
-// it's designed for exactly this "load once, serve many queries" use case
-// (plain "query" always demands input files, even reading from stdin otherwise).
+// config parsing/validation here. argv[0] is a dummy program name; argv[1] (the
+// CLI "identity") is picked based on "method", since Config's validation rules
+// differ:
+//  - "query" -> "server_query": the one identity whose validation allows
+//    loading a graph/annotation from -i/-a with no positional FASTA files
+//    (plain "query" always demands input files), but it also *requires*
+//    exactly one annotator -- fine here, since label-presence queries can't
+//    work without one anyway.
+//  - "align" -> "align": also allows -i (+ no positional files) with no
+//    validation-time exit(), but unlike "server_query" it does not require an
+//    annotator at all, matching how `metagraph align` itself only needs a
+//    graph. This is what lets Index(method="align") skip annotation entirely.
+// Neither identity's *parsing* (as opposed to validation) is gated on which
+// one is picked -- e.g. -a/--num-top-labels/etc. are recognized the same way
+// under both -- so this only changes which validation rules apply.
 //
 // "method" is consumed here rather than forwarded to Config: it selects which
 // pymetagraph binding code path runs (label-presence vs. real alignment), not
@@ -52,13 +63,17 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
         { "max_num_nodes_per_seq_char", "--align-max-nodes-per-seq-char" },
         { "min_exact_match", "--align-min-exact-match" },
         { "max_num_seeds_per_locus", "--align-max-num-seeds-per-locus" },
+        { "xdrop", "--align-xdrop" },
+        { "rel_score_cutoff", "--align-rel-score-cutoff" },
     };
     static const std::unordered_map<std::string, std::string> kNegationFlagAliases = {
         { "connect_anchors", "--align-no-connect-anchors" },
         { "extend_chains", "--align-no-extend-chains" },
     };
 
-    std::vector<std::string> args = { "pymetagraph", "server_query" };
+    // args[1] (the identity) is filled in below once "method" has been seen,
+    // since kwargs iteration order isn't guaranteed to visit it first.
+    std::vector<std::string> args = { "pymetagraph", "" };
     *method = "query";
 
     for (auto item : kwargs) {
@@ -89,6 +104,17 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
             "pymetagraph: unknown method '" + *method + "' (expected 'query' or 'align')");
     }
 
+    args[1] = (*method == "align") ? "align" : "server_query";
+
+    // Unlike "server_query", the "align" identity's validation unconditionally
+    // requires at least one positional input file (config.cpp: "No input
+    // file(s) passed"), since it's normally used as `align -i graph.dbg
+    // reads.fq`. We never read config.fnames ourselves -- queries come in via
+    // Index::query/query_batch instead -- so a placeholder that's never opened
+    // is enough to satisfy that check.
+    if (*method == "align")
+        args.push_back("__pymetagraph_placeholder__");
+
     return args;
 }
 
@@ -108,12 +134,13 @@ struct Alignment {
         : ctg(std::move(ctg)), r_st(r_st), r_en(r_en), strand(strand) {}
 };
 
-// Loads a prebuilt metagraph graph + single annotation file and answers
-// queries against it, using one of two unrelated underlying methods picked
-// at construction time via the "method" kwarg:
+// Loads a prebuilt metagraph graph, plus an optional single annotation file,
+// and answers queries against it, using one of two unrelated underlying
+// methods picked at construction time via the "method" kwarg:
 //  - "query" (default): AnnotatedDBG::get_top_labels, the same label-presence
-//    primitive backing the CLI's `query` command. Read-only, no mutable
-//    per-call state, safe to call concurrently from multiple threads.
+//    primitive backing the CLI's `query` command. Requires an annotation.
+//    Read-only, no mutable per-call state, safe to call concurrently from
+//    multiple threads.
 //  - "align": the alignment_redone seed-and-extend pipeline, the same one
 //    backing the CLI's `align` command and the server's `/align` endpoint
 //    (see cli/align.cpp::align_to_graph, cli/server.cpp::process_align_request).
@@ -121,6 +148,11 @@ struct Alignment {
 //    builds its own AnnotationBuffer, since that type caches mutable
 //    per-query state and is not meant to be shared across concurrent queries
 //    (mirrored from how align_to_graph gives each worker its own buffer).
+//    Annotation is optional here, mirroring align.cpp's own behavior when no
+//    "-a" is given: without one, plain ExactSeeder/Extender is used (no label
+//    lookups at all, so the O(num_labels) annotation-fetch cost is avoided
+//    entirely), and the reported "ctg" degrades to a generic "mapped"/"*"
+//    hit-or-miss marker instead of an actual label.
 class Index {
   public:
     explicit Index(const py::kwargs &kwargs) {
@@ -137,13 +169,19 @@ class Index {
 
         if (config.infbase.empty())
             throw std::invalid_argument("pymetagraph: missing required argument 'input'");
-        if (config.infbase_annotators.size() != 1) {
+        if (config.infbase_annotators.size() > 1) {
             throw std::invalid_argument(
-                "pymetagraph: exactly one 'annotator' file is required");
+                "pymetagraph: at most one 'annotator' file is supported");
+        }
+        if (method_ == Method::kQuery && config.infbase_annotators.empty()) {
+            throw std::invalid_argument(
+                "pymetagraph: method 'query' requires an 'annotator' file "
+                "('align' can be used without one)");
         }
 
         graph_ = mtg::cli::load_critical_dbg(config.infbase);
-        anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
+        if (!config.infbase_annotators.empty())
+            anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
 
         num_top_labels_ = config.num_top_labels;
         discovery_fraction_ = config.discovery_fraction;
@@ -152,7 +190,20 @@ class Index {
         if (method_ == Method::kAlign) {
             connect_anchors_ = config.alignment_connect_anchors;
             extend_chains_ = config.alignment_extend_chains;
-            aligner_config_ = mtg::cli::initialize_aligner_config(config, anno_dbg_->get_graph());
+
+            if (anno_dbg_) {
+                aligner_config_ = mtg::cli::initialize_aligner_config(config, anno_dbg_->get_graph());
+            } else {
+                // Mirrors align.cpp's wrap_graph: a PRIMARY-mode graph must be
+                // wrapped into CanonicalDBG before it can be aligned to directly.
+                // When an annotation is loaded, initialize_annotated_dbg does this
+                // wrapping internally; here we have to do it ourselves.
+                align_graph_ = graph_;
+                if (align_graph_->get_mode() == mtg::graph::DeBruijnGraph::PRIMARY)
+                    align_graph_ = std::make_shared<mtg::graph::CanonicalDBG>(align_graph_);
+
+                aligner_config_ = mtg::cli::initialize_aligner_config(config, *align_graph_);
+            }
         }
 
         thread_pool_ = std::make_unique<ThreadPool>(std::max(1u, get_num_threads()));
@@ -197,10 +248,17 @@ class Index {
     Alignment query_by_alignment(const std::string &seq) const {
         namespace align_redone = mtg::graph::align_redone;
 
-        const auto &graph = anno_dbg_->get_graph();
+        const auto &graph = anno_dbg_ ? anno_dbg_->get_graph() : *align_graph_;
         align_redone::Query aln_query(graph, seq);
-        align_redone::AnnotationBuffer anno_buffer(graph, anno_dbg_->get_annotator());
-        align_redone::LabeledSeeder seeder(anno_buffer, aln_query, *aligner_config_);
+
+        std::optional<align_redone::AnnotationBuffer> anno_buffer;
+        std::unique_ptr<align_redone::ExactSeeder> seeder;
+        if (anno_dbg_) {
+            anno_buffer.emplace(graph, anno_dbg_->get_annotator());
+            seeder = std::make_unique<align_redone::LabeledSeeder>(*anno_buffer, aln_query, *aligner_config_);
+        } else {
+            seeder = std::make_unique<align_redone::ExactSeeder>(aln_query, *aligner_config_);
+        }
 
         std::vector<align_redone::Alignment> paths;
         auto aln_callback = [&](align_redone::Alignment &&aln) {
@@ -208,10 +266,15 @@ class Index {
         };
 
         if (extend_chains_) {
-            align_redone::LabeledExtender extender(anno_buffer, aln_query, *aligner_config_);
-            align_redone::align_query(aln_query, seeder, extender, aln_callback, connect_anchors_);
+            std::unique_ptr<align_redone::Extender> extender;
+            if (anno_dbg_) {
+                extender = std::make_unique<align_redone::LabeledExtender>(*anno_buffer, aln_query, *aligner_config_);
+            } else {
+                extender = std::make_unique<align_redone::Extender>(aln_query, *aligner_config_);
+            }
+            align_redone::align_query(aln_query, *seeder, *extender, aln_callback, connect_anchors_);
         } else {
-            align_redone::align_query(aln_query, seeder, aln_callback, connect_anchors_);
+            align_redone::align_query(aln_query, *seeder, aln_callback, connect_anchors_);
         }
 
         if (paths.empty())
@@ -223,14 +286,21 @@ class Index {
                      < align_redone::score_match(b, *aligner_config_);
             });
 
-        std::string label = "*";
-        if (!best.get_label_classes().empty()) {
-            auto label_class = best.get_label_classes().front();
-            if (label_class != align_redone::Anchor::nannot) {
-                const auto &columns = anno_buffer.get_cached_column_set(label_class);
-                if (!columns.empty())
-                    label = anno_buffer.get_annotator().get_label_encoder().decode(columns.front());
+        std::string label;
+        if (anno_dbg_) {
+            label = "*";
+            if (!best.get_label_classes().empty()) {
+                auto label_class = best.get_label_classes().front();
+                if (label_class != align_redone::Anchor::nannot) {
+                    const auto &columns = anno_buffer->get_cached_column_set(label_class);
+                    if (!columns.empty())
+                        label = anno_buffer->get_annotator().get_label_encoder().decode(columns.front());
+                }
             }
+        } else {
+            // Without an annotation there are no labels to decode; a non-"*"
+            // ctg here just signals "this read aligned to the graph".
+            label = "mapped";
         }
 
         // Query coordinates are always reported on the original (forward) read,
@@ -252,6 +322,9 @@ class Index {
     Method method_ = Method::kQuery;
     std::shared_ptr<mtg::graph::DeBruijnGraph> graph_;
     std::unique_ptr<mtg::graph::AnnotatedDBG> anno_dbg_;
+    // Only populated when method_ == Method::kAlign and there's no annotation;
+    // may be a CanonicalDBG wrapper around graph_ (see constructor).
+    std::shared_ptr<mtg::graph::DeBruijnGraph> align_graph_;
     std::unique_ptr<ThreadPool> thread_pool_;
     size_t num_top_labels_ = 1;
     double discovery_fraction_ = 0.7;

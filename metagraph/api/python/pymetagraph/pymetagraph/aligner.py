@@ -28,7 +28,9 @@ class Aligner(AlignerABC):
 
     :param debug_log: Filename (or ``"stdout"``/``"stderr"``) for debug logging.
     :keyword input: Path to the metagraph graph file (``.dbg``).
-    :keyword annotator: Path to the metagraph annotation file.
+    :keyword annotator: Path to the metagraph annotation file. Required for
+        ``method="query"``; optional for ``method="align"`` (omitting it runs
+        plain graph alignment with no label lookups).
     :keyword threads: Number of threads to use for querying (default: 1).
     :keyword method: Either ``"query"`` (default) or ``"align"``.
     :keyword num_top_labels: Max number of labels to consider per query.
@@ -77,9 +79,14 @@ class Aligner(AlignerABC):
         if not index_path.is_file():
             raise FileNotFoundError(f"{index_path} does not exist")
 
+        # "query" (the default) needs an annotation to have any labels to
+        # report; "align" can run against the bare graph (see _pymetagraph_core.Index).
+        method = self.kwargs.get("method", "query")
         annotator = self.kwargs.get("annotator")
         if not annotator:
-            raise AttributeError('Required argument "annotator" not found.')
+            if method != "align":
+                raise AttributeError('Required argument "annotator" not found.')
+            return
         if not Path(annotator).is_file():
             raise FileNotFoundError(f"{annotator} does not exist")
 
@@ -90,7 +97,7 @@ class Aligner(AlignerABC):
     def describe(self, regions: List[Region], barcodes: Dict[str, Barcode]) -> str:
         return (
             f"Using the pymetagraph plugin. Graph: {self.kwargs['input']}, "
-            f"annotator: {self.kwargs['annotator']}."
+            f"annotator: {self.kwargs.get('annotator', 'none')}."
         )
 
     def map_reads(self, basecall_results: Iterable[Result]) -> Iterable[Result]:
