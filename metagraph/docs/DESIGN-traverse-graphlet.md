@@ -703,3 +703,77 @@ the useful next action — the stages only move hard bounds from *stated* to *en
 Implementation order (from the review): the C++ writer, the Python parser and the shared conformance fixtures first;
 then the staged enforcement of §14.1 (atomic commits and lazy paths, the bounded decode path, the ledger), with every
 not-yet-enforced guarantee marked soft in the responses.
+
+# 18. Record coordinates — an additive, v1-compatible extension *(owner's decision, 2026-10-02)*
+
+MGT v1 is frozen, so coordinates do not go into the body. They are an **additive JSON field** of the response, carried
+with the envelope the library already keeps (the `J` line of a saved `.mgt`), ignored by v1 readers that do not know
+it. Rationale and the v2 alternative are in the discussion of 2026-10-02: the size cost is small (about 2–3× the bytes
+of a body record for this part before compression, ~1.2× after gzip, and only for trace retrievals), and the Python
+side parses JSON faster than MGT text. Reasons that would justify an MGT v2 are collected in §18.4.
+
+## 18.1 What is reported, and when
+
+Coordinates are reported **only where they are well defined**: under `support: trace` on an index with k-mer
+coordinates, where every claim is one coordinate-consecutive occurrence in one record. Under `support: kmer` a stretch
+can be stitched from several occurrences, so no single position is honest; nothing is reported, and the response says
+so (`coordinates: null` with `coordinates_reason: "support kmer"` / `"index has no coordinates"`).
+
+For **header labels** (an accession via `CoordToHeader`), coordinates are positions **within the record**, 0-based,
+in the record's own orientation; for **column labels**, positions in the column's global coordinate space (and the
+existing `trace_record_boundaries` limitation applies). Trace runs only on basic (single-strand) graphs, so the
+strand is always the record's forward strand on the right arm; on the left arm the walk runs backwards along the
+record, which the interval below already accounts for.
+
+## 18.2 The field
+
+Per seed result (JSON, every detail level — `full`, `tree`, `summary` and `graphlet`):
+
+```
+"coordinates": {
+  "kind": "record" | "column",            // header labels: within the record; column labels: global
+  "k": 31,
+  "seed": [ {"label": <label id>, "occurrences": [[start, end], ...]} , ... ],
+  "arms": {
+    "left"|"right": [
+      {"run": <run id (the R ordinal / runs[] index)>, "label": <label id>,
+       "occurrences": [[start, end], ...]}    // one per live coordinate chain of the run
+    ]
+  }
+}
+```
+
+- An occurrence `[start, end)` is the **half-open base interval in record (or column) coordinates** spelled by that
+  run's bases **together with the seed-side context that makes them k-mers**: for a right-arm run the bases
+  `[from_bp, to_bp)` of the walk are record bases `[c + k − 1 + from_bp − d, …)` — the normative rule is: the run's
+  first node (the k-mer entered by step `from_bp + 1`) has coordinate `c₀`, its last node coordinate `c₁`; the run's
+  **own bases** (the last base of every k-mer it entered) are record bases `[c₀ + k − 1, c₁ + k)` on the right arm and
+  `[c₁, c₀ + 1)` on the left arm (where coordinates decrease outward). Seed occurrences are `[c_first, c_last + k)`.
+- Several occurrences per run occur when the label's record repeats the walked sequence (two live coordinate chains);
+  they are listed in ascending `start`.
+- Runs closed by a merge do not occur (trace and merging are mutually exclusive). Runs entered by a switch carry the
+  new label's own coordinates from their start.
+- Bounded like everything else: at most `output.max_coordinate_occurrences` (default 16, accepts `"unlimited"`) per
+  run; a cut is stated as a limitation `coordinates` (knob `output.max_coordinate_occurrences`, observed = the true
+  count) — never silent.
+
+## 18.3 The library
+
+- `Graphlet.coordinates` (from the envelope; `None` with the reason when absent). Body-only graphlets have none and say
+  so (`MissingEnvelope` for coordinate queries).
+- `Claim.coordinates`: the occurrences of the claimed run(s), **clipped to the claim's displayed interval** (and to a
+  cut depth `D`) with the same arithmetic as §18.2; `route_only` claims carry the coordinates of the label's own route.
+- `walks(...)`: per walk and label, the record intervals covering the walk's bases; `label_walks()` rows likewise.
+- `to_fasta()`: headers gain `acc:start-end` (natural orientation, 1-based closed in the header for readability, stated
+  in the docs) when coordinates are present.
+- MCP tools: claims/walks/labels rows carry `coordinates` (counted against the byte ceilings; cut with `more`).
+- **Oracle**: on mini_refseq the real-index suite fetches each record's sequence from the fixture FASTA and checks that
+  the bases at every reported interval equal the spelled claim (natural orientation, both arms) — positional
+  verification on top of the search-based one.
+
+## 18.4 Reasons collected for an eventual MGT v2
+
+1. Coordinates in the body (self-contained raw bodies, one conformance regime) — today in the envelope (§18).
+2. An extension mechanism (readers ignore unknown records of a reserved form), so later additions need no version
+   bump — v1's strict reader rejects unknown records.
+Cut a v2 only when more than one strong reason has accumulated; keep v1 reading.
