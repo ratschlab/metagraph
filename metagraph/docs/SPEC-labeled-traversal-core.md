@@ -214,8 +214,8 @@ to a header).
       "max_output_bp": 2000000,
       "time_budget_ms": 30000
     },
-    "frontier": {"order": "breadth_first", "beam_rank": "support", "on_overflow": "stop"},
-    "output": {"detail": "full", "sequences": true, "label_lists": "delta", "label_runs": true,
+    "frontier": {"order": "breadth_first", "on_overflow": "stop"},
+    "output": {"detail": "full", "sequences": true,
                "profile_bin_bp": 100, "max_branch_events": 100, "continuation_bp": 1000, "timing": true},
     "annotation": {"access": "auto", "batch_kmers": 64}
   }
@@ -225,7 +225,8 @@ to a header).
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
   rejected with a message naming the field; nothing is silently weakened. Defaults are filled in and the
   **normalized strategy** is echoed. If the server clamps a bound (§10.3) the echo carries
-  `clamped: [{field, requested, effective}]`.
+  `clamped: [{field, requested, effective}]`, each value in its knob's type (an integer for an integer knob such
+  as `labels.max_seed_labels`, a number for `bounds.time_budget_ms`).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -255,9 +256,17 @@ to a header).
   `max_switch_sources` (default 64, or `"unlimited"`): for pairwise models, only the cheapest that many sources
   are considered per step. Under `exhaustive` its default is `"unlimited"` and, with a `table` cost, a number is
   **rejected**: a target label reachable only from a cut source is not entered, and if it was the only label on
-  that successor the walk into it would be pruned with no path-level reason.
+  that successor the walk into it would be pruned with no path-level reason. Outside the preset every cut that
+  may have changed a step is counted and stated (`counters.switch_sources_cut`, the `switch_sources` limitation,
+  §7.0).
 - `branching.*`: see §6.4–§6.5. `max_label_branches` is a **depth** along a root-to-leaf path (a lineage may reach
-  up to d^b leaves, d ≤ number of successor characters), not a total.
+  up to d^b leaves, d ≤ number of successor characters), not a total. `tip_window_bp` and `bubble_window_bp` are
+  **not implemented**: only `0` (the default, and what the echo carries) is accepted; any other value is rejected
+  (400 naming the field) rather than accepted and walked as 0.
+- `output.continuation_bp` (default 1000): the length of a leaf's `continuation` (§7.1). `0` means **no
+  continuation sequence** (`sequence: ""`; its labels and loss are still reported); `1 … k − 1` is **rejected**
+  naming k, because a continuation shorter than k is not valid `/traverse` input; from k on the continuation is a
+  resubmittable seed.
 - `bounds.*` scopes are in §6.8. `frontier.*` in §6.8. `output.detail`: `summary | tree | full` (§7).
 - **`labels.mode`**: `constrain` (default; everything above) | `annotate` (§6.9: every structural successor is
   followed, the labels present are recorded, nothing is filtered). In `annotate` mode `seeds[].labels`,
@@ -336,13 +345,16 @@ to a header).
    **Per-seed failure.** Deriving can fail for reasons the caller cannot act on, because it named no labels at all:
    nothing carries the seed in full, the derived names are ambiguous, the first row is too wide, or the time budget
    ran out mid-derivation. Those do not fail the request: the seed's entry in `results` is
-   `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "error": "<reason>"}` — no `arms` — and the other
-   seeds are traversed as usual. A client distinguishes the two shapes by the presence of `error`. Everything that
+   `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "outcome": {"walks": "failed", …}, "error":
+   "<reason>", "limitations": [{"kind": "derivation", "cause", "knob", …}]}` — no `arms` — and the other seeds are
+   traversed as usual. The `derivation` entry names the request field that would get past the cause (§7.0); a
+   client distinguishes the two shapes by `outcome.walks` (or the presence of `error`). Everything that
    *is* the caller's own doing still fails the whole request with HTTP 400: a malformed seed (too short, invalid
    character, not fully present in the graph), an unknown or duplicate **explicit** label, and every strategy error.
 5. The seed is never rewritten.
-6. The permitted universe is `P = seed labels ∪ extra`. Duplicate `seed_id`s in one request are computed once and
-   reported with `duplicate_of`.
+6. The permitted universe is `P = seed labels ∪ extra`. A seed whose `validated_seed_id` repeats an earlier seed
+   of the same request is traversed again and its result carries `duplicate: true` (the `duplicate_of` reference
+   and the compute-once reuse are not implemented).
 
 ### 6.2 Arms, steps, orientation
 
@@ -396,7 +408,10 @@ the exact minimum over label assignments (costs ≥ 0, so budget pruning is safe
 - **`max_switch_sources` truncates the source list by `(loss, branches, label)`, not by the cost into the
   particular target**, so with a `table` cost it can miss the cheapest switch: if A→E costs 2 and B→E costs 0.5
   from equal starting losses, `max_switch_sources: 1` reports 2 and `2` reports 0.5. Raising the cap restores
-  exactness; the approximation is reported, not hidden.
+  exactness; the approximation is reported, not hidden: every successor derivation in which a cut source had a
+  finite switch into one of the successor's targets is counted (`counters.switch_sources_cut`) and stated as the
+  arm's `switch_sources` limitation with `outcome.label_evidence: lower_bound` (§7.0) — also when the cut source
+  goes on along another successor and so never ends with the `switch_sources` qualifier.
 
 **Special cases and their meaning.**
 
@@ -440,6 +455,10 @@ one label (within-sample variation) is an ambiguous branch for that label; §6.5
 
 ### 6.5 Tips, bubbles, reconvergence and hairpins
 
+**The tip and bubble windows below are not implemented** (§13, I3 note 1): a non-zero `tip_window_bp` or
+`bubble_window_bp` is rejected (400 naming the field), no `tip` / `bubble` event is ever emitted and the
+`tips` / `bubbles` growth counters stay 0. The two bullets describe the intended behaviour.
+
 - **Tip window** (`tip_window_bp > 0`): before declaring a source ambiguous at u, each alternative is explored
   structurally (graph only, counted toward `max_steps`) for up to `tip_window_bp`; an alternative whose permitted
   continuation ends (dead end or label lost) within the window is a **tip**: it does not count toward ambiguity,
@@ -470,8 +489,10 @@ one label (within-sample variation) is an ambiguous branch for that label; §6.5
   offset, orientation)`; a step is blocked iff some entry's segment is an ancestor-or-self of the current segment
   (precomputed depth and parent pointers; for merged DAG nodes, any parent). No graph-sized arrays.
 - **Seed re-entry.** A step whose target is any seed node (either orientation in canonical/primary) ends the path
-  at that node with `rejoined_seed{seed_offset, orientation}`, regardless of seed length; the re-entered bases are
-  reported as `overlap_bp` and not counted in `extension_bp`. Interpretation: a circular molecule (offset 0 on the
+  at that node with `rejoined_seed`, regardless of seed length (the `{seed_offset, orientation}` qualifier and an
+  `overlap_bp` for the re-entered bases are **not implemented**: the label end carries the reason only, and the
+  step into the seed node is not taken but reported as a `blocked` event with that reason). Interpretation: a
+  circular molecule (offset 0 on the
   right arm / the last offset on the left arm, same orientation) or a repeat shared with the seed. Arms do not
   share used-edge sets; a circle is reported by both arms.
 - Precedence when several apply: `rejoined_seed > edge_reuse_rc > edge_reuse`.
@@ -516,8 +537,11 @@ Each arm reports `status: complete | truncated (a resource reason) | pruned (bea
 {live_paths, live_labels, exact}` and `cap_trigger: {reason, arm, at_bp, segment, live_paths, live_labels,
 exact}` when truncated. `exact` is `false` when a head counted carried a list cut by `labels.max_labels_per_node`
 (`annotate` mode): `live_labels` is then a lower bound. The same flag sits on every `growth[]` bin
-(`exact`); in `constrain` mode it is always `true` (the live state is never cut). `max_output_bytes` / `max_events` are **delivery** truncation (`delivery: {truncated, next_cursor}`),
-separate from exploration status. A capped or pruned result is never evidence of absence.
+(`exact`); in `constrain` mode it is always `true` (the live state is never cut). (`cap_trigger` has no `arm`
+field: it sits inside its arm.) **Delivery truncation is not implemented** (§13 deviation 8): `max_output_bytes`,
+`max_events` and a `delivery: {truncated, next_cursor}` block do not exist, the two fields are rejected, and every
+response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged delivery is designed in
+`DESIGN-traverse-graphlet.md` §14). A capped or pruned result is never evidence of absence.
 
 ### 6.8 Exploration order, bounds, determinism
 
@@ -529,11 +553,17 @@ separate from exploration status. A capped or pruned result is never evidence of
   batch-fetched, §8.3). **Cap and overflow decisions are made in queue-key order at single-step granularity:** a
   chunk is truncated at the step where a cap trips, so `batch_kmers` never changes which steps are taken.
 - Scope table: `max_extension_bp` per path; `min_live_labels` per path; `max_steps`, `time_budget_ms` per seed;
-  `max_live_paths`, `max_paths`, `max_output_bp` per arm; `max_output_bytes`, `max_events` per seed (delivery);
-  request-level `time_budget_ms` (optional, `request_time_budget_ms`) marks seeds not started as `not_started`.
-- **Overflow** (`on_overflow`): `stop` ends the arm's live paths with that reason; `beam` keeps the best paths by
-  `beam_rank` (`support` = `(−|σ|, min loss, extension_bp, path_id)`, or `queue`) within the arm and ends the
-  others with `beam_pruned`; pruned paths are listed in `beam_pruned: [{path, at_bp, n_labels}]`.
+  `max_live_paths`, `max_paths`, `max_output_bp` per arm. **Not implemented** (see `DESIGN-traverse-graphlet.md`
+  §14): the per-seed delivery bounds `max_output_bytes` / `max_events` (§6.7), and a request-level time budget
+  (`request_time_budget_ms`) that would mark the seeds it leaves unstarted as `not_started` — every seed of a
+  request is traversed, each under its own `time_budget_ms`, and the server bounds a request by
+  `--traverse-max-seeds` (§10.3).
+- **Overflow** (`on_overflow`): `stop` ends the arm's live paths with that reason; `beam` keeps, at the end of each
+  level, the `max_live_paths` heads with the most support (`(−|σ|, min loss, path_id)`; in `annotate` mode |σ| is
+  the true count recorded at the head node, §6.11), whatever `frontier.order` is, and ends the others with
+  `beam_pruned` (their paths carry `path_reason: beam_pruned` and the arm is `pruned`, with the first pruning in
+  `cap_trigger` and a `walk_domain` limitation, §7.0). There is no `beam_rank` knob (the request schema rejects
+  it) and no separate `beam_pruned: [...]` list: the pruned paths are the `paths` with that reason.
 - **Determinism.** The `result` object (seeds, arms, segments, events, label_summary, growth, branch_events,
   step/enumeration/rows-mapped counters) is byte-identical across runs, across seed permutations and when the
   request is split into one seed per request, for the same graph, annotation, seeds and normalized strategy,
@@ -692,9 +722,25 @@ tool for an agent exploring the graph *locally* before committing to labels, and
 ### 7.0 Guarantees and stated limitations
 
 **Principle.** Every response certifies what it covers and states every cap that limited it, with the request
-field to turn: nothing is cut silently. A cap either leaves the result complete, or the result says where the
-cut starts, what was cut and which knob controls it — the model is `complete_to_bp` (§6.10).
+field to turn: nothing is cut, ignored or weakened silently. A cap either leaves the result complete, or the result
+says where the cut starts, what was cut and which knob controls it — the model is `complete_to_bp` (§6.10). A knob
+that would be accepted and then change nothing (`tip_window_bp`, `bubble_window_bp`, a `continuation_bp` below k)
+is rejected instead (§5).
 
+- **The outcome, per seed result.** Every entry of `results` carries `outcome`, one value per guarantee, because
+  the guarantees are independent (a complete walk can have cut diagnostics; complete walks can carry cut label
+  lists):
+
+  | axis | values | meaning |
+  |---|---|---|
+  | `walks` | `complete` \| `partial` \| `failed` | `complete`: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`). `partial`: a valid certified prefix — some arm was truncated or pruned, and its `complete_to_bp` and `walk_domain` limitation say how far the guarantee goes. `failed`: no traversal — the permitted set could not be derived (§6.1 step 4); the result has no `arms`, an `error`, and a `derivation` limitation |
+  | `branch_diagnostics` | `complete` \| `cut` | `cut`: some arm's `evidence.complete` is `false` — branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported (the `branch_events` limitation) |
+  | `label_evidence` | `complete` \| `lower_bound` | `lower_bound`: recorded label lists were cut (`labels_per_node.nodes_truncated > 0`, the `label_lists` limitation; annotate mode's `label_summary` and the counts flagged `exact: false` are then lower bounds), or a `max_switch_sources` cut may have raised a loss or missed a switch entry (`counters.switch_sources_cut > 0`, the `switch_sources` limitation). The permitted set the request chose — an explicit list, or the derived carriers taken under `max_seed_labels` — is the domain, not a cut of the evidence within it: what the cap left out is stated by the `seed_labels` limitation |
+  | `delivery` | `inline` | the whole result is in this response; `spooled` / `paged` are reserved for the graphlet delivery path (`DESIGN-traverse-graphlet.md` §14) |
+
+  A failed derivation reports `{"walks": "failed", "branch_diagnostics": "complete", "label_evidence":
+  "complete", "delivery": "inline"}`: nothing was walked, so nothing else was cut. Each axis is backed by the
+  per-arm fields and the `limitations` below, which say how far it holds and which knob would go further.
 - **What is certified, per arm.** `complete_to_bp` under `walk_rule` and `completeness_scope` (§6.10): every
   admissible walk of at most that many bases is present. `evidence: {complete, complete_to_bp}`: below
   `evidence.complete_to_bp` every branch decision and every refusal the walker made is in `branch_events`
@@ -702,10 +748,11 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
   when no event was dropped. How the two boundaries relate: §6.10.
 - **What limited it.** `limitations`, per arm and per seed result, in every `detail` level; `[]` when nothing
   did. Each entry is `{kind, knob, limit, observed, effect}`, plus `complete_to_bp` for a limitation with a
-  depth boundary. `knob` names the request field relative to `strategy` (as `strategy.clamped` does), `limit`
-  is its value in this run, `observed` what the run met against it — for a cap, the demand that exceeded
-  `limit` — and `effect` says in one sentence what is missing and how to get it. A kind is emitted only when it
-  applies:
+  depth boundary. `knob` names the request field relative to `strategy` (as `strategy.clamped` does; a seed's
+  own field is `seeds[].…`), `limit` is its value in this run, `observed` what the run met against it — for a
+  cap, the demand that exceeded `limit` — and `effect` says in one sentence what is missing and how to get it.
+  Numbers keep their knob's type: integers for integer knobs (also in `strategy.clamped`), numbers for time
+  budgets. A kind is emitted only when it applies:
 
 | `kind` | Where | Emitted when | `knob` | `observed` |
 |---|---|---|---|---|
@@ -713,12 +760,14 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
 | `branch_events` | arm | events were dropped by the cap | `output.max_branch_events` | `branch_events_total`; `complete_to_bp` = `evidence.complete_to_bp` |
 | `label_lists` | arm | `labels_per_node.nodes_truncated > 0` | `labels.max_labels_per_node` | `labels_per_node.max_seen` |
 | `inexact_counts` | arm | a live-label count in `frontier_remaining`, `cap_trigger` or a `growth` bin is flagged `exact: false` | `labels.max_labels_per_node` | how many counts are flagged |
-| `switch_sources` | arm | a label ended `label_lost` with the qualifier `switch_sources` | `labels.max_switch_sources` | how many such ends |
+| `switch_sources` | arm | a `table` cost's source list was cut while a cut source had a finite switch into a target of that successor (`counters.switch_sources_cut > 0`), or a label ended `label_lost` with the qualifier `switch_sources` — whether or not the cut source ended: one that goes on along another successor leaves no end, yet the target it was the cheapest way into was entered at a higher loss or not at all | `labels.max_switch_sources` (accepts `"unlimited"`) | `counters.switch_sources_cut`, the successor derivations the cut may have changed (an over-approximation: the kept sources may still have been the cheapest); `label_ends` = the `switch_sources` label ends. Effect: losses may be overestimated and switch entries missed |
 | `scope` | arm | `completeness_scope: united_history` | `branching.on_reconverge` (`limit: "merge"`) | merges done (0: no history was united) |
-| `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
+| `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
+| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels` | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers |
 
 ```json
+"outcome": {"walks": "complete", "branch_diagnostics": "cut", "label_evidence": "complete", "delivery": "inline"},
 "evidence": {"complete": false, "complete_to_bp": 25},
 "limitations": [{"kind": "branch_events", "knob": "output.max_branch_events", "limit": 1, "observed": 3,
                  "complete_to_bp": 25, "effect": "branch decisions and refusals at or beyond complete_to_bp are
@@ -727,21 +776,39 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
 
 - **Not limitations:** semantic stops (`dead_end`, `label_lost`, `max_extension_bp`, …) — the requested domain
   is complete there — and `dropped_labels` (named labels that do not support the seed). A seed whose permitted
-  set could not be derived is an `error` result (§7.1), not a limited one.
+  set could not be derived is a `failed` result with a `derivation` limitation (§6.1 step 4), not a limited one.
 - So an arm with `limitations: []` is exactly what its strategy defines to `bounds.max_extension_bp`: every
-  walk per path, every reason, every recorded list in full. Two gaps remain that no entry states: §6.3's
-  `max_switch_sources` approximation under a `table` cost when the cut source goes on along another successor
-  (it does not end, so no `switch_sources` end is recorded; `"unlimited"` removes it), and `tip_window_bp` /
-  `bubble_window_bp`, which are accepted and echoed but not implemented (§13, I3 note 1).
+  walk per path, every reason, every recorded list in full, every loss as the §6.3 recurrence gives it (but see
+  gap 3), and a result whose `outcome` axes are all `complete` / `inline` and whose seed-level `limitations` are
+  `[]` covers everything it certifies.
+- **Known gaps that no entry states** (the rule's remaining exceptions; each is documented here instead):
+  1. `support: trace` with **column** labels follows consecutive column coordinates and does not detect a record
+     boundary whose global coordinates are consecutive (§13, I3 note 8): such a trace can run across two records
+     of one column without a `trace_break`. Header labels detect it. The response does not flag it.
+  2. Under `support: trace`, `dropped_labels[].runs` are k-mer **presence** runs, not trace runs (§13, I3 note 8).
+  3. Under a finite change cost with a finite `max_label_branches`, the branch-limit exclusion is greedy (§6.3,
+     §6.4): an excluded source's targets are re-minimised over the remaining sources, which need not be the
+     constrained optimum, so a loss can be higher than the best assignment within the limit (or a target
+     unentered). The exclusion itself is reported (`refused: branch`, the label's `branch` end); that the losses
+     after it are not optimal is not. `max_label_branches: "unlimited"` removes it.
+- **Described in this spec but not implemented** (a request naming one is rejected; no response carries one):
+  delivery bounds and the `delivery` block (§6.7, §13 deviation 8), a request-level time budget and `not_started`
+  (§6.8), `beam_rank` and a `beam_pruned: [...]` list (§6.8), tip and bubble windows (§6.5), the `hll` cost model
+  (§9), `duplicate_of` (§6.1; the response has `duplicate: true`), `seed_offset` / `orientation` / `overlap_bp` on
+  `rejoined_seed` (§6.6), the `label_lists: delta` encoding (§7.1), and in §7.2 `cost_preview`, the
+  `rc_index_range` and resource-cap-hit counters and the `bubble_len_bp` of a `reconverge` event.
 
 ### 7.1 Per seed (`detail: full`)
 
 ```json
 {
   "seed": {"seed_id": "…", "validated_seed_id": "…", "seed_id_mismatch": false, "length_bp": 4870,
-           "num_kmers": 4840, "labels": [...], "dropped_labels": [], "label_population": {...},
+           "num_kmers": 4840, "labels": [...], "dropped_labels": [],
            "labels_from_seed": false, "labels_supporting_total": 2, "labels_dropped": 0,
            "labels_dropped_digest": ""},
+  "outcome": {"walks": "complete", "branch_diagnostics": "complete", "label_evidence": "complete",
+              "delivery": "inline"},
+  "label_mode": "constrain",
   "label_dict": [{"name": "NZ_STEQ01000045.1", "kind": "header"}, {"name": "573", "kind": "column"}],
   "limitations": [],
   "arms": {
@@ -755,30 +822,34 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
          "labels": [0, 1], "labels_at_end": [0],
          "events": [{"at_bp": 300, "type": "switch", "from": 1, "to": 2, "cost": 0.7},
                     {"at_bp": 455, "type": "label_end", "label": 2, "reason": "label_lost",
-                     "structural_successors": 1, "unpermitted_labels_present": 3}]},
-        {"id": 1, "parents": [0], "from_bp": 812, "length_bp": 40, "labels": [], "labels_removed": [], "sequence": "…"}
+                     "structural_successors": 1}]},
+        {"id": 1, "parents": [0], "from_bp": 812, "length_bp": 40, "labels": [], "labels_at_end": [],
+         "sequence": "…", "events": []}
       ],
       "splits": [{"at_bp": 812, "segment": 0, "children": [1, 2], "kind": "divergence"}],
-      "joins": [], "tips": [], "bubbles": [], "blocked": [],
       "paths": [{"id": 0, "segments": [0, 1], "length_bp": 852, "end_reasons": {"dead_end": 1},
-                 "end_labels": [{"label": 0, "loss": 0, "branches": 0}],
-                 "continuation": null}]
+                 "end_labels": [{"label": 0, "loss": 0, "branches": 0, "run": 0, "route_bp": 0}]}],
+      "runs": [{"label": 0, "from_bp": 0, "to_bp": 852, "entered_by": "seed", "route_bp": 0,
+                "end_reason": "dead_end"}],
+      "growth": [], "branch_events": [], "branch_events_truncated": 0, "needed_budgets": [],
+      "counters": {"…": "§7.2"}
     },
     "left": {"…": "same shape"}
   },
-  "label_summary": [{"label": 0, "right": {"direct_bp": 852, "reach_bp": 852, "reentries": 0,
-                                           "runs": [{"path": 0, "from_bp": 0, "to_bp": 852, "entered_by": "seed", "end_reason": "dead_end"}]},
+  "label_summary": [{"label": 0, "right": {"direct_bp": 852, "reach_bp": 852, "reentries": 0, "runs": [0]},
                                   "left": {...}}],
-  "diagnostics": {"…": "§7.2"}
+  "annotation": {"access_path": "…", "keys_mapped": 0, "rows_requested": 0, "direct_reads": 0},
+  "timing": {"…": "§7.2"}
 }
 ```
 
 - **A seed whose permitted set could not be DERIVED** (§6.1 step 4) takes the place of this object with
-  `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "error": "<reason>"}` and no `arms`: the request
-  still succeeds and the other seeds are traversed. Presence of `error` is how a client tells the two apart.
-- `segment.labels` = names live at the segment's **first** step; `labels_at_end` at its last; with
-  `label_lists: delta` a child lists only `labels_removed` relative to its parent's end set. Label sets change only
-  through events, sorted by `at_bp`.
+  `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "outcome": {"walks": "failed", …}, "error":
+  "<reason>", "limitations": [{"kind": "derivation", …}]}` and no `arms`: the request still succeeds and the other
+  seeds are traversed. `outcome.walks` (or the presence of `error`) is how a client tells the two apart.
+- `segment.labels` = names live at the segment's **first** step; `labels_at_end` at its last (both lists in full:
+  a `label_lists: delta` encoding with `labels_removed` is not implemented). Label sets change only through
+  events, sorted by `at_bp`.
 - `sequence` holds the bases the segment adds, natural orientation. A right flank is the concatenation root →
   leaf; a left flank leaf → root. `"sequences": false` omits strings (sizes and events stay). Whole flanks are
   reconstructed client-side so shared prefixes are never duplicated.
@@ -795,9 +866,12 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
 - **Continuation.** Every leaf ended by `max_extension_bp`, a resource reason or `beam_pruned` carries
   `continuation: {sequence, labels, loss_used, branches_used}`: the last `max(k, bp since the last switch)` bases
   up to `continuation_bp`, natural orientation, with the labels covering that whole tail. It is valid `/traverse`
-  input (a fresh seed: edge-reuse and branch state reset; the agent may reduce `loss_budget` by `loss_used`).
-- `detail: summary` returns `seed`, `label_summary`, per-leaf `{length_bp, n_labels, end_reasons}`, `diagnostics`
-  and `continuation`s, but no segments, events or sequences — the cheap probe to run before committing to a radius.
+  input (a fresh seed: edge-reuse and branch state reset; the agent may reduce `loss_budget` by `loss_used`):
+  `continuation_bp` is either 0 or at least k (1 … k − 1 is rejected, §5). With `continuation_bp: 0` the sequence
+  is `""` and `labels` / `loss_used` / `branches_used` describe the leaf's head node.
+- `detail: summary` returns `seed`, `outcome`, `limitations`, `label_summary`, per-leaf `{length_bp, n_labels,
+  end_reasons}`, the per-arm diagnostics of §7.2 and `continuation`s, but no segments, splits, runs, events or
+  sequences — the cheap probe to run before committing to a radius.
   `tree` adds segments without sequences.
 
 ### 7.2 Diagnostics (the tuning evidence, always present)
@@ -835,17 +909,20 @@ cut starts, what was cut and which knob controls it — the model is `complete_t
   only from `evidence.complete_to_bp` on, and the response says where: below it an omission must carry its
   reason, at or beyond it a consumer cannot expect one (the checker counts such an omission as
   `unexplained_capped`). Set the knob to `"unlimited"` when the evidence for the whole trie is what is wanted.
-- `needed_budget` histogram per arm (from `loss_budget` events); `cost_preview` for P under pairwise models
-  (min/median/max of `cost(seed label → extra)`, units stated).
-- `counters`: steps, successor enumerations, annotation access (path used, keys mapped, rows reconstructed,
-  direct cell reads, tuple rows, pair evaluations, rc_index_range calls), resource-cap hits; and the work of
-  the structural and branching rules — `edge_reuse_probes` (uses scanned or (edge, segment) pairs probed by
-  the per-path edge-reuse check, whichever was fewer), `reminimisation_rounds` (re-derivations after the
-  first at ambiguous nodes, §6.4; bounded by |σ| per node), `max_reminimisation_rounds` (the largest at
-  one node) and `refusal_scans` (the work of recording the refusals: per round that excludes sources, the
-  successor state entries scanned once for all of them, plus one loss-budget test per (source, successor)
-  under a constant cost or per target under a table — linear in |σ| + Σ|σ_v| per round under `forbid` and
-  `constant`) — so that a pathological locus is visible rather than silent.
+- `needed_budgets` per arm: the `needed_budget` of every `loss_budget` end, as a list. (A `cost_preview` for P
+  under pairwise models — min/median/max of `cost(seed label → extra)` — is not implemented.)
+- `counters` per arm: `steps`, `successor_enumerations`, `output_bp`, `pair_evaluations`; the work of the
+  structural and branching rules — `edge_reuse_probes` (uses scanned or (edge, segment) pairs probed by the
+  per-path edge-reuse check, whichever was fewer), `reminimisation_rounds` (re-derivations after the first at
+  ambiguous nodes, §6.4; bounded by |σ| per node), `max_reminimisation_rounds` (the largest at one node) and
+  `refusal_scans` (the work of recording the refusals: per round that excludes sources, the successor state
+  entries scanned once for all of them, plus one loss-budget test per (source, successor) under a constant cost
+  or per target under a table — linear in |σ| + Σ|σ_v| per round under `forbid` and `constant`) — so that a
+  pathological locus is visible rather than silent; and `switch_sources_cut`, the successor derivations of
+  committed steps in which a `table` cost's source list was cut by `max_switch_sources` while a cut source had a
+  finite switch into a target there (the `switch_sources` limitation, §7.0). Annotation access is per seed
+  (`annotation: {access_path, keys_mapped, rows_requested, direct_reads}`); `rc_index_range` calls and
+  resource-cap hits are not counted.
 - `timing` (excluded from determinism): elapsed per phase, cache hits, and the **physical fetch counters**
   `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` — prefetching along unbranched runs changes them with
   `annotation.batch_kmers` while the walk, `rows_requested` and `keys_mapped` do not (§6.8), so they are not part
@@ -1088,13 +1165,14 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T29 | trace support | Coord fixture with two occurrences of R in one accession: `kmer` support follows both continuations as one label; `trace` keeps them apart and ends with `trace_break` at a coordinate jump; a cross-record boundary stops with `trace_break` even with consecutive global coordinates | Cross-record boundary |
 | T30 | derived seed labels | Seed carried in full by 2 of 3 labels, `labels` omitted: derives exactly those 2, `labels_from_seed`, results identical to naming them; `max_seed_labels` truncation reports counts + digest and does NOT drop them; empty intersection rejected; `extra` on top of a derived set; coordinate fixture: header kind derives accessions, column kind the column, `trace` holds the derived set to coordinate continuity; mini-refseq: the whole blaNDM gene with no labels derives the 19 full-length carriers and traverses identically to the explicit run | Hit-labelled seed |
 | T30b | derived-set cost and usability | 25 labels, one carrying only a prefix: the derived set and the same list named explicitly agree field by field, and `labels_supporting_total` equals the kept count for the explicit list too; `bounds.time_budget_ms` stops the derivation (which runs before the walk's clock check) while leaving an explicit request a truncated walk; 100 decoy records sharing only the seed's first k-mer: the intersection starts from the cheapest row of the first batch, so `coords_mapped` stays at two per k-mer instead of paying for that row; the same accession in two columns makes a derived `header` set ambiguous and is refused naming the header and `seed_label_kind`, while the `column` kind and an explicit `ACC1` still work; under `trace`, a set that halves outside the first batch (8 carriers of the first 100 k-mers, 2 of the rest) still reports the coordinates the explicit run finds, i.e. the retained per-k-mer coordinates survive being compacted; mini-refseq: derived and explicit agree on dropped labels, label summary, runs, access path and the row/key counters | Hit-labelled seed |
-| T30c | per-seed derivation failure | Three seeds, the middle one carried in full by no label: HTTP 200 / exit 0 with `{"seed": {...}, "error": …}` in its place and the other two traversed; the same seed with an EXPLICIT label list still fails the whole request; `max_seed_labels` out of `[1, 100000]` is a parse error; a seed over `--traverse-max-seed-bp` and more than `--traverse-max-seeds` seeds are 400s; `max_seed_labels` above `--traverse-max-seed-labels` is clamped and reported | Hit-labelled seed |
+| T30c | per-seed derivation failure | Three seeds, the middle one carried in full by no label: HTTP 200 / exit 0 with `{"seed": {...}, "outcome": {"walks": "failed", …}, "error": …, "limitations": [derivation]}` in its place (cause `no_carrier`, knob `seeds[].sequence`) and the other two traversed with their own `outcome` (`Walker.FailedDerivationIsAStatedOutcome`, also `over_seed_label_cap` and `time_budget` with `server_limit`); the same seed with an EXPLICIT label list still fails the whole request; `max_seed_labels` out of `[1, 100000]` is a parse error; a seed over `--traverse-max-seed-bp` and more than `--traverse-max-seeds` seeds are 400s; `max_seed_labels` above `--traverse-max-seed-labels` is clamped and reported | Hit-labelled seed |
 | T31 | trie oracle (§6.9) | `test_trie.cpp`: annotate records what constrain filters; the exhaustive preset refuses conflicting knobs; a tripped cap reports `complete_to_bp` and the partial level is excluded; cut recorded lists are reported and break the oracle; `TrieOracle` (4 graph × annotation pairs, 3 modes): `claims(A) == E` for 5 permitted sets on both arms, tuned runs are prefix-subsets with a reason for every omission, merged routes are sound | — |
 | T32 | records model, edge and non-edge cases | `test_trie_cases.cpp` + `test_trie_reference.hpp` + `test_trie_checks.hpp`, two graph × annotation pairs, three modes, both arms, every case three ways (records ⇔ T ⇔ A with end reasons) plus single-label union, derived == explicit and the recurrence at budget 0: linear; seed at record start / end / the whole record; radius 0, 1, 2, |R|−1, |R|, |R|+1 (a head at the radius is `max_extension_bp`, not `dead_end`); fork; unequal bubble (+ merged routes); nested bubbles; one-base tip at the seed boundary; homopolymer self-loop (3 walks, never the record's); cycle junction; circle (`rejoined_seed` on both arms); repeat in two records plus a chimera; seed twice in one record (the walk runs through the k−1 junction k-mers before `rejoined_seed`); seed spanning a bubble (the other label is dropped, nothing else changes); an unlabeled region (recorded empty, `label_lost` at its edge); a reverse-complement record (not a carrier in basic, the second fork branch in canonical/primary); hairpin skip and follow; even-k palindromic node; 100 labels (default cap cuts the lists and the oracle says so; uncapped the contract holds); unmasked DBGSuccinct ('$' never recorded); 16 random fixtures at k = 7 | Cycle / self-loop, Reverse complements |
 | T33 | switching vs the §6.3 recurrence | `OneSwitch`: forbid ends A in Y; budget 1 spells P·Y·Z under B at loss 1 switched at |P·Y|, budget 0 reports `loss_budget` needed 1; `TwoSwitches`: budget 1 cuts A's walk at |P·Y·Z| needing 2, budget 2 spells P·Y·Z·W under C at loss 2, B's walk needs one; leaves, losses and switch events equal the recurrence over the records | Sample-switching chain |
 | T34 | trace vs the records | `TrieCasesTrace`: k-mer support follows the four combinations of two records sharing a stretch, trace the two records; a record ending where another goes on is `record_end` under trace and continues under k-mer; a seed twice in one record gives two traces; the homopolymer limitation (§6.6) | Cross-record boundary |
 | T35 | size caps vs the completeness guarantee | `TrieCasesCaps`: `max_steps` 1…120, `max_live_paths` 1–3 (stop and beam), `max_output_bp` 1…90, `max_paths` 1–2 on the nested bubbles, three modes: every tuned run is a prefix-subset with a reason per omission, its walks equal the exhaustive trie's at every depth ≤ `complete_to_bp`, and `complete_to_bp` never decreases as `max_steps` grows | Caps |
 | T36 | the contract on a real index | `MiniRefSeq.TrieContractAgainstTheSourceRecords`: the string model from the 42 source records (k = 31, basic, unmasked, RowDiff<BRWT> + coordinates, header labels); the whole blaNDM seed (19 carriers; 24 structural walks left, 2 right at 300 bp) and three 150 bp windows: records ⇔ T ⇔ A, trace ⇔ records, no '$' in any output; at 1000 bp the 19 carriers' claims under k-mer and trace support equal the records' | — |
+| T37 | stated limitations and outcome (§7.0) | `Walker.LimitationsStateExactlyWhatLimitedTheResult` and `test_traverse_states_every_limitation`: each kind produced by its knob and absent without it, the four `outcome` axes per case; `WalkerTest.SwitchSourcesCutWithoutALabelEnd`: a `table` cost whose cut source goes on along another successor — no `switch_sources` end, E entered at 0.8 instead of 0.5, `switch_sources_cut` 1 and the limitation stated; `"unlimited"`: 0.5, nothing stated; `Walker.UnimplementedWindowsAndShortContinuationsAreRefused`: a non-zero tip / bubble window and `continuation_bp` 1 … k − 1 are 400s naming the field (and k), 0 is accepted; clamped integer knobs serialize as integers | — |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
@@ -1155,7 +1233,9 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 **Implementation notes of increment I3 (`src/graph/traversal/walker.cpp`), deviations to resolve or confirm:**
 
 1. **Tip and bubble windows are not implemented** (`tip_window_bp`, `bubble_window_bp`, the `tip` / `bubble`
-   events and the `tips` / `bubbles` growth counters). The fields exist and stay zero; T28 is deferred.
+   events and the `tips` / `bubbles` growth counters). The fields exist and stay zero; a non-zero window is
+   rejected (the JSON API with a 400 naming the field, `validate_strategy` for the C++ API) rather than accepted
+   and walked as 0; T28 is deferred.
 2. `EndReason` has no `switched`, `superseded`, `minority`, `below_min_labels`, `split_limit`, `switch_sources`
    or `hairpin` value (the enum is the contract of `traversal_types.hpp`). A source whose lineage continues only
    under another name ends its run with `label_lost` and the continuation is documented by the `switch` event;

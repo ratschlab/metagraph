@@ -510,6 +510,43 @@ From the owner:
     an entry, and stated in §7.0 instead: §6.3's `max_switch_sources` approximation when the cut source goes on
     elsewhere, and the accepted-but-unimplemented tip/bubble windows.
 
+32. **Six places that still cut, ignored or weakened silently** (found by a pass over item 31), and the outcome.
+    (a) *A cut switch-source list that ends no label.* `derive()` now flags a cut whose cut sources include one
+    with a finite pair cost into a target of the successor (`reaches_a_target()`: the table entries of that source
+    under a `forbid` default, the targets otherwise — bounded by the table, not by |σ|·|A(v)|), and every committed
+    step adds those successors to `ArmResult::switch_sources_cut` (`counters.switch_sources_cut`). The
+    `switch_sources` limitation is emitted when that count or the `switch_sources` label ends are non-zero, with
+    `observed` = the derivations and `label_ends` beside it. It over-approximates (the kept sources may still have
+    been the cheapest) but never misses: a `switch_sources` end implies a counted derivation.
+    `WalkerTest.SwitchSourcesCutWithoutALabelEnd` (3 graphs × 3 modes): the cut source B goes on along Z1, nothing
+    ends `switch_sources`, E is entered at 0.8 instead of 0.5, the count is 1 and the limitation is stated;
+    `"unlimited"` gives 0.5 and states nothing. (b) *Tip / bubble windows* were parsed, echoed and ignored: a
+    non-zero value is now a 400 naming the field ("not implemented"), and `validate_strategy` refuses it for the
+    C++ API; 0 stays accepted. (c) *`output.continuation_bp` 1 … k − 1* gave continuations shorter than k, which
+    are not valid seeds although §7.1 promises resubmittability: now a 400 naming k (and an `invalid_argument` in
+    `traverse_seed`); 0 is documented as "no continuation sequence, labels and loss still reported". (d) *Failed
+    derivations had no structured reason:* `SeedDerivationError` carries a cause code with the bound it met
+    (`no_carrier`, `no_trace_carrier`, `too_wide`, `time_budget`, `ambiguous_header`, `over_seed_label_cap`), and a
+    failed result carries a `derivation` limitation `{cause, knob, limit, observed, effect, server_limit?}` — knob
+    `seeds[].sequence`, `support`, `bounds.time_budget_ms`, `labels.seed_label_kind` or `labels.max_seed_labels` —
+    plus a `seed_labels` entry when the cap cut carriers before the trace check (only that check runs after the
+    cap). (e) *`outcome`* on every seed result, one axis per independent guarantee (after the external review's
+    point that a single value conflates them): `walks` complete / partial / failed, `branch_diagnostics` complete /
+    cut, `label_evidence` complete / lower_bound (cut lists or a switch-source cut), `delivery` inline. (f)
+    *Clamped integer knobs* were serialized as doubles (`10001.0`): `strategy.clamped` and the `server_clamp`
+    entries keep each knob's type. Spec drift: §6.7–§6.8 no longer describe `beam_pruned: [...]`, `beam_rank`,
+    `request_time_budget_ms`, `not_started` or the delivery block as if they existed (marked not implemented, see
+    the graphlet design §14); §5's example request no longer contains fields the parser rejects; §7.1's example is
+    the real shape; §7.0 lists the kinds, the outcome axes, the three gaps no entry states (column-label trace
+    across a record boundary, presence runs in `dropped_labels` under trace, greedy re-minimisation under a branch
+    limit) and what the spec describes but the code does not have. Tests: `Walker.FailedDerivationIsAStatedOutcome`
+    (a 3-seed batch: complete / failed / partial, plus `over_seed_label_cap` and `time_budget` with
+    `server_limit`), `Walker.UnimplementedWindowsAndShortContinuationsAreRefused`, cause codes in the existing
+    derivation tests, outcome axes in `BranchEventsCompleteToBp` and `LimitationsStateExactlyWhatLimitedTheResult`
+    (now with a beam case), and in the integration tests (`test_traverse_states_every_limitation`,
+    `test_traverse_derived_seed_failure_is_per_seed`, `test_traverse_reports_caps`,
+    `test_traverse_rejects_invalid_requests`, `test_api_enforces_server_caps` checks the clamp values are ints).
+
 Not changed, by decision (see §5.5 / §7): the trace seed cap ordering (presence → cap → trace validation),
 repeated edges under trace, the even-k palindromic-node rule, the constrain-mode merge default, `switch_on: any`
 without a reference, and `switch_on: loss` being per successor (§5.2.7 — the latter is the one I intend to
