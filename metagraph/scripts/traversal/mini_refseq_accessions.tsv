@@ -1,0 +1,43 @@
+accession	taxid	length	group	refseq33m_fw_mask	refseq33m_rc_mask	title
+NZ_CM008882.1	573	110432	ndm_fw	x783	-	Klebsiella pneumoniae strain 18ES plasmid pNDM_18ES, whole genome shotgun sequence
+NZ_CDQG01000062.1	573	5501	ndm_fw	x783	-	Klebsiella pneumoniae strain 98, whole genome shotgun sequence
+NZ_STBC01000047.1	573	15013	ndm_fw	x783	-	Klebsiella pneumoniae strain SIKP052 57_NODE_47, whole genome shotgun sequence
+NZ_CP021947.1	573	54064	ndm_fw	x783	-	Klebsiella pneumoniae strain AR_0152 plasmid tig00000200, complete sequence
+NZ_CP021936.1	562	138340	ndm_fw	x783	-	Escherichia coli strain AR_0055 plasmid unitig_2, complete sequence
+NZ_MOHB01000080.1	562	4525	ndm_fw	x783	-	Escherichia coli strain 629 BN4_629_1_(paired)_contig_80, whole genome shotgun sequence
+NZ_RJAB01000061.1	562	15095	ndm_fw	x783	-	Escherichia coli strain L200 NODE_65_length_14959_cov_41.694096, whole genome shotgun sequence
+NZ_MPCO01000003.1	562	133234	ndm_fw	x783	-	Escherichia coli strain AR_0048 scaffold00003, whole genome shotgun sequence
+NZ_CP023488.1	72407	223434	ndm_fw	x783	-	Klebsiella pneumoniae subsp. pneumoniae strain ST101:960186733 plasmid p19-10_01, complete sequence
+NZ_STDH01000048.1	72407	15009	ndm_fw	x783	-	Klebsiella pneumoniae subsp. pneumoniae strain SIKP116 125_NODE_48, whole genome shotgun sequence
+NC_020818.1	470	47098	ndm_fw	x783	-	Acinetobacter baumannii plasmid pNDM-AB, complete sequence
+NZ_NXGU01000132.1	470	8078	ndm_fw	x783	-	Acinetobacter baumannii strain Abau471 contig_00132, whole genome shotgun sequence
+NZ_CP030345.1	158836	152715	ndm_fw	x783	-	Enterobacter hormaechei strain AR_038 plasmid unnamed1
+NZ_MRAB01000034.1	158836	7852	ndm_fw	x783	-	Enterobacter hormaechei strain WCHEClY2403 NODE_34_length_7852_cov_264.268, whole genome shotgun sequence
+NZ_CM008884.1	615	105614	ndm_fw	x783	-	Serratia marcescens strain 9580 plasmid pNDM_9580, whole genome shotgun sequence
+NZ_LJES02000051.1	546	26537	ndm_fw	x783	-	Citrobacter freundii strain ST63:944526466 L_contig000050, whole genome shotgun sequence
+NZ_LPPQ01000025.1	1296536	11137	ndm_fw	x783	-	Enterobacter hormaechei subsp. xiangfangensis strain SMART_598 contig31, whole genome shotgun sequence
+NZ_BIFO01000144.1	287	1654	ndm_fw	x783	-	Pseudomonas aeruginosa strain TUM17826 sequence144, whole genome shotgun sequence
+NZ_CP031884.1	573	105259	ndm_rc	-	x783	Klebsiella pneumoniae strain WCHKP095845 plasmid pNDM1_095845, complete sequence
+NZ_BFCQ01000022.1	573	11788	ndm_rc	-	x783	Klebsiella pneumoniae strain MH15-289M contig_22, whole genome shotgun sequence
+NZ_CP014757.1	573	54064	ndm_rc	-	x783	Klebsiella pneumoniae strain AATZP plasmid pNDM-1fa, complete sequence
+NZ_CP021206.1	562	111688	ndm_rc	-	x783	Escherichia coli strain Z1002 plasmid p1002-NDM1, complete sequence
+NZ_RYBD01000068.1	562	7845	ndm_rc	-	x783	Escherichia coli strain C023p NODE_68_length_7845_cov_59.0389, whole genome shotgun sequence
+NC_019089.1	562	87021	ndm_rc	-	x783	Escherichia coli plasmid pGUE-NDM, complete sequence
+NZ_CP023554.1	72407	212326	ndm_rc	-	x783	Klebsiella pneumoniae subsp. pneumoniae strain ST2017:950142398 plasmid p18-43_01, complete sequence
+NZ_STBI01000048.1	72407	15007	ndm_rc	-	x783	Klebsiella pneumoniae subsp. pneumoniae strain SIKP058 63_NODE_48, whole genome shotgun sequence
+NZ_NQXH01000034.1	470	7338	ndm_rc	-	x783	Acinetobacter baumannii strain MCR10172 NODE_67_length_7262_cov_35.339439, whole genome shotgun sequence
+NZ_SSCT01000033.1	158836	18783	ndm_rc	-	x783	Enterobacter hormaechei strain MGF017 MGF017_contig33, whole genome shotgun sequence
+NZ_NDFR01000042.1	287	2365	ndm_rc	-	x783	Pseudomonas aeruginosa strain PASGNDM571 PASGNDM571_contig_84, whole genome shotgun sequence
+NZ_LRJE01000029.1	1296536	4210	ndm_rc	-	x783	Enterobacter hormaechei subsp. xiangfangensis strain SMART_1262 GCID_ENTES_00102_NODE_35.ctg_1, whole genome shotgun sequence
+NZ_MOIC01000010.1	562	8746	ndm_snp	x231o31x167o31x323	-	Escherichia coli strain 638 BN4_638_1_(paired)_contig_10, whole genome shotgun sequence
+NZ_QFMG01000210.1	573	7363	ndm_snp	x231o31x167o31x323	-	Klebsiella pneumoniae strain 3DZ2-7B scaffold_209, whole genome shotgun sequence
+NZ_MOHX01000127.1	562	7144	ndm_snp	x423o31x329	-	Escherichia coli strain 504 BN4_504_1_(paired)_contig_127, whole genome shotgun sequence
+NZ_NICZ01000017.1	573	44058	ndm_snp	x357o31x41o31x323	-	Klebsiella pneumoniae strain AUH-KIMP461 NODE_17_length_44058_cov_186.187_ID_2750, whole genome shotgun sequence
+NZ_RYEE01000044.1	562	8995	ndm_snp	-	x323o31x167o31x231	Escherichia coli strain E007h NODE_44_length_8995_cov_33.5937, whole genome shotgun sequence
+NZ_MOGZ01000079.1	562	7130	ndm_snp	-	x329o31x423	Escherichia coli strain 599 BN4_599_1_(paired)_contig_80, whole genome shotgun sequence
+NZ_CABHKL010000003.1	573	110723	ndm_both	x435o28x229o28x63	x783	Klebsiella pneumoniae isolate Klebsiella pneumoniae, whole genome shotgun sequence
+NZ_CP025626.1	562	144225	ndm_both	x231o31x167o31x323	x323o31x167o31x231	Escherichia coli strain SCEC020007 plasmid pNDM5_020007, complete sequence
+NZ_CP034369.1	287	6937609	ndm_both	x783	x783	Pseudomonas aeruginosa strain SP4371 chromosome, complete genome
+NC_014016.1	573	113637	negative	-	-	Klebsiella pneumoniae plasmid pKpQIL, complete sequence
+NC_019154.1	573	61881	negative	-	-	Klebsiella pneumoniae plasmid pOXA-48, complete sequence
+NC_013122.1	562	117536	negative	-	-	Escherichia coli plasmid pEK499, complete sequence
