@@ -503,7 +503,8 @@ class Walker {
                         State &state, uint64_t at, std::vector<uint32_t> *taken);
 
     // ---- ends
-    void end_run(ArmState &arm, const Entry &e, uint64_t at, EndReason reason);
+    // |segment|: where the run ends (LabelRun::segment), the head's own segment
+    void end_run(ArmState &arm, const Entry &e, uint64_t at, EndReason reason, size_t segment);
     void end_label(ArmState &arm, const Item &item, const Entry &e, EndReason reason,
                    size_t structural, const char *text, double needed = 0);
     void finish_path(ArmState &arm, Item &item, std::optional<EndReason> path_reason);
@@ -1523,17 +1524,21 @@ void Walker::record_live(ArmState &arm, uint64_t bp, const std::vector<Item> &it
 
 /*********************************** ends ***********************************/
 
-void Walker::end_run(ArmState &arm, const Entry &e, uint64_t at, EndReason reason) {
+void Walker::end_run(ArmState &arm, const Entry &e, uint64_t at, EndReason reason,
+                     size_t segment) {
     LabelRun &run = arm.result.runs[e.run];
     run.to_bp = at;
     run.ended = true;
     run.end_reason = reason;
+    run.segment = static_cast<uint32_t>(segment);
+    run.branches = e.branches;
+    run.loss = e.loss;
     bin(arm, at).label_ends[static_cast<size_t>(reason)]++;
 }
 
 void Walker::end_label(ArmState &arm, const Item &item, const Entry &e, EndReason reason,
                        size_t structural, const char *text, double needed) {
-    end_run(arm, e, item.ext_bp, reason);
+    end_run(arm, e, item.ext_bp, reason, item.segment);
     Event ev;
     ev.at_bp = item.ext_bp;
     ev.type = EventType::LABEL_END;
@@ -2096,8 +2101,15 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
             // runs are per path, so the kept entry's run identifies its parent
             for (const Entry &e : item.state) {
                 const Entry *kept = find_entry(st, e.label);
-                if (kept && kept->run == e.run)
+                if (kept && kept->run == e.run) {
                     mseg.labels_via_parent[j].push_back(e.label);
+                } else if (e.run != UINT32_MAX) {
+                    // closed by this merge on this parent (to_bp and ended set above)
+                    LabelRun &closed = arm.result.runs[e.run];
+                    closed.segment = static_cast<uint32_t>(item.segment);
+                    closed.branches = e.branches;
+                    closed.loss = e.loss;
+                }
             }
             Segment &seg = arm.result.segments[item.segment];
             seg.children.push_back(m);
@@ -2644,8 +2656,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         LabelId l = src.label;
         if (sc.has_cont[l]) {
             if (!sc.stays[l]) {
-                // the lineage continues only under other names (switch events on commit)
-                end_run(arm, src, at, EndReason::LABEL_LOST);
+                // the lineage continues only under other names (switch events on commit,
+                // on the children when this step splits): a run end without an event
+                end_run(arm, src, at, EndReason::LABEL_LOST, item.segment);
             }
             continue;
         }

@@ -2163,3 +2163,166 @@ TEST(Trie, WalkRuleStatesWhatTheWalkerEnforces) {
         EXPECT_FALSE(has(walk_rule_statement(st, packable_oracle), "128-bit"));
     }
 }
+
+
+/*
+ * The run anchors (DESIGN-traverse-graphlet.md §4): LabelRun::segment is the segment on
+ * which a run ended or was closed, and the graphlet stores runs by it instead of
+ * replaying the frontier. Three kinds of run end, each checked where it must be visible:
+ *   - an end with a LABEL_END event: the event is on the anchor, at to_bp, for the run's
+ *     label, and every event is claimed by exactly one run (#label_end <= #runs);
+ *   - a silent switch-source end (label_lost, no event): the lineage went on under
+ *     other names, so some run entered by switch FROM this one starts at to_bp (the
+ *     switch events may sit on the anchor's children when the source ends at a split);
+ *   - a merge closure (ended = false): the anchor is a parent of the merged segment
+ *     created at to_bp.
+ * Branches and loss are the lineage's terminal values; for a label alive at a leaf they
+ * equal the leaf's own record of it.
+ */
+namespace {
+
+struct AnchorTally {
+    size_t event_ends = 0, silent_ends = 0, merge_closures = 0, wide_merges = 0;
+};
+
+void expect_runs_anchored(const SeedResult &r, const std::string &what, AnchorTally *tally) {
+    for (size_t a : { kLeft, kRight }) {
+        const ArmResult &arm = r.arms[a];
+        const std::string where = what + " arm " + std::to_string(a);
+        // (segment, label, at) of every LABEL_END event, claimed by at most one run
+        std::map<std::tuple<size_t, LabelId, uint64_t>, size_t> events;
+        for (const Segment &seg : arm.segments) {
+            for (const Event &ev : seg.events) {
+                if (ev.type == EventType::LABEL_END)
+                    events[{ seg.id, ev.label, ev.at_bp }]++;
+            }
+            tally->wide_merges += seg.parents.size() > 2;
+        }
+        for (const auto &[key, n] : events)
+            EXPECT_EQ(1u, n) << where << ": two label ends of one label at one position";
+        size_t claimed = 0;
+        for (size_t i = 0; i < arm.runs.size(); ++i) {
+            const LabelRun &run = arm.runs[i];
+            const std::string at = where + " run " + std::to_string(i);
+            ASSERT_LT(run.segment, arm.segments.size()) << at << ": no anchor";
+            const Segment &anchor = arm.segments[run.segment];
+            EXPECT_LE(anchor.from_bp, run.to_bp) << at;
+            EXPECT_LE(run.to_bp, anchor.from_bp + anchor.length_bp) << at;
+            if (!run.ended) {
+                // closed by a merge at to_bp: the anchor is a parent of that merge
+                tally->merge_closures++;
+                bool found = false;
+                for (const Segment &m : arm.segments) {
+                    found |= m.parents.size() > 1 && m.from_bp == run.to_bp
+                        && std::count(m.parents.begin(), m.parents.end(), run.segment);
+                }
+                EXPECT_TRUE(found) << at << ": closed, but its anchor is not a merge parent";
+                EXPECT_EQ(run.to_bp, anchor.from_bp + anchor.length_bp) << at;
+                continue;
+            }
+            if (events.count({ run.segment, run.label, run.to_bp })) {
+                tally->event_ends++;
+                claimed++;
+                continue;
+            }
+            // silent: a switch source that went on only under other names
+            tally->silent_ends++;
+            EXPECT_EQ(EndReason::LABEL_LOST, run.end_reason) << at << ": an end without event";
+            bool continued = false;
+            for (const LabelRun &next : arm.runs) {
+                continued |= next.entered_by_switch && next.prev_run == i
+                    && next.from_bp == run.to_bp && next.from_label == run.label;
+            }
+            EXPECT_TRUE(continued) << at << ": a silent end no switch continues";
+        }
+        size_t total = 0;
+        for (const auto &[key, n] : events) total += n;
+        EXPECT_EQ(total, claimed) << where << ": a label end no run claims";
+        // a leaf label's run ends on the leaf at the path's end with the leaf's values
+        for (const PathResult &p : arm.paths) {
+            for (const LabelEnd &e : p.end_labels) {
+                ASSERT_LT(e.run, arm.runs.size()) << where;
+                const LabelRun &run = arm.runs[e.run];
+                EXPECT_EQ(p.segments.back(), run.segment) << where << " path " << p.id;
+                EXPECT_EQ(p.length_bp, run.to_bp) << where << " path " << p.id;
+                EXPECT_EQ(e.branches, run.branches) << where << " path " << p.id;
+                EXPECT_EQ(e.loss, run.loss) << where << " path " << p.id;
+            }
+        }
+    }
+}
+
+SeedResult run_with_cost(const AnnotatedDBG &anno, const std::string &seq,
+                         const std::vector<std::string> &labels, const Strategy &st,
+                         const LabelChangeCost &cost) {
+    LabelOracle oracle(anno);
+    Seed seed;
+    seed.sequence = seq;
+    seed.labels = labels;
+    return traverse_seed(oracle, seed, st, cost);
+}
+
+} // namespace
+
+TEST(Trie, EveryRunIsAnchoredWhereItEnds) {
+    AnchorTally tally;
+    // the oracle fixture: a bubble (merged or kept), a tip, a label ending inside a
+    // stretch others continue, both arms, every mode
+    const OracleFixture f(kFixtureSeed);
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, f.sequences, f.labels, mode);
+        const std::string where = "fixture mode " + std::to_string(mode);
+        Strategy st = exhaustive_at(LabelMode::CONSTRAIN, kRadius);
+        expect_runs_anchored(run(*anno, f.X, as_list(kAllLabels), st), where + " keep", &tally);
+        Strategy merged;
+        merged.max_extension_bp = kRadius;
+        merged.max_label_branches = Strategy::kUnlimited;
+        expect_runs_anchored(run(*anno, f.X, as_list(kAllLabels), merged), where + " merge", &tally);
+        merged.min_successor_labels = 2;
+        expect_runs_anchored(run(*anno, f.X, as_list(kAllLabels), merged), where + " quorum", &tally);
+        merged = Strategy();
+        merged.max_extension_bp = kRadius;
+        merged.max_steps = 60;
+        expect_runs_anchored(run(*anno, f.X, as_list(kAllLabels), merged), where + " capped", &tally);
+    }
+    // dense random graphs with switching: silent switch-source ends (on a single
+    // successor and at splits), merges of several parents, branch-limited lineages
+    for (auto mode : all_modes()) {
+        for (uint32_t s = 1; s <= 8; ++s) {
+            std::vector<std::string> seqs, labels;
+            for (uint32_t i = 0; i < 6; ++i) {
+                seqs.push_back("AAA" + random_seq(14, s * 11 + i));
+                labels.push_back(std::string(1, "CDECDF"[i]));
+            }
+            auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, labels, mode);
+            for (bool merge : { false, true }) {
+                for (size_t branches : { size_t(0), size_t(1), Strategy::kUnlimited }) {
+                    Strategy st;
+                    st.max_extension_bp = 9;
+                    st.merge_reconverge = merge;
+                    st.max_label_branches = branches;
+                    st.max_splits_per_path = Strategy::kUnlimited;
+                    st.loss_budget = 2;
+                    st.switch_on_loss_only = s % 2;
+                    const std::string what = "dense mode " + std::to_string(mode) + " seed "
+                        + std::to_string(s) + (merge ? " merge" : " keep") + " branches "
+                        + std::to_string(branches);
+                    // E and F are switch targets only: entered by switching or not at all
+                    Strategy switching = st;
+                    switching.extra = { "E", "F" };
+                    expect_runs_anchored(run_with_cost(*anno, "AAA", { "C", "D" }, switching,
+                                                       LabelChangeCost::constant(1)),
+                                         what, &tally);
+                    expect_runs_anchored(run(*anno, "AAA", { "C", "D", "E", "F" }, st),
+                                         what + " forbid", &tally);
+                }
+            }
+        }
+    }
+    // not vacuous: every kind of end occurred, and merges of three or more parents
+    EXPECT_GT(tally.event_ends, 0u);
+    EXPECT_GT(tally.silent_ends, 0u);
+    EXPECT_GT(tally.merge_closures, 0u);
+    EXPECT_GT(tally.wide_merges, 0u);
+}

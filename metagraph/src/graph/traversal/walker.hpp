@@ -359,6 +359,17 @@ struct LabelRun {
     uint32_t prev_run = UINT32_MAX;
     bool ended = false;
     EndReason end_reason = EndReason::DEAD_END;
+    // The segment on which the run ended (its LABEL_END event, if any, is there at
+    // to_bp) or was closed by a reconvergence merge (a parent of the merged segment).
+    // Neither the events nor the paths determine it: clones made at a split are
+    // identical rows, a switch source that goes on only under other names ends
+    // silently, and a merge of three or more parents closes several runs at one depth.
+    uint32_t segment = UINT32_MAX;
+    // The lineage's branch count and loss when the run ended or was closed. Branches
+    // are counted before quorum filtering, so they can depend on a successor that left
+    // no trace in the output; the leaf records them only for labels alive at a leaf.
+    uint32_t branches = 0;
+    double loss = 0;
 };
 
 struct LabelEnd {
