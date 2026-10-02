@@ -251,6 +251,15 @@ C1–C12 from round 1 still stand (restated briefly; C1 and C3 were qualified af
 6. **Even k.** The hairpin rule for even k treats a self-RC *node* as a hairpin in itself, so a record containing a
    palindromic k-mer cannot be reconstructed through it (`EvenKPalindromicNode` pins the walk stopping one base
    short). Is that the right rule, or should a palindromic node be enterable and only its *RC retrace* blocked?
+7. **`switch_on: loss` is per successor, and that makes one switch + branch limit 0 useless.** Measured on the
+   SRA index (§5.3, 24 random positions, 10 kb): `constant 1` / budget 1 with the default limit 0 reached a
+   median of **57 bp** against 224 bp under `forbid`. Mechanism: at a plain divergence (A continues on P, B on Q)
+   A is *lost on Q*, so it is an eligible source there and the lineage of A continues on Q renamed to B while it
+   also continues on P as A — an ambiguous branch (C2, correctly), so limit 0 ends both labels at every
+   divergence between two carriers. The user's intent ("exact continuation within the same label, allow one
+   switch") is a switch **only when the label can continue on no successor at all**. Should `switch_on: loss` be
+   defined globally per step (lost on every successor), with the current behaviour available as a third value?
+   I believe this is a semantics bug against the design note, not a tuning matter.
 
 ### 5.3 Efficiency — measurements and the open problem
 
@@ -265,6 +274,8 @@ Measured, all single-threaded on a laptop (Apple M-series, Release build):
 | 2000 bp exact flank recovery, single label | UHGG public index (9.68 G nodes, 4,644 labels, RowDiff<BRWT>, no coords) | ~1.4 annotation rows per step; 6 s wall dominated by index load; 6.6 GB RSS |
 | 16S window, 8 carriers, multi-label == union of 8 single-label walks | UHGG | 10 leaves; every leaf exact in its MGnify genome and absent from the others |
 | switching at a real contig end | UHGG | forbid → 0 bp `label_lost`; constant 1 / budget 1 → 500 bp via two labels; `route_bp = 0` label verified exact over 800 bp, `route_bp = 451` label's agreement ends at exactly 419 |
+| **Cost at random positions**, 12 random 50-mers (from gut genomes, fully present in the graph) | SRA, as below | `/search` 50 bp: **2 ms** (1–3). Depth 100: default walk **15 ms** (5–63), exhaustive constrained trie **17 ms** (3–595), label-free trie extraction **20 ms** (3–1708); ≈ 0.05–0.1 ms per node entered; 23/24 arms complete at 100 bp. The tail is the repeat: 616 labels on the seed → 114 constrained / 1139 structural leaves, the 1000-live-path cap at 51 bp |
+| **Label-consistent walks to 10 kb**, 24 random positions, derived labels (median 6) | SRA, as below | strict (`forbid`, limit 0): flank median **224 bp**, 10/48 arms ≥ 1 kb, max 7.5 kb, none reaches 10 kb; ends `branch` 205 / `label_lost` 94 / `dead_end` 9; 44 ms median (max 884). Limit 1: median 428 bp; limit 2: 520 bp (13 → 14 arms ≥ 1 kb). `min_successor_labels 2`: 74 bp (too few labels for a quorum). One switch + limit 0: **57 bp** (see §5.2.7). Exhaustive capped at 200 live paths: cap hit on 27/48 arms, 24 `edge_reuse` blocks in total, no `edge_reuse_rc`, no `rejoined_seed` — loops are rare at random positions and, under a branch limit, are met as `branch` at the junction before they are entered |
 | **PRIMARY regime on a real index**: a full-length 16S (1396 bp window of PZ326290.1) | SRA `sra_random_100studies` (42.4 G nodes, k = 31, primary `DBGSuccinct` small + `RowDiff<BRWT>` 19.6 GB, no coords; 12 GB RSS, 20 s load, server mode) | `resolve`: 1.0 s / 0.4 s per 16S query, ≥ 300 labels (discover cap hit), 6 carriers of the whole window (one study). Exhaustive constrained trie, derived labels, R = 300: **1000 live paths at 237 bp (right) / 291 bp (left)** — 1116 / 1437 leaves, 44.7 k steps, 124.6 k rows requested, **5.4 s**; the structural trie (2836 labels recorded, up to 827 at one node) trips the same cap at 109 / 46 bp, 5.0 s. **The JSON-level oracle at the common complete depth agrees on both arms: 114 = 114 claims (right, 10 of them labels ending inside walks), 2 = 2 (left).** One switch allowed: 398 / 282 switch events, 19 `loss_budget` ends. Default strategy (branch limit 0, merge on), R = 3000: one leaf per arm, **61 bp right / 52 bp left, every label ends `branch`** — 0.2 s; each of the 6 samples alone gives the same 61 / 52 (one 18): the 16S flank is ambiguous *within* each metagenome within ~60 bp |
 
 The complexity audit (asymptotics in `walker.cpp`, `label_oracle.cpp`, `resolve.cpp`) found six superlinear
