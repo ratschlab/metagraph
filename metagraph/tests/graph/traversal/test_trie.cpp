@@ -2021,6 +2021,11 @@ TEST(Trie, ExhaustiveRefusesACutDerivedSet) {
     } catch (const SeedDerivationError &e) {
         EXPECT_NE(std::string::npos, std::string(e.what()).find("max_seed_labels")) << e.what();
         EXPECT_NE(std::string::npos, std::string(e.what()).find("5 labels")) << e.what();
+        // the cause as a code, with the cap and what it met (the response's derivation
+        // limitation is built from these, not from the message)
+        EXPECT_EQ(SeedDerivationError::OVER_SEED_LABEL_CAP, e.cause());
+        EXPECT_EQ(3.0, e.limit());
+        EXPECT_EQ(5.0, e.observed());
     }
     st.max_seed_labels = 5;
     auto full = run(*anno, f.X, {}, st);

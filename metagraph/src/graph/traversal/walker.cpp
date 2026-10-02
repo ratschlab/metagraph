@@ -43,6 +43,18 @@ const char* to_string(LabelMode mode) {
     return mode == LabelMode::ANNOTATE ? "annotate" : "constrain";
 }
 
+const char* to_string(SeedDerivationError::Cause cause) {
+    switch (cause) {
+        case SeedDerivationError::NO_CARRIER: return "no_carrier";
+        case SeedDerivationError::NO_TRACE_CARRIER: return "no_trace_carrier";
+        case SeedDerivationError::TOO_WIDE: return "too_wide";
+        case SeedDerivationError::TIME_BUDGET: return "time_budget";
+        case SeedDerivationError::AMBIGUOUS_HEADER: return "ambiguous_header";
+        case SeedDerivationError::OVER_SEED_LABEL_CAP: return "over_seed_label_cap";
+    }
+    return "unknown";
+}
+
 
 namespace {
 
@@ -59,14 +71,17 @@ namespace {
  *   independent of batch_kmers; rows_fetched / cache_hits are not).
  * - Tip windows and bubble windows (Strategy::tip_window_bp / bubble_window_bp, the
  *   TIP / BUBBLE events and the GrowthBin::tips / bubbles counters) are NOT
- *   implemented in this increment; the fields are kept and stay zero (spec §12).
+ *   implemented in this increment; the fields are kept and stay zero (spec §12), and
+ *   validate_strategy() refuses a non-zero window instead of ignoring it.
  * - EndReason has no values for `switched`, `superseded`, `minority`,
  *   `below_min_labels`, `split_limit`, `switch_sources` and `hairpin`: a source
  *   whose lineage only continues under another name ends its run with LABEL_LOST
  *   plus a SWITCH event; quorum and split-limit stops use BRANCH with the text in
  *   Event::text; a label whose only continuation is a skipped hairpin ends with
  *   DEAD_END, text "hairpin"; a label cut from the switch sources by
- *   max_switch_sources ends with LABEL_LOST, text "switch_sources".
+ *   max_switch_sources ends with LABEL_LOST, text "switch_sources". A cut source that
+ *   does not end leaves no such trace, so every cut that may have changed a step is
+ *   also counted (ArmResult::switch_sources_cut).
  * - Every successor the walker refuses to a label whose lineage would have continued
  *   on it (quorum, split limit, branch limit, loss budget) is stated on the step's
  *   BranchEvent as a Refusal (§7.2): the tuned-run checker takes only that, or a
@@ -173,6 +188,9 @@ struct Cand {
     size_t initial_labels = 0;      // |σ_v| before any source was excluded
     bool truncated = false;         // derive() cut the switch sources (max_switch_sources)
     SourceKey cut {};               // key of the last eligible source when truncated
+    // derive() cut a source with a finite pair cost into a target of this successor:
+    // the cut may have changed a loss or an entry (ArmResult::switch_sources_cut)
+    bool cut_reaches = false;
     // the predecessors of the entries whose source the current re-minimisation round
     // excluded (refused "branch"; duplicates removed when the event is emitted)
     std::vector<LabelId> excluded_preds;
@@ -190,6 +208,7 @@ struct Cand {
         quorum_text = "";
         initial_labels = 0;
         truncated = false;
+        cut_reaches = false;
         excluded_preds.clear();
         present.labels.clear();
         present.total = 0;
@@ -466,9 +485,14 @@ class Walker {
     void summarize_annotate();
 
     // ---- label state
+    // |*truncated|, |*cut|: whether max_switch_sources cut the source list and the key
+    // of the last source kept; |*cut_reaches|: whether a cut source had a finite pair
+    // cost into one of |targets| (other than its own label)
     void derive(const State &sigma, const std::vector<Target> &targets,
                 const std::vector<uint8_t> &excluded, State *out,
-                bool *truncated, SourceKey *cut);
+                bool *truncated, SourceKey *cut, bool *cut_reaches);
+    // a finite cost(from -> t) for some target t != from
+    bool reaches_a_target(LabelId from, const std::vector<Target> &targets) const;
     SourceKey source_key(const Entry &e) const {
         const LabelRef &ref = result_.label_dict[e.label];
         return { e.loss, e.branches, ref.column, ref.seq_id };
@@ -739,10 +763,17 @@ void Walker::validate_seed() {
     }
     if (result_.label_dict.empty()) {
         // under `support: trace` a derived label can still be dropped here: the set is
-        // derived from k-mer presence and must then also be coordinate-consecutive
-        if (result_.labels_from_seed)
-            throw SeedDerivationError("No label derived from the seed supports every "
-                                      "k-mer of the seed");
+        // derived from k-mer presence and must then also be coordinate-consecutive. The
+        // presence carriers exist (the intersection was not empty), so the cause is the
+        // trace, and labels the cap cut before this check might have passed it
+        if (result_.labels_from_seed) {
+            throw SeedDerivationError(SeedDerivationError::NO_TRACE_CARRIER,
+                                      "No label derived from the seed supports every "
+                                      "k-mer of the seed as one coordinate-consecutive "
+                                      "occurrence (support: trace)",
+                                      0, static_cast<double>(result_.labels_supporting_total),
+                                      "", result_.labels_dropped);
+        }
         throw std::invalid_argument("No seed label supports every k-mer of the seed");
     }
     result_.num_seed_labels = result_.label_dict.size();
@@ -929,13 +960,14 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     std::min_element(cost.begin(), cost.end()) - cost.begin());
             std::iter_swap(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(best));
             if (cost[best] > max_candidates) {
-                throw SeedDerivationError(
+                throw SeedDerivationError(SeedDerivationError::TOO_WIDE,
                         "The permitted set cannot be derived from this seed: the narrowest of "
                         "its first " + std::to_string(end - begin) + " k-mers alone has "
                         + std::to_string(cost[best]) + " annotation entries (columns plus "
                         "k-mer coordinates, an upper bound on its labels), over the limit of "
                         + std::to_string(max_candidates) + ". Start the seed in a less "
-                          "repetitive k-mer, or name the labels explicitly.");
+                          "repetitive k-mer, or name the labels explicitly.",
+                        static_cast<double>(max_candidates), static_cast<double>(cost[best]));
             }
         }
 
@@ -1013,10 +1045,13 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             // kMaxChunk rows, not by the rest of the seed; |rows_requested| above counts
             // only the rows actually consumed, so it does not claim otherwise.
             if (live.empty()) {
-                throw SeedDerivationError("No label supports every k-mer of the seed (the "
+                throw SeedDerivationError(SeedDerivationError::NO_CARRIER,
+                                          "No label supports every k-mer of the seed (the "
                                           "permitted set derived from the seed is empty at "
                                           "k-mer " + std::to_string(i) + " of "
-                                          + std::to_string(keys.size()) + ")");
+                                          + std::to_string(keys.size()) + ")",
+                                          static_cast<double>(keys.size()),
+                                          static_cast<double>(done.size()));
             }
             live_columns.clear();
             for (const Key &key : live) {
@@ -1054,11 +1089,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 compacted_at = live.size();
             }
             if (out_of_time()) {
-                throw SeedDerivationError(
+                throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
                         "The time budget (bounds.time_budget_ms) ran out while deriving the "
                         "permitted set from the seed, after " + std::to_string(done.size())
                         + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
-                          "explicitly or shorten the seed");
+                          "explicitly or shorten the seed",
+                        budget_ms, timer_.elapsed() * 1000.0);
             }
         }
     }
@@ -1085,11 +1121,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                   [](const std::string *a, const std::string *b) { return *a < *b; });
         for (size_t i = 1; i < names.size(); ++i) {
             if (*names[i - 1] == *names[i]) {
-                throw SeedDerivationError(
+                throw SeedDerivationError(SeedDerivationError::AMBIGUOUS_HEADER,
                         "The labels derived from the seed are ambiguous: the sequence header '"
                         + *names[i] + "' occurs in more than one annotation column, so the "
                         "derived list cannot be resubmitted as explicit labels. Set "
-                        "seed_label_kind to \"column\" or name the labels explicitly.");
+                        "seed_label_kind to \"column\" or name the labels explicitly.",
+                        0, 0, *names[i]);
             }
         }
         // ... and a header that an explicit list would resolve to something else is just
@@ -1107,11 +1144,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     ? "is also the name of an annotation column"
                     : "also occurs in another annotation column ("
                           + oracle_.column_name(back.column) + ")";
-                throw SeedDerivationError(
+                throw SeedDerivationError(SeedDerivationError::AMBIGUOUS_HEADER,
                         "The labels derived from the seed are not resubmittable: the sequence "
                         "header '" + name + "' " + resolves_to + ", which an explicit label list "
                         "would resolve it to. Set seed_label_kind to \"column\" or name the "
-                        "labels explicitly.");
+                        "labels explicitly.",
+                        0, 0, name);
             }
         }
     }
@@ -1121,11 +1159,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     // dropped, and every walk of a dropped carrier would be. Refuse instead, naming
     // the two levers the caller has.
     if (live.size() > strategy_.max_seed_labels && strategy_.exhaustive) {
-        throw SeedDerivationError(
+        throw SeedDerivationError(SeedDerivationError::OVER_SEED_LABEL_CAP,
                 std::to_string(live.size()) + " labels carry the seed and max_seed_labels is "
                 + std::to_string(strategy_.max_seed_labels) + ": under `exhaustive` the "
                   "derived set is not truncated (every walk of a dropped carrier would be "
-                  "missing from the trie); raise labels.max_seed_labels or name the labels");
+                  "missing from the trie); raise labels.max_seed_labels or name the labels",
+                static_cast<double>(strategy_.max_seed_labels), static_cast<double>(live.size()));
     }
     if (live.size() > strategy_.max_seed_labels) {
         uint64_t digest = kFnvOffsetBasis;
@@ -1628,11 +1667,39 @@ Continuation Walker::make_continuation(ArmState &arm, const Item &item) {
 
 /******************************* label state ********************************/
 
+bool Walker::reaches_a_target(LabelId from, const std::vector<Target> &targets) const {
+    assert(cost_.model() == LabelChangeCost::TABLE);
+    if (cost_.default_cost() != kInfiniteLoss) {
+        // every pair is finite unless an entry forbids it, so this stops at the first
+        // or second target unless the table forbids pair after pair
+        for (const Target &t : targets) {
+            if (t.label != from && cost_.cost(from, t.label) != kInfiniteLoss)
+                return true;
+        }
+        return false;
+    }
+    // only the entries of |from| are finite: bounded by the table the caller wrote, not
+    // by |targets|, so a cut list costs no more to check than the table is long
+    const auto &table = cost_.table();
+    for (auto it = table.lower_bound({ from, 0 });
+            it != table.end() && it->first.first == from; ++it) {
+        const LabelId to = it->first.second;
+        if (to == from || it->second == kInfiniteLoss)
+            continue;
+        auto t = std::lower_bound(targets.begin(), targets.end(), to,
+                                  [](const Target &x, LabelId l) { return x.label < l; });
+        if (t != targets.end() && t->label == to)
+            return true;
+    }
+    return false;
+}
+
 void Walker::derive(const State &sigma, const std::vector<Target> &targets,
                     const std::vector<uint8_t> &excluded, State *out,
-                    bool *truncated, SourceKey *cut) {
+                    bool *truncated, SourceKey *cut, bool *cut_reaches) {
     out->clear();
     *truncated = false;
+    *cut_reaches = false;
     const double budget = strategy_.loss_budget;
     const bool loss_only = strategy_.switch_on_loss_only;
 
@@ -1668,6 +1735,14 @@ void Walker::derive(const State &sigma, const std::vector<Target> &targets,
                 return source_key(*a) < source_key(*b);
             });
             if (sw.size() > strategy_.max_switch_sources) {
+                // Whether the cut can matter here: a cut source with a finite switch into
+                // a target of this successor might have been the cheapest way in (§6.3).
+                // Such a source need not END (it may go on along another successor), so
+                // its label end cannot be what reports the cut; this flag is, through
+                // ArmResult::switch_sources_cut.
+                for (size_t i = strategy_.max_switch_sources; i < sw.size() && !*cut_reaches; ++i) {
+                    *cut_reaches = reaches_a_target(sw[i]->label, targets);
+                }
                 sw.resize(strategy_.max_switch_sources);
                 *truncated = true;
                 // no source at all: a key below every real one
@@ -2297,8 +2372,10 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
 
     // ---- label recurrence and per-lineage branching (fixpoint over excluded sources)
     for (Cand &c : cands_) {
-        if (!c.admissible())
-            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut);
+        if (!c.admissible()) {
+            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
+                   &c.cut_reaches);
+        }
     }
     std::vector<LabelId> ambiguous_over, ambiguous_taken;
     // The explicit per-successor refusals of this step (BranchEvent::refused), one per
@@ -2333,7 +2410,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         for (Cand &c : cands_) {
             if (!c.admissible())
                 continue;
-            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut);
+            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
+                   &c.cut_reaches);
             if (rounds == 1)
                 c.initial_labels = c.state.size();
             if (c.hairpin)
@@ -2447,6 +2525,14 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // ---- caps, decided before anything is committed
     if (auto cap = cap_check(arm, nf, remaining_in_level))
         return cap;
+
+    // ---- a cut switch-source list that may have changed what this step commits: a loss,
+    // an entry of a followed successor, or the labels on a blocked / hairpin event. Once
+    // per successor, for the derivation that stands (the last round's); stated as the
+    // arm's switch_sources limitation (§7.0)
+    for (const Cand &c : cands_) {
+        arm.result.switch_sources_cut += c.truncated && c.cut_reaches;
+    }
 
     // ---- commit: events for inadmissible label-carrying successors and followed hairpins
     for (const Cand &c : cands_) {
@@ -3149,6 +3235,15 @@ void Walker::summarize_annotate() {
 }
 
 SeedResult Walker::run() {
+    // A continuation is offered as the seed of the next request (§7.1), and a seed
+    // shorter than k is refused: 1 .. k - 1 would hand out continuations that cannot be
+    // resubmitted. 0 is "no continuation sequence" and stays allowed.
+    if (strategy_.continuation_bp > 0 && strategy_.continuation_bp < k_) {
+        throw std::invalid_argument(
+                "output.continuation_bp " + std::to_string(strategy_.continuation_bp)
+                + " is shorter than k = " + std::to_string(k_) + ": a continuation must be "
+                  "valid traverse input; use 0 (no continuation sequence) or at least k");
+    }
     validate_seed();
     init_edge_coding();
     if (annotate_) {
@@ -3226,6 +3321,16 @@ void validate_strategy(const Strategy &st, const LabelChangeCost &cost) {
         throw std::invalid_argument("max_live_paths must be positive");
     if (!st.max_labels_per_node)
         throw std::invalid_argument("max_labels_per_node must be positive");
+    // Tip and bubble windows (§6.5) are not implemented: accepting a window and walking
+    // as if it were 0 would answer a different question than the one asked
+    if (st.tip_window_bp) {
+        throw std::invalid_argument("branching.tip_window_bp: not implemented (tip windows are not "
+                                    "supported yet); set it to 0 or omit it");
+    }
+    if (st.bubble_window_bp) {
+        throw std::invalid_argument("branching.bubble_window_bp: not implemented (bubble windows "
+                                    "are not supported yet); set it to 0 or omit it");
+    }
     // A conflicting knob is refused, never overridden: a caller who asked for the
     // exhaustive trie and got a pruned one would have no way to tell.
     auto conflict = [](const char *knob, const char *required, const std::string &why) {

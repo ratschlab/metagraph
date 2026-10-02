@@ -294,8 +294,15 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
                                                        st.max_label_branches, 64, no_lineage);
             st.min_successor_labels = b.uint("min_successor_labels", 1, 1);
             st.min_successor_fraction = b.number("min_successor_fraction", 0, 0, 1);
-            st.tip_window_bp = b.uint("tip_window_bp", 0);
-            st.bubble_window_bp = b.uint("bubble_window_bp", 0);
+            // Not implemented (spec §6.5): a window would be accepted and then walked as
+            // 0, a different question than the one asked, so only 0 (the echo's value,
+            // which must stay resubmittable) is accepted.
+            for (const char *window : { "tip_window_bp", "bubble_window_bp" }) {
+                if (b.uint(window, 0)) {
+                    throw InvalidRequest(b.child_path(window) + ": not implemented (tip and bubble "
+                                         "windows are not supported yet); set it to 0 or omit it");
+                }
+            }
             st.merge_reconverge = b.enumeration<bool>("on_reconverge", st.merge_reconverge,
                 { { "merge", true }, { "keep", false } });
             st.skip_hairpins = b.enumeration<bool>("hairpins", true,
@@ -335,6 +342,9 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             st.max_branch_events = limit_or_unlimited(o, "max_branch_events", 100,
                                                       std::numeric_limits<size_t>::max() - 1,
                                                       nullptr);
+            // 0: no continuation sequence (labels and loss still reported); 1 .. k - 1 is
+            // refused in process_traverse_request, where k is known: a continuation
+            // shorter than k could not be resubmitted as a seed
             st.continuation_bp = o.uint("continuation_bp", 1000, 0);
             req.timing = o.boolean("timing", true);
         }
@@ -674,18 +684,34 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
                               "from the lists (annotate mode's label_summary, an oracle filtered from "
                               "the recorded sets) is a lower bound; raise the knob"));
     }
-    size_t cut_sources = 0;
+    // A cut source list (§6.3) is stated by the derivations it may have changed, not only
+    // by the label ends it caused: a cut source that goes on along another successor
+    // does not end, yet a target it was the cheapest way into was entered at a higher
+    // loss or not at all.
+    size_t cut_ends = 0;
     for (const Segment &s : arm.segments) {
         for (const Event &ev : s.events) {
-            cut_sources += ev.type == EventType::LABEL_END && ev.text == "switch_sources";
+            cut_ends += ev.type == EventType::LABEL_END && ev.text == "switch_sources";
         }
     }
-    if (cut_sources) {
-        out.append(limitation("switch_sources", "labels.max_switch_sources",
-                              limit_json(st.max_switch_sources), uint_json(cut_sources),
-                              "label(s) ended label_lost (switch_sources) because they were not among "
-                              "the cheapest sources priced for a switch; a switch within the budget may "
-                              "exist; raise the knob or set it to \"unlimited\""));
+    if (arm.switch_sources_cut || cut_ends) {
+        std::string effect = "the switch sources of " + std::to_string(arm.switch_sources_cut)
+                           + " successor derivation(s) were cut to the cheapest by (loss, branches, "
+                             "label) while a cut source could switch into a target there: losses "
+                             "may be overestimated and switch entries missed because cheaper "
+                             "sources were cut";
+        if (cut_ends) {
+            effect += "; " + std::to_string(cut_ends) + " label(s) ended label_lost "
+                      "(switch_sources) because they were not priced";
+        }
+        effect += "; raise the knob or set it to \"unlimited\"";
+        Json::Value j = limitation("switch_sources", "labels.max_switch_sources",
+                                   limit_json(st.max_switch_sources),
+                                   uint_json(arm.switch_sources_cut), effect);
+        // the label ends the cut caused (label_lost, text switch_sources); a subset of
+        // the derivations' effects, since a cut source that goes on does not end
+        j["label_ends"] = uint_json(cut_ends);
+        out.append(j);
     }
     size_t inexact = !arm.frontier_live_labels_exact
                    + (arm.cap_trigger && !arm.cap_trigger->live_labels_exact);
@@ -710,6 +736,28 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
                               "\"keep\" for the per-path guarantee"));
     }
     return out;
+}
+
+// The per-seed outcome (spec §7.0), one axis per guarantee:
+//   walks               complete: every requested arm reached the radius (complete_to_bp ==
+//                       max_extension_bp); partial: a valid certified prefix (an arm was
+//                       truncated or pruned); failed: no traversal (the derivation failed)
+//   branch_diagnostics  complete, or cut: an arm's evidence is incomplete (branch events
+//                       at and beyond evidence.complete_to_bp are not reported)
+//   label_evidence      complete, or lower_bound: recorded label lists were cut
+//                       (labels.max_labels_per_node), or a max_switch_sources cut may have
+//                       changed a loss or an entry. A permitted set chosen by the request
+//                       is the domain, not a cut of the evidence within it
+//   delivery            inline (the whole result is in this response); spooled / paged
+//                       are reserved for the graphlet delivery path
+// Each value is backed by the arms' fields and the `limitations`, which say how far.
+static Json::Value outcome_json(const char *walks, bool diagnostics, bool label_evidence) {
+    Json::Value o;
+    o["walks"] = walks;
+    o["branch_diagnostics"] = diagnostics ? "complete" : "cut";
+    o["label_evidence"] = label_evidence ? "complete" : "lower_bound";
+    o["delivery"] = "inline";
+    return o;
 }
 
 static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const std::string &detail) {
@@ -945,6 +993,9 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     counters["reminimisation_rounds"] = uint_json(arm.reminimisation_rounds);
     counters["max_reminimisation_rounds"] = uint_json(arm.max_reminimisation_rounds);
     counters["refusal_scans"] = uint_json(arm.refusal_scans);
+    // derivations a max_switch_sources cut may have changed (the switch_sources
+    // limitation's observed)
+    counters["switch_sources_cut"] = uint_json(arm.switch_sources_cut);
     j["counters"] = counters;
     return j;
 }
@@ -994,6 +1045,18 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
                                "explicit list"));
     }
     j["limitations"] = lims;
+    // §7.0: the guarantees are independent, so the outcome states each on its own axis
+    // instead of folding them into one value that would read "partial" for a complete
+    // walk with cut diagnostics, or "complete" for walks whose label lists were cut
+    bool walks = true, diagnostics = true, label_evidence = true;
+    for (const ArmResult &a : r.arms) {
+        if (!a.requested)
+            continue;
+        walks &= a.status == ArmResult::COMPLETE;
+        diagnostics &= a.branch_events_complete_to_bp == std::numeric_limits<uint64_t>::max();
+        label_evidence &= !a.nodes_labels_truncated && !a.switch_sources_cut;
+    }
+    j["outcome"] = outcome_json(walks ? "complete" : "partial", diagnostics, label_evidence);
     j["label_mode"] = to_string(st.label_mode);
     Json::Value dict(Json::arrayValue);
     for (const auto &l : r.label_dict) {
@@ -1237,16 +1300,110 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
         }
         if (!affected)
             continue;
-        // strategy.clamped carries numbers as doubles; an integer knob reads as one here
-        auto value = [&](const Json::Value &v) {
-            return field == "labels.max_seed_labels" ? uint_json(v.asUInt64()) : v;
-        };
-        lims.append(limitation("server_clamp", field, value(c["effective"]), value(c["requested"]),
+        // strategy.clamped already carries each value in its knob's type
+        lims.append(limitation("server_clamp", field, c["effective"], c["requested"],
                                lowered ? "the server lowered the requested value to its maximum and "
                                          "this seed ran into it; a request cannot raise it further"
                                        : "the server raised the requested value (it also bounds the "
                                          "derivation of a permitted set); the walk ran under it"));
     }
+}
+
+// The result of a seed whose permitted set could not be DERIVED (§6.1 step 4): no arms,
+// `outcome.walks: failed`, the message as `error`, and the cause as a `derivation` limitation
+// naming the request field that would get past it (§7.0) — so that an agent acts on the
+// knob instead of parsing the message. |clamped| supplies `server_limit` when the server
+// clamped that knob: raising it beyond the server's value does nothing.
+static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e,
+                                       const Strategy &st, const Json::Value &clamped) {
+    auto server_limit = [&](const std::string &knob, Json::Value *l) {
+        for (const Json::Value &c : clamped) {
+            if (c["field"].asString() == knob)
+                (*l)["server_limit"] = c["effective"];
+        }
+    };
+    std::string knob;
+    Json::Value limit, observed;
+    std::string effect;
+    switch (e.cause()) {
+        case SeedDerivationError::NO_CARRIER:
+            knob = "seeds[].sequence";
+            limit = uint_json(static_cast<uint64_t>(e.limit()));
+            observed = uint_json(static_cast<uint64_t>(e.observed()));
+            effect = "no label carries every k-mer of the seed (limit: its k-mers; observed: the "
+                     "k-mers read when no candidate was left), so no permitted set exists to "
+                     "traverse under: shorten the seed to a stretch one label carries (resolve "
+                     "reports each label's runs) or name the labels explicitly";
+            break;
+        case SeedDerivationError::NO_TRACE_CARRIER:
+            knob = "support";
+            limit = "trace";
+            observed = uint_json(static_cast<uint64_t>(e.observed()));
+            effect = "the observed number of labels carry every k-mer of the seed, none of them "
+                     "as one coordinate-consecutive occurrence: set support to \"kmer\" (presence), "
+                     "shorten the seed, or name the labels explicitly";
+            break;
+        case SeedDerivationError::TOO_WIDE:
+            knob = "seeds[].sequence";
+            limit = uint_json(static_cast<uint64_t>(e.limit()));
+            observed = uint_json(static_cast<uint64_t>(e.observed()));
+            effect = "the narrowest of the seed's first 64 k-mers has more annotation entries "
+                     "(columns plus coordinates) than the derivation materialises (64 x "
+                     "labels.max_seed_labels, at least 65536): start the seed in a less repetitive "
+                     "k-mer, raise labels.max_seed_labels, or name the labels explicitly";
+            break;
+        case SeedDerivationError::TIME_BUDGET:
+            knob = "bounds.time_budget_ms";
+            limit = e.limit();
+            observed = e.observed();
+            effect = "the time budget ran out while deriving the permitted set, before any "
+                     "extension: raise the budget, shorten the seed, or name the labels explicitly "
+                     "(an explicit list reads only its own columns)";
+            break;
+        case SeedDerivationError::AMBIGUOUS_HEADER:
+            knob = "labels.seed_label_kind";
+            limit = "header";
+            observed = e.subject();
+            effect = "the derived header label (observed) occurs in more than one annotation "
+                     "column or names a column, so the derived list could not be resubmitted as "
+                     "explicit labels: set the knob to \"column\" or name the labels explicitly";
+            break;
+        case SeedDerivationError::OVER_SEED_LABEL_CAP:
+            knob = "labels.max_seed_labels";
+            limit = uint_json(static_cast<uint64_t>(e.limit()));
+            observed = uint_json(static_cast<uint64_t>(e.observed()));
+            effect = "under `exhaustive` the derived set is refused rather than cut (every walk "
+                     "of a dropped carrier would be missing): raise the knob to at least observed "
+                     "or name the labels explicitly";
+            break;
+    }
+    Json::Value rj;
+    Json::Value sj;
+    sj["seed_id"] = seed.seed_id;
+    sj["length_bp"] = uint_json(seed.sequence.size());
+    sj["labels_from_seed"] = true;
+    rj["seed"] = sj;
+    // no walk was made, so nothing was cut on the other axes
+    rj["outcome"] = outcome_json("failed", true, true);
+    rj["error"] = e.what();
+    Json::Value lims(Json::arrayValue);
+    Json::Value d = limitation("derivation", knob, limit, observed, effect);
+    d["cause"] = to_string(e.cause());
+    server_limit(knob, &d);
+    lims.append(d);
+    if (e.labels_cut()) {
+        // the trace check runs after the cap: a carrier the cap cut was never checked
+        Json::Value s = limitation(
+                "seed_labels", "labels.max_seed_labels", uint_json(st.max_seed_labels),
+                uint_json(static_cast<uint64_t>(e.observed())),
+                std::to_string(e.labels_cut()) + " label(s) carrying every k-mer of the seed were "
+                "cut before the trace check and never checked; one of them may carry the seed "
+                "as one occurrence: raise the knob");
+        server_limit("labels.max_seed_labels", &s);
+        lims.append(s);
+    }
+    rj["limitations"] = lims;
+    return rj;
 }
 
 Json::Value process_traverse_request(const Json::Value &json,
@@ -1272,11 +1429,14 @@ Json::Value process_traverse_request(const Json::Value &json,
         }
     }
     Json::Value clamped(Json::arrayValue);
-    auto clamp = [&](const char *field, double requested, double effective) {
+    // the values keep the type of their knob: an integer knob echoes as an integer (as a
+    // double it printed 10000.0, which a client reads as a float where the field is an
+    // integer), a time budget as the number it was parsed as
+    auto clamp = [&](const char *field, Json::Value requested, Json::Value effective) {
         Json::Value c;
         c["field"] = field;
-        c["requested"] = requested;
-        c["effective"] = effective;
+        c["requested"] = std::move(requested);
+        c["effective"] = std::move(effective);
         clamped.append(c);
     };
     const bool derives = std::any_of(req.seeds.begin(), req.seeds.end(),
@@ -1292,12 +1452,22 @@ Json::Value process_traverse_request(const Json::Value &json,
         req.strategy.time_budget_ms = limits.max_time_ms;
     }
     if (limits.max_seed_labels && req.strategy.max_seed_labels > limits.max_seed_labels) {
-        clamp("labels.max_seed_labels", static_cast<double>(req.strategy.max_seed_labels),
-              static_cast<double>(limits.max_seed_labels));
+        clamp("labels.max_seed_labels", uint_json(req.strategy.max_seed_labels),
+              uint_json(limits.max_seed_labels));
         req.strategy.max_seed_labels = limits.max_seed_labels;
     }
 
     LabelOracle oracle(anno_graph);
+    // checked here, where k is known: a continuation shorter than k is not a valid seed,
+    // so the promise that continuations are resubmittable (§7.1) would not hold
+    const uint64_t k = oracle.get_k();
+    if (req.strategy.continuation_bp > 0 && req.strategy.continuation_bp < k) {
+        throw InvalidRequest("strategy.output.continuation_bp: "
+                             + std::to_string(req.strategy.continuation_bp) + " is between 1 and "
+                             "k - 1 (k = " + std::to_string(k) + "), which would give continuations "
+                             "shorter than k that are not valid traverse input; use 0 (no "
+                             "continuation sequence) or at least " + std::to_string(k));
+    }
     Timer timer;
     Json::Value out;
     out["release"] = release;
@@ -1347,14 +1517,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // labels, so it had no lever on that and nothing to fix in the request:
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
-            Json::Value rj;
-            Json::Value sj;
-            sj["seed_id"] = seed.seed_id;
-            sj["length_bp"] = uint_json(seed.sequence.size());
-            sj["labels_from_seed"] = true;
-            rj["seed"] = sj;
-            rj["error"] = e.what();
-            results.append(rj);
+            results.append(failed_seed_to_json(seed, e, req.strategy, clamped));
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
         } catch (const std::invalid_argument &e) {
             throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)

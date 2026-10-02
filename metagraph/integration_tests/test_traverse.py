@@ -99,6 +99,14 @@ class TestTraverseBase(TestingBase):
         return parsed, res.returncode
 
     @staticmethod
+    def _outcome_axes(result):
+        """The per-seed outcome (spec §7.0) as (walks, branch_diagnostics, label_evidence,
+        delivery): independent guarantees, one axis each."""
+        o = result['outcome']
+        assert set(o) == {'walks', 'branch_diagnostics', 'label_evidence', 'delivery'}, o
+        return o['walks'], o['branch_diagnostics'], o['label_evidence'], o['delivery']
+
+    @staticmethod
     def _names(result):
         return {i: l['name'] for i, l in enumerate(result['label_dict'])}
 
@@ -342,6 +350,16 @@ class TestTraverseCLI(TestTraverseBase):
               'strategy': {'labels': {'max_seed_labels': 100000000}}}, 'max_seed_labels'),
             ({'seeds': [{'sequence': self.element}],
               'strategy': {'labels': {'max_seed_labels': 0}}}, 'max_seed_labels'),
+            # not implemented: refused rather than accepted and walked as 0
+            ({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+              'strategy': {'branching': {'tip_window_bp': 20}}},
+             'strategy.branching.tip_window_bp: not implemented'),
+            ({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+              'strategy': {'branching': {'bubble_window_bp': 20}}},
+             'strategy.branching.bubble_window_bp: not implemented'),
+            # a continuation shorter than k could not be resubmitted as a seed
+            ({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+              'strategy': {'output': {'continuation_bp': K - 1}}}, f'k = {K}'),
         ]:
             out, rc = self._traverse(bad)
             self.assertEqual(1, rc, f'expected failure for {bad}')
@@ -362,6 +380,29 @@ class TestTraverseCLI(TestTraverseBase):
         # a radius stop offers a continuation seed for iterative deepening
         self.assertIn('continuation', path)
         self.assertTrue(path['continuation']['sequence'])
+        # every result states its outcome: the walk reached the radius with all evidence
+        self.assertEqual(('complete', 'complete', 'complete', 'inline'),
+                         self._outcome_axes(out['results'][0]))
+
+        def continuation(bp, sequence=None):
+            out, rc = self._traverse({
+                'seeds': [{'sequence': sequence or self.element, 'labels': ['acc1']}],
+                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                             'output': {'continuation_bp': bp}},
+            })
+            self.assertEqual(0, rc, out.get('error'))
+            return out['results'][0]['arms']['right']['paths'][0]['continuation']
+
+        # k bases: a valid seed, and resubmitting it works
+        tail = continuation(K)
+        self.assertEqual(K, len(tail['sequence']))
+        self.assertEqual(self.right1[:10], tail['sequence'][-10:])
+        continuation(K, tail['sequence'])
+        # 0: no continuation sequence, but the labels and the loss are still reported
+        empty = continuation(0)
+        self.assertEqual('', empty['sequence'])
+        self.assertEqual(1, len(empty['labels']))
+        self.assertEqual(0, empty['loss_used'])
 
     def test_traverse_derived_seed_failure_is_per_seed(self):
         """A seed no label carries in full fails ALONE, not the whole request.
@@ -390,6 +431,16 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(len(orphan), failed['seed']['length_bp'])
         self.assertTrue(failed['seed']['labels_from_seed'])
         self.assertIn('No label supports every k-mer', failed['error'])
+        # ... with a structured reason: the outcome and the request field to change
+        self.assertEqual(('failed', 'complete', 'complete', 'inline'), self._outcome_axes(failed))
+        self.assertEqual(['derivation'], [l['kind'] for l in failed['limitations']])
+        derivation = failed['limitations'][0]
+        self.assertEqual('no_carrier', derivation['cause'])
+        self.assertEqual('seeds[].sequence', derivation['knob'])
+        self.assertEqual(len(orphan) - K + 1, derivation['limit'])
+        self.assertLessEqual(derivation['observed'], derivation['limit'])
+        for ok in (first, third):
+            self.assertEqual(('complete', 'complete', 'complete', 'inline'), self._outcome_axes(ok))
 
         # an EXPLICIT label list is the caller's own choice, so it still fails the request
         out, rc = self._traverse({
@@ -691,6 +742,7 @@ class TestTraverseCLI(TestTraverseBase):
         out = run({'branching': keep, 'output': {'max_branch_events': 'unlimited'}})
         self.assertEqual('unlimited', out['strategy']['output']['max_branch_events'])
         result = out['results'][0]
+        self.assertEqual(('complete', 'complete', 'complete', 'inline'), self._outcome_axes(result))
         self.assertEqual([], result['limitations'])
         right = result['arms']['right']
         self.assertEqual('complete', right['status'])
@@ -707,8 +759,10 @@ class TestTraverseCLI(TestTraverseBase):
 
         # walk_domain: the RIGHT1 / RIGHT2 fork needs two live paths
         for detail in ('summary', 'tree', 'full'):
-            right = run({'branching': keep, 'bounds': {'max_extension_bp': BLOCK, 'max_live_paths': 1},
-                         'output': {'detail': detail}})['results'][0]['arms']['right']
+            result = run({'branching': keep, 'bounds': {'max_extension_bp': BLOCK, 'max_live_paths': 1},
+                          'output': {'detail': detail}})['results'][0]
+            self.assertEqual(('partial', 'complete', 'complete', 'inline'), self._outcome_axes(result))
+            right = result['arms']['right']
             self.assertEqual('truncated', right['status'])
             self.assertEqual(['walk_domain'], kinds(right['limitations']), detail)
             walk = right['limitations'][0]
@@ -718,9 +772,13 @@ class TestTraverseCLI(TestTraverseBase):
             self.assertEqual(right['complete_to_bp'], walk['complete_to_bp'])
 
         # branch_events: the quorum refusal at the fork is the only event; keeping none
-        # puts the evidence boundary at the fork
-        right = run({'branching': dict(keep, min_successor_labels=2),
-                     'output': {'max_branch_events': 0}})['results'][0]['arms']['right']
+        # puts the evidence boundary at the fork. The walks are complete, the branch
+        # diagnostics are cut
+        result = run({'branching': dict(keep, min_successor_labels=2),
+                      'output': {'max_branch_events': 0}})['results'][0]
+        self.assertEqual(('complete', 'cut', 'complete', 'inline'), self._outcome_axes(result))
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
         self.assertEqual({'complete': False, 'complete_to_bp': 0}, right['evidence'])
         self.assertEqual(['branch_events'], kinds(right['limitations']))
         events = right['limitations'][0]
@@ -738,8 +796,10 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(0, right['limitations'][0]['observed'])
 
         # label_lists (and the counts over the cut lists): annotate mode, one label a list
-        right = run({'labels': {'mode': 'annotate', 'max_labels_per_node': 1}},
-                    seeds=[{'sequence': self.element}])['results'][0]['arms']['right']
+        result = run({'labels': {'mode': 'annotate', 'max_labels_per_node': 1}},
+                     seeds=[{'sequence': self.element}])['results'][0]
+        self.assertEqual(('complete', 'complete', 'lower_bound', 'inline'), self._outcome_axes(result))
+        right = result['arms']['right']
         self.assertEqual(['label_lists', 'inexact_counts'], kinds(right['limitations']))
         lists = right['limitations'][0]
         self.assertEqual('labels.max_labels_per_node', lists['knob'])
@@ -838,6 +898,10 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(over, clamped['labels.max_seed_labels']['requested'])
         self.assertEqual(caps['max_seed_labels'],
                          clamped['labels.max_seed_labels']['effective'])
+        # an integer knob is echoed as an integer (10001, not 10001.0)
+        self.assertIsInstance(clamped['labels.max_seed_labels']['requested'], int)
+        self.assertIsInstance(clamped['labels.max_seed_labels']['effective'], int)
+        self.assertNotIn(f'{over}.0', ret.text)
         # ... but the three carriers fit under it: the clamp bound nothing in this seed,
         # so the seed states no limitation (spec §7.0)
         self.assertEqual([], out['results'][0]['limitations'])

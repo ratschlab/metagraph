@@ -351,6 +351,16 @@ std::string serialize(const SeedResult &r) {
     return os.str();
 }
 
+// the per-seed outcome (spec §7.0) as "walks/branch_diagnostics/label_evidence/delivery",
+// so that an assertion names all four axes at once
+std::string outcome_of(const Json::Value &result) {
+    const Json::Value &o = result["outcome"];
+    EXPECT_TRUE(o.isObject());
+    EXPECT_EQ(4u, o.size());
+    return o["walks"].asString() + "/" + o["branch_diagnostics"].asString() + "/"
+         + o["label_evidence"].asString() + "/" + o["delivery"].asString();
+}
+
 
 template <typename Pair>
 class WalkerTest : public ::testing::Test {};
@@ -1974,6 +1984,9 @@ TYPED_TEST(WalkerTest, SwitchSources) {
             EXPECT_EQ(EndReason::LABEL_LOST, c->reason);
             EXPECT_EQ("", c->text);
         }
+        // the cut of B (whose B -> E is priced) is counted as a derivation it may have
+        // changed, as well as by B's label end
+        EXPECT_EQ(1u, r1.switch_sources_cut) << mode;
 
         // two sources: B's switch is taken, A's over-budget switch is a plain loss
         st.max_switch_sources = 2;
@@ -2004,6 +2017,87 @@ TYPED_TEST(WalkerTest, SwitchSources) {
         st.max_switch_sources = 64;
         auto r64 = run(*anno, S, { "A", "B", "C" }, st, table);
         EXPECT_EQ(serialize(res), serialize(r64));
+        // with two sources the only cut one is C, which has no finite switch into E, so
+        // nothing that could matter was cut (the one-source run is counted above)
+        EXPECT_EQ(0u, r2.switch_sources_cut) << mode;
+        EXPECT_EQ(0u, r64.arms[kRight].switch_sources_cut) << mode;
+    }
+}
+
+// A cut switch-source list that leaves NO label end behind (spec §6.3, §7.0): the cut
+// source goes on along another successor, so nothing ends with `switch_sources`, yet the
+// target it was the cheapest way into is entered at a higher loss. A, B, C on S; past S
+// the graph forks into Z1, where B goes on, and Z2, carried only by E (extra). B -> E
+// costs 0.5, A -> E 0.8. With one source A (the lower column) is the only one priced on
+// Z2, so E is entered at 0.8, and no label ends because of the cut (B goes on along Z1,
+// C has no finite switch). The arm's switch_sources_cut counts the derivation and the
+// response states it; "unlimited" prices B, enters E at 0.5 (B then follows both
+// successors, so it needs one branch) and states nothing.
+TYPED_TEST(WalkerTest, SwitchSourcesCutWithoutALabelEnd) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto b = fork_blocks(34, { 60, 40, 40 });
+    const std::string &S = b[0], &Z1 = b[1], &Z2 = b[2];
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<Graph, Annotation>(
+                kK, { S, S + Z1, S, S.substr(S.size() - kK) + Z2 }, { "A", "B", "C", "E" }, mode);
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.extra = { "E" };
+        st.loss_budget = 1;
+        st.max_label_branches = 1;
+        st.merge_reconverge = false;     // no `scope` limitation beside the one tested
+        // request order: A 0, B 1, C 2, E 3
+        auto table = LabelChangeCost::table({ { { 0, 3 }, 0.8 }, { { 1, 3 }, 0.5 } }, kInfiniteLoss);
+        auto loss_of_e = [&](const ArmResult &arm) {
+            for (const PathResult &p : arm.paths) {
+                for (const LabelEnd &e : p.end_labels) {
+                    if (e.label == 3)
+                        return e.loss;
+                }
+            }
+            return -1.0;
+        };
+
+        st.max_switch_sources = 1;
+        auto cut = run(*anno, S, { "A", "B", "C" }, st, table);
+        const ArmResult &rc1 = cut.arms[kRight];
+        check_invariants(rc1, st);
+        ASSERT_EQ(2u, rc1.paths.size()) << mode;
+        for (const PathResult &p : rc1.paths) {
+            EXPECT_EQ(Z1.size(), p.length_bp) << mode;
+        }
+        EXPECT_EQ(0.8, loss_of_e(rc1)) << mode;   // overestimated: B's 0.5 was cut
+        for (const Event *ev : events_of(rc1, EventType::LABEL_END)) {
+            EXPECT_NE("switch_sources", ev->text) << mode << ": the cut source did not end";
+        }
+        EXPECT_EQ(1u, rc1.switch_sources_cut) << mode;
+        // every walk is there; a loss in it may be too high
+        EXPECT_EQ("complete/complete/lower_bound/inline",
+                  outcome_of(cli::seed_result_to_json(cut, st, "summary", false))) << mode;
+        Json::Value arm = cli::seed_result_to_json(cut, st, "summary", false)["arms"]["right"];
+        ASSERT_EQ(1u, arm["limitations"].size()) << mode;
+        const Json::Value &l = arm["limitations"][0];
+        EXPECT_EQ("switch_sources", l["kind"].asString());
+        EXPECT_EQ("labels.max_switch_sources", l["knob"].asString());
+        EXPECT_EQ(1u, l["limit"].asUInt64());
+        EXPECT_EQ(1u, l["observed"].asUInt64());       // the derivations
+        EXPECT_EQ(0u, l["label_ends"].asUInt64());     // ... none of which ended a label
+        EXPECT_NE(std::string::npos, l["effect"].asString().find("overestimated"));
+        EXPECT_EQ(1u, arm["counters"]["switch_sources_cut"].asUInt64());
+
+        st.max_switch_sources = Strategy::kUnlimited;
+        auto full = run(*anno, S, { "A", "B", "C" }, st, table);
+        const ArmResult &ru = full.arms[kRight];
+        check_invariants(ru, st);
+        EXPECT_EQ(2u, ru.paths.size()) << mode;
+        EXPECT_EQ(0.5, loss_of_e(ru)) << mode;
+        EXPECT_EQ(0u, ru.switch_sources_cut) << mode;
+        EXPECT_EQ("complete/complete/complete/inline",
+                  outcome_of(cli::seed_result_to_json(full, st, "summary", false))) << mode;
+        arm = cli::seed_result_to_json(full, st, "summary", false)["arms"]["right"];
+        EXPECT_EQ(0u, arm["limitations"].size()) << mode;
+        EXPECT_EQ(0u, arm["counters"]["switch_sources_cut"].asUInt64());
     }
 }
 
@@ -2386,6 +2480,19 @@ TEST(WalkerCoord, DeriveSeedLabels) {
         ASSERT_EQ(1u, by_trace.dropped_labels.size());
         EXPECT_EQ("acc1", by_trace.dropped_labels[0].name);
         EXPECT_EQ("seed_unsupported", by_trace.dropped_labels[0].reason);
+        // the cap applies before the trace check: with one label taken, acc1 (the first
+        // by seq_id) is checked and fails while acc3, which passes, was cut unchecked.
+        // The failure says so: two presence carriers, one of them cut by the cap
+        Strategy capped = st;
+        capped.max_seed_labels = 1;
+        try {
+            traverse_seed(oracle, seed, capped, LabelChangeCost::forbid());
+            FAIL() << "expected no trace carrier among the labels taken";
+        } catch (const SeedDerivationError &e) {
+            EXPECT_EQ(SeedDerivationError::NO_TRACE_CARRIER, e.cause()) << e.what();
+            EXPECT_EQ(2.0, e.observed());
+            EXPECT_EQ(1u, e.labels_cut());
+        }
         // the same under column labels, whose coordinates live in the column frame
         Strategy sc = st;
         sc.seed_label_kind = LabelKind::COLUMN;
@@ -2541,6 +2648,9 @@ TEST(WalkerDerive, DerivationHonoursTheTimeBudget) {
         FAIL() << "expected the derivation to stop at the time budget";
     } catch (const SeedDerivationError &e) {
         EXPECT_NE(nullptr, std::strstr(e.what(), "time budget")) << e.what();
+        EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause());
+        EXPECT_EQ(1e-9, e.limit());
+        EXPECT_GT(e.observed(), e.limit());   // the elapsed milliseconds
     }
 
     // An explicit list reads only its own columns, so the budget stops the WALK instead
@@ -2637,6 +2747,8 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     } catch (const SeedDerivationError &e) {
         EXPECT_NE(nullptr, std::strstr(e.what(), "ACC1")) << e.what();
         EXPECT_NE(nullptr, std::strstr(e.what(), "seed_label_kind")) << e.what();
+        EXPECT_EQ(SeedDerivationError::AMBIGUOUS_HEADER, e.cause());
+        EXPECT_EQ("ACC1", e.subject());
     }
     // the column kind is unambiguous here: two columns, two distinct names
     st.seed_label_kind = LabelKind::COLUMN;
@@ -2725,6 +2837,8 @@ TEST(WalkerCoord, DerivedHeaderMustResolveBackToItsColumn) {
     } catch (const SeedDerivationError &e) {
         EXPECT_NE(std::string::npos, std::string(e.what()).find("'ACC'")) << e.what();
         EXPECT_NE(std::string::npos, std::string(e.what()).find("another annotation column")) << e.what();
+        EXPECT_EQ(SeedDerivationError::AMBIGUOUS_HEADER, e.cause());
+        EXPECT_EQ("ACC", e.subject());
     }
     // the column kind derives B, and B explicitly still works
     st.seed_label_kind = LabelKind::COLUMN;
@@ -2776,6 +2890,8 @@ TEST(WalkerCoord, DerivedHeaderMustNotBeAColumnName) {
     } catch (const SeedDerivationError &e) {
         EXPECT_NE(std::string::npos, std::string(e.what()).find("'ACC'")) << e.what();
         EXPECT_NE(std::string::npos, std::string(e.what()).find("name of an annotation column")) << e.what();
+        EXPECT_EQ(SeedDerivationError::AMBIGUOUS_HEADER, e.cause());
+        EXPECT_EQ("ACC", e.subject());
     }
     // the column kind derives B, and B explicitly still works
     st.seed_label_kind = LabelKind::COLUMN;
@@ -3278,8 +3394,13 @@ TEST(Walker, BranchEventsCompleteToBp) {
         }
 
         for (const char *detail : { "summary", "tree", "full" }) {
-            const Json::Value j = cli::seed_result_to_json(res, st, detail, false)["arms"]["right"];
+            const Json::Value seed_json = cli::seed_result_to_json(res, st, detail, false);
+            const Json::Value &j = seed_json["arms"]["right"];
             const std::string at = where + ", detail " + detail;
+            // the walks are complete either way; only the branch diagnostics are cut
+            EXPECT_EQ("complete", j["status"].asString()) << at;
+            EXPECT_EQ(complete ? "complete/complete/complete/inline" : "complete/cut/complete/inline",
+                      outcome_of(seed_json)) << at;
             ASSERT_TRUE(j.isMember("evidence")) << at;
             EXPECT_EQ(complete, j["evidence"]["complete"].asBool()) << at;
             if (complete) {
@@ -3355,11 +3476,13 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_EQ(nothing, kinds_of(result["limitations"]));
     EXPECT_TRUE(right["evidence"]["complete"].asBool());
     EXPECT_TRUE(right["evidence"]["complete_to_bp"].isNull());
+    EXPECT_EQ("complete/complete/complete/inline", outcome_of(result));
 
     // walk_domain: the fork needs two live paths
     out = traverse(request(ABC, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
                                     "bounds": {"max_live_paths": 1}})"), none);
     right = out["results"][0]["arms"]["right"];
+    EXPECT_EQ("partial/complete/complete/inline", outcome_of(out["results"][0]));
     EXPECT_EQ("truncated", right["status"].asString());
     ASSERT_EQ(std::vector<std::string>{ "walk_domain" }, kinds_of(right["limitations"]));
     const Json::Value &walk = right["limitations"][0];
@@ -3370,8 +3493,21 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_EQ(0u, walk["complete_to_bp"].asUInt64());
     EXPECT_EQ(nothing, kinds_of(out["results"][0]["limitations"]));
 
-    // scope: merging (constrain's default) closes the bubble once
+    // ... and a beam of width one prunes at the fork: pruned, so partial as well
+    out = traverse(request(ABC, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                    "frontier": {"on_overflow": "beam"},
+                                    "bounds": {"max_live_paths": 1}})"), none);
+    right = out["results"][0]["arms"]["right"];
+    EXPECT_EQ("pruned", right["status"].asString());
+    EXPECT_EQ("partial/complete/complete/inline", outcome_of(out["results"][0]));
+    ASSERT_EQ(std::vector<std::string>{ "walk_domain" }, kinds_of(right["limitations"]));
+    EXPECT_EQ("bounds.max_live_paths", right["limitations"][0]["knob"].asString());
+
+    // scope: merging (constrain's default) closes the bubble once. Every walk of the
+    // united-history rule is present, so the walks are complete for that rule; the
+    // weaker scope is stated by the limitation and by completeness_scope
     out = traverse(request(ABC, R"({"direction": "right"})"), none);
+    EXPECT_EQ("complete/complete/complete/inline", outcome_of(out["results"][0]));
     right = out["results"][0]["arms"]["right"];
     EXPECT_EQ("united_history", right["completeness_scope"].asString());
     ASSERT_EQ(std::vector<std::string>{ "scope" }, kinds_of(right["limitations"]));
@@ -3384,6 +3520,8 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
                                         "labels": {"mode": "annotate", "max_labels_per_node": 1}})"), none);
     right = out["results"][0]["arms"]["right"];
     EXPECT_EQ("complete", right["status"].asString());
+    // every walk is there, its recorded lists are not
+    EXPECT_EQ("complete/complete/lower_bound/inline", outcome_of(out["results"][0]));
     ASSERT_EQ((std::vector<std::string>{ "label_lists", "inexact_counts" }), kinds_of(right["limitations"]));
     for (const Json::Value &l : right["limitations"]) {
         EXPECT_EQ("labels.max_labels_per_node", l["knob"].asString());
@@ -3405,6 +3543,9 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_EQ(3u, result["limitations"][0]["observed"].asUInt64());
     EXPECT_FALSE(result["limitations"][0].isMember("server_limit"));
     EXPECT_EQ(nothing, kinds_of(result["arms"]["right"]["limitations"]));
+    // the labels taken are the domain (§7.0): their walks and evidence are complete, and
+    // what the cap left out is stated by the seed_labels entry
+    EXPECT_EQ("complete/complete/complete/inline", outcome_of(result));
 
     // server_clamp: the server lowers the derived-set cap to 2. The derived seed runs
     // into it (and its seed_labels entry names the server's maximum); a seed with an
@@ -3420,13 +3561,21 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     limits.max_seed_labels = 2;
     out = traverse(req, limits);
     ASSERT_EQ(1u, out["strategy"]["clamped"].size());
+    // an integer knob is echoed as an integer (1000, not 1000.0), in the clamp and in the
+    // server_clamp limitation built from it
+    EXPECT_EQ(Json::uintValue, out["strategy"]["clamped"][0]["requested"].type());
+    EXPECT_EQ(Json::uintValue, out["strategy"]["clamped"][0]["effective"].type());
+    EXPECT_EQ("1000", Json::writeString(Json::StreamWriterBuilder(),
+                                        out["strategy"]["clamped"][0]["requested"]));
     result = out["results"][0];
     ASSERT_EQ((std::vector<std::string>{ "seed_labels", "server_clamp" }), kinds_of(result["limitations"]));
     EXPECT_EQ(2u, result["limitations"][0]["server_limit"].asUInt64());
     const Json::Value &clamp = result["limitations"][1];
     EXPECT_EQ("labels.max_seed_labels", clamp["knob"].asString());
-    EXPECT_EQ(2.0, clamp["limit"].asDouble());
-    EXPECT_EQ(1000.0, clamp["observed"].asDouble());   // what the request asked for
+    EXPECT_EQ(2u, clamp["limit"].asUInt64());
+    EXPECT_EQ(1000u, clamp["observed"].asUInt64());   // what the request asked for
+    EXPECT_EQ(Json::uintValue, clamp["limit"].type());
+    EXPECT_EQ(Json::uintValue, clamp["observed"].type());
     EXPECT_EQ(nothing, kinds_of(out["results"][1]["limitations"]));
 
     // a time budget raised from zero (it also bounds the derivation) binds every seed's
@@ -3458,16 +3607,179 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     st.merge_reconverge = false;
     auto table = LabelChangeCost::table({ { { 0, 3 }, 2.0 }, { { 1, 3 }, 0.5 } }, kInfiniteLoss);
     st.max_switch_sources = 1;
-    Json::Value arm = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
-                                               st, "summary", false)["arms"]["right"];
+    Json::Value seed_json = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
+                                                     st, "summary", false);
+    EXPECT_EQ("complete/complete/lower_bound/inline", outcome_of(seed_json));
+    Json::Value arm = seed_json["arms"]["right"];
     ASSERT_EQ(std::vector<std::string>{ "switch_sources" }, kinds_of(arm["limitations"]));
     EXPECT_EQ("labels.max_switch_sources", arm["limitations"][0]["knob"].asString());
     EXPECT_EQ(1u, arm["limitations"][0]["limit"].asUInt64());
+    // one derivation was cut while B could switch into E, and it ended B
     EXPECT_EQ(1u, arm["limitations"][0]["observed"].asUInt64());
+    EXPECT_EQ(1u, arm["limitations"][0]["label_ends"].asUInt64());
     st.max_switch_sources = 2;
-    arm = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
-                                   st, "summary", false)["arms"]["right"];
-    EXPECT_EQ(nothing, kinds_of(arm["limitations"]));
+    seed_json = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
+                                         st, "summary", false);
+    EXPECT_EQ("complete/complete/complete/inline", outcome_of(seed_json));
+    EXPECT_EQ(nothing, kinds_of(seed_json["arms"]["right"]["limitations"]));
+}
+
+// Every seed result carries an `outcome` (spec §7.0). A seed whose permitted set cannot
+// be derived has `walks: failed` and states its cause as a `derivation` limitation naming
+// the request field that would get past it, while the other seeds of the batch are
+// traversed: `walks: complete` when every requested arm reached the radius, `partial`
+// when one was truncated or pruned. Records A = Y1·X·P, B = Y2·X·Q (a fork past X), C = W·Z (linear); the seed
+// Y1·X·Q is in the graph but no record carries it.
+TEST(Walker, FailedDerivationIsAStatedOutcome) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 71; ; ++seed) {
+        b = clean_blocks({ 30, 30, 30, 30, 30, 30, 30 }, seed);
+        if (b[3][0] != b[4][0])
+            break;
+    }
+    const std::string &Y1 = b[0], &Y2 = b[1], &X = b[2], &P = b[3], &Q = b[4], &W = b[5], &Z = b[6];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { Y1 + X + P, Y2 + X + Q, W + Z }, { "A", "B", "C" }, DeBruijnGraph::BASIC);
+    auto request = [&](const std::vector<std::string> &seeds, const std::string &strategy) {
+        Json::Value r;
+        for (const std::string &s : seeds) {
+            Json::Value seed;
+            seed["sequence"] = s;
+            r["seeds"].append(seed);
+        }
+        r["strategy"] = parse_json(strategy);
+        return r;
+    };
+    const std::string orphan = Y1 + X + Q;
+
+    // the walk of W is linear (complete), the fork past X needs two live paths
+    // (truncated: partial), and the orphan fails alone
+    Json::Value out = cli::process_traverse_request(
+            request({ W, orphan, X }, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                          "bounds": {"max_extension_bp": 100, "max_live_paths": 1}})"),
+            *anno, "", cli::TraverseLimits());
+    ASSERT_EQ(3u, out["results"].size());
+    const Json::Value &linear = out["results"][0], &failed = out["results"][1], &fork = out["results"][2];
+    EXPECT_EQ("complete/complete/complete/inline", outcome_of(linear));
+    EXPECT_EQ("complete", linear["arms"]["right"]["status"].asString());
+    EXPECT_EQ("partial/complete/complete/inline", outcome_of(fork));
+    EXPECT_EQ("truncated", fork["arms"]["right"]["status"].asString());
+    for (const Json::Value *ok : { &linear, &fork }) {
+        EXPECT_FALSE(ok->isMember("error"));
+        EXPECT_TRUE((*ok)["arms"].isMember("right"));
+    }
+
+    EXPECT_EQ("failed/complete/complete/inline", outcome_of(failed));
+    EXPECT_TRUE(failed.isMember("error"));
+    EXPECT_FALSE(failed.isMember("arms"));
+    EXPECT_TRUE(failed["seed"]["labels_from_seed"].asBool());
+    EXPECT_EQ(orphan.size(), failed["seed"]["length_bp"].asUInt64());
+    ASSERT_EQ(std::vector<std::string>{ "derivation" }, kinds_of(failed["limitations"]));
+    const Json::Value &d = failed["limitations"][0];
+    EXPECT_EQ("no_carrier", d["cause"].asString());
+    EXPECT_EQ("seeds[].sequence", d["knob"].asString());
+    EXPECT_EQ(orphan.size() - kK + 1, d["limit"].asUInt64());   // the seed's k-mers
+    EXPECT_GE(d["observed"].asUInt64(), 1u);                    // read until none was left
+    EXPECT_LE(d["observed"].asUInt64(), d["limit"].asUInt64());
+    EXPECT_FALSE(d["effect"].asString().empty());
+    EXPECT_FALSE(d.isMember("server_limit"));
+
+    // `exhaustive` refuses to cut the derived set {A, B} of X: the cap is the knob, and
+    // the server's clamp of it is its server_limit (raising it further does nothing)
+    cli::TraverseLimits limits;
+    limits.max_seed_labels = 1;
+    out = cli::process_traverse_request(
+            request({ X }, R"({"exhaustive": true, "direction": "right",
+                               "labels": {"max_seed_labels": 5}})"), *anno, "", limits);
+    const Json::Value &refused = out["results"][0];
+    EXPECT_EQ("failed", refused["outcome"]["walks"].asString());
+    ASSERT_EQ(std::vector<std::string>{ "derivation" }, kinds_of(refused["limitations"]));
+    EXPECT_EQ("over_seed_label_cap", refused["limitations"][0]["cause"].asString());
+    EXPECT_EQ("labels.max_seed_labels", refused["limitations"][0]["knob"].asString());
+    EXPECT_EQ(1u, refused["limitations"][0]["limit"].asUInt64());
+    EXPECT_EQ(2u, refused["limitations"][0]["observed"].asUInt64());
+    EXPECT_EQ(1u, refused["limitations"][0]["server_limit"].asUInt64());
+
+    // the time budget runs out during the derivation; the server lowered it, so the
+    // entry carries the server's value as well
+    limits = cli::TraverseLimits();
+    limits.max_time_ms = 1e-9;
+    out = cli::process_traverse_request(
+            request({ X }, R"({"direction": "right", "bounds": {"time_budget_ms": 60000}})"),
+            *anno, "", limits);
+    const Json::Value &late = out["results"][0];
+    EXPECT_EQ("failed", late["outcome"]["walks"].asString());
+    ASSERT_EQ(std::vector<std::string>{ "derivation" }, kinds_of(late["limitations"]));
+    EXPECT_EQ("time_budget", late["limitations"][0]["cause"].asString());
+    EXPECT_EQ("bounds.time_budget_ms", late["limitations"][0]["knob"].asString());
+    EXPECT_EQ(1e-9, late["limitations"][0]["limit"].asDouble());
+    EXPECT_GT(late["limitations"][0]["observed"].asDouble(), 1e-9);
+    EXPECT_EQ(1e-9, late["limitations"][0]["server_limit"].asDouble());
+}
+
+// Knobs that would be accepted and then do nothing are refused (spec §7.0): the tip and
+// bubble windows are not implemented, so a non-zero window is a 400 naming the field (0,
+// the echoed value, stays accepted). A continuation is resubmittable only when it is at
+// least k long, so output.continuation_bp 1 .. k - 1 is refused naming k; 0 means "no
+// continuation sequence" and still reports the labels and the loss.
+TEST(Walker, UnimplementedWindowsAndShortContinuationsAreRefused) {
+    for (const char *window : { "tip_window_bp", "bubble_window_bp" }) {
+        Json::Value request = parse_json(R"({"seeds": [{"sequence": "ACGTACGTACGTACGT"}], "strategy": {}})");
+        request["strategy"]["branching"][window] = 20;
+        try {
+            cli::parse_traverse_request(request);
+            FAIL() << "accepted an unimplemented " << window;
+        } catch (const cli::InvalidRequest &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find(std::string("strategy.branching.") + window))
+                    << e.what();
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("not implemented")) << e.what();
+        }
+        request["strategy"]["branching"][window] = 0;
+        cli::TraverseRequest parsed = cli::parse_traverse_request(request);
+        EXPECT_EQ(0u, cli::strategy_to_json(parsed.strategy, parsed.cost)["branching"][window].asUInt64());
+        // the C++ API refuses it as well
+        Strategy st;
+        (std::string(window) == "tip_window_bp" ? st.tip_window_bp : st.bubble_window_bp) = 20;
+        EXPECT_THROW(validate_strategy(st, LabelChangeCost::forbid()), std::invalid_argument);
+    }
+
+    auto b = clean_blocks({ 30, 40 }, 19);
+    const std::string &X = b[0], &P = b[1];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P }, { "A" }, DeBruijnGraph::BASIC);
+    auto traverse = [&](const std::string &seed, uint64_t continuation_bp) {
+        Json::Value request;
+        request["seeds"][0]["sequence"] = seed;
+        request["seeds"][0]["labels"].append("A");
+        request["strategy"] = parse_json(R"({"direction": "right", "bounds": {"max_extension_bp": 10}})");
+        request["strategy"]["output"]["continuation_bp"] = static_cast<Json::UInt64>(continuation_bp);
+        return cli::process_traverse_request(request, *anno, "", cli::TraverseLimits());
+    };
+    for (uint64_t short_bp : { uint64_t(1), uint64_t(5), uint64_t(kK - 1) }) {
+        try {
+            traverse(X, short_bp);
+            FAIL() << "accepted continuation_bp " << short_bp << " below k";
+        } catch (const cli::InvalidRequest &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("continuation_bp")) << e.what();
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("k = " + std::to_string(kK))) << e.what();
+        }
+        Strategy st;
+        st.continuation_bp = short_bp;
+        EXPECT_THROW(run(*anno, X, { "A" }, st), std::invalid_argument);
+    }
+    // k: the continuation is a valid seed, and resubmitting it works
+    Json::Value out = traverse(X, kK);
+    const Json::Value &cont = out["results"][0]["arms"]["right"]["paths"][0]["continuation"];
+    ASSERT_EQ(kK, cont["sequence"].asString().size());
+    EXPECT_EQ(1u, cont["labels"].size());
+    EXPECT_NO_THROW(traverse(cont["sequence"].asString(), kK));
+    // 0: no continuation sequence, the labels and the loss are still reported
+    out = traverse(X, 0);
+    const Json::Value &none = out["results"][0]["arms"]["right"]["paths"][0]["continuation"];
+    EXPECT_EQ("", none["sequence"].asString());
+    EXPECT_EQ(1u, none["labels"].size());
+    EXPECT_EQ(0.0, none["loss_used"].asDouble());
+    EXPECT_EQ(0u, out["strategy"]["output"]["continuation_bp"].asUInt64());
 }
 
 } // namespace

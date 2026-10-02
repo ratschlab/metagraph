@@ -25,11 +25,54 @@ namespace traversal {
  * of the seed and the data, not of the request: the caller has no lever, so a
  * multi-seed request reports it per seed and still traverses the other seeds
  * (spec §6.1). Explicit labels never raise it.
+ *
+ * The cause is carried as a code with the bound the derivation ran into, so that the
+ * per-seed failure can name the request field that would get past it (spec §7.0, a
+ * `derivation` limitation) without parsing the message, which is prose and may change.
  */
 class SeedDerivationError : public std::invalid_argument {
   public:
-    using std::invalid_argument::invalid_argument;
+    enum Cause {
+        // no label carries every k-mer of the seed: |limit| the seed's k-mers,
+        // |observed| the k-mers read when the intersection became empty
+        NO_CARRIER,
+        // `support: trace`: labels carry every k-mer, none as one coordinate-consecutive
+        // occurrence: |observed| how many carry every k-mer (|labels_cut| of them were
+        // cut by max_seed_labels before the trace check)
+        NO_TRACE_CARRIER,
+        // the narrowest of the first 64 k-mers has more annotation entries than the
+        // derivation materialises: |limit| that bound, |observed| its entries
+        TOO_WIDE,
+        // bounds.time_budget_ms ran out: |limit| the budget, |observed| the elapsed ms
+        TIME_BUDGET,
+        // a derived header name is not resubmittable as an explicit label: |subject|
+        AMBIGUOUS_HEADER,
+        // `exhaustive` refuses to cut the derived set: |limit| max_seed_labels,
+        // |observed| the labels carrying the seed
+        OVER_SEED_LABEL_CAP,
+    };
+
+    SeedDerivationError(Cause cause, const std::string &what, double limit = 0,
+                        double observed = 0, std::string subject = "", size_t labels_cut = 0)
+          : std::invalid_argument(what), cause_(cause), limit_(limit), observed_(observed),
+            subject_(std::move(subject)), labels_cut_(labels_cut) {}
+
+    Cause cause() const { return cause_; }
+    double limit() const { return limit_; }
+    double observed() const { return observed_; }
+    const std::string& subject() const { return subject_; }
+    // labels carrying the seed that max_seed_labels cut before the failure (only the
+    // trace check runs after the cap): non-zero means raising that knob may succeed
+    size_t labels_cut() const { return labels_cut_; }
+
+  private:
+    Cause cause_;
+    double limit_;
+    double observed_;
+    std::string subject_;
+    size_t labels_cut_;
 };
+const char* to_string(SeedDerivationError::Cause cause);
 
 /**
  * Cost of switching the supporting label along a path (spec §9). Labels are
@@ -133,7 +176,9 @@ struct Strategy {
     bool switch_on_loss_only = true;
     // Pairwise (TABLE) costs only: the cheapest that many sources are considered per
     // step (or kUnlimited). A cut source list can leave a target label unentered, so
-    // under `exhaustive` with a TABLE cost it must be kUnlimited (validate_strategy).
+    // under `exhaustive` with a TABLE cost it must be kUnlimited (validate_strategy);
+    // elsewhere every cut that may have mattered is counted
+    // (ArmResult::switch_sources_cut).
     size_t max_switch_sources = 64;
     // Cap on a set DERIVED from the seed (Seed::labels empty). It bounds the
     // traversal state, not the derivation: the labels above the cap are discovered
@@ -151,6 +196,8 @@ struct Strategy {
     size_t max_label_branches = 0;     // or kUnlimited
     size_t min_successor_labels = 1;
     double min_successor_fraction = 0;
+    // Tip and bubble windows (spec §6.5) are NOT implemented: validate_strategy()
+    // refuses a non-zero value rather than accept a knob that would change nothing.
     uint64_t tip_window_bp = 0;
     uint64_t bubble_window_bp = 0;
     bool merge_reconverge = true;
@@ -176,6 +223,9 @@ struct Strategy {
     // per arm, the first that many branch events in level order are kept (or
     // kUnlimited); ArmResult::branch_events_complete_to_bp states where a cut starts
     size_t max_branch_events = 100;
+    // 0: no continuation sequence (its labels and loss are still reported); otherwise
+    // at least k, or the continuation would be shorter than a k-mer and not valid
+    // traverse input (traverse_seed() refuses 1 .. k - 1)
     uint64_t continuation_bp = 1000;
 
     // annotation
@@ -509,6 +559,14 @@ struct ArmResult {
     // change cost — one per (source, successor) under a constant cost, one per target
     // under a table. Linear in |σ| + Σ|σ_v| per round under forbid and constant costs.
     uint64_t refusal_scans = 0;
+    // Successor derivations (one per successor of a committed step) in which a TABLE
+    // cost's source list was cut by max_switch_sources AND a cut source had a finite
+    // pair cost into a target of that successor: the cases in which the cut may have
+    // raised a target's loss or left it unentered (§6.3). An over-approximation — the
+    // kept sources may still have been the cheapest — but never an under-count, and it
+    // covers what a `switch_sources` label end cannot: a cut source that goes on along
+    // another successor (or stays) does not end, so no end records the cut.
+    uint64_t switch_sources_cut = 0;
 };
 
 struct LabelArmSummary {
