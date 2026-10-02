@@ -1,5 +1,6 @@
 #include "traverse.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <optional>
 #include <set>
@@ -109,6 +110,40 @@ Json::Value labels_json(const std::vector<LabelId> &labels) {
     return arr;
 }
 
+// A limit that may also be "unlimited" (Strategy::kUnlimited). |def| is the value for
+// an omitted field; a mode in which the knob has no meaning passes |only_unlimited|,
+// and a number is then rejected rather than accepted and ignored.
+size_t limit_or_unlimited(Strict &s, const std::string &k, size_t def, size_t max,
+                          const char *only_unlimited) {
+    if (!s.has(k))
+        return def;
+    const Json::Value &v = s.raw(k);
+    if (v.isString()) {
+        if (v.asString() == "unlimited")
+            return Strategy::kUnlimited;
+        throw InvalidRequest(s.child_path(k) + ": expected an integer or \"unlimited\"");
+    }
+    if (only_unlimited) {
+        throw InvalidRequest(s.child_path(k) + ": " + only_unlimited
+                             + "; set it to \"unlimited\" or omit it");
+    }
+    return s.uint(k, def, 0, max);
+}
+
+Json::Value limit_json(size_t x) {
+    return x == Strategy::kUnlimited ? Json::Value("unlimited") : uint_json(x);
+}
+
+// the cost model as the walker sees it, for validating a strategy before any seed
+LabelChangeCost representative_cost(const CostSpec &spec) {
+    switch (spec.model) {
+        case CostSpec::FORBID: return LabelChangeCost::forbid();
+        case CostSpec::CONSTANT: return LabelChangeCost::constant(spec.value);
+        case CostSpec::TABLE: return LabelChangeCost::table({}, spec.default_cost);
+    }
+    return LabelChangeCost::forbid();
+}
+
 } // namespace
 
 
@@ -194,21 +229,39 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             { { "both", Strategy::BOTH }, { "left", Strategy::LEFT }, { "right", Strategy::RIGHT } });
         st.support = t.enumeration<Support>("support", Support::KMER,
             { { "kmer", Support::KMER }, { "trace", Support::TRACE } });
+        // The preset (spec §6.9) decides the DEFAULTS of the knobs it governs; a knob
+        // given explicitly must agree with it, which validate_strategy() checks below.
+        st.exhaustive = t.boolean("exhaustive", false);
 
         if (t.has("labels")) {
             Strict l(t.raw("labels"), "strategy.labels");
+            st.label_mode = l.enumeration<LabelMode>("mode", LabelMode::CONSTRAIN,
+                { { "constrain", LabelMode::CONSTRAIN }, { "annotate", LabelMode::ANNOTATE } });
+            // bounded like its neighbours: a seed of exactly k bases has no intersection
+            // to narrow the candidates, so this knob alone decides how large a label
+            // dictionary (and with it scratch, stamps, summary and hit maps) the server
+            // materialises. The server lowers it further via TraverseLimits.
+            st.max_seed_labels = l.uint("max_seed_labels", 1000, 1, 100'000);
+            // In annotate mode the per-node cap must admit what the constrain side
+            // admits as a derived permitted set, or the structural oracle of a locus
+            // with more than 64 labels cuts every node by default and proves nothing.
+            const size_t default_cap = st.label_mode == LabelMode::ANNOTATE
+                ? std::max<size_t>(64, st.max_seed_labels) : 64;
+            st.max_labels_per_node = l.uint("max_labels_per_node", default_cap, 1, 100'000);
             st.extra = l.strings("extra");
             if (l.has("change_cost"))
                 req.cost = parse_cost(l.raw("change_cost"), "strategy.labels.change_cost");
             st.loss_budget = l.number("loss_budget", 0);
             st.switch_on_loss_only = l.enumeration<bool>("switch_on", true,
                 { { "loss", true }, { "any", false } });
-            st.max_switch_sources = l.uint("max_switch_sources", 64, 1);
-            // bounded like its neighbours: a seed of exactly k bases has no intersection
-            // to narrow the candidates, so this knob alone decides how large a label
-            // dictionary (and with it scratch, stamps, summary and hit maps) the server
-            // materialises. The server lowers it further via TraverseLimits.
-            st.max_seed_labels = l.uint("max_seed_labels", 1000, 1, 100'000);
+            // unlimited under the preset (a cut source list prunes, see
+            // validate_strategy); a number given with it is left for the validation
+            // to refuse under a table cost
+            st.max_switch_sources = limit_or_unlimited(
+                    l, "max_switch_sources", st.exhaustive ? Strategy::kUnlimited : 64,
+                    std::numeric_limits<size_t>::max() - 1, nullptr);
+            if (st.max_switch_sources == 0)
+                throw InvalidRequest("strategy.labels.max_switch_sources: out of range [1, ...]");
             // "auto" (no kind pinned) is what the normalized strategy echoes, so it has
             // to parse back: an echoed strategy must be resubmittable verbatim
             using OptionalKind = std::optional<LabelKind>;
@@ -217,18 +270,37 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
                   { "column", OptionalKind(LabelKind::COLUMN) },
                   { "header", OptionalKind(LabelKind::HEADER) } });
         }
+        // the preset's default applies to an omitted labels block too
+        if (!t.has("labels") && st.exhaustive)
+            st.max_switch_sources = Strategy::kUnlimited;
+        // Annotate mode has no lineages, so a branch limit and a split limit have no
+        // meaning in it; they are "unlimited" there and a number is refused rather than
+        // ignored. The exhaustive preset makes "unlimited" the default and keeps a
+        // conflicting number for validate_strategy() to refuse.
+        const bool annotate = st.label_mode == LabelMode::ANNOTATE;
+        const char *no_lineage = annotate
+            ? "has no meaning in labels.mode \"annotate\" (no label lineage is tracked, every "
+              "structural successor is followed)"
+            : nullptr;
+        st.max_label_branches = (st.exhaustive || annotate) ? Strategy::kUnlimited : 0;
+        st.max_splits_per_path = (st.exhaustive || annotate) ? Strategy::kUnlimited : 64;
+        st.merge_reconverge = !st.exhaustive;
         if (t.has("branching")) {
             Strict b(t.raw("branching"), "strategy.branching");
-            st.max_label_branches = b.uint("max_label_branches", 0, 0, 64);
+            st.max_label_branches = limit_or_unlimited(b, "max_label_branches",
+                                                       st.max_label_branches, 64, no_lineage);
             st.min_successor_labels = b.uint("min_successor_labels", 1, 1);
             st.min_successor_fraction = b.number("min_successor_fraction", 0, 0, 1);
             st.tip_window_bp = b.uint("tip_window_bp", 0);
             st.bubble_window_bp = b.uint("bubble_window_bp", 0);
-            st.merge_reconverge = b.enumeration<bool>("on_reconverge", true,
+            st.merge_reconverge = b.enumeration<bool>("on_reconverge", st.merge_reconverge,
                 { { "merge", true }, { "keep", false } });
             st.skip_hairpins = b.enumeration<bool>("hairpins", true,
                 { { "skip", true }, { "follow", false } });
-            st.max_splits_per_path = b.uint("max_splits_per_path", 64, 0);
+            st.max_splits_per_path = limit_or_unlimited(b, "max_splits_per_path",
+                                                        st.max_splits_per_path,
+                                                        std::numeric_limits<size_t>::max() - 1,
+                                                        no_lineage);
         }
         if (t.has("bounds")) {
             Strict b(t.raw("bounds"), "strategy.bounds");
@@ -276,8 +348,9 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     }
     // A table is authored by label NAME over the request order (seed labels, then
     // extra). A seed whose labels are derived has no such list at request time, so the
-    // entries could not be resolved — rejected rather than silently mapped.
-    if (req.cost.model == CostSpec::TABLE) {
+    // entries could not be resolved — rejected rather than silently mapped. (In
+    // annotate mode a table conflicts with the mode itself; that message comes first.)
+    if (req.cost.model == CostSpec::TABLE && st.label_mode != LabelMode::ANNOTATE) {
         for (size_t i = 0; i < req.seeds.size(); ++i) {
             if (req.seeds[i].labels.empty()) {
                 throw InvalidRequest("strategy.labels.change_cost: model \"table\" needs "
@@ -292,6 +365,21 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
         throw InvalidRequest("strategy.labels.extra: extra labels are unreachable under change_cost forbid");
     if (req.cost.model == CostSpec::CONSTANT && !st.extra.empty() && req.cost.value > st.loss_budget)
         throw InvalidRequest("strategy.labels.extra: extra labels are unreachable (cost exceeds loss_budget)");
+    // the preset / mode conflicts, refused before any seed is looked at
+    try {
+        validate_strategy(st, representative_cost(req.cost));
+    } catch (const std::invalid_argument &e) {
+        throw InvalidRequest(std::string("strategy.") + e.what());
+    }
+    if (st.label_mode == LabelMode::ANNOTATE) {
+        for (size_t i = 0; i < req.seeds.size(); ++i) {
+            if (!req.seeds[i].labels.empty()) {
+                throw InvalidRequest("request.seeds[" + std::to_string(i) + "].labels: labels.mode "
+                                     "\"annotate\" records the labels present and filters by "
+                                     "none; omit the field (there is no permitted set)");
+            }
+        }
+    }
     return req;
 }
 
@@ -397,27 +485,30 @@ Json::Value strategy_to_json(const Strategy &st, const CostSpec &cost) {
     j["schema_version"] = 1;
     j["direction"] = st.direction == Strategy::BOTH ? "both" : st.direction == Strategy::LEFT ? "left" : "right";
     j["support"] = to_string(st.support);
+    j["exhaustive"] = st.exhaustive;
     Json::Value labels;
+    labels["mode"] = to_string(st.label_mode);
+    labels["max_labels_per_node"] = uint_json(st.max_labels_per_node);
     Json::Value extra(Json::arrayValue);
     for (const auto &e : st.extra) extra.append(e);
     labels["extra"] = extra;
     labels["change_cost"] = cost_to_json(cost);
     labels["loss_budget"] = st.loss_budget;
     labels["switch_on"] = st.switch_on_loss_only ? "loss" : "any";
-    labels["max_switch_sources"] = uint_json(st.max_switch_sources);
+    labels["max_switch_sources"] = limit_json(st.max_switch_sources);
     labels["max_seed_labels"] = uint_json(st.max_seed_labels);
     // "auto": header when the index has a CoordToHeader, column otherwise
     labels["seed_label_kind"] = st.seed_label_kind ? to_string(*st.seed_label_kind) : "auto";
     j["labels"] = labels;
     Json::Value b;
-    b["max_label_branches"] = uint_json(st.max_label_branches);
+    b["max_label_branches"] = limit_json(st.max_label_branches);
     b["min_successor_labels"] = uint_json(st.min_successor_labels);
     b["min_successor_fraction"] = st.min_successor_fraction;
     b["tip_window_bp"] = uint_json(st.tip_window_bp);
     b["bubble_window_bp"] = uint_json(st.bubble_window_bp);
     b["on_reconverge"] = st.merge_reconverge ? "merge" : "keep";
     b["hairpins"] = st.skip_hairpins ? "skip" : "follow";
-    b["max_splits_per_path"] = uint_json(st.max_splits_per_path);
+    b["max_splits_per_path"] = limit_json(st.max_splits_per_path);
     j["branching"] = b;
     Json::Value bo;
     bo["max_extension_bp"] = uint_json(st.max_extension_bp);
@@ -461,9 +552,13 @@ static Json::Value event_to_json(const Event &ev) {
             break;
         case EventType::BLOCKED:
             j["char"] = std::string(1, ev.ch); j["reason"] = to_string(ev.reason); j["labels"] = labels_json(ev.labels);
+            // the labels at the successor not taken appear nowhere else, so a cut list
+            // here is reported like any recorded node's
+            j["labels_total"] = uint_json(ev.labels_total); j["truncated"] = ev.truncated();
             break;
         case EventType::HAIRPIN:
             j["char"] = std::string(1, ev.ch); j["labels"] = labels_json(ev.labels);
+            j["labels_total"] = uint_json(ev.labels_total); j["truncated"] = ev.truncated();
             break;
         case EventType::TIP:
             j["char"] = std::string(1, ev.ch); j["length_bp"] = uint_json(ev.length_bp);
@@ -486,8 +581,20 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     Json::Value fr;
     fr["live_paths"] = uint_json(arm.frontier_live_paths);
     fr["live_labels"] = uint_json(arm.frontier_live_labels);
-    fr["exact"] = true;
+    // false when a remaining head carried a list cut by labels.max_labels_per_node
+    // (annotate mode): live_labels is then a lower bound
+    fr["exact"] = arm.frontier_live_labels_exact;
     j["frontier_remaining"] = fr;
+    // the completeness guarantee (§6.10): every admissible walk of at most this many
+    // bases is present; equals bounds.max_extension_bp exactly when status is complete
+    j["complete_to_bp"] = uint_json(arm.complete_to_bp);
+    // per-node label lists cut by labels.max_labels_per_node: non-zero means the
+    // recorded sets are incomplete and must not be read as "these labels and no other"
+    Json::Value lpn;
+    lpn["cap"] = uint_json(st.max_labels_per_node);
+    lpn["max_seen"] = uint_json(arm.max_labels_at_node);
+    lpn["nodes_truncated"] = uint_json(arm.nodes_labels_truncated);
+    j["labels_per_node"] = lpn;
     if (arm.cap_trigger) {
         Json::Value c;
         c["reason"] = to_string(arm.cap_trigger->reason);
@@ -495,6 +602,7 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
         c["segment"] = uint_json(arm.cap_trigger->segment);
         c["live_paths"] = uint_json(arm.cap_trigger->live_paths);
         c["live_labels"] = uint_json(arm.cap_trigger->live_labels);
+        c["exact"] = arm.cap_trigger->live_labels_exact;
         j["cap_trigger"] = c;
     }
     if (detail != "summary") {
@@ -509,22 +617,56 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
             sj["length_bp"] = uint_json(s.length_bp);
             if (detail == "full" && st.sequences) sj["sequence"] = s.sequence;
             sj["labels"] = labels_json(s.labels_start);
+            // the true count at the entry node: for the root (the seed boundary, which
+            // is in no run) the only place a cut of its list is reported
+            sj["labels_total"] = uint_json(s.labels_start_total);
+            sj["labels_truncated"] = s.labels_start_total > s.labels_start.size();
             sj["labels_at_end"] = labels_json(s.labels_end);
             Json::Value evs(Json::arrayValue);
             for (const auto &e : s.events) evs.append(event_to_json(e));
             sj["events"] = evs;
+            if (st.label_mode == LabelMode::ANNOTATE) {
+                // the labels present along the segment, as runs over its bases
+                Json::Value sets(Json::arrayValue);
+                for (const auto &r : s.label_sets) {
+                    Json::Value rj;
+                    rj["from_bp"] = uint_json(r.from_bp);
+                    rj["to_bp"] = uint_json(r.to_bp);
+                    rj["labels"] = labels_json(r.labels);
+                    rj["labels_total"] = uint_json(r.labels_total);
+                    rj["truncated"] = r.truncated();
+                    sets.append(rj);
+                }
+                sj["label_sets"] = sets;
+            }
             segs.append(sj);
         }
         j["segments"] = segs;
+        // the trie view (design note §5.1.1): at_bp is the shared prefix length from the
+        // seed boundary; per branch the labels at its first node. A branch's count is
+        // not a share of labels_before — one label may follow several branches
         Json::Value splits(Json::arrayValue);
         for (const auto &s : arm.splits) {
             Json::Value sj;
             sj["at_bp"] = uint_json(s.at_bp);
+            sj["prefix_bp"] = uint_json(s.at_bp);
             sj["segment"] = uint_json(s.segment);
             Json::Value ch(Json::arrayValue);
             for (size_t c : s.children) ch.append(uint_json(c));
             sj["children"] = ch;
             sj["kind"] = s.ambiguous ? "ambiguous" : "divergence";
+            sj["labels_before"] = uint_json(s.labels_before);
+            Json::Value branches(Json::arrayValue);
+            for (const auto &b : s.branches) {
+                Json::Value bj;
+                bj["segment"] = uint_json(b.segment);
+                bj["char"] = std::string(1, b.ch);
+                bj["labels_distinct"] = uint_json(b.labels_distinct);
+                bj["labels"] = labels_json(b.labels);
+                bj["labels_truncated"] = b.labels_distinct > b.labels.size();
+                branches.append(bj);
+            }
+            sj["branches"] = branches;
             splits.append(sj);
         }
         j["splits"] = splits;
@@ -539,7 +681,8 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
             pj["segments"] = segs;
         }
         pj["length_bp"] = uint_json(p.length_bp);
-        Json::Value reasons;
+        // an object even when empty (annotate mode: no label ends, only path_reason)
+        Json::Value reasons(Json::objectValue);
         for (size_t r = 0; r < kNumEndReasons; ++r) {
             if (p.end_reasons[r]) reasons[to_string(static_cast<EndReason>(r))] = p.end_reasons[r];
         }
@@ -591,6 +734,7 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
         gj["max_live_paths"] = uint_json(g.max_live_paths);
         gj["distinct_live_labels"] = uint_json(g.max_live_labels);
         gj["live_pairs"] = uint_json(g.max_live_pairs);
+        gj["exact"] = g.live_labels_exact;
         gj["steps"] = uint_json(g.steps);
         gj["divergences"] = uint_json(g.divergences);
         gj["ambiguous_branches"] = uint_json(g.ambiguous_branches);
@@ -669,6 +813,7 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     }
     seed["dropped_labels"] = dropped;
     j["seed"] = seed;
+    j["label_mode"] = to_string(st.label_mode);
     Json::Value dict(Json::arrayValue);
     for (const auto &l : r.label_dict) {
         Json::Value lj;
@@ -848,6 +993,9 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     Json::Value models(Json::arrayValue);
     models.append("forbid"); models.append("constant"); models.append("table");
     c["cost_models_available"] = models;
+    Json::Value modes(Json::arrayValue);
+    modes.append("constrain"); modes.append("annotate");
+    c["label_modes"] = modes;
     c["direct_access"] = oracle.supports_direct();
     c["release"] = release;
     return c;
@@ -935,7 +1083,10 @@ Json::Value process_traverse_request(const Json::Value &json,
     Json::Value strategy = strategy_to_json(req.strategy, req.cost);
     strategy["clamped"] = clamped;
     out["strategy"] = strategy;
-    out["algorithm_version"] = "traverse-0.1";
+    // what every arm's complete_to_bp quantifies over: the per-path edge-reuse rule is
+    // what makes "all walks" a finite set in a graph with cycles
+    out["walk_rule"] = walk_rule_statement(req.strategy, oracle);
+    out["algorithm_version"] = "traverse-0.2";
 
     Json::Value results(Json::arrayValue);
     std::set<std::string> seen_ids;

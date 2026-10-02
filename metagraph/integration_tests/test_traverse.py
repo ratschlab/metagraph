@@ -98,6 +98,60 @@ class TestTraverseBase(TestingBase):
             print(f'  CLI error: {parsed["error"]}', flush=True)
         return parsed, res.returncode
 
+    @staticmethod
+    def _names(result):
+        return {i: l['name'] for i, l in enumerate(result['label_dict'])}
+
+    @staticmethod
+    def _walks(arm, names):
+        """leaf flank -> names of the labels at its end (a constrain-mode right arm).
+
+        Only labels that travelled the spelled bases count (route_bp == 0); under
+        `on_reconverge: keep` that is every label.
+        """
+        segments = {s['id']: s for s in arm['segments']}
+        out = {}
+        for path in arm['paths']:
+            flank = ''.join(segments[sid]['sequence'] for sid in path['segments'])
+            out[flank] = {names[e['label']] for e in path['end_labels'] if e['route_bp'] == 0}
+        return out
+
+    @staticmethod
+    def _structural_walks(arm, names, permitted):
+        """The maximal label-consistent walks of an ANNOTATE-mode right arm for the
+        permitted set, read off the RECORDED label sets alone: the oracle side of the
+        spec's §6.9 contract, sharing no label logic with the walker.
+        """
+        segments = {s['id']: s for s in arm['segments']}
+        candidates = {}
+        for path in arm['paths']:
+            root = segments[path['segments'][0]]
+            at = {0: {names[i] for i in root['labels']}}
+            flank = ''
+            for sid in path['segments']:
+                seg = segments[sid]
+                flank += seg['sequence']
+                for run in seg['label_sets']:
+                    assert not run['truncated'], 'a cut list makes the oracle unusable'
+                    for d in range(run['from_bp'] + 1, run['to_bp'] + 1):
+                        at[d] = {names[i] for i in run['labels']}
+            assert len(at) == len(flank) + 1, 'the recorded runs do not cover the walk'
+            for label in permitted:
+                if label not in at[0]:
+                    continue
+                j = 0
+                while j < len(flank) and label in at[j + 1]:
+                    j += 1
+                candidates.setdefault(label, set()).add(flank[:j])
+        # maximal PER LABEL (a label whose walk ends inside another label's walk is a
+        # claim of its own), then grouped by walk
+        out = {}
+        for label, walks in candidates.items():
+            for w in walks:
+                if not any(o != w and o.startswith(w) for o in walks):
+                    out.setdefault(w, set()).add(label)
+        return out
+
 
 class TestTraverseCLI(TestTraverseBase):
     def test_resolve_header_labels(self):
@@ -357,6 +411,266 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(json.dumps(first['results'], sort_keys=True),
                          json.dumps(second['results'], sort_keys=True))
 
+    def test_traverse_annotate_mode_records_labels(self):
+        """`labels.mode: annotate` follows every structural successor and records what is there.
+
+        Seeding on the shared element, right arm: the structural trie forks into RIGHT1
+        (carried by acc1 and acc3) and RIGHT2 (acc2). Nothing is filtered, the recorded
+        sets name the carriers, and the constrained exhaustive run agrees leaf by leaf.
+        """
+        # a radius beyond the flanks, so that every walk ends at its real dead end
+        radius = BLOCK + 10
+        request = {
+            'seeds': [{'sequence': self.element}],
+            'strategy': {
+                'exhaustive': True,
+                'direction': 'right',
+                'labels': {'mode': 'annotate', 'max_labels_per_node': 8},
+                'bounds': {'max_extension_bp': radius},
+                'output': {'timing': False},
+            },
+        }
+        out, rc = self._traverse(request)
+        self.assertEqual(0, rc, out.get('error'))
+        self.assertIn('walk_rule', out)
+        self.assertIn('edge twice', out['walk_rule'])
+        self.assertIn('annotate', out['capabilities']['label_modes'])
+        strategy = out['strategy']
+        self.assertTrue(strategy['exhaustive'])
+        self.assertEqual('annotate', strategy['labels']['mode'])
+        self.assertEqual(8, strategy['labels']['max_labels_per_node'])
+        self.assertEqual('unlimited', strategy['branching']['max_label_branches'])
+        self.assertEqual('unlimited', strategy['branching']['max_splits_per_path'])
+        self.assertEqual('keep', strategy['branching']['on_reconverge'])
+        self.assertEqual('stop', strategy['frontier']['on_overflow'])
+
+        result = out['results'][0]
+        self.assertEqual('annotate', result['label_mode'])
+        self.assertEqual([], result['seed']['labels'])
+        names = {i: l['name'] for i, l in enumerate(result['label_dict'])}
+        self.assertEqual({'acc1', 'acc2', 'acc3'}, set(names.values()))
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual(radius, right['complete_to_bp'])
+        self.assertEqual({'cap': 8, 'max_seen': 3, 'nodes_truncated': 0}, right['labels_per_node'])
+        # the trie view: one split right after the seed, one branch per flank, and the
+        # branch counts (2 + 1) exceed nothing but need not sum to labels_before either
+        self.assertEqual(1, len(right['splits']))
+        split = right['splits'][0]
+        self.assertEqual(0, split['prefix_bp'])
+        self.assertEqual('divergence', split['kind'])
+        self.assertEqual(3, split['labels_before'])
+        self.assertEqual({1, 2}, {b['labels_distinct'] for b in split['branches']})
+        for branch in split['branches']:
+            self.assertFalse(branch['labels_truncated'])
+            self.assertEqual(branch['labels_distinct'], len(branch['labels']))
+        # every leaf ends structurally, carries no label ends, and its recorded sets are
+        # exactly the carriers of that flank
+        segments = {s['id']: s for s in right['segments']}
+        recorded = {}
+        for path in right['paths']:
+            self.assertEqual('dead_end', path['path_reason'])
+            self.assertEqual({}, path['end_reasons'])
+            self.assertEqual([], path['end_labels'])
+            flank = ''.join(segments[sid]['sequence'] for sid in path['segments'])
+            alive = set(segments[path['segments'][0]]['labels'])
+            for sid in path['segments']:
+                for run in segments[sid]['label_sets']:
+                    self.assertFalse(run['truncated'])
+                    self.assertEqual(run['labels_total'], len(run['labels']))
+                    alive &= set(run['labels'])
+            recorded[flank] = {names[i] for i in alive}
+        self.assertEqual({self.right1: {'acc1', 'acc3'}, self.right2: {'acc2'}}, recorded)
+
+        # the echo is resubmittable verbatim and gives the same result (`output.timing`
+        # is a request-level field the normalized strategy does not carry)
+        request['strategy'] = dict(strategy)
+        request['strategy'].pop('clamped')
+        request['strategy']['output'] = dict(strategy['output'], timing=False)
+        again, rc = self._traverse(request)
+        self.assertEqual(0, rc, again.get('error'))
+        self.assertEqual(json.dumps(out['results'], sort_keys=True),
+                         json.dumps(again['results'], sort_keys=True))
+
+        # the constrained exhaustive run over the carriers has the same leaves
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'bounds': {'max_extension_bp': radius}, 'output': {'timing': False}},
+        })
+        self.assertEqual(0, rc, out.get('error'))
+        result = out['results'][0]
+        self.assertEqual('constrain', result['label_mode'])
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual(radius, right['complete_to_bp'])
+        names = {i: l['name'] for i, l in enumerate(result['label_dict'])}
+        segments = {s['id']: s for s in right['segments']}
+        constrained = {}
+        for path in right['paths']:
+            flank = ''.join(segments[sid]['sequence'] for sid in path['segments'])
+            constrained[flank] = {names[e['label']] for e in path['end_labels']}
+        self.assertEqual(recorded, constrained)
+
+    def test_traverse_exhaustive_rejects_conflicts_and_reports_the_complete_depth(self):
+        """The preset refuses what would prune it; a tripped size cap reports complete_to_bp."""
+        seed = {'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}
+        for conflicting, field in [
+                ({'branching': {'on_reconverge': 'merge'}}, 'on_reconverge'),
+                ({'branching': {'max_label_branches': 2}}, 'max_label_branches'),
+                ({'branching': {'max_splits_per_path': 3}}, 'max_splits_per_path'),
+                ({'branching': {'min_successor_labels': 2}}, 'min_successor_labels'),
+                ({'bounds': {'min_live_labels': 2}}, 'min_live_labels'),
+                ({'frontier': {'on_overflow': 'beam'}}, 'on_overflow'),
+                ({'labels': {'mode': 'annotate', 'extra': ['acc1']}}, 'labels.extra'),
+                ({'labels': {'mode': 'annotate', 'loss_budget': 1}}, 'loss_budget'),
+                ({'labels': {'mode': 'annotate'}, 'support': 'trace'}, 'support'),
+                ({'labels': {'mode': 'annotate'}, 'branching': {'max_label_branches': 0}},
+                 'max_label_branches'),
+                ({'labels': {'mode': 'nonsense'}}, 'mode'),
+                ({'branching': {'max_label_branches': 'lots'}}, 'max_label_branches'),
+                # a pairwise cost keeps only the cheapest max_switch_sources sources,
+                # which can leave a target label unentered: a number is refused
+                ({'labels': {'change_cost': {'model': 'table', 'entries': [['acc1', 'acc2', 1]]},
+                             'loss_budget': 1, 'max_switch_sources': 64}},
+                 'max_switch_sources'),
+        ]:
+            strategy = {'exhaustive': True, 'direction': 'right'}
+            strategy.update(conflicting)
+            out, rc = self._traverse({'seeds': [seed], 'strategy': strategy})
+            self.assertEqual(1, rc, f'accepted a conflict on {field}')
+            self.assertIn(field, out['error'])
+        # ... and "unlimited" is the preset's default for it, echoed as such
+        out, rc = self._traverse({
+            'seeds': [seed],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'labels': {'change_cost': {'model': 'table',
+                                                    'entries': [['acc1', 'acc2', 1]]},
+                                    'loss_budget': 1}},
+        })
+        self.assertEqual(0, rc, out.get('error'))
+        self.assertEqual('unlimited', out['strategy']['labels']['max_switch_sources'])
+        # a derived permitted set over max_seed_labels is refused per seed under the
+        # preset (every walk of a dropped carrier would be missing), not cut
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'labels': {'max_seed_labels': 2}},
+        })
+        self.assertEqual(0, rc)
+        self.assertIn('max_seed_labels', out['results'][0]['error'])
+        self.assertNotIn('arms', out['results'][0])
+        # annotate mode has no permitted set: a seed label list is refused
+        out, rc = self._traverse({'seeds': [seed],
+                                  'strategy': {'labels': {'mode': 'annotate'}}})
+        self.assertEqual(1, rc)
+        self.assertIn('seeds[0].labels', out['error'])
+
+        # a size cap trips mid-level: the partial level does not count, the status is
+        # never "complete", and every walk up to complete_to_bp is present
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'labels': {'mode': 'annotate'},
+                         'bounds': {'max_extension_bp': BLOCK, 'max_steps': 15}},
+        })
+        self.assertEqual(0, rc, out.get('error'))
+        # the annotate default of the per-node cap admits what the constrain side
+        # admits as a derived set (max_seed_labels), so nothing is cut here ...
+        self.assertEqual(1000, out['strategy']['labels']['max_labels_per_node'])
+        right = out['results'][0]['arms']['right']
+        self.assertEqual('truncated', right['status'])
+        self.assertEqual('max_steps', right['cap_trigger']['reason'])
+        # ... and the live-label counts at the trip are exact
+        self.assertTrue(right['cap_trigger']['exact'])
+        self.assertTrue(right['frontier_remaining']['exact'])
+        self.assertTrue(all(g['exact'] for g in right['growth']))
+        # the root segment carries the boundary node's true count (it is in no run)
+        root = right['segments'][0]
+        self.assertEqual(3, root['labels_total'])
+        self.assertFalse(root['labels_truncated'])
+        # two walks: 7 whole levels of two steps, the 8th level trips on its second head
+        self.assertEqual(7, right['complete_to_bp'])
+        segments = {s['id']: s for s in right['segments']}
+        prefixes = set()
+        for path in right['paths']:
+            self.assertEqual('max_steps', path['path_reason'])
+            flank = ''.join(segments[sid]['sequence'] for sid in path['segments'])
+            self.assertGreaterEqual(len(flank), 7)
+            prefixes.add(flank[:7])
+        self.assertEqual({self.right1[:7], self.right2[:7]}, prefixes)
+
+        # a cap that cuts: the counts over cut lists are lower bounds and say so
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'labels': {'mode': 'annotate', 'max_labels_per_node': 1},
+                         'bounds': {'max_extension_bp': BLOCK, 'max_steps': 15}},
+        })
+        self.assertEqual(0, rc, out.get('error'))
+        right = out['results'][0]['arms']['right']
+        self.assertGreater(right['labels_per_node']['nodes_truncated'], 0)
+        self.assertFalse(right['cap_trigger']['exact'])
+        self.assertFalse(right['frontier_remaining']['exact'])
+        self.assertFalse(right['growth'][0]['exact'])
+        root = right['segments'][0]
+        self.assertEqual(3, root['labels_total'])
+        self.assertEqual(1, len(root['labels']))
+        self.assertTrue(root['labels_truncated'])
+
+    def test_traverse_tuned_run_is_a_prefix_subset_of_the_exhaustive_trie(self):
+        """A tuned run drops nothing silently (spec §6.9).
+
+        Its leaves are prefixes of the exhaustive trie's under each of their labels, and
+        the walk it omits carries a recorded reason: RIGHT2 is acc2 alone against acc1 and
+        acc3 on RIGHT1, so a quorum of two prunes it with `minority` at the fork.
+        """
+        radius = BLOCK + 10
+        seed = {'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}
+        full, rc = self._traverse({
+            'seeds': [seed],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'bounds': {'max_extension_bp': radius}},
+        })
+        self.assertEqual(0, rc, full.get('error'))
+        names = self._names(full['results'][0])
+        exhaustive = self._walks(full['results'][0]['arms']['right'], names)
+        self.assertEqual({self.right1: {'acc1', 'acc3'}, self.right2: {'acc2'}}, exhaustive)
+
+        tuned, rc = self._traverse({
+            'seeds': [seed],
+            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': radius},
+                         'branching': {'min_successor_labels': 2, 'on_reconverge': 'keep'}},
+        })
+        self.assertEqual(0, rc, tuned.get('error'))
+        right = tuned['results'][0]['arms']['right']
+        self.assertEqual('complete', right['status'])
+        names = self._names(tuned['results'][0])
+        leaves = self._walks(right, names)
+        # prefix-subset: every tuned leaf under each label extends to an exhaustive leaf
+        for flank, labels in leaves.items():
+            for label in labels:
+                self.assertTrue(any(w.startswith(flank) and label in ls
+                                    for w, ls in exhaustive.items()), (flank, label))
+        # the omitted walk ...
+        self.assertEqual({self.right1: {'acc1', 'acc3'}}, leaves)
+        # ... has its reason on record at the fork: acc2 ended by the quorum, and the
+        # branch event names both bases. Nothing split (one branch was followed), so
+        # the root segment runs to the dead end and also holds acc1's and acc3's ends.
+        root = [s for s in right['segments'] if not s['parents']][0]
+        ends = [(ev['reason'], ev['at_bp'], names[ev['label']])
+                for ev in root['events'] if ev['type'] == 'label_end']
+        self.assertEqual([('minority', 0, 'acc2')], [e for e in ends if e[1] == 0])
+        self.assertEqual({('dead_end', BLOCK, 'acc1'), ('dead_end', BLOCK, 'acc3')},
+                         {e for e in ends if e[1] != 0})
+        self.assertEqual(1, len(right['branch_events']))
+        event = right['branch_events'][0]
+        self.assertEqual(0, event['at_bp'])
+        self.assertEqual({self.right1[0], self.right2[0]}, set(event['successors']))
+        self.assertEqual([2, 1] if event['successors'][0] == self.right1[0] else [1, 2],
+                         event['labels_per_successor'])
+        self.assertEqual(['acc2'], [names[l] for l in event['dropped']])
+
 
 class TestTraverseAPI(TestTraverseBase):
     @classmethod
@@ -537,6 +851,84 @@ class TestTraverseAPI(TestTraverseBase):
         # the server was started without --index-release, so a pinned request is
         # accepted only when the ids match; with no configured id it is ignored
         self.assertIn(ret.status_code, (200, 400))
+
+    def _annotate(self, radius):
+        ret = self._post('traverse', {
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'labels': {'mode': 'annotate'},
+                         'bounds': {'max_extension_bp': radius}},
+        })
+        self.assertEqual(200, ret.status_code, ret.text)
+        return ret.json()
+
+    def test_api_traverse_annotate_mode(self):
+        """HTTP, `labels.mode: annotate`: every structural successor is followed and the
+        labels present are recorded; the response carries the completeness contract."""
+        radius = BLOCK + 10
+        out = self._annotate(radius)
+        self.assertIn('edge twice', out['walk_rule'])
+        self.assertEqual('traverse-0.2', out['algorithm_version'])
+        self.assertTrue(out['strategy']['exhaustive'])
+        self.assertEqual('annotate', out['strategy']['labels']['mode'])
+        result = out['results'][0]
+        self.assertEqual('annotate', result['label_mode'])
+        self.assertEqual([], result['seed']['labels'])
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual(radius, right['complete_to_bp'])
+        self.assertEqual(0, right['labels_per_node']['nodes_truncated'])
+        self.assertEqual(3, right['labels_per_node']['max_seen'])
+        for path in right['paths']:
+            self.assertEqual('dead_end', path['path_reason'])
+            self.assertEqual([], path['end_labels'])
+            self.assertEqual({}, path['end_reasons'])
+        names = self._names(result)
+        structural = self._structural_walks(right, names, {'acc1', 'acc2', 'acc3'})
+        self.assertEqual({self.right1: {'acc1', 'acc3'}, self.right2: {'acc2'}}, structural)
+        # the trie view of the fork: one label per flank but acc1 and acc3 share RIGHT1
+        split = right['splits'][0]
+        self.assertEqual(0, split['prefix_bp'])
+        self.assertEqual(3, split['labels_before'])
+        self.assertEqual([1, 2], sorted(b['labels_distinct'] for b in split['branches']))
+        # the preset refuses a knob that would prune it
+        ret = self._post('traverse', {
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'exhaustive': True, 'labels': {'mode': 'annotate'},
+                         'frontier': {'on_overflow': 'beam'}},
+        })
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn('on_overflow', ret.json()['error'])
+
+    def test_api_traverse_constrain_exhaustive_matches_the_structural_oracle(self):
+        """HTTP, `labels.mode: constrain` with `exhaustive`: the label-constrained trie over a
+        permitted set has exactly the structural oracle's leaves filtered by that set."""
+        radius = BLOCK + 10
+        structural = self._annotate(radius)['results'][0]
+        oracle = self._structural_walks(structural['arms']['right'],
+                                        self._names(structural), {'acc1', 'acc3'})
+        # acc2's flank is not carried by the permitted set: it is not in E
+        self.assertEqual({self.right1: {'acc1', 'acc3'}}, oracle)
+
+        ret = self._post('traverse', {
+            'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc3']}],
+            'strategy': {'exhaustive': True, 'direction': 'right',
+                         'bounds': {'max_extension_bp': radius}},
+        })
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self.assertEqual('constrain', out['strategy']['labels']['mode'])
+        self.assertEqual('unlimited', out['strategy']['branching']['max_label_branches'])
+        result = out['results'][0]
+        self.assertEqual('constrain', result['label_mode'])
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual(radius, right['complete_to_bp'])
+        self.assertEqual(oracle, self._walks(right, self._names(result)))
+        # the path ends with the semantic reason the structural trie saw, a dead end,
+        # reported per label in this mode (no path-level reason)
+        self.assertEqual([{'dead_end': 2}], [p['end_reasons'] for p in right['paths']])
+        self.assertNotIn('path_reason', right['paths'][0])
 
 
 if __name__ == '__main__':
