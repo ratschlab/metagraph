@@ -227,6 +227,25 @@ to a header).
   **normalized strategy** is echoed. If the server clamps a bound (§10.3) the echo carries
   `clamped: [{field, requested, effective}]`, each value in its knob's type (an integer for an integer knob such
   as `labels.max_seed_labels`, a number for `bounds.time_budget_ms`).
+- **Request budgets** (`DESIGN-traverse-graphlet.md` §14, stage 2 of §14.1): `bounds.max_memory_mb` (integer,
+  1 … 1 048 576) and `bounds.max_work_units` (integer ≥ 1), both optional — omitted means no budget, and an
+  omitted budget is not echoed, so the response to a request without one is what it always was. Memory is the
+  modelled bytes the request retains at once: the walker's state, the label caches (a fixed allotment of the
+  budget, which they evict within) and the output **in the requested detail** (a graphlet costs the least,
+  `detail: full` spells every path's chain). Work is charged work units (§6.8). Either budget stops the whole
+  seed when a head cannot be admitted (§6.8), with `resource_limit`, a `resource_stop` and a `walk_domain`
+  limitation (§7.0). Both budgets are **per seed** (the design's *locus* scope): each seed of a request is
+  walked under budgets of its own, so that its result does not depend on the other seeds, and a request of n
+  seeds can hold up to n times the memory budget (each seed's output is kept until the response is written;
+  the server bounds n). A budget that does not hold the seed itself — the work of reading the seed (its
+  validation, or the derivation of its permitted set), or the memory of its depth-0 state (the label
+  dictionary and both roots, with what ending and delivering them costs in the requested detail) — fails
+  that seed (`outcome.walks: failed`, §7.0) before anything per label is delivered; the other seeds are
+  traversed. **What bounds the output**: work and the deadline bound the walk, the same in every detail (so a
+  graphlet rebuilds the `detail: full` response of the same walk); the size of the output, and so the time to
+  serialise it, is bounded by `bounds.max_memory_mb` alone, which charges each expansion's delivery in the
+  requested detail (`detail: full` spells every leaf's chain: on a comb-shaped trie the output is quadratic
+  in the walk, and only the memory budget bounds it).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -534,8 +553,9 @@ one label (within-sample variation) is an ambiguous branch for that label; §6.5
 
 **Per path**: ends when no admissible successor remains (its `end_reasons` count the label reasons above), with
 the semantic reason `max_extension_bp` (the requested radius; the domain is complete, the biology may continue),
-or with a **resource** reason: `max_steps`, `time_budget` (per seed: end all live paths of both arms), or
-`max_live_paths`, `max_paths`, `max_output_bp` (per arm: end that arm only). `beam_pruned` marks pruned paths.
+or with a **resource** reason: `max_steps`, `time_budget`, `resource_limit` (a head the request's memory or work
+budget did not admit; per seed: end all live paths of both arms), or `max_live_paths`, `max_paths`,
+`max_output_bp` (per arm: end that arm only). `beam_pruned` marks pruned paths.
 
 Each arm reports `status: complete | truncated (a resource reason) | pruned (beam)`, `frontier_remaining:
 {live_paths, live_labels, exact}` and `cap_trigger: {reason, arm, at_bp, segment, live_paths, live_labels,
@@ -556,8 +576,27 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
 - A popped path advances along its structurally unbranched run in chunks of up to `batch_kmers` nodes (labels
   batch-fetched, §8.3). **Cap and overflow decisions are made in queue-key order at single-step granularity:** a
   chunk is truncated at the step where a cap trips, so `batch_kmers` never changes which steps are taken.
-- Scope table: `max_extension_bp` per path; `min_live_labels` per path; `max_steps`, `time_budget_ms` per seed;
-  `max_live_paths`, `max_paths`, `max_output_bp` per arm. **Not implemented** (see `DESIGN-traverse-graphlet.md`
+- Scope table: `max_extension_bp` per path; `min_live_labels` per path; `max_steps`, `time_budget_ms`,
+  `max_memory_mb`, `max_work_units` per seed (the design's *locus* scope); `max_live_paths`, `max_paths`,
+  `max_output_bp` per arm.
+- **Head admission** (`DESIGN-traverse-graphlet.md` §14, "atomic commit per head"). Every head is processed in
+  three phases: **plan** (successors, derived states, label ends, switch events, splits — computed without
+  touching the result), **admit** (the plan's objects and the reservations of the heads it creates — what ending,
+  merging and delivering each of them costs — against the memory budget), **commit** (cannot fail). A head that
+  is not admitted is censored exactly like a head beyond a cap (`resource_limit`), and its level does not count
+  toward `complete_to_bp`; every admitted prefix can be finished and delivered within what it reserved. The
+  model is deterministic (fixed bytes per object, never a measurement), so a memory stop is reproducible and
+  independent of `annotation.batch_kmers`. Work units are a weighted sum of what the walk consumed — successor
+  enumerations (4), annotation keys requested (8) and entries returned (1), pair evaluations, refusal scans,
+  edge-reuse probes, derivation scans and steps (1 each) — and the work budget and the deadline are checked
+  before every head and at least every `W` = 65 536 units (within a derivation and between chunks of a level's
+  annotation fetch), so neither is overrun by more than `W`. The seed phase is charged too (8 per seed k-mer
+  read, 1 per annotation entry and coordinate, as the walk charges a fetched row; `account.work_seed` beside
+  each arm's `work_units`), checked at the same interval: a seed phase within one interval is followed by a
+  stop at the first head (a valid result complete to 0 bp), a longer one is cut within about the interval
+  and fails the seed. The depth-0 state is admitted like a head: a memory budget that does not hold it fails
+  the seed. Every counter belongs to the arm whose head did the work. The deadline is never checked at depth 0
+  (`time_budget_ms: 0` still means one level, then the boundary check). **Not implemented** (see `DESIGN-traverse-graphlet.md`
   §14): the per-seed delivery bounds `max_output_bytes` / `max_events` (§6.7), and a request-level time budget
   (`request_time_budget_ms`) that would mark the seeds it leaves unstarted as `not_started` — every seed of a
   request is traversed, each under its own `time_budget_ms`, and the server bounds a request by
@@ -586,8 +625,11 @@ therefore usable as independent evidence for it. That is what the second label m
   subject only to the per-path edge-reuse rule, hairpin handling and seed re-entry of §6.5–§6.6. There is no
   permitted set, no label state, no loss budget, no switching, no quorum and no branch limit: `seeds[].labels`
   must be omitted and the label machinery is rejected (§5). The labels present at every node are **recorded**
-  instead — `label_dict` is filled in the order labels are first met, each segment carries the sets present
-  along it as runs (§7.4), and `labels_start` / `labels_end` are the sets at the segment's entry node (the seed
+  instead — `label_dict` is filled in the order labels are first met (a level's labels are named when its
+  annotation is fetched, before its heads are admitted: a walk that a request budget or a refused admission
+  stopped after that fetch keeps only the labels its result records, in the same order, so that no label is
+  "met" that appears nowhere in the result; a cap, and a time stop without a budget, keep the dictionary as
+  it was), each segment carries the sets present along it as runs (§7.4), and `labels_start` / `labels_end` are the sets at the segment's entry node (the seed
   boundary for the root) and last node. A path ends with a **path-level** reason only — `dead_end`,
   `edge_reuse`, `edge_reuse_rc`, `rejoined_seed` (a successor that was only a skipped hairpin is a `dead_end`
   with its `hairpin` event), `max_extension_bp` or a resource cap — and `end_labels` / `end_reasons` are empty,
@@ -640,7 +682,8 @@ been fully explored, which is a usable oracle, just a shallower one. Exploration
 so no new order is needed; what the bound needs is a **per-level completion boundary and an honest report of it**.
 
 - The size caps are the existing ones: `max_steps` (nodes entered, per seed), `max_output_bp` (bases emitted, per
-  arm), `max_paths` (leaves, per arm), `max_live_paths` (frontier, per arm), `time_budget_ms`. Radius is what the
+  arm), `max_paths` (leaves, per arm), `max_live_paths` (frontier, per arm), `time_budget_ms`, and the request
+  budgets `max_memory_mb` and `max_work_units` (per seed, §6.8), which stop between two heads like any cap. Radius is what the
   caller pushes; size is what is capped.
 - A cap trips **between two heads of one level**: the heads expanded before it have all their children, the heads
   after it have none. That level is **partial and does not count**. Every arm reports **`complete_to_bp`** = the
@@ -737,7 +780,7 @@ is rejected instead (§5).
 
   | axis | values | meaning |
   |---|---|---|
-  | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4); the result has no `arms`, an `error`, and a `derivation` limitation |
+  | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4): the result has no `arms`, an `error`, and a `derivation` limitation; or a request budget does not hold the seed itself (§5, request budgets): no `arms`, an `error`, a seed-level `walk_domain` naming the budget's knob and a `resource_stop` |
   | `branch_diagnostics` | `complete` \| `cut` | `cut`: a `branch_events` limitation — some arm's `evidence.complete` is `false`, and branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported |
   | `label_evidence` | `complete` \| `lower_bound` \| `qualified` | `lower_bound`: evidence may be *missing or understated* — recorded lists were cut (`label_lists`, `inexact_counts`: annotate mode's `label_summary` and the counts flagged `exact: false` are lower bounds), carriers of the seed were cut (`seed_labels`), a `max_switch_sources` cut may have raised a loss or missed a switch entry (`switch_sources`), or losses were re-minimised greedily (`greedy_losses`). `qualified`: something reported may be *overstated* — a column-label trace cannot see a record boundary (`trace_record_boundaries`); `qualified` wins when both apply |
   | `delivery` | `inline` | the whole result is in this response; `spooled` / `paged` are reserved for the graphlet delivery path (`DESIGN-traverse-graphlet.md` §14) |
@@ -766,7 +809,7 @@ is rejected instead (§5).
 
 | `kind` | Where | Emitted when | `knob` | `observed` |
 |---|---|---|---|---|
-| `walk_domain` | arm | `status` is not `complete`: the cap in `cap_trigger`, then any other cap that ended walks after it (a beam, then a step cap) | the cap's field: `bounds.max_steps`, `bounds.max_live_paths` (also a beam's width), `bounds.max_paths`, `bounds.max_output_bp`, `bounds.time_budget_ms` | what the cap compared at the trip: steps of the seed, bases of the arm, leaves + live heads, live heads (beam: heads of the level), elapsed ms; for a later cap the walks it ended. `complete_to_bp` = the arm's |
+| `walk_domain` | arm; seed, on a seed a request budget failed (no `complete_to_bp`: nothing was walked) | `status` is not `complete`: the cap in `cap_trigger`, then any other cap that ended walks after it (a beam, then a step cap) | the cap's field: `bounds.max_steps`, `bounds.max_live_paths` (also a beam's width), `bounds.max_paths`, `bounds.max_output_bp`, `bounds.time_budget_ms`, `bounds.max_memory_mb`, `bounds.max_work_units` (`resource_limit`) | what the cap compared at the trip: steps of the seed, bases of the arm, leaves + live heads, live heads (beam: heads of the level), elapsed ms, the MiB admitting the head needed (rounded up), the work units used; for a later cap the walks it ended. `complete_to_bp` = the arm's |
 | `branch_events` | arm | events were dropped by the cap | `output.max_branch_events` | `branch_events_total`; `complete_to_bp` = `evidence.complete_to_bp` |
 | `label_lists` | arm | `labels_per_node.nodes_truncated > 0` | `labels.max_labels_per_node` | `labels_per_node.max_seen` |
 | `inexact_counts` | arm | a live-label count in `frontier_remaining`, `cap_trigger` or a `growth` bin is flagged `exact: false` | `labels.max_labels_per_node` | how many counts are flagged |
@@ -776,6 +819,7 @@ is rejected instead (§5).
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
+| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: the budget is enforced on the modelled state and output, but the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged — stage 3 of `DESIGN-traverse-graphlet.md` §14.1 charges them inside the decoder. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account (the decoded rows, a cache beyond its allotment, the dictionary a fetch grew), MiB rounded up (0: none); the admitted account itself, the depth-0 state included, never exceeds the budget. Also on a seed a budget failed |
 | `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels` | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers |
 
 ```json
@@ -786,6 +830,18 @@ is rejected instead (§5).
                  not reported; more were produced: raise the knob or set it to \"unlimited\""}]
 ```
 
+- **A resource stop**, per seed result, when a request budget stopped the walk (and for a time stop only when the
+  request set a budget, so that a response without one keeps its form): `resource_stop: {scope: "locus",
+  resource: memory | work | time, phase: "traversal", requested, effective, used, remaining, actions, message}`,
+  the amounts in the knob's unit (MiB — `used` rounded up, `remaining` down —, work units, ms; `requested` is the
+  request's value where the server clamped it), `actions` the levers (`raise_memory_budget`, `use_graphlet`,
+  `drop_sequences`, `raise_work_budget`, `raise_time_budget`, `continue_from_leaves`; on a seed a budget failed,
+  which has no leaves, the levers on the seed instead of `continue_from_leaves`: `lower_max_seed_labels` for a
+  derived set, `name_fewer_labels` for a named one, `lower_max_labels_per_node` in annotate mode, and
+  `shorten_seed` for a work budget the seed phase spent). The MGT `Q` record carries
+  it (§7.5.2). It is a property of the walk, the same in every detail; a memory stop itself depends on the
+  requested detail (the output is charged), so the same request can stop at another depth in another detail.
+  `phase` is always `traversal` in this stage: finalisation and serialisation are reserved at admission.
 - **Not limitations:** semantic stops (`dead_end`, `label_lost`, `max_extension_bp`, …) — the requested domain
   is complete there — and `dropped_labels` (named labels that do not support the seed). A seed whose permitted
   set could not be derived is a `failed` result with a `derivation` limitation (§6.1 step 4), not a limited one.
@@ -949,7 +1005,9 @@ is rejected instead (§5).
   or per target under a table — linear in |σ| + Σ|σ_v| per round under `forbid` and `constant`) — so that a
   pathological locus is visible rather than silent; and `switch_sources_cut`, the successor derivations of
   committed steps in which a `table` cost's source list was cut by `max_switch_sources` while a cut source had a
-  finite switch into a target there (the `switch_sources` limitation, §7.0). Annotation access is per seed
+  finite switch into a target there (the `switch_sources` limitation, §7.0); and, when the request sets a budget,
+  `work_units`, the arm's charged work units (§6.8; listed last, so a reader that does not know it keeps it).
+  Every counter belongs to the arm whose head did the work. Annotation access is per seed
   (`annotation: {access_path, keys_mapped, rows_requested, direct_reads}`); `rc_index_range` calls and
   resource-cap hits are not counted.
 - `timing` (excluded from determinism): elapsed per phase, cache hits, and the **physical fetch counters**
@@ -1055,7 +1113,7 @@ derived keeps the failed shape of §7.1 (no `graphlet`).
   be UTF-8. The string `unlimited` is `s:unlimited`; the knob value "unlimited" is `u`.
 - **Codes.** End reasons: `D` dead_end, `L` label_lost, `B` loss_budget, `R` branch, `U` edge_reuse,
   `V` edge_reuse_rc, `J` rejoined_seed, `T` trace_break, `X` max_extension_bp, `S` max_steps, `P` max_live_paths,
-  `N` max_paths, `O` max_output_bp, `M` time_budget, `W` beam_pruned (`Y` resource_limit is reserved). A label
+  `N` max_paths, `O` max_output_bp, `M` time_budget, `W` beam_pruned, `Y` resource_limit. A label
   end's text qualifier is a second letter: `Rm` minority, `Rb` below_min_labels, `Rs` split_limit, `Dh` hairpin,
   `Ls` superseded, `Lx` switch_sources.
 - Every token has exactly one valid spelling and readers reject every other one (`1.0`, `01`, `0,1`, `%41`, a
@@ -1092,7 +1150,8 @@ O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l|q> <delivery i|s|p>
     the per-seed outcome (§7.0); q = qualified (DESIGN v5.2)
 Q <scope> <resource> <phase> <requested VALUE|*> <effective VALUE|*> <used VALUE|*> <remaining VALUE|*>
   <actions csv|.> <message>
-    a resource stop (DESIGN §14): reserved, never written today (no budget can stop a walk yet). The four
+    a resource stop (DESIGN §14): the result's resource_stop (§7.0), written when a request budget stopped
+    the walk. The four
     amounts are typed like K's values (the design left them untyped; a budget can be an integer, a float or
     "unlimited"), * = not stated; actions = the suggested next actions ([a-z_] tokens); message = free text
 K <arm l|r|*> <kind> <knob> <limit VALUE> <observed VALUE> <complete_to_bp|*> <extra name=VALUE,…|.> <effect>
@@ -1342,7 +1401,10 @@ the server.
 - **Capabilities** (also in `/stats` and every resolve/traverse response): `k`, `regime`, `alphabet`,
   `num_labels`, `has_coordinates`, `has_coord_to_header`, `cost_models_available`, access path, server maxima,
   `schema_version`, `release`, `graphlet_format` (1: the MGT version `detail: graphlet` writes, §7.5),
-  `detail_levels` (`["summary", "tree", "full", "graphlet"]`) and the **index identity**
+  `detail_levels` (`["summary", "tree", "full", "graphlet"]`); `GET /traverse/capabilities` adds the request
+  budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in
+  work units) and `memory_bound: "soft"` (until stage 3 charges annotation decoding; not in the per-request
+  capabilities, which stay as they were); and the **index identity**
   (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
   - `index_ns`: `--index-name NAME` (`[A-Za-z0-9._-]+`), a name for humans and routing, not identity; `null`
     when unset.
