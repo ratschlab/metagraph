@@ -1,0 +1,260 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "fbfd396e439f0d22",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 4,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "rows",
+    "direct_reads": 0,
+    "keys_mapped": 144,
+    "rows_requested": 144
+   },
+   "arms": {
+    "left": {
+     "branch_events_total": 0,
+     "complete_to_bp": 70,
+     "completeness_scope": "united_history",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 40,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 40,
+      "successor_enumerations": 41,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 40,
+      "label_ends": {},
+      "leaves": 1,
+      "leaves_by_reason": {
+       "dead_end": 1
+      },
+      "max_bp": 40,
+      "merges": 0,
+      "runs": 0,
+      "segments": 1,
+      "splits": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 2,
+      "max_seen": 4,
+      "nodes_truncated": 41
+     },
+     "limitations": [
+      {
+       "effect": "41 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob",
+       "kind": "label_lists",
+       "knob": "labels.max_labels_per_node",
+       "limit": 2,
+       "observed": 4
+      },
+      {
+       "effect": "the live-label counts flagged \"exact\": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob",
+       "kind": "inexact_counts",
+       "knob": "labels.max_labels_per_node",
+       "limit": 2,
+       "observed": 1
+      },
+      {
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 0
+      }
+     ],
+     "status": "complete"
+    },
+    "right": {
+     "branch_events_total": 0,
+     "complete_to_bp": 70,
+     "completeness_scope": "united_history",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 102,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 102,
+      "successor_enumerations": 100,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 102,
+      "label_ends": {},
+      "leaves": 1,
+      "leaves_by_reason": {
+       "max_extension_bp": 1
+      },
+      "max_bp": 70,
+      "merges": 2,
+      "runs": 0,
+      "segments": 7,
+      "splits": 2
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 2,
+      "max_seen": 4,
+      "nodes_truncated": 73
+     },
+     "limitations": [
+      {
+       "effect": "73 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob",
+       "kind": "label_lists",
+       "knob": "labels.max_labels_per_node",
+       "limit": 2,
+       "observed": 4
+      },
+      {
+       "effect": "the live-label counts flagged \"exact\": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob",
+       "kind": "inexact_counts",
+       "knob": "labels.max_labels_per_node",
+       "limit": 2,
+       "observed": 2
+      },
+      {
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 2
+      }
+     ],
+     "status": "complete"
+    }
+   },
+   "graphlet": "H mgt 1 15 basic $ACGT a k m 2 20 0 walk fixtures * fbfd396e439f0d22\nS 58b906f959ef3993 30 16 0 ATGAGCGTGCCTCTAACGTTCATACCAAAT\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 2 * 0 c.fa\nL c 3 * 0 both.fa\nO p c l i\nK l label_lists labels.max_labels_per_node i:2 i:4 * . 41 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob\nK l inexact_counts labels.max_labels_per_node i:2 i:1 * . the live-label counts flagged \"exact\": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob\nK l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nK r label_lists labels.max_labels_per_node i:2 i:4 * . 73 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob\nK r inexact_counts labels.max_labels_per_node i:2 i:2 * . the live-label counts flagged \"exact\": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob\nK r scope branching.on_reconverge s:merge i:2 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA l c 70 u 0 0 1 4 41 steps=40,successor_enumerations=41,output_bp=40,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 1 0 1 0 0 40\nB 0 1 2 2 0 40 0 0 0 0 0 0 0 .\nG * 0 40 0-1 4 * * * * AATCCCGGGAATCCGCCGGACCCGGTCACTTGCGATGCGA\nP 0 40 4 !\nT D .\nA r c 70 u 0 0 1 4 73 steps=102,successor_enumerations=100,output_bp=102,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 7 0 1 2 2 102\nB 0 2 4 4 0 70 2 0 2 1 0 0 0 .\nB 50 2 4 4 0 32 0 0 0 1 0 0 0 .\nG * 0 20 0-1 4 * * 0 * TTTCCTATTTAGCCTCTGTC\nP 0 20 4 !\nG 0 20 16 0,2 3 * * * * ATTACGTTTGACAATG\nP 20 35 3 !\nP 35 36 4 0-1\nG 0 20 16 1,3 * * * * * TTTACGTTTGACAATG\nP 20 35 2 !\nP 35 36 4 0-1\nG 1,2 36 10 ! 4 * * 0 * ACCCAGCCCT\nP 36 46 4 !\nG 3 46 16 0,3 * * * * * CCGGCGGGTCGACTTG\nP 46 61 2 !\nP 61 62 4 0-1\nG 3 46 16 1-2 3 * * * * GCGGCGGGTCGACTTG\nP 46 61 3 !\nP 61 62 4 0-1\nG 4,5 62 8 ! 4 * * * * GTCCGGAC\nP 62 70 4 !\nT X .\nC 20 0 0 0\nZ 42\n",
+   "graphlet_bytes": 2549,
+   "graphlet_lines": 42,
+   "label_mode": "annotate",
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "lower_bound",
+    "walks": "partial"
+   },
+   "seed": {
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": false,
+    "labels_supporting_total": 0,
+    "length_bp": 30,
+    "num_kmers": 16,
+    "num_labels": 4,
+    "num_seed_labels": 0,
+    "seed_id": "annotate",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "58b906f959ef3993"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 70,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "merge",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "both",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 2,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "annotate",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 20,
+   "detail": "graphlet",
+   "max_branch_events": 100,
+   "profile_bin_bp": 50,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); every such walk is followed and the labels present at its nodes are recorded"
+}

@@ -1,0 +1,172 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "f61e6e391195a372",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 2,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "tuples",
+    "direct_reads": 0,
+    "keys_mapped": 80,
+    "rows_requested": 80
+   },
+   "arms": {
+    "right": {
+     "branch_events_total": 0,
+     "complete_to_bp": 40,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 79,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 79,
+      "successor_enumerations": 79,
+      "switch_sources_cut": 0
+     },
+     "counts": {
+      "bases": 79,
+      "label_ends": {},
+      "leaves": 3,
+      "leaves_by_reason": {
+       "dead_end": 2,
+       "max_extension_bp": 1
+      },
+      "max_bp": 40,
+      "merges": 0,
+      "runs": 0,
+      "segments": 5,
+      "splits": 2
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "labels_per_node": {
+      "cap": 1000,
+      "max_seen": 2,
+      "nodes_truncated": 0
+     },
+     "limitations": [],
+     "status": "complete"
+    }
+   },
+   "graphlet": "H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk fixtures * f61e6e391195a372\nS 3b323ea27d2ea165 30 16 0 CGGGGTGGATTAGTCAAGGCCATGATGGGC\nL h 0 0 0 ACC1\nL h 1 0 4 \nL h 0 1 3 2\nO c c c i\nA r c 40 p 0 0 1 2 0 steps=79,successor_enumerations=79,output_bp=79,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 5 0 3 2 0 79\nB 0 3 3 3 1 79 2 0 2 0 0 0 0 .\nG * 0 1 0-1 * * * 0 * G\nP 0 1 2 !\nG 0 1 19 0 * * * 0 * CATTTGGACCGTAGGAGTA\nP 1 14 1 0\nP 14 20 2 0,2\nG 0 1 29 1 * * * * * TACGGAGATATTCATCAAGATGATCATAT\nP 1 30 1 1\nT D .\nG 1 20 20 2 * * * * * CTATCACCTGCCACTTCAAT\nP 20 40 1 2\nT X .\nC 40 0 0 .\nG 1 20 10 0 * * * * * TATGGTCCTA\nP 20 30 1 0\nT D .\nZ 24\n",
+   "graphlet_bytes": 723,
+   "graphlet_lines": 24,
+   "label_mode": "annotate",
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "complete"
+   },
+   "seed": {
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": false,
+    "labels_supporting_total": 0,
+    "length_bp": 30,
+    "num_kmers": 16,
+    "num_labels": 3,
+    "num_seed_labels": 0,
+    "seed_id": "same_name",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "3b323ea27d2ea165"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 40,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "keep",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "right",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 1000,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "annotate",
+   "seed_label_kind": "header",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 1000,
+   "detail": "graphlet",
+   "max_branch_events": 100,
+   "profile_bin_bp": 50,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); every such walk is followed and the labels present at its nodes are recorded"
+}

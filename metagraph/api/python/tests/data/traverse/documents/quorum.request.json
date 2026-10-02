@@ -1,0 +1,30 @@
+{
+ "seeds": [
+  {
+   "seed_id": "quorum",
+   "sequence": "CGCAGGGGCGTGGGTCAGGCCAAAATCGGT"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "branching": {
+   "min_successor_labels": 2,
+   "max_label_branches": 1
+  },
+  "bounds": {
+   "max_extension_bp": 100
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "quorum",
+  "k": 15,
+  "doc": "quorum 2 at a three-way fork: the minority successor is refused (V) and the split keeps two children; two interior label_lost ends at one position whose branch counts (1 and 0) differ only through the refused successor"
+ }
+}

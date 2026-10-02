@@ -1,0 +1,9 @@
+{
+ "fixture_index": {"k": 5, "regime": "basic", "alphabet": "$ACGT", "ns": null, "fp": null, "meta_fp": "3f2a9c1b0d4e5f60", "release": ""},
+ "seeds": [{"seed_id": "limits", "sequence": "ATGGCATTCA", "labels": ["colA", "colB", "colC"]}],
+ "strategy": {"direction": "right", "support": "trace",
+              "labels": {"extra": ["colD"], "loss_budget": 1,
+                         "change_cost": {"model": "table", "entries": [["colB", "colD", 2], ["colC", "colD", 3]], "default": "forbid"}},
+              "bounds": {"max_extension_bp": 20, "max_steps": 11},
+              "output": {"sequences": false, "max_branch_events": 1, "profile_bin_bp": 10, "continuation_bp": 10}}
+}

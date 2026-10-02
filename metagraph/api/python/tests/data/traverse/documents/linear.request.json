@@ -1,0 +1,32 @@
+{
+ "seeds": [
+  {
+   "seed_id": "linear",
+   "sequence": "CGTACCGTCGTAGCCATGCTGCTTCATTGCAGGTTCTATT",
+   "labels": [
+    "acc1",
+    "acc2",
+    "acc3",
+    "acc4"
+   ]
+  }
+ ],
+ "strategy": {
+  "direction": "both",
+  "branching": {
+   "min_successor_labels": 2
+  },
+  "bounds": {
+   "max_extension_bp": 50
+  },
+  "output": {
+   "profile_bin_bp": 20,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "fork",
+  "k": 15,
+  "doc": "both arms, quorum 2: a minority end at each arm's fork with its V refusal (on the right at the seed boundary: a zero-length Rm run; L1 and L2 share their last base, so the left fork is at 1); acc4, named but carrying only part of the seed, is dropped (X)"
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "seeds": [
+  {
+   "seed_id": "same_name",
+   "sequence": "CGGGGTGGATTAGTCAAGGCCATGATGGGC"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "mode": "annotate",
+   "seed_label_kind": "header"
+  },
+  "bounds": {
+   "max_extension_bp": 40
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "same_name",
+  "k": 15,
+  "doc": "annotate: two headers named ACC1 from different columns (an L line ending in a space)"
+ }
+}

@@ -1,0 +1,30 @@
+H mgt 1 15 basic $ACGT c k m 64 1000 0 walk fixtures * 53a0a128bc5a0614
+S f94bc92d9ffd62de 40 26 3 CGTACCGTCGTAGCCATGCTGCTTCATTGCAGGTTCTATT
+X seed_unsupported 0-12 acc4
+L h 0 0 0 acc1
+L h 0 1 3 2
+L h 0 2 3 3
+O c c c i
+K l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+K r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A l c 50 u 0 0 1 0 0 steps=40,successor_enumerations=41,output_bp=40,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 1 3 1 0 0 40
+B 0 1 3 3 1 20 0 0 0 0 0 0 0 R:1
+B 20 1 2 2 1 20 0 0 0 0 0 0 0 .
+B 40 1 2 2 1 0 0 0 0 0 0 0 0 D:2
+V 1 0 CG 2,1 . 2 G:minority:2
+G * 0 40 * * * * * * GCACTCCCTATGAAAACGTCTGTCAGCTACGAGGAGACTA
+T * .
+R 0 0 0 40 D 0 * * 0 0 0
+R 0 1 0 40 D 0 * * 0 0 0
+R 0 2 0 1 Rm 0 * * 2 0 0
+A r c 50 u 0 0 1 0 0 steps=40,successor_enumerations=41,output_bp=40,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 1 3 1 0 0 40
+B 0 1 3 3 1 20 0 0 0 0 0 0 0 R:1
+B 20 1 2 2 1 20 0 0 0 0 0 0 0 .
+B 40 1 2 2 1 0 0 0 0 0 0 0 0 D:2
+V 0 0 AT 1,2 . 1 A:minority:1
+G * 0 40 * * * * * * TTACACCACGAGATCGCCTGGGGCTCTGACAGTTAGCATA
+T * .
+R 0 0 0 40 D 0 * * 0 0 0
+R 0 1 0 0 Rm 0 * * 2 0 0
+R 0 2 0 40 D 0 * * 0 0 0
+Z 30

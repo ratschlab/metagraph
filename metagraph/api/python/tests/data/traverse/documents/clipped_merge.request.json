@@ -1,0 +1,7 @@
+{
+ "fixture_index": {"k": 5, "regime": "basic", "alphabet": "$ACGT", "ns": "mini", "fp": "a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5", "meta_fp": "3f2a9c1b0d4e5f60", "release": ""},
+ "seeds": [{"seed_id": "clipped_merge", "sequence": "CGTAGGATCC", "labels": ["lineA", "lineB"]}],
+ "strategy": {"direction": "right",
+              "bounds": {"max_extension_bp": 19},
+              "output": {"profile_bin_bp": 10, "continuation_bp": 10}}
+}

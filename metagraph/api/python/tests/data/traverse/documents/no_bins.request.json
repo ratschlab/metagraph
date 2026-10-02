@@ -1,0 +1,28 @@
+{
+ "seeds": [
+  {
+   "seed_id": "no_bins",
+   "sequence": "TTACGTTTGACAATGACCCAGCCCT"
+  }
+ ],
+ "strategy": {
+  "direction": "both",
+  "labels": {
+   "mode": "annotate",
+   "seed_label_kind": "column"
+  },
+  "bounds": {
+   "max_extension_bp": 50,
+   "max_steps": 1
+  },
+  "output": {
+   "profile_bin_bp": 20,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "bubbles",
+  "k": 15,
+  "doc": "annotate, both arms, max_steps 1 below the left boundary's two successors (the seed Q1 sits between two bubbles): the cap trips on the left arm at depth 0 and censors the right root before it ran a level, so the right arm has no growth bin (A B* V*: zero B records are valid)"
+ }
+}

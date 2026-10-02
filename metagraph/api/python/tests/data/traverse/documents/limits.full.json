@@ -1,0 +1,597 @@
+{
+ "release": "",
+ "capabilities": {
+  "schema_version": 1,
+  "k": 5,
+  "regime": "basic",
+  "alphabet": "$ACGT",
+  "num_labels": 1,
+  "has_coordinates": true,
+  "has_coord_to_header": true,
+  "supports_trace": true,
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "direct_access": false,
+  "release": "",
+  "graphlet_format": 1,
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "index_ns": null,
+  "index_fp": null,
+  "index_meta_fp": "3f2a9c1b0d4e5f60"
+ },
+ "strategy": {
+  "schema_version": 1,
+  "direction": "right",
+  "support": "trace",
+  "exhaustive": false,
+  "labels": {
+   "mode": "constrain",
+   "max_labels_per_node": 64,
+   "extra": [
+    "colD"
+   ],
+   "change_cost": {
+    "model": "table",
+    "entries": [
+     [
+      "colB",
+      "colD",
+      2
+     ],
+     [
+      "colC",
+      "colD",
+      3
+     ]
+    ],
+    "default": "forbid"
+   },
+   "loss_budget": 1.0,
+   "switch_on": "loss",
+   "max_switch_sources": 64,
+   "max_seed_labels": 1000,
+   "seed_label_kind": "auto"
+  },
+  "branching": {
+   "max_label_branches": 0,
+   "min_successor_labels": 1,
+   "min_successor_fraction": 0.0,
+   "tip_window_bp": 0,
+   "bubble_window_bp": 0,
+   "on_reconverge": "merge",
+   "hairpins": "skip",
+   "max_splits_per_path": 64
+  },
+  "bounds": {
+   "max_extension_bp": 20,
+   "min_live_labels": 1,
+   "max_steps": 11,
+   "max_live_paths": 1000,
+   "max_paths": 10000,
+   "max_output_bp": 2000000,
+   "time_budget_ms": 30000.0
+  },
+  "frontier": {
+   "order": "breadth_first",
+   "on_overflow": "stop"
+  },
+  "output": {
+   "detail": "full",
+   "sequences": false,
+   "profile_bin_bp": 10,
+   "max_branch_events": 1,
+   "continuation_bp": 10,
+   "timing": true
+  },
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "clamped": []
+ },
+ "walk_rule": "a walk uses no (k+1)-mer edge twice on its own path, enters no seed node and takes no hairpin step (hand-made fixture: no index behind it)",
+ "algorithm_version": "traverse-0.2",
+ "results": [
+  {
+   "seed": {
+    "seed_id": "limits",
+    "validated_seed_id": "5eedfa11ed5eed00",
+    "seed_id_mismatch": false,
+    "length_bp": 10,
+    "num_kmers": 6,
+    "labels": [
+     "colA",
+     "colB",
+     "colC"
+    ],
+    "labels_from_seed": false,
+    "labels_supporting_total": 3,
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "dropped_labels": []
+   },
+   "limitations": [
+    {
+     "kind": "trace_record_boundaries",
+     "knob": "labels.seed_label_kind",
+     "limit": "column",
+     "observed": 4,
+     "effect": "a column label's trace follows consecutive coordinates of the whole column, so it cannot detect the boundary between two records whose coordinates happen to be adjacent; use header labels (seed_label_kind: \"header\") where the index has a CoordToHeader"
+    }
+   ],
+   "outcome": {
+    "walks": "partial",
+    "branch_diagnostics": "cut",
+    "label_evidence": "qualified",
+    "delivery": "spooled"
+   },
+   "label_mode": "constrain",
+   "label_dict": [
+    {
+     "name": "colA",
+     "kind": "column",
+     "column": 0
+    },
+    {
+     "name": "colB",
+     "kind": "column",
+     "column": 1
+    },
+    {
+     "name": "colC",
+     "kind": "column",
+     "column": 2
+    },
+    {
+     "name": "colD",
+     "kind": "column",
+     "column": 3
+    }
+   ],
+   "arms": {
+    "right": {
+     "status": "truncated",
+     "frontier_remaining": {
+      "live_paths": 1,
+      "live_labels": 2,
+      "exact": true
+     },
+     "complete_to_bp": 7,
+     "completeness_scope": "united_history",
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 2,
+      "nodes_truncated": 0
+     },
+     "evidence": {
+      "complete": false,
+      "complete_to_bp": 6
+     },
+     "limitations": [
+      {
+       "kind": "walk_domain",
+       "knob": "bounds.max_steps",
+       "limit": 11,
+       "observed": 12,
+       "complete_to_bp": 7,
+       "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob"
+      },
+      {
+       "kind": "branch_events",
+       "knob": "output.max_branch_events",
+       "limit": 1,
+       "observed": 2,
+       "complete_to_bp": 6,
+       "effect": "branch decisions and refusals at or beyond complete_to_bp are not reported; more were produced: raise the knob or set it to \"unlimited\""
+      },
+      {
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 1,
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee"
+      }
+     ],
+     "cap_trigger": {
+      "reason": "max_steps",
+      "at_bp": 7,
+      "segment": 3,
+      "live_paths": 1,
+      "live_labels": 2,
+      "exact": true
+     },
+     "segments": [
+      {
+       "id": 0,
+       "parents": [],
+       "from_bp": 0,
+       "length_bp": 3,
+       "labels": [
+        0,
+        1,
+        2
+       ],
+       "labels_total": 3,
+       "labels_truncated": false,
+       "labels_at_end": [
+        0,
+        1,
+        2
+       ],
+       "events": [
+        {
+         "at_bp": 2,
+         "type": "blocked",
+         "char": "T",
+         "reason": "edge_reuse",
+         "labels": [
+          2
+         ],
+         "labels_total": 1,
+         "truncated": false
+        }
+       ]
+      },
+      {
+       "id": 1,
+       "parents": [
+        0
+       ],
+       "from_bp": 3,
+       "length_bp": 4,
+       "labels": [
+        0,
+        1
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "labels_at_end": [
+        0
+       ],
+       "events": [
+        {
+         "at_bp": 5,
+         "type": "label_end",
+         "label": 1,
+         "reason": "loss_budget",
+         "needed_budget": 2.0,
+         "structural_successors": 2
+        }
+       ]
+      },
+      {
+       "id": 2,
+       "parents": [
+        0
+       ],
+       "from_bp": 3,
+       "length_bp": 4,
+       "labels": [
+        2
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "labels_at_end": [
+        2
+       ],
+       "events": [
+        {
+         "at_bp": 6,
+         "type": "revisit",
+         "segments": [
+          1
+         ],
+         "length_bp": 2,
+         "same_distance": false
+        }
+       ]
+      },
+      {
+       "id": 3,
+       "parents": [
+        1,
+        2
+       ],
+       "from_bp": 7,
+       "length_bp": 0,
+       "labels": [
+        0,
+        2
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "labels_at_end": [
+        0,
+        2
+       ],
+       "events": [
+        {
+         "at_bp": 7,
+         "type": "reconverge",
+         "segments": [
+          1,
+          2
+         ]
+        },
+        {
+         "at_bp": 7,
+         "type": "label_end",
+         "label": 0,
+         "reason": "max_steps",
+         "structural_successors": 0
+        },
+        {
+         "at_bp": 7,
+         "type": "label_end",
+         "label": 2,
+         "reason": "max_steps",
+         "structural_successors": 0
+        }
+       ],
+       "labels_via_parent": [
+        [
+         0
+        ],
+        [
+         2
+        ]
+       ]
+      }
+     ],
+     "splits": [
+      {
+       "at_bp": 3,
+       "prefix_bp": 3,
+       "segment": 0,
+       "children": [
+        1,
+        2
+       ],
+       "kind": "divergence",
+       "labels_before": 3,
+       "branches": [
+        {
+         "segment": 1,
+         "char": "C",
+         "labels_distinct": 2,
+         "labels": [
+          0,
+          1
+         ],
+         "labels_truncated": false
+        },
+        {
+         "segment": 2,
+         "char": "G",
+         "labels_distinct": 1,
+         "labels": [
+          2
+         ],
+         "labels_truncated": false
+        }
+       ]
+      }
+     ],
+     "paths": [
+      {
+       "id": 0,
+       "segments": [
+        0,
+        1,
+        3
+       ],
+       "length_bp": 7,
+       "end_reasons": {
+        "max_steps": 2
+       },
+       "path_reason": "max_steps",
+       "n_labels": 2,
+       "end_labels": [
+        {
+         "label": 0,
+         "loss": 0.0,
+         "branches": 0,
+         "run": 0,
+         "route_bp": 0
+        },
+        {
+         "label": 2,
+         "loss": 0.0,
+         "branches": 0,
+         "run": 2,
+         "route_bp": 7
+        }
+       ],
+       "continuation": {
+        "sequence": "ACAAG",
+        "labels": [
+         0
+        ],
+        "loss_used": 0.0,
+        "branches_used": 0
+       }
+      }
+     ],
+     "runs": [
+      {
+       "label": 0,
+       "from_bp": 0,
+       "to_bp": 7,
+       "entered_by": "seed",
+       "route_bp": 0,
+       "end_reason": "max_steps",
+       "segment": 3,
+       "branches": 0,
+       "loss": 0.0
+      },
+      {
+       "label": 1,
+       "from_bp": 0,
+       "to_bp": 5,
+       "entered_by": "seed",
+       "route_bp": 0,
+       "end_reason": "loss_budget",
+       "segment": 1,
+       "branches": 0,
+       "loss": 0.0
+      },
+      {
+       "label": 2,
+       "from_bp": 0,
+       "to_bp": 7,
+       "entered_by": "seed",
+       "route_bp": 7,
+       "end_reason": "max_steps",
+       "segment": 3,
+       "branches": 0,
+       "loss": 0.0
+      }
+     ],
+     "growth": [
+      {
+       "from_bp": 0,
+       "max_live_paths": 2,
+       "distinct_live_labels": 3,
+       "live_pairs": 3,
+       "exact": true,
+       "steps": 11,
+       "divergences": 1,
+       "ambiguous_branches": 0,
+       "splits": 1,
+       "reconvergences": 1,
+       "bubbles": 0,
+       "tips": 0,
+       "blocked_repeat": 1,
+       "label_ends": {
+        "loss_budget": 1,
+        "max_steps": 2
+       }
+      }
+     ],
+     "branch_events": [
+      {
+       "at_bp": 5,
+       "segment": 1,
+       "successors": "A",
+       "labels_per_successor": [
+        1
+       ],
+       "ambiguous": [],
+       "dropped": [
+        1
+       ],
+       "refused": [
+        {
+         "char": "T",
+         "cause": "loss_budget",
+         "labels": [
+          1
+         ]
+        }
+       ]
+      }
+     ],
+     "branch_events_truncated": 1,
+     "needed_budgets": [
+      2.0
+     ],
+     "counters": {
+      "steps": 11,
+      "successor_enumerations": 10,
+      "output_bp": 11,
+      "pair_evaluations": 8,
+      "edge_reuse_probes": 3,
+      "reminimisation_rounds": 0,
+      "max_reminimisation_rounds": 0,
+      "refusal_scans": 4,
+      "switch_sources_cut": 0,
+      "future_units": 7
+     }
+    }
+   },
+   "label_summary": [
+    {
+     "label": 0,
+     "right": {
+      "direct_bp": 7,
+      "reach_bp": 7,
+      "reentries": 0,
+      "runs": [
+       0
+      ]
+     }
+    },
+    {
+     "label": 1,
+     "right": {
+      "direct_bp": 5,
+      "reach_bp": 5,
+      "reentries": 0,
+      "runs": [
+       1
+      ]
+     }
+    },
+    {
+     "label": 2,
+     "right": {
+      "direct_bp": 7,
+      "reach_bp": 7,
+      "reentries": 0,
+      "runs": [
+       2
+      ]
+     }
+    },
+    {
+     "label": 3,
+     "right": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     }
+    }
+   ],
+   "resource_stop": {
+    "scope": "locus",
+    "resource": "work",
+    "phase": "annotation_decode",
+    "requested": 1000000,
+    "effective": 500000,
+    "used": 500000,
+    "remaining": 0,
+    "actions": [
+     "narrow_seed",
+     "constrain_labels"
+    ],
+    "message": "decode stopped at 100% of the work budget; use a more selective seed"
+   },
+   "annotation": {
+    "access_path": "row_diff_coord",
+    "keys_mapped": 14,
+    "rows_requested": 14,
+    "direct_reads": 0
+   },
+   "timing": {
+    "elapsed_ms": 0.7,
+    "cache_hits": 1,
+    "rows_fetched": 14,
+    "tuple_rows_fetched": 14,
+    "coords_mapped": 30,
+    "annotation_fetch_ms": 0.3
+   }
+  }
+ ]
+}

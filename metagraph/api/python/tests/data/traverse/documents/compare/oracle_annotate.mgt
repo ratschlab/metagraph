@@ -1,0 +1,16 @@
+H mgt 1 5 basic $ACGT a k k 1000 10 0 walk mini a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5 3f2a9c1b0d4e5f60
+S 0b5e55ed0ac1e000 10 6 0 CCATGGTACA
+L h 0 1 0 acc1
+L h 0 2 3 2
+L h 0 3 3 3
+O c c c i
+A r c 20 p 0 0 1 3 0 steps=16,successor_enumerations=17,output_bp=16,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 0 2 1 0 16
+B 0 2 3 3 1 16 1 0 1 0 0 0 0 .
+G * 0 0 0-2 * * * 0 * .
+G 0 0 8 !1 * * * * * GATTACAG
+P 0 8 2 !
+T D .
+G 0 0 8 1 * * * * * TCCGGAAT
+P 0 8 1 1
+T D .
+Z 16

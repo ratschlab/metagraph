@@ -1,0 +1,40 @@
+{
+ "seeds": [
+  {
+   "seed_id": "ambiguous_split",
+   "sequence": "AAGTAGTGTTCTGGTTATTATTTCATGGGA"
+  }
+ ],
+ "strategy": {
+  "direction": "both",
+  "labels": {
+   "seed_label_kind": "column",
+   "extra": [
+    "b.fa",
+    "c.fa",
+    "d.fa"
+   ],
+   "change_cost": {
+    "model": "constant",
+    "value": 1
+   },
+   "loss_budget": 2
+  },
+  "branching": {
+   "hairpins": "follow",
+   "max_label_branches": 1
+  },
+  "bounds": {
+   "max_extension_bp": 100
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "ambiguous_split",
+  "k": 15,
+  "doc": "canonical graph, column labels: an ambiguous split with disjoint child sets after a switch (right); a followed hairpin at a divergence whose child sets overlap (left)"
+ }
+}

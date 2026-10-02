@@ -1,0 +1,740 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "fbfd396e439f0d22",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 4,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "direct",
+    "direct_reads": 568,
+    "keys_mapped": 148,
+    "rows_requested": 148
+   },
+   "arms": {
+    "right": {
+     "branch_events": [
+      {
+       "ambiguous": [
+        3
+       ],
+       "at_bp": 20,
+       "dropped": [],
+       "labels_per_successor": [
+        3,
+        2
+       ],
+       "refused": [],
+       "segment": 0,
+       "successors": "AT"
+      },
+      {
+       "ambiguous": [
+        3
+       ],
+       "at_bp": 46,
+       "dropped": [],
+       "labels_per_successor": [
+        2,
+        3
+       ],
+       "refused": [],
+       "segment": 3,
+       "successors": "CG"
+      }
+     ],
+     "branch_events_truncated": 0,
+     "complete_to_bp": 100,
+     "completeness_scope": "united_history",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 132,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 132,
+      "successor_enumerations": 130,
+      "switch_sources_cut": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 0,
+      "live_paths": 0
+     },
+     "growth": [
+      {
+       "ambiguous_branches": 2,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 4,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 0,
+       "label_ends": {},
+       "live_pairs": 5,
+       "max_live_paths": 2,
+       "reconvergences": 1,
+       "splits": 2,
+       "steps": 70,
+       "tips": 0
+      },
+      {
+       "ambiguous_branches": 0,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 4,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 50,
+       "label_ends": {},
+       "live_pairs": 5,
+       "max_live_paths": 2,
+       "reconvergences": 1,
+       "splits": 0,
+       "steps": 62,
+       "tips": 0
+      },
+      {
+       "ambiguous_branches": 0,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 4,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 100,
+       "label_ends": {
+        "max_extension_bp": 4
+       },
+       "live_pairs": 4,
+       "max_live_paths": 1,
+       "reconvergences": 0,
+       "splits": 0,
+       "steps": 0,
+       "tips": 0
+      }
+     ],
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 3,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 2
+      }
+     ],
+     "needed_budgets": [],
+     "paths": [
+      {
+       "continuation": {
+        "branches_used": 0,
+        "labels": [
+         0,
+         1,
+         2,
+         3
+        ],
+        "loss_used": 0.0,
+        "sequence": "GTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG"
+       },
+       "end_labels": [
+        {
+         "branches": 0,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 0
+        },
+        {
+         "branches": 0,
+         "label": 1,
+         "loss": 0.0,
+         "route_bp": 62,
+         "run": 1
+        },
+        {
+         "branches": 0,
+         "label": 2,
+         "loss": 0.0,
+         "route_bp": 62,
+         "run": 2
+        },
+        {
+         "branches": 2,
+         "label": 3,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 3
+        }
+       ],
+       "end_reasons": {
+        "max_extension_bp": 4
+       },
+       "id": 0,
+       "length_bp": 100,
+       "n_labels": 4,
+       "path_reason": "max_extension_bp",
+       "segments": [
+        0,
+        1,
+        3,
+        4,
+        6
+       ]
+      }
+     ],
+     "runs": [
+      {
+       "branches": 0,
+       "end_reason": "max_extension_bp",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 6,
+       "to_bp": 100
+      },
+      {
+       "branches": 0,
+       "end_reason": "max_extension_bp",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 1,
+       "loss": 0.0,
+       "route_bp": 36,
+       "segment": 6,
+       "to_bp": 100
+      },
+      {
+       "branches": 0,
+       "end_reason": "max_extension_bp",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 2,
+       "loss": 0.0,
+       "route_bp": 62,
+       "segment": 6,
+       "to_bp": 100
+      },
+      {
+       "branches": 2,
+       "end_reason": "max_extension_bp",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 3,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 6,
+       "to_bp": 100
+      },
+      {
+       "branches": 1,
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 3,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 2,
+       "to_bp": 36
+      },
+      {
+       "branches": 2,
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 3,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 5,
+       "to_bp": 62
+      }
+     ],
+     "segments": [
+      {
+       "events": [],
+       "from_bp": 0,
+       "id": 0,
+       "labels": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_total": 4,
+       "labels_truncated": false,
+       "length_bp": 20,
+       "parents": [],
+       "sequence": "TTTCCTATTTAGCCTCTGTC"
+      },
+      {
+       "events": [],
+       "from_bp": 20,
+       "id": 1,
+       "labels": [
+        0,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        2,
+        3
+       ],
+       "labels_total": 3,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        0
+       ],
+       "sequence": "ATTACGTTTGACAATG"
+      },
+      {
+       "events": [],
+       "from_bp": 20,
+       "id": 2,
+       "labels": [
+        1,
+        3
+       ],
+       "labels_at_end": [
+        1,
+        3
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        0
+       ],
+       "sequence": "TTTACGTTTGACAATG"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 36,
+         "segments": [
+          1,
+          2
+         ],
+         "type": "reconverge"
+        }
+       ],
+       "from_bp": 36,
+       "id": 3,
+       "labels": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_total": 4,
+       "labels_truncated": false,
+       "labels_via_parent": [
+        [
+         0,
+         2,
+         3
+        ],
+        [
+         1
+        ]
+       ],
+       "length_bp": 10,
+       "parents": [
+        1,
+        2
+       ],
+       "sequence": "ACCCAGCCCT"
+      },
+      {
+       "events": [],
+       "from_bp": 46,
+       "id": 4,
+       "labels": [
+        0,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        3
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        3
+       ],
+       "sequence": "CCGGCGGGTCGACTTG"
+      },
+      {
+       "events": [],
+       "from_bp": 46,
+       "id": 5,
+       "labels": [
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        1,
+        2,
+        3
+       ],
+       "labels_total": 3,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        3
+       ],
+       "sequence": "GCGGCGGGTCGACTTG"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 62,
+         "segments": [
+          4,
+          5
+         ],
+         "type": "reconverge"
+        },
+        {
+         "at_bp": 100,
+         "label": 0,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        },
+        {
+         "at_bp": 100,
+         "label": 1,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        },
+        {
+         "at_bp": 100,
+         "label": 2,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        },
+        {
+         "at_bp": 100,
+         "label": 3,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 62,
+       "id": 6,
+       "labels": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_total": 4,
+       "labels_truncated": false,
+       "labels_via_parent": [
+        [
+         0,
+         3
+        ],
+        [
+         1,
+         2
+        ]
+       ],
+       "length_bp": 38,
+       "parents": [
+        4,
+        5
+       ],
+       "sequence": "GTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG"
+      }
+     ],
+     "splits": [
+      {
+       "at_bp": 20,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0,
+          2,
+          3
+         ],
+         "labels_distinct": 3,
+         "labels_truncated": false,
+         "segment": 1
+        },
+        {
+         "char": "T",
+         "labels": [
+          1,
+          3
+         ],
+         "labels_distinct": 2,
+         "labels_truncated": false,
+         "segment": 2
+        }
+       ],
+       "children": [
+        1,
+        2
+       ],
+       "kind": "ambiguous",
+       "labels_before": 4,
+       "prefix_bp": 20,
+       "segment": 0
+      },
+      {
+       "at_bp": 46,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0,
+          3
+         ],
+         "labels_distinct": 2,
+         "labels_truncated": false,
+         "segment": 4
+        },
+        {
+         "char": "G",
+         "labels": [
+          1,
+          2,
+          3
+         ],
+         "labels_distinct": 3,
+         "labels_truncated": false,
+         "segment": 5
+        }
+       ],
+       "children": [
+        4,
+        5
+       ],
+       "kind": "ambiguous",
+       "labels_before": 4,
+       "prefix_bp": 46,
+       "segment": 3
+      }
+     ],
+     "status": "complete"
+    }
+   },
+   "label_dict": [
+    {
+     "column": 0,
+     "kind": "column",
+     "name": "a.fa"
+    },
+    {
+     "column": 1,
+     "kind": "column",
+     "name": "b.fa"
+    },
+    {
+     "column": 2,
+     "kind": "column",
+     "name": "c.fa"
+    },
+    {
+     "column": 3,
+     "kind": "column",
+     "name": "both.fa"
+    }
+   ],
+   "label_mode": "constrain",
+   "label_summary": [
+    {
+     "label": 0,
+     "right": {
+      "direct_bp": 100,
+      "reach_bp": 100,
+      "reentries": 0,
+      "runs": [
+       0
+      ]
+     }
+    },
+    {
+     "label": 1,
+     "right": {
+      "direct_bp": 100,
+      "reach_bp": 100,
+      "reentries": 0,
+      "runs": [
+       1
+      ]
+     }
+    },
+    {
+     "label": 2,
+     "right": {
+      "direct_bp": 100,
+      "reach_bp": 100,
+      "reentries": 0,
+      "runs": [
+       2
+      ]
+     }
+    },
+    {
+     "label": 3,
+     "right": {
+      "direct_bp": 100,
+      "reach_bp": 100,
+      "reentries": 0,
+      "runs": [
+       3,
+       4,
+       5
+      ]
+     }
+    }
+   ],
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "partial"
+   },
+   "seed": {
+    "dropped_labels": [],
+    "labels": [
+     "a.fa",
+     "b.fa",
+     "c.fa",
+     "both.fa"
+    ],
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": true,
+    "labels_supporting_total": 4,
+    "length_bp": 30,
+    "num_kmers": 16,
+    "seed_id": "merge",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "1c38c1d2a2cf1283"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 100,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": 64,
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "merge",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "right",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 64,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "constrain",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 40,
+   "detail": "full",
+   "max_branch_events": 100,
+   "profile_bin_bp": 50,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules"
+}

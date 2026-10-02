@@ -1,0 +1,19 @@
+H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk fixtures * fbfd396e439f0d22
+S f527952522cd99a3 25 11 0 TTACGTTTGACAATGACCCAGCCCT
+L c 0 * 0 a.fa
+L c 1 * 0 b.fa
+L c 2 * 0 c.fa
+L c 3 * 0 both.fa
+O p c c i
+K l walk_domain bounds.max_steps i:1 i:2 0 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob
+K r walk_domain bounds.max_steps i:1 i:2 0 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob
+A l t 0 p 1 4 1 4 0 steps=0,successor_enumerations=1,output_bp=0,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 S,0,0,1,4,1,2 0 * 1 0 1 0 0 0
+B 0 1 4 4 1 0 0 0 0 0 0 0 0 .
+G * 0 0 0-3 * * * * * .
+T S .
+C 15 0 0 !
+A r t 0 p 1 4 1 4 0 steps=0,successor_enumerations=0,output_bp=0,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 S,0,0,1,4,1,2 0 * 1 0 1 0 0 0
+G * 0 0 0-3 * * * * * .
+T S .
+C 15 0 0 !
+Z 19

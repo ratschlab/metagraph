@@ -1,0 +1,24 @@
+H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk fixtures * f61e6e391195a372
+S 3b323ea27d2ea165 30 16 0 CGGGGTGGATTAGTCAAGGCCATGATGGGC
+L h 0 0 0 ACC1
+L h 1 0 4 
+L h 0 1 3 2
+O c c c i
+A r c 40 p 0 0 1 2 0 steps=79,successor_enumerations=79,output_bp=79,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 5 0 3 2 0 79
+B 0 3 3 3 1 79 2 0 2 0 0 0 0 .
+G * 0 1 0-1 * * * 0 * G
+P 0 1 2 !
+G 0 1 19 0 * * * 0 * CATTTGGACCGTAGGAGTA
+P 1 14 1 0
+P 14 20 2 0,2
+G 0 1 29 1 * * * * * TACGGAGATATTCATCAAGATGATCATAT
+P 1 30 1 1
+T D .
+G 1 20 20 2 * * * * * CTATCACCTGCCACTTCAAT
+P 20 40 1 2
+T X .
+C 40 0 0 .
+G 1 20 10 0 * * * * * TATGGTCCTA
+P 20 30 1 0
+T D .
+Z 24

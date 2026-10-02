@@ -1,0 +1,41 @@
+{
+ "seeds": [
+  {
+   "seed_id": "switch_chain",
+   "sequence": "ACCAGTCTTAGAATCTGATGACCGCCCGAC",
+   "labels": [
+    "A"
+   ]
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "extra": [
+    "B",
+    "C",
+    "D"
+   ],
+   "change_cost": {
+    "model": "constant",
+    "value": 1
+   },
+   "loss_budget": 3
+  },
+  "branching": {
+   "max_label_branches": 1
+  },
+  "bounds": {
+   "max_extension_bp": 80
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "chain",
+  "k": 15,
+  "doc": "A -> B -> {C, D}: a silent Lw end inside a segment (switch on the same segment), and one at an ambiguous split with disjoint child sets whose switches sit on the children; both walks stop at the radius 20 bp after the last switch (continuations with loss_used 2)"
+ }
+}

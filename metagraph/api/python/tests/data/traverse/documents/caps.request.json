@@ -1,0 +1,56 @@
+{
+ "seeds": [
+  {
+   "seed_id": "caps",
+   "sequence": "ATAGGTTTCTCCCCGATGTAAAGTTGTGGT",
+   "labels": [
+    "hX",
+    "hY"
+   ]
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "extra": [
+    "hZ"
+   ],
+   "change_cost": {
+    "model": "table",
+    "entries": [
+     [
+      "hX",
+      "hZ",
+      2
+     ],
+     [
+      "hY",
+      "hZ",
+      0.5
+     ]
+    ],
+    "default": "forbid"
+   },
+   "loss_budget": 1
+  },
+  "branching": {
+   "on_reconverge": "keep",
+   "max_label_branches": "unlimited"
+  },
+  "bounds": {
+   "max_extension_bp": 200,
+   "max_steps": 240
+  },
+  "output": {
+   "sequences": false,
+   "max_branch_events": 1,
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "caps",
+  "k": 15,
+  "doc": "caps and events: a max_steps truncation, branch events cut at 1, sequences false (first bases, explicit continuation sequences), a loss_budget end, a blocked edge_reuse successor and a revisit at another distance"
+ }
+}

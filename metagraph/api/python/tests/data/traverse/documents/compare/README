@@ -1,0 +1,21 @@
+Body-only MGT documents for the comparison tests (T39 on a hand-made locus): one seed,
+the same index identity, retrieved four ways. Hand-derived; no full.json.
+  oracle_annotate    annotate, keep: the structural trie with acc1/acc2/acc3 recorded
+  oracle_constrain   constrain exhaustive over {acc1, acc3}: claims == the annotate
+                     oracle filtered to those labels
+  oracle_exhaustive  constrain exhaustive over {acc1, acc2, acc3}
+  oracle_tuned       constrain, min_successor_labels 2: acc2 refused `minority` at the
+                     fork, a prefix-subset of oracle_exhaustive
+
+CLI-generated (scripts/traversal/graphlet_fixtures.py --from-cli, COMPARE_FIXTURES; kept
+current by its --check), on the fixture indexes of that script, no manifest (the tests
+stamp an index_fp into H):
+  cli_quorum_tuned       quorum index, min_successor_labels 2, keep: x.fa refused
+                         `minority` at 10, y.fa at 40; x.fa and z.fa end label_lost at 40
+                         inside a walk y.fa carries on
+  cli_quorum_exhaustive  the same seed, exhaustive
+  cli_bubbles_r60        bubbles index, keep, radius 60
+  cli_bubbles_r100       ... radius 100
+  cli_bubbles_steps150   ... radius 100 and max_steps 150 (complete_to_bp 65)
+The tests also read the quorum pair on the LEFT arm of the mirrored index (every record
+reversed) by flipping the arm codes and the seed: bases are stored in walking order.

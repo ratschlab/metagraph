@@ -1,0 +1,23 @@
+{
+ "seeds": [
+  {
+   "seed_id": "fork",
+   "sequence": "CGTACCGTCGTAGCCATGCTGCTTCATTGCAGGTTCTATT"
+  }
+ ],
+ "strategy": {
+  "direction": "both",
+  "bounds": {
+   "max_extension_bp": 10
+  },
+  "output": {
+   "profile_bin_bp": 20,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "fork",
+  "k": 15,
+  "doc": "both arms split (divergences); the radius (10) is below k (15), so both arms' continuations cross into the seed"
+ }
+}

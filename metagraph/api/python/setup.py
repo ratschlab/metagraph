@@ -38,7 +38,8 @@ setup(
     include_package_data=True,
     keywords='MetaGraph',
     name='metagraph-api',
-    packages=find_packages(include=['metagraph']),
+    # metagraph.* too: the traverse subpackage must survive a non-editable install
+    packages=find_packages(include=['metagraph', 'metagraph.*']),
     setup_requires=setup_requirements,
     test_suite='tests',
     tests_require=test_requirements,

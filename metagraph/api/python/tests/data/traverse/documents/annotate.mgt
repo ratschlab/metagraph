@@ -1,0 +1,42 @@
+H mgt 1 15 basic $ACGT a k m 2 20 0 walk fixtures * fbfd396e439f0d22
+S 58b906f959ef3993 30 16 0 ATGAGCGTGCCTCTAACGTTCATACCAAAT
+L c 0 * 0 a.fa
+L c 1 * 0 b.fa
+L c 2 * 0 c.fa
+L c 3 * 0 both.fa
+O p c l i
+K l label_lists labels.max_labels_per_node i:2 i:4 * . 41 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob
+K l inexact_counts labels.max_labels_per_node i:2 i:1 * . the live-label counts flagged "exact": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob
+K l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+K r label_lists labels.max_labels_per_node i:2 i:4 * . 73 recorded label list(s) are cut at the cap; every list carries its true count, and what is derived from the lists (annotate mode's label_summary, an oracle filtered from the recorded sets) is a lower bound; raise the knob
+K r inexact_counts labels.max_labels_per_node i:2 i:2 * . the live-label counts flagged "exact": false (frontier_remaining, cap_trigger, growth bins) counted heads carrying a cut list and are lower bounds; raise the knob
+K r scope branching.on_reconverge s:merge i:2 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A l c 70 u 0 0 1 4 41 steps=40,successor_enumerations=41,output_bp=40,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 1 0 1 0 0 40
+B 0 1 2 2 0 40 0 0 0 0 0 0 0 .
+G * 0 40 0-1 4 * * * * AATCCCGGGAATCCGCCGGACCCGGTCACTTGCGATGCGA
+P 0 40 4 !
+T D .
+A r c 70 u 0 0 1 4 73 steps=102,successor_enumerations=100,output_bp=102,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 7 0 1 2 2 102
+B 0 2 4 4 0 70 2 0 2 1 0 0 0 .
+B 50 2 4 4 0 32 0 0 0 1 0 0 0 .
+G * 0 20 0-1 4 * * 0 * TTTCCTATTTAGCCTCTGTC
+P 0 20 4 !
+G 0 20 16 0,2 3 * * * * ATTACGTTTGACAATG
+P 20 35 3 !
+P 35 36 4 0-1
+G 0 20 16 1,3 * * * * * TTTACGTTTGACAATG
+P 20 35 2 !
+P 35 36 4 0-1
+G 1,2 36 10 ! 4 * * 0 * ACCCAGCCCT
+P 36 46 4 !
+G 3 46 16 0,3 * * * * * CCGGCGGGTCGACTTG
+P 46 61 2 !
+P 61 62 4 0-1
+G 3 46 16 1-2 3 * * * * GCGGCGGGTCGACTTG
+P 46 61 3 !
+P 61 62 4 0-1
+G 4,5 62 8 ! 4 * * * * GTCCGGAC
+P 62 70 4 !
+T X .
+C 20 0 0 0
+Z 42

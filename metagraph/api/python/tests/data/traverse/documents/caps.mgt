@@ -1,0 +1,31 @@
+H mgt 1 15 basic $ACGT c k k 64 1000 0 walk fixtures * b538866d2379f768
+S b95d81a2d451ade7 30 16 2 ATAGGTTTCTCCCCGATGTAAAGTTGTGGT
+L h 0 0 0 hX
+L h 0 1 1 Y
+L h 0 2 1 Z
+O p x c i
+K r walk_domain bounds.max_steps i:240 i:241 126 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob
+K r branch_events output.max_branch_events i:1 i:2 95 . branch decisions and refusals at or beyond complete_to_bp are not reported; more were produced: raise the knob or set it to "unlimited"
+A r t 126 p 1 1 1 1 0 steps=240,successor_enumerations=241,output_bp=240,pair_evaluations=5,edge_reuse_probes=64,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=2,switch_sources_cut=0 S,126,1,1,1,1,241 2 95 5 4 3 2 0 240
+B 0 2 2 2 1 80 1 0 1 0 0 0 0 .
+B 50 3 2 3 1 125 0 1 1 0 0 0 0 B:1
+B 100 2 2 2 1 35 0 0 0 0 0 0 1 L:1,U:1,S:1
+V 70 2 CG 1,1 0 . .
+G * 0 20 * * * * 0 * *
+G 0 20 106 1 * * * * A *
+E 42 v 2 8
+E 103 s 1 2 0.5
+T S 2:0.5:0:0
+C 23 0.5 0 2 CCGAGTGATATATCACCTTGCTA
+G 0 20 50 0 * * * 1 C *
+G 2 70 39 0 * * * * C *
+E 109 v 2 45
+E 109 b T U 1 0
+T * 0:0:1:0
+G 2 70 25 0 * * * * G *
+T * 0:0:1:0
+R 3 0 0 109 U 0 * * 1 1 0
+R 1 1 0 103 Lw 0 * * * 0 0
+R 4 0 0 95 B 0 * * 1 1 0 2
+R 1 2 103 126 S 0 1:0.5 1 0 0 0.5
+Z 31

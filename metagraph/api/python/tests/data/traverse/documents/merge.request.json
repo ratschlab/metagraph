@@ -1,0 +1,30 @@
+{
+ "seeds": [
+  {
+   "seed_id": "merge",
+   "sequence": "ATGAGCGTGCCTCTAACGTTCATACCAAAT"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "branching": {
+   "max_label_branches": "unlimited"
+  },
+  "bounds": {
+   "max_extension_bp": 100
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "continuation_bp": 40,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "bubbles",
+  "k": 15,
+  "doc": "column labels through two SNP bubbles under on_reconverge merge: merge partitions (labels_via_parent), an ambiguous split (both.fa on both alleles) with an m closure at each merge, b.fa through two non-first-parent merges (R.route_bp != T.route_bp); continuations contained in the flank"
+ }
+}

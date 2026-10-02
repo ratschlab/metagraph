@@ -1,0 +1,430 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "fbfd396e439f0d22",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 4,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "rows",
+    "direct_reads": 0,
+    "keys_mapped": 4,
+    "rows_requested": 4
+   },
+   "arms": {
+    "left": {
+     "branch_events": [],
+     "branch_events_truncated": 0,
+     "cap_trigger": {
+      "at_bp": 0,
+      "exact": true,
+      "live_labels": 4,
+      "live_paths": 1,
+      "reason": "max_steps",
+      "segment": 0
+     },
+     "complete_to_bp": 0,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 0,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 0,
+      "successor_enumerations": 1,
+      "switch_sources_cut": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 4,
+      "live_paths": 1
+     },
+     "growth": [
+      {
+       "ambiguous_branches": 0,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 4,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 0,
+       "label_ends": {},
+       "live_pairs": 4,
+       "max_live_paths": 1,
+       "reconvergences": 0,
+       "splits": 0,
+       "steps": 0,
+       "tips": 0
+      }
+     ],
+     "labels_per_node": {
+      "cap": 1000,
+      "max_seen": 4,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "complete_to_bp": 0,
+       "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob",
+       "kind": "walk_domain",
+       "knob": "bounds.max_steps",
+       "limit": 1,
+       "observed": 2
+      }
+     ],
+     "needed_budgets": [],
+     "paths": [
+      {
+       "continuation": {
+        "branches_used": 0,
+        "labels": [
+         0,
+         1,
+         2,
+         3
+        ],
+        "loss_used": 0.0,
+        "sequence": "TTACGTTTGACAATG"
+       },
+       "end_labels": [],
+       "end_reasons": {},
+       "id": 0,
+       "length_bp": 0,
+       "n_labels": 0,
+       "path_reason": "max_steps",
+       "segments": [
+        0
+       ]
+      }
+     ],
+     "runs": [],
+     "segments": [
+      {
+       "events": [],
+       "from_bp": 0,
+       "id": 0,
+       "label_sets": [],
+       "labels": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_total": 4,
+       "labels_truncated": false,
+       "length_bp": 0,
+       "parents": [],
+       "sequence": ""
+      }
+     ],
+     "splits": [],
+     "status": "truncated"
+    },
+    "right": {
+     "branch_events": [],
+     "branch_events_truncated": 0,
+     "cap_trigger": {
+      "at_bp": 0,
+      "exact": true,
+      "live_labels": 4,
+      "live_paths": 1,
+      "reason": "max_steps",
+      "segment": 0
+     },
+     "complete_to_bp": 0,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 0,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 0,
+      "successor_enumerations": 0,
+      "switch_sources_cut": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 4,
+      "live_paths": 1
+     },
+     "growth": [],
+     "labels_per_node": {
+      "cap": 1000,
+      "max_seen": 4,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "complete_to_bp": 0,
+       "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob",
+       "kind": "walk_domain",
+       "knob": "bounds.max_steps",
+       "limit": 1,
+       "observed": 2
+      }
+     ],
+     "needed_budgets": [],
+     "paths": [
+      {
+       "continuation": {
+        "branches_used": 0,
+        "labels": [
+         0,
+         1,
+         2,
+         3
+        ],
+        "loss_used": 0.0,
+        "sequence": "CAATGACCCAGCCCT"
+       },
+       "end_labels": [],
+       "end_reasons": {},
+       "id": 0,
+       "length_bp": 0,
+       "n_labels": 0,
+       "path_reason": "max_steps",
+       "segments": [
+        0
+       ]
+      }
+     ],
+     "runs": [],
+     "segments": [
+      {
+       "events": [],
+       "from_bp": 0,
+       "id": 0,
+       "label_sets": [],
+       "labels": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2,
+        3
+       ],
+       "labels_total": 4,
+       "labels_truncated": false,
+       "length_bp": 0,
+       "parents": [],
+       "sequence": ""
+      }
+     ],
+     "splits": [],
+     "status": "truncated"
+    }
+   },
+   "label_dict": [
+    {
+     "column": 0,
+     "kind": "column",
+     "name": "a.fa"
+    },
+    {
+     "column": 1,
+     "kind": "column",
+     "name": "b.fa"
+    },
+    {
+     "column": 2,
+     "kind": "column",
+     "name": "c.fa"
+    },
+    {
+     "column": 3,
+     "kind": "column",
+     "name": "both.fa"
+    }
+   ],
+   "label_mode": "annotate",
+   "label_summary": [
+    {
+     "label": 0,
+     "left": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     },
+     "right": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     }
+    },
+    {
+     "label": 1,
+     "left": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     },
+     "right": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     }
+    },
+    {
+     "label": 2,
+     "left": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     },
+     "right": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     }
+    },
+    {
+     "label": 3,
+     "left": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     },
+     "right": {
+      "direct_bp": 0,
+      "reach_bp": 0,
+      "reentries": 0,
+      "runs": []
+     }
+    }
+   ],
+   "limitations": [],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "partial"
+   },
+   "seed": {
+    "dropped_labels": [],
+    "labels": [],
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": false,
+    "labels_supporting_total": 0,
+    "length_bp": 25,
+    "num_kmers": 11,
+    "seed_id": "no_bins",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "f527952522cd99a3"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 50,
+   "max_live_paths": 1000,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "keep",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "both",
+  "exhaustive": false,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 1000,
+   "max_seed_labels": 1000,
+   "max_switch_sources": 64,
+   "mode": "annotate",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 1000,
+   "detail": "full",
+   "max_branch_events": 100,
+   "profile_bin_bp": 20,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); every such walk is followed and the labels present at its nodes are recorded"
+}

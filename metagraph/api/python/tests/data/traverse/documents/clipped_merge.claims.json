@@ -1,0 +1,17 @@
+{"comment": "The clipped-merge evidence case of DESIGN-traverse-graphlet.md §5.1 (v3/v4): lineB joins the displayed path (which begins AACC) through the merge's second parent at depth 14; its own route begins TCTA. Provenance is evaluated at the run's anchored endpoint and then clipped: at D = 4 lineB has route support [0, 4) but no displayed support, so it is route_only (v2 evaluated the walk at D and wrongly gave evidence_from = 0). Hand-derived, not produced by the library.",
+ "claims": {
+  "all": [
+   {"ref": "h:0:1", "run": 0, "kind": "alive", "from_bp": 0, "to_bp": 19, "route_bp": 0, "evidence_from": 0, "end_class": "radius", "reason": "max_extension_bp", "loss": 0.0, "branches": 0},
+   {"ref": "h:0:2", "run": 1, "kind": "alive", "from_bp": 0, "to_bp": 19, "route_bp": 14, "evidence_from": 14, "end_class": "radius", "reason": "max_extension_bp", "loss": 0.0, "branches": 0}],
+  "at_4": [
+   {"ref": "h:0:1", "run": 0, "kind": "stretch", "from_bp": 0, "to_bp": 4, "route_bp": 0, "evidence_from": 0, "end_class": "open", "reason": null, "loss": null, "branches": null},
+   {"ref": "h:0:2", "run": 1, "kind": "route_only", "from_bp": 0, "to_bp": 4, "route_bp": 14, "evidence_from": null, "end_class": "open", "reason": null, "loss": null, "branches": null}],
+  "at_16": [
+   {"ref": "h:0:1", "run": 0, "kind": "stretch", "from_bp": 0, "to_bp": 16, "route_bp": 0, "evidence_from": 0, "end_class": "open", "reason": null, "loss": null, "branches": null},
+   {"ref": "h:0:2", "run": 1, "kind": "stretch", "from_bp": 0, "to_bp": 16, "route_bp": 14, "evidence_from": 14, "end_class": "open", "reason": null, "loss": null, "branches": null}]},
+ "routes": {"h:0:1": [[0, 1, 3]], "h:0:2": [[0, 2, 3]]},
+ "route_bases": {"h:0:2": "TCTAAGGCACATGCTTGAC"},
+ "displayed": "AACCGTAGTCATGCTTGAC",
+ "support_profile_displayed": [[0, 14, ["h:0:1"]], [14, 19, ["h:0:1", "h:0:2"]]],
+ "support_profile_route": [[0, 19, ["h:0:1", "h:0:2"]]]
+}

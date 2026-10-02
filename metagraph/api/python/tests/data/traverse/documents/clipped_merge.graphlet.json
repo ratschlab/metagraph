@@ -1,0 +1,181 @@
+{
+ "release": "",
+ "capabilities": {
+  "schema_version": 1,
+  "k": 5,
+  "regime": "basic",
+  "alphabet": "$ACGT",
+  "num_labels": 1,
+  "has_coordinates": true,
+  "has_coord_to_header": true,
+  "supports_trace": true,
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "direct_access": false,
+  "release": "",
+  "graphlet_format": 1,
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "index_ns": "mini",
+  "index_fp": "a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5",
+  "index_meta_fp": "3f2a9c1b0d4e5f60"
+ },
+ "strategy": {
+  "schema_version": 1,
+  "direction": "right",
+  "support": "kmer",
+  "exhaustive": false,
+  "labels": {
+   "mode": "constrain",
+   "max_labels_per_node": 64,
+   "extra": [],
+   "change_cost": {
+    "model": "forbid"
+   },
+   "loss_budget": 0.0,
+   "switch_on": "loss",
+   "max_switch_sources": 64,
+   "max_seed_labels": 1000,
+   "seed_label_kind": "auto"
+  },
+  "branching": {
+   "max_label_branches": 0,
+   "min_successor_labels": 1,
+   "min_successor_fraction": 0.0,
+   "tip_window_bp": 0,
+   "bubble_window_bp": 0,
+   "on_reconverge": "merge",
+   "hairpins": "skip",
+   "max_splits_per_path": 64
+  },
+  "bounds": {
+   "max_extension_bp": 19,
+   "min_live_labels": 1,
+   "max_steps": 1000000,
+   "max_live_paths": 1000,
+   "max_paths": 10000,
+   "max_output_bp": 2000000,
+   "time_budget_ms": 30000.0
+  },
+  "frontier": {
+   "order": "breadth_first",
+   "on_overflow": "stop"
+  },
+  "output": {
+   "detail": "graphlet",
+   "sequences": true,
+   "profile_bin_bp": 10,
+   "max_branch_events": 100,
+   "continuation_bp": 10,
+   "timing": true
+  },
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "clamped": []
+ },
+ "walk_rule": "a walk uses no (k+1)-mer edge twice on its own path, enters no seed node and takes no hairpin step (hand-made fixture: no index behind it)",
+ "algorithm_version": "traverse-0.2",
+ "results": [
+  {
+   "seed": {
+    "seed_id": "clipped_merge",
+    "validated_seed_id": "c11bbed0e71de9ce",
+    "seed_id_mismatch": false,
+    "length_bp": 10,
+    "num_kmers": 6,
+    "labels_from_seed": false,
+    "labels_supporting_total": 2,
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "num_labels": 2,
+    "num_seed_labels": 2
+   },
+   "label_mode": "constrain",
+   "arms": {
+    "right": {
+     "status": "complete",
+     "complete_to_bp": 19,
+     "completeness_scope": "united_history",
+     "frontier_remaining": {
+      "live_paths": 0,
+      "live_labels": 0,
+      "exact": true
+     },
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 1,
+      "nodes_truncated": 0
+     },
+     "counters": {
+      "steps": 33,
+      "successor_enumerations": 33,
+      "output_bp": 33,
+      "pair_evaluations": 0,
+      "edge_reuse_probes": 0,
+      "reminimisation_rounds": 0,
+      "max_reminimisation_rounds": 0,
+      "refusal_scans": 0,
+      "switch_sources_cut": 0
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "limitations": [
+      {
+       "kind": "scope",
+       "knob": "branching.on_reconverge",
+       "limit": "merge",
+       "observed": 1,
+       "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee"
+      }
+     ],
+     "branch_events_total": 0,
+     "counts": {
+      "segments": 4,
+      "leaves": 1,
+      "splits": 1,
+      "merges": 1,
+      "runs": 2,
+      "bases": 33,
+      "max_bp": 19,
+      "label_ends": {
+       "max_extension_bp": 2
+      },
+      "leaves_by_reason": {
+       "max_extension_bp": 1
+      }
+     }
+    }
+   },
+   "annotation": {
+    "access_path": "row_diff_coord",
+    "keys_mapped": 40,
+    "rows_requested": 40,
+    "direct_reads": 0
+   },
+   "outcome": {
+    "walks": "partial",
+    "branch_diagnostics": "complete",
+    "label_evidence": "complete",
+    "delivery": "inline"
+   },
+   "limitations": [],
+   "graphlet": "H mgt 1 5 basic $ACGT c k m 64 10 0 walk mini a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5 3f2a9c1b0d4e5f60\nS c11bbed0e71de9ce 10 6 2 CGTAGGATCC\nL h 0 1 0 lineA\nL h 0 2 4 B\nO p c c i\nK r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r c 19 u 0 0 1 1 0 steps=33,successor_enumerations=33,output_bp=33,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 4 2 1 1 1 33\nB 0 2 2 2 1 20 1 0 1 0 0 0 0 .\nB 10 2 2 2 1 13 0 0 0 1 0 0 0 X:2\nG * 0 0 * * * * 0 * .\nG 0 0 14 0 * * * * * AACCGTAGTCATGC\nG 0 0 14 1 * * * * * TCTAAGGCACATGC\nG 1,2 14 5 * * * 0|1 * * TTGAC\nT X 1:0:0:14\nC 5 0 0 !\nR 3 0 0 19 X 0 * * 0 0 0\nR 3 1 0 19 X 14 * * 0 0 0\nZ 18\n",
+   "graphlet_bytes": 838,
+   "graphlet_lines": 18
+  }
+ ]
+}

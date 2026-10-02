@@ -1,0 +1,34 @@
+{
+ "seeds": [
+  {
+   "seed_id": "reentry",
+   "sequence": "ATAAAGCTAATAACCCCCGTGAGGCAAGAT"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column",
+   "extra": [
+    "pB.fa"
+   ],
+   "change_cost": {
+    "model": "constant",
+    "value": 1
+   },
+   "loss_budget": 2
+  },
+  "bounds": {
+   "max_extension_bp": 200
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "reentry",
+  "k": 15,
+  "doc": "A -> B -> A inside one segment (the G.end counterexample to v1's set formula)"
+ }
+}

@@ -1,0 +1,33 @@
+H mgt 1 15 basic $ACGT c k m 64 1000 0 walk fixtures * 53a0a128bc5a0614
+S f94bc92d9ffd62de 40 26 3 CGTACCGTCGTAGCCATGCTGCTTCATTGCAGGTTCTATT
+L h 0 0 0 acc1
+L h 0 1 3 2
+L h 0 2 3 3
+O c c c i
+K l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+K r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A l c 10 u 0 0 1 2 0 steps=19,successor_enumerations=18,output_bp=19,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 3 2 1 0 19
+B 0 2 3 3 1 19 1 0 1 0 0 0 0 X:3
+G * 0 1 * * * * 0 * G
+G 0 1 9 !2 * * * * * CACTCCCTA
+T X .
+C 15 0 0 !
+G 0 1 9 2 * * * * * GGCAGGCTG
+T X .
+C 15 0 0 2
+R 1 0 0 10 X 0 * * 0 0 0
+R 1 1 0 10 X 0 * * 0 0 0
+R 2 2 0 10 X 0 * * 0 0 0
+A r c 10 u 0 0 1 2 0 steps=20,successor_enumerations=19,output_bp=20,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 3 2 1 0 20
+B 0 2 3 3 1 20 1 0 1 0 0 0 0 X:3
+G * 0 0 * * * * 0 * .
+G 0 0 10 1 * * * * * ATTGCTAAGA
+T X .
+C 15 0 0 1
+G 0 0 10 !1 * * * * * TTACACCACG
+T X .
+C 15 0 0 !
+R 2 0 0 10 X 0 * * 0 0 0
+R 1 1 0 10 X 0 * * 0 0 0
+R 2 2 0 10 X 0 * * 0 0 0
+Z 33

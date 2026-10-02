@@ -1,0 +1,18 @@
+H mgt 1 5 basic $ACGT c k m 64 10 0 walk mini a3f5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5 3f2a9c1b0d4e5f60
+S c11bbed0e71de9ce 10 6 2 CGTAGGATCC
+L h 0 1 0 lineA
+L h 0 2 4 B
+O p c c i
+K r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A r c 19 u 0 0 1 1 0 steps=33,successor_enumerations=33,output_bp=33,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 4 2 1 1 1 33
+B 0 2 2 2 1 20 1 0 1 0 0 0 0 .
+B 10 2 2 2 1 13 0 0 0 1 0 0 0 X:2
+G * 0 0 * * * * 0 * .
+G 0 0 14 0 * * * * * AACCGTAGTCATGC
+G 0 0 14 1 * * * * * TCTAAGGCACATGC
+G 1,2 14 5 * * * 0|1 * * TTGAC
+T X 1:0:0:14
+C 5 0 0 !
+R 3 0 0 19 X 0 * * 0 0 0
+R 3 1 0 19 X 14 * * 0 0 0
+Z 18
