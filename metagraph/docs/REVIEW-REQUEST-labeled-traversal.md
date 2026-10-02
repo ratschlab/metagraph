@@ -1,32 +1,33 @@
-# Review request: label-consistent graph traversal in MetaGraph
+# Review request (round 2): label-consistent graph traversal in MetaGraph
 
-**What I want from you:** an adversarial technical review of a new, uncommitted feature. Please try to *break*
-it rather than confirm it. I care most about defects that would make the output **claim more biological support
-than the evidence warrants**, and about whether the design will survive the scale it is aimed at.
-
-You have access to the repository. Nothing is committed, so see §2 for how to find the code.
+**What I want from you:** a second adversarial review of the traversal feature on branch `gr/labeled-traversal`,
+now **committed and pushed** (11 commits on top of upstream `1de02cec`, head `01a5230a`). Round 1 found a
+blocker (trace support fabricated direct support across a merge), a crash and eleven further defects; all are
+fixed and listed in §6 so you do not re-report them. Since then the feature grew a verification layer and a
+number of real-index results, and that is what this round is about.
 
 **Priorities, in order:**
 
-1. **Correctness** — real defects in the traversal semantics.
-2. **Evidence honesty** — can any output overstate biological support? (One such bug was already found; §5.2.)
-3. **Efficiency at scale** — will this work on a 33 M-label, 627 G-node index, or only on toys?
-4. **Robustness** — large disk-backed annotations, unmasked graphs, concurrent server use, hostile input.
-5. **Design critique** — is the formulation right at all? See §6 for the alternatives I rejected.
-6. **API / usability** — can an LLM agent actually drive and tune this from the JSON it gets back?
+1. **Correctness of the verification itself.** The new `annotate` mode produces an exhaustive, label-free trie
+   that is used as an *oracle* for the label-constrained walk, and a string-level model of the records is used as
+   a third party. If the oracle, the model, or the way they are compared is wrong, every green test built on them
+   is worthless. Attack that first (§4 C13–C21, §5.1).
+2. **Correctness of the new surface** — `exhaustive`, `complete_to_bp`, the per-node label cap, derived seed
+   labels (`per_hit`), switching with a budget (§5.2).
+3. **Efficiency, with the measurements I have** (§5.3) — what decides whether this works on `refseq33m`
+   (33 M labels, 627 G nodes, coordinate annotation), and whether the three complexity fixes are exact.
+4. **Evidence honesty**, again (§5.4) — any output that claims more biological support than the evidence warrants.
+5. **Design critique and API** (§5.5–§5.6).
 
-Please be blunt. If the whole approach is wrong, say so and say what you would do instead.
+Please be blunt. If the verification approach is circular, say so and say what would not be.
 
 ---
 
-## 1. What the feature does, in one page
+## 1. What the feature does (one page; unchanged in substance from round 1)
 
 MetaGraph indexes DNA as a de Bruijn graph (nodes = k-mers) plus an **annotation matrix** mapping each k-mer to
-the **labels** (samples, genomes, accessions…) that contain it. Existing search answers *"which labels contain my
-query?"*. It cannot answer *"what sequence lies **around** my query in those labels?"* — the flanks are not in the
-query, so they cannot be returned by a lookup.
-
-This feature adds that, as a three-step pipeline:
+the **labels** (samples, genomes, accessions…) that contain it. Search answers *"which labels contain my query?"*;
+it cannot answer *"what sequence lies **around** my query in those labels?"*. This feature adds that:
 
 ```
 query sequence
@@ -35,330 +36,361 @@ query sequence
             └─ traverse → extend each seed outward through the graph, constrained by labels
 ```
 
-The traversal walks outward from the seed, and at every step keeps only the labels that still support the path.
-A step is admissible while at least one permitted label survives. The central generalisation: traversal state
-carries a **set** of labels, not one, so one seed carried by 1,000 labels is **one** walk whose label set splits
-where the genomes diverge — rather than 1,000 walks.
+The traversal walks outward from the seed and at every step keeps only the labels that still support the path;
+a step is admissible while at least one permitted label survives. The state is a **set** of labels (one seed
+carried by 1,000 genomes is one walk whose set splits where the genomes diverge), with a **label-change cost**
+plus a per-arm **loss budget** (`forbid` = one label must carry the whole path; `constant 1` with budget 1 = at
+most one switch), per-**lineage** branch limits and quorums, per-path edge reuse, hairpin skipping and seed
+re-entry as the structural rule, and optional reconvergence merging into a DAG.
 
-On top of that set are two knobs that subsume the modes in the design note:
+**New since round 1:**
 
-- a **label-change cost** `cost(ℓ → ℓ′) ≥ 0` plus a per-arm **loss budget**: with cost `forbid` a single label must
-  carry the whole path (strict, the default); with a finite cost the path may switch labels, paying for it, which
-  is the "close enough labels" idea;
-- **per-lineage branch limits** and quorum thresholds, so breadth is a property of the *strategy*, not just the
-  graph: a tight strategy prunes most structural branches and runs deep with a small result, a loose one fans out
-  and hits a cap.
+- **Derived seed labels (`per_hit`).** `seeds[].labels` may be omitted: the permitted set is then the labels that
+  carry every k-mer of the seed (the intersection of the rows seed validation reads anyway — no extra I/O), capped
+  at `max_seed_labels` and reported as such. This is the design note's default and the user's primary use:
+  "traverse consistently labelled continuations from how the match is labelled, without naming labels".
+- **`labels.mode: annotate`.** Admissibility becomes purely structural (edge reuse, hairpins, seed re-entry);
+  the labels present at every node are *recorded* (full rows, a `LabelRecorder`) instead of filtered. No permitted
+  set, no label state, no switching, no quorum, no branch limit — the code path shares the level loop and
+  `check_structure()` with the constrained mode and **nothing** of the label machinery.
+- **`exhaustive: true`.** Pins the knobs that would prune (unlimited branches and splits, `on_reconverge: keep`,
+  no quorum, `on_overflow: stop`) and *refuses* a request that sets them otherwise, so "the exhaustive trie" cannot
+  silently be a beam-pruned one.
+- **`complete_to_bp`.** Exploration is level-synchronous; a size cap trips between two heads of one level; that
+  level is marked partial and excluded. Every arm reports the depth up to which *every* admissible walk is
+  present, and `status: complete ⇔ complete_to_bp == max_extension_bp`. The walk rule the claim quantifies over
+  is echoed as `walk_rule`.
+- **Per-node label cap.** Recorded lists are cut at `labels.max_labels_per_node` (default 64) but every list
+  carries its true count, nodes_truncated is reported per arm, and the oracle refuses to prove anything with cut
+  lists.
+- **Verification layer** (§3): the oracle contract, a records model, 25 edge/non-edge cases, and the contract on
+  a real index.
 
-Design note (goals, written by the project owner, deliberately cautious about what graph evidence proves):
-`docs/DESIGN-labeled-traversal-endpoint.md`. Implementation spec (mine, the contract this code is written
-against): `docs/SPEC-labeled-traversal-core.md` (785 lines). **Where code and spec disagree, that is a finding.**
+Design note (project owner): `docs/DESIGN-labeled-traversal-endpoint.md`. Implementation spec (mine):
+`docs/SPEC-labeled-traversal-core.md` (1105 lines; §6.9 the oracle, §6.10 the completeness boundary, §11.3 the
+test list T1–T36). **Where code and spec disagree, that is a finding.**
 
 ---
 
 ## 2. How to see the code
 
-Branch `gr/labeled-traversal`, head is still upstream `1de02cec` — **there are no commits**. So:
-
 ```bash
-git status --short                 # 5 modified files, the rest untracked
-git diff                           # ONLY shows the 5 modified files
+git fetch origin gr/labeled-traversal && git checkout gr/labeled-traversal
+git log --oneline 1de02cec..HEAD        # 11 commits; read the messages, they state what each one claims
+git diff --stat 1de02cec HEAD
 ```
-
-Everything else is **untracked** and will not appear in a diff. The complete feature:
 
 | Path | Lines | Role |
 |---|---:|---|
-| `src/graph/traversal/traversal_types.{hpp,cpp}` | 95 / 74 | shared enums: regimes, label kinds, support kinds, end reasons |
-| `src/graph/traversal/label_oracle.{hpp,cpp}` | 204 / 525 | per-request context: graph regime, oriented-node → annotation-row mapping, batched label membership |
-| `src/graph/traversal/resolve.{hpp,cpp}` | 152 / 548 | `resolve` (support profile) and `select` (seed freezing) |
-| `src/graph/traversal/walker.{hpp,cpp}` | 330 / 2089 | the traversal itself — **the core, review this hardest** |
-| `src/cli/traverse.{hpp,cpp}` | 90 / 944 | strict JSON parsing/validation, serialisation, CLI entry point |
-| `tests/graph/traversal/test_walker.cpp` | 2085 | traversal semantics, typed over graph × annotation × mode |
-| `tests/graph/traversal/test_label_oracle.cpp` | 345 | regime/key mapping, access-path agreement |
-| `tests/graph/traversal/test_resolve.cpp` | 374 | support profiles, selection policies, scale |
-| `tests/graph/traversal/test_mini_refseq.cpp` | 376 | **against a real index** in the public `refseq33m` format |
-| `integration_tests/test_traverse.py` | 319 | CLI + HTTP routes end to end |
+| `src/graph/traversal/traversal_types.{hpp,cpp}` | 95 / 74 | enums: regimes, label kinds, support kinds, end reasons |
+| `src/graph/traversal/label_oracle.{hpp,cpp}` | 275 / 690 | per-request context: regime, oriented node → row key, batched membership (`LabelQuery`), full-row recording (`LabelRecorder`) |
+| `src/graph/traversal/resolve.{hpp,cpp}` | 155 / 579 | `resolve` (support profile) and `select` (seed freezing) |
+| `src/graph/traversal/walker.{hpp,cpp}` | 549 / 3037 | the traversal — **the core**; `walker.cpp:48–100` is the implementation-notes block |
+| `src/cli/traverse.{hpp,cpp}` | 105 / 1229 | strict JSON parsing/validation, serialisation, CLI entry |
+| `tests/graph/traversal/test_trie_oracle.hpp` | 667 | **the oracle contract**: E from recorded sets vs claims(A); tuned-run subset; merged-route soundness |
+| `tests/graph/traversal/test_trie_reference.hpp` | 586 | **the records model**: walk rule over strings; per-label walks; §6.3 recurrence; trace |
+| `tests/graph/traversal/test_trie_checks.hpp` | 485 | the three-way checks every fixture runs |
+| `tests/graph/traversal/test_trie.cpp` | 1298 | annotate/exhaustive smoke tests, cap boundary, cut lists, `TrieOracle` suite |
+| `tests/graph/traversal/test_trie_cases.cpp` | 986 | 25 edge/non-edge cases, caps sweep, random graphs |
+| `tests/graph/traversal/test_walker.cpp` | 2517 | traversal semantics, typed over graph × annotation × mode |
+| `tests/graph/traversal/test_label_oracle.cpp` | 485 | regime/key mapping, access paths, eviction |
+| `tests/graph/traversal/test_resolve.cpp` | 409 | support profiles, selection policies, scale |
+| `tests/graph/traversal/test_mini_refseq.cpp` | 723 | **against a real index** in the `refseq33m` format, incl. the contract vs the 42 source records |
+| `integration_tests/test_traverse.py` | 935 | CLI + HTTP end to end (23 tests) |
 | `scripts/traversal/build_mini_refseq.sh` | — | builds the real-format fixture from 42 NCBI accessions (~25 s) |
 
-Modified existing files (151 inserted lines total): `src/cli/server.cpp` (+101: three routes and a shard-
-addressing helper), `src/cli/config/config.{hpp,cpp}` (+43: the `traverse` command and its flags),
-`src/main.cpp` (+4: dispatch), `integration_tests/main.py` (server-based module must not be chunked).
+Modified pre-existing files (173 lines): `src/cli/server.cpp` (+106: routes, shard addressing),
+`src/cli/config/config.{hpp,cpp}` (+60), `src/main.cpp` (+4), `integration_tests/main.py` (6).
 
-**Suggested reading order:** spec §1–§9 → `traversal_types.hpp` (the enum contract: note `EndReason` has no
-`switched`/`superseded`/`minority`/`hairpin` values — those are `Event::text` qualifiers) → `walker.hpp` (the
-output contract; every field is an evidence claim) → `walker.cpp`, whose **lines 42–78 are an
-implementation-notes block listing the known deviations** → `label_oracle.cpp` → `resolve.cpp` →
-`test_walker.cpp`. The `MiniRefSeq*` tests must run with `cwd = build/` (they locate the fixture by relative
-path and skip if it is absent).
+**Suggested reading order for this round:** spec §6.9–§6.10 and §7.4 → `test_trie_oracle.hpp` (read the header
+comment: *what* is compared and why claims, not leaves) → `test_trie_reference.hpp` (the model; is it the rule?)
+→ `test_trie_checks.hpp` → `walker.cpp` `process_item_annotate`, `check_structure`, `cap_check`, `trip`,
+`stop_frontier`, `bounded`, `finalize` (the `complete_to_bp` computation) and `validate_strategy` →
+`test_trie_cases.cpp` → `test_mini_refseq.cpp` (last test).
 
 ---
 
-## 3. Background you need (MetaGraph specifics)
+## 3. The verification layer — what it claims to establish
 
-- **Label kinds.** A *column label* is an annotation column (on `refseq33m`, an NCBI taxid). A *header label* is
-  one indexed sequence inside a column — an accession — recovered through a `CoordToHeader` (`.seqs`) sidecar that
-  maps a column's k-mer coordinates to the FASTA record they came from. **On `refseq33m` the useful labels are
-  header labels**, so the per-accession path is the production path, not an edge case.
-- **Three graph regimes**, and oriented traversal node ids are *not* annotation row keys:
-  - `BASIC`: key = node.
-  - `PRIMARY`: the graph is wrapped in `CanonicalDBG`; ids above an offset are reverse-complement orientations;
-    key = `get_base_node(node)`.
-  - `CANONICAL` (native, both strands stored): no arithmetic mapping; the key is `map_to_nodes()` of the spelled
-    k-mer (for `DBGSSHash`, `min(n, reverse_complement(n))`).
-  Passing an oriented id straight to the annotation indexes out of range on `PRIMARY` and **silently returns an
-  empty row** on `CANONICAL` — a false negative with no error. `CanonicalDBG::get_mode()` returns `CANONICAL` for
-  primary graphs, so the regime is detected by `dynamic_cast`, not by mode.
-- **Annotation representations** differ in what a membership test costs: `ColumnMajor`, `RowFlat`, `BRWT` support a
-  single-cell `get(row, col)`; `RowDiff` variants do **not** — a row is reconstructed by walking a successor path
-  to an anchor (soft cap ~100 steps) and XOR-ing diffs. Coordinates live in `TupleRowDiff<TupleCSC<BRWT>>`, read
-  with `get_row_tuples`. The design note is explicit that whole-column extraction must never be an online path.
-- **Dummy k-mers.** `DBGSuccinct` without a mask exposes sentinel `'$'` neighbours; `refseq33m` ships no
-  `.edgemask`, so this is the production case. Degree functions count them, so branch decisions must come from
-  the character-filtered, label-filtered neighbour list.
-- **Conventions in the output.** Support runs are **0-based half-open intervals of k-mer starts**; a run `[a,b)`
-  covers bases `[a, b+k−1)`. Extension is measured in **bases outward from the seed boundary** per arm, counted
-  outside the seed; step *j* adds outward base *j−1*. Left-arm sequences are reported in natural orientation.
-- **What the evidence means.** `within_label` support proves every k-mer of the path carries that label. It does
-  **not** prove the path is a contiguous molecule: one label can hold many contigs, repeat copies or strains, so a
-  graph path through them is a *candidate* sequence. The design note is emphatic about this, and it is the crux of
-  §5.2 below.
+For a seed S, radius R and permitted set P, all under the `exhaustive` preset:
 
-**The target index** (public, verified via its own `/stats` and S3 listing): `refseq33m` — k=31, **basic** mode
-`DBGSuccinct`, **forward strand only**, 626,753,663,468 nodes (362 GB), annotation
-`RowDiff<BRWT>` **with k-mer coordinates** (333 GB), 32,881,371 labels, columns = taxids, accessions via a
-0.64 GB `.seqs` sidecar, no dummy mask.
+```
+T = trie(S, R, annotate)                 structural, labels recorded, no label logic
+E = { (w, l) : l ∈ P, w a walk of T on every node of which l is present, maximal per label }
+A = trie(S, R, constrain, P, forbid)     the label-constrained walker
+contract:  claims(A) == E                a claim is a (walk, label) pair — a label's END position, so a label
+                                         ending inside a walk other labels continue is checked at its own end
+```
+
+plus, for any tuned run (branch limits, quorums, beam, caps): every tuned leaf is a prefix of an exhaustive leaf
+under each of its labels, and every (walk, label) of E the tuned run does not reach has a *recorded* reason where
+the run left it (a branch event naming the base not taken, a quorum text, a cap, the beam). Nothing drops
+silently.
+
+**The third party.** T and A share the graph, the annotation and `check_structure()`, so their agreement cannot
+catch an error common to both. `test_trie_reference.hpp` therefore models the index from the records a fixture is
+built from and nothing else: per-label packed k-mer sets, and the walk rule of §6.10 re-implemented over strings —
+the structural walks with the labels present at every node (compared with T's recorded sets and path reasons),
+each label's maximal walks with the reason each ends (compared with claims(A)), the §6.3 recurrence for a constant
+switch cost and a budget (compared with constant-cost runs: leaves, losses, switch events), and the records' own
+continuations for `support: trace` (compared with trace runs). Every fixture is also checked for: the run over P
+equals the union of the single-label runs; a permitted set derived from the seed equals the explicit list; the
+recurrence at budget 0 equals the forbid leaves.
+
+**On a real index** (`MiniRefSeq.TrieContractAgainstTheSourceRecords`): the model is built from the 42 source
+FASTA records (9.3 Mbp, 2.8 s) of the fixture — k = 31, basic, **unmasked** `DBGSuccinct` (so `'$'` dummy
+k-mers are live), `RowDiff<BRWT>` with coordinates, header (accession) labels, exactly the `refseq33m` shape — and
+the contract holds on the whole blaNDM-1 seed (19 carriers; 24 structural walks left / 2 right at 300 bp) and on
+three 150 bp windows cut from records, under k-mer and under trace support, at 300 bp (all parties) and 1000 bp
+(claims vs records).
+
+**What this does and does not establish.** It shows the constrained walker returns exactly the label-consistent
+walks the records admit *under the stated walk rule*, with the stated reasons. It does **not** show the walk rule
+is the right finite set of walks to return (see §5.5.1 — the homopolymer consequence is the clearest example), and
+it does not cover `on_reconverge: merge` except through the route-soundness check.
 
 ---
 
 ## 4. The claims to attack
 
-These are the load-bearing claims. Each is meant to be decidable by reading the code. **If any is false, that is
-the finding I most want.**
+C1–C12 from round 1 still stand (restated briefly; C1 and C3 were qualified after round 1). C13–C21 are new.
 
 | # | Claim | Where |
 |---|---|---|
-| C1 | For a fixed path with no branch limit, the per-label loss is the exact minimum over label assignments. Branch-limit pruning is explicitly greedy, not a constrained optimum. | spec §6.3; `walker.cpp` `derive()` |
-| C2 | Branching is counted per **lineage**, not per label name: with a finite switch cost a label can be renamed, and a renamed lineage must not evade its branch limit. | spec §6.4; the ambiguity/exclusion loop in `process_item` |
-| C3 | With `forbid` and `max_label_branches = 0`, the result equals the union of independent single-label walks, and each arm has at most \|S\| leaves. | `test_walker.cpp` `ReferenceWalker` |
-| C4 | Every path uses each directed edge at most once, **per path**, with merged lineages' edge sets unioned (conservative). Canonical regimes treat `u→v` and `rc(v)→rc(u)` as one edge. | spec §6.6; `edge_key()`, `is_ancestor_or_self()` |
-| C5 | Precedence when a step is blocked: `rejoined_seed` > `edge_reuse_rc` > `edge_reuse`; seed re-entry is keyed on the target **node**, not the edge. | `block_rank()` |
-| C6 | A hairpin step (a self-reverse-complementary (k+1)-mer) is skipped by default and never counts toward ambiguity — otherwise every label would stop at any RC-palindromic (k−1)-mer. | spec §6.5 |
-| C7 | `trace` support requires strictly consecutive coordinates in one indexed sequence: `+1` on the right arm, `−1` on the left. | `derive()` coordinate filter |
-| C8 | Results do not depend on `annotation.batch_kmers` — prefetching only warms a cache and can never change which steps are taken. | spec §6.8; `prefetch()`; `Determinism` test |
-| C9 | The `result` object is byte-identical across runs, seed permutations, and one-seed-per-request splits. Wall-clock/cache counters live in a separate `timing` object excluded from that contract. | spec §6.8 |
-| C10 | `complete` means the requested domain was fully explored; `truncated`/`pruned` mean it was not. A capped result is never evidence of absence. Seed-level caps stop both arms, per-arm caps stop one. | spec §6.7 |
-| C11 | Strict JSON validation: unknown keys, bad types, out-of-range values and unreachable `extra` labels are rejected naming the field; nothing is silently weakened. | `traverse.cpp` `Strict` |
-| C12 | A traversal addresses exactly one physical (graph, annotation) shard; an index name covering several is rejected unless disambiguated. | `server.cpp` `resolve_traverse_index()` |
+| C1 | For a fixed path with no branch limit and `constant` cost, the per-label loss is the exact minimum over label assignments under *switch_on: loss* (a switch only from a label lost at that step); under a `table` cost exactness is subject to `max_switch_sources` (the preset forces it unlimited). | spec §6.3; `derive()` |
+| C2 | Branching is counted per lineage; a renamed lineage cannot evade its branch limit. | `process_item` exclusion loop |
+| C3 | Under `forbid` with `on_reconverge: keep`, the result over P equals the union of the single-label walks. | `check_single_label_union` on every fixture |
+| C4 | Each (k+1)-mer edge is used at most once **per path** (canonical in canonical regimes, orientation kept). | `check_structure`, `edge_key` |
+| C5 | Block precedence `rejoined_seed > edge_reuse_rc > edge_reuse`; seed re-entry keyed on the target node (either strand). | `block_rank` |
+| C6 | A hairpin step (self-RC (k+1)-mer; for even k also into/out of a self-RC node) is skipped by default and never counts toward ambiguity. | `is_hairpin` |
+| C7 | `trace` requires consecutive coordinates (+1 right, −1 left) and is only defined for BASIC graphs; `trace` + `merge` is rejected. | `validate_seed`, `derive` |
+| C8 | Results are invariant under `batch_kmers` in both modes (annotate assigns label ids at consumption). | `AnnotateIsDeterministicAndBatchInvariant` |
+| C9 | `result` is byte-identical across runs and request splits; per-seed annotation counters are deltas. | `Determinism` |
+| C10 | `complete` ⇔ the requested domain was fully explored. | — |
+| C11 | Strict JSON validation; nothing silently weakened (`annotation.access` must be `"auto"`). | `Strict` |
+| C12 | One physical shard per traversal; ambiguity is a routing 400, not a parse error. | `resolve_traverse_index` |
+| **C13** | **Annotate mode shares no label logic with constrain mode**: `process_item_annotate` never touches `derive`, `Entry`, `State`, the cost, the budget, quorums or branch limits; the only shared pieces are the level loop, `check_structure`, the caps, merging and the segment DAG. If any label decision leaks in, the oracle is circular. | `walker.cpp` |
+| **C14** | **`complete_to_bp` is sound**: for every n ≤ `complete_to_bp`, every walk of n bases from the seed boundary obeying the walk rule is in `segments`, and every path ending before it ended for its reported semantic reason. The partial level is marked, not rolled back, and excluded. Heads already at the radius when a seed-level cap trips are ended `max_extension_bp`, not censored. | `cap_check`, `trip`, `stop_frontier`, `finalize`; `TrieCasesCaps`, `TrippedCapReportsTheCompleteDepth` |
+| **C15** | Under the `exhaustive` preset nothing prunes except the level boundary; the preset refuses conflicting knobs naming the required value, including `max_switch_sources` under a `table` cost, and a derived set cut by `max_seed_labels`. | `validate_strategy`, `ExhaustiveRejectsConflictingKnobs`, `ExhaustiveRefusesACutDerivedSet` |
+| **C16** | A derived permitted set is exactly the labels carrying every seed k-mer, in `(column, seq_id)` order, costs no extra annotation reads, is validated in O(sum of hits) not O(L²·M), honours the time budget, and yields results identical to naming those labels. | `validate_seed`; `check_derived` on every fixture; `ManyDerivedLabelsMatchTheExplicitList` |
+| **C17** | Every recorded label list carries its true count (`labels_total` / `labels_distinct`), including blocked/hairpin events and the root; a cut anywhere increments `nodes_truncated`; live-label counts over cut lists are stamped inexact. | `bounded`, `distinct_labels`; `CutRecordedListsAreReportedAndBreakTheOracle`, `CutEventListsAndTheRootTotalAreReported` |
+| **C18** | The oracle E in `test_trie_oracle.hpp` reads only segment sequences, the recorded sets and the path/segment structure, and compares **claims** (label ends), so that a label ending inside a continuing walk is checked at its own end. | `expected_leaves`, `constrained_claims`, `OracleComparesPerLabelClaimsNotLeaves` |
+| **C19** | The records model implements the walk rule exactly, and "a label's maximal walks" (per-label DFS over its k-mers) equals "the maximal per-label prefixes of the structural walks" (what E computes from T). | `test_trie_reference.hpp` `WalkRule::steps`, `detail::dfs`, `label_trie` |
+| **C20** | `hits_from_tuples` is O(coordinates) per node (a slot map, not a scan of the hits built so far); `max_support` selection is O(R log R) per round with a single materialisation; `LabelQuery::fetch` keeps a call's whole working set resident across eviction. | `label_oracle.cpp`, `resolve.cpp`; `MaxSupportScalesWithManyLabels`, `EvictionKeepsTheCurrentBatchAnswerable` |
+| **C21** | The trace model's end reasons: at a record's end, `dead_end` when the node has no successor, `record_end` when a successor carries the label with non-continuing coordinates, `label_lost` otherwise; structural blocks still apply under trace. | `trace_trie` vs `TrieCasesTrace.*` |
 
 ---
 
 ## 5. Specific questions
 
-### 5.1 Correctness
+### 5.1 Is the verification circular, and is the model the rule?
 
-1. **C2, the re-minimisation loop.** When an ambiguous lineage is excluded, every successor's state is recomputed
-   and the loop repeats. Can this loop fail to terminate, or terminate with a state that depends on iteration
-   order? Is the bound (`round <= |state|`) actually sufficient?
-2. **C1 vs C2 interaction.** `derive()` fixes one predecessor per target *before* branch-limit exclusion runs. Can
-   that discard a cheaper assignment that would have satisfied the branch limit — and if so, is the greedy
-   behaviour the spec admits, or something worse?
-3. **C4 after a merge.** Segments gain multiple parents at a reconvergence and `is_ancestor_or_self` walks all
-   branches. Is the ancestor marking still valid when segments are created *during* the same level as a merge?
-   Can an edge be reused because a lineage's ancestry was not yet linked?
-4. **C7 on the left arm.** Coordinates decrease leftward. Check the `coord == 0` boundary and the case where a
-   label has several coordinates at one node (a repeat) — can a trace jump between copies and still be reported
-   as one run?
-5. **Regime mapping.** For native `CANONICAL` graphs the key needs the spelled k-mer. Is the spelling always the
-   oriented k-mer at that node, including on the left arm and after a hairpin? A wrong spelling yields a silently
-   empty row, i.e. a false "label lost".
-6. **`resolve`'s trace runs** (`resolve.cpp`): the run/break construction is subtle. Does a coordinate jump always
-   produce exactly one break and two runs, and is `kmers_supported` (k-mer presence) correctly distinguished from
-   trace continuity?
-7. **`select`'s `max_support` sweep**: it claims that for a fixed left end the best interval ends at the smallest
-   run end ≥ `a + min_kmers`, with candidate left ends being run starts and `end − min_kmers`. Is that exact, or
-   is there a case where a non-endpoint left end wins?
+1. **C13.** Read `process_item_annotate` and everything it calls. Does any label-derived quantity influence which
+   successor is followed, which path ends, or where? (`labels_at`, `record_present`, `bounded` are meant to be
+   write-only.) Is the `continuation` of an annotate path, whose labels are "recorded on every node of the tail",
+   a label decision in disguise?
+2. **C18/C19.** `expected_leaves` walks each structural path and, per permitted label, takes the longest prefix on
+   which the label is present at every node, then keeps the maximal prefixes per label by a lexicographic
+   successor test. (a) Is "maximal per label" exactly the walker's label end? Think of a label present on a walk's
+   nodes 0..j, absent at j+1, present again at j+2 on the *same* walk. (b) The lexicographic test claims "every
+   extension of s directly follows s"; is that true with the empty walk and with walks that are prefixes of
+   several others? (c) The records model's `label_trie` is a per-label DFS with the per-path used-edge set; I
+   argue it equals the maximal-prefix definition because the prefix shares the path and hence the used set. Is
+   there a case where a label's own DFS takes a step the structural DFS also takes but *blocks differently*?
+3. **The walk rule in the model** (`WalkRule::steps`): hairpin → skipped; seed node → `rejoined_seed`; used key →
+   `edge_reuse_rc` if the orientation differs else `edge_reuse`; `stop_reason` picks the strongest block among the
+   label's passing candidates, else `label_lost` if none passes, else `dead_end`. Compare with
+   `Walker::check_structure` and the end-reason selection in `process_item` (`walker.cpp` ~2300–2380). Where do
+   they differ? In particular: a label whose only continuation is a *blocked* step while *another* label's
+   continuation is followed; a candidate that is both a seed node and a used edge; two blocked candidates of
+   different ranks.
+4. **Recorded sets vs the model's `labels_at`.** On canonical and primary graphs the model inserts both
+   orientations of every record k-mer and the recorder reads the row of the base node; on PRIMARY the row key is
+   `get_base_node`. The three-way agreement held in all three modes on every fixture — but is there a k-mer for
+   which the two disagree *and* no fixture exercises it (e.g. a k-mer whose RC is also in a different record)?
+5. **What the real-index test proves.** The model for `mini_refseq` is built from the FASTA the index was built
+   from, by my own builder script. If the builder drops or alters sequence (N handling, line endings, lowercase),
+   the model and the index would agree on the wrong thing. The records are ACGT-only and the index builder is
+   `scripts/traversal/build_mini_refseq.sh`; please check that the records the test loads are the ones the index
+   was built from and that no k-mer could be silently absent from one side.
+6. **`check_tuned_subset`.** Clause 2 follows each exhaustive claim through the tuned trie and accepts a `cut`
+   reason (branch limit, loss budget, beam, cap) or a recorded branch event where the run leaves the claim. Is
+   "a branch event naming the base not taken" too permissive — could a run drop a walk for a *wrong* reason that
+   happens to be recorded?
+7. **A cautionary tale about the JSON-level oracle.** The integration tests' `_walks` / `_structural_walks`
+   compare *leaves* on the *right* arm. When I ported them to a script for the SRA run I (a) compared leaves to
+   per-label claims and (b) reversed the left arm's flank as one string instead of per segment (a left-arm
+   segment stores its bases in natural orientation, so walking order is `reverse(seg)` concatenated root→leaf —
+   see `spell_path`). Both mistakes produce a "DIFFER" that looks like a walker bug and is not; with claims and
+   the right orientation the SRA result is 114 = 114 and 2 = 2. The C++ oracle does this correctly, but the two
+   conventions (claims not leaves; per-segment reversal) are easy to get wrong in any new consumer — is the
+   output format itself inviting this, and should the left arm be serialised in walking order instead?
 
-### 5.2 Evidence honesty — the highest-value area
+### 5.2 Correctness of the new surface
 
-I found exactly one real bug this way, and I want you to look for more of the same shape.
+1. **C14, the boundary.** `trip()` sets `boundary` to the first unexpanded head's depth; the beam sets it to the
+   pruned heads' depth; `MAX_STEPS` (a seed-level cap) stops the *other* arm at its own frontier depth. With both
+   arms alternating by depth, can arm B's boundary be set by a cap that tripped in arm A at a depth B has already
+   completed? Can `complete_to_bp` ever be *larger* than the last complete level? (The sweep in `TrieCasesCaps`
+   found no case, but it is one fixture.)
+2. **Partial level marked, not rolled back.** Children created before the cap tripped stay in the output ended
+   with the cap reason, above `complete_to_bp`. Is anything downstream (`label_summary.reach_bp`, `direct_bp`,
+   `continuation`) computed over them in a way that reads as evidence?
+3. **The per-node cap and E.** With lists cut, `expected_leaves` sets `cut` and the test refuses to compare. But
+   `constrain` mode also uses `bounded()` for its *reported* lists while its *decisions* use the full state. Is
+   there any place where a cut list feeds a decision?
+4. **Derived labels (C16).** The derivation intersects hits across the seed's k-mers starting from the cheapest row
+   of the first batch. Under `trace`, the derived set must also be coordinate-consecutive over the seed. Check the
+   compaction of per-k-mer coordinates (`TraceCoordinatesSurviveCompaction`) and the ambiguous-header refusal: can
+   an accession present in two columns be derived under `column` kind and traverse under the wrong column?
+5. **Switching (C1).** `OneSwitch` and `TwoSwitches` pin the recurrence against the records model: a target enters
+   from the cheapest *lost* source at source loss + cost within the budget, stays when cheaper or equal, and a
+   lost label whose only switch would exceed the budget ends `loss_budget` with the needed value. Is "switch only
+   from a lost source" (`switch_on: loss`) what the spec says, and does `switch_on: any` have any reference at
+   all? (It does not; is that acceptable for a knob that exists?)
+6. **Even k.** The hairpin rule for even k treats a self-RC *node* as a hairpin in itself, so a record containing a
+   palindromic k-mer cannot be reconstructed through it (`EvenKPalindromicNode` pins the walk stopping one base
+   short). Is that the right rule, or should a palindromic node be enterable and only its *RC retrace* blocked?
 
-**What happened.** I extended a blaNDM-1 gene 3 kb through the real fixture and then checked every recovered
-flank against the source RefSeq record it was attributed to. 29 of 30 were exact substrings. The one exception
-was a path that passed a **reconvergence** at 1239 bp: two routes met, the merged node's label set became the
-union, and an accession that arrived via the *other* route was listed at a leaf whose spelled sequence it does not
-contain. The output was asserting that an accession carries a 3 kb flank it does not carry.
+### 5.3 Efficiency — measurements and the open problem
 
-**The fix** was to expose `LabelEnd::route_bp` (already computed internally for continuations): `0` means the label
-travelled this path's own bases; non-zero means its route diverged there, so it supports the leaf *node* but not
-the spelled bases. `test_mini_refseq.cpp` now asserts the substring property for all `route_bp == 0` labels and
-requires the merged case to occur.
+Measured, all single-threaded on a laptop (Apple M-series, Release build):
 
-**Questions:**
+| What | Index | Numbers |
+|---|---|---|
+| 3 kb two-arm walk, 19 labels, merge on | mini_refseq (9 Mbp, RowDiff<BRWT>+coords, 9 columns) | 0.14 s incl. resolve; 24,877 rows requested (~1 row per step per arm) |
+| exhaustive constrained, 19 labels, R = 300 | mini_refseq | 0.33 s both arms (26 leaves); structural annotate run 0.11 s |
+| exhaustive constrained, 19 labels, R = 1000, k-mer / trace | mini_refseq | 0.49 s / 0.43 s |
+| the records model, 42 records, 9.28 Mbp | — | 2.8 s to build (packed k-mers, hopscotch; the same with `std::hash` on packed k-mers took 80 s — identity hashing of 2-bit k-mers in an open-addressing table) |
+| 2000 bp exact flank recovery, single label | UHGG public index (9.68 G nodes, 4,644 labels, RowDiff<BRWT>, no coords) | ~1.4 annotation rows per step; 6 s wall dominated by index load; 6.6 GB RSS |
+| 16S window, 8 carriers, multi-label == union of 8 single-label walks | UHGG | 10 leaves; every leaf exact in its MGnify genome and absent from the others |
+| switching at a real contig end | UHGG | forbid → 0 bp `label_lost`; constant 1 / budget 1 → 500 bp via two labels; `route_bp = 0` label verified exact over 800 bp, `route_bp = 451` label's agreement ends at exactly 419 |
+| **PRIMARY regime on a real index**: a full-length 16S (1396 bp window of PZ326290.1) | SRA `sra_random_100studies` (42.4 G nodes, k = 31, primary `DBGSuccinct` small + `RowDiff<BRWT>` 19.6 GB, no coords; 12 GB RSS, 20 s load, server mode) | `resolve`: 1.0 s / 0.4 s per 16S query, ≥ 300 labels (discover cap hit), 6 carriers of the whole window (one study). Exhaustive constrained trie, derived labels, R = 300: **1000 live paths at 237 bp (right) / 291 bp (left)** — 1116 / 1437 leaves, 44.7 k steps, 124.6 k rows requested, **5.4 s**; the structural trie (2836 labels recorded, up to 827 at one node) trips the same cap at 109 / 46 bp, 5.0 s. **The JSON-level oracle at the common complete depth agrees on both arms: 114 = 114 claims (right, 10 of them labels ending inside walks), 2 = 2 (left).** One switch allowed: 398 / 282 switch events, 19 `loss_budget` ends. Default strategy (branch limit 0, merge on), R = 3000: one leaf per arm, **61 bp right / 52 bp left, every label ends `branch`** — 0.2 s; each of the 6 samples alone gives the same 61 / 52 (one 18): the 16S flank is ambiguous *within* each metagenome within ~60 bp |
 
-1. Are there other paths by which a label can be reported against sequence it does not support? Candidates to
-   check: `LabelRun` intervals after a merge; `LabelArmSummary::direct_bp` vs `reach_bp`; `Segment::labels_start`
-   / `labels_end` on a merged segment; `Continuation::labels`.
-2. Is `direct_bp` (advertised as "the longest run entered from the seed", the only per-sample evidence) actually
-   immune to the merge problem?
-3. After a switch, a path is supported by a *chain* of labels, not one sample. Is that distinguishable in the
-   output in every place a label is named, or can a switched-in label be mistaken for a direct carrier?
-4. Does any end reason overstate knowledge? Specifically `LABEL_LOST` ("no continuation carries it") vs merely
-   "we did not look" — e.g. when a successor was skipped as a hairpin or blocked by edge reuse.
-5. Several semantic distinctions are carried in `Event::text` qualifiers (`"superseded"`, `"minority"`,
-   `"below_min_labels"`, `"split_limit"`, `"hairpin"`) rather than distinct `EndReason` values. Is that a
-   lossy encoding a consumer can misread?
+The complexity audit (asymptotics in `walker.cpp`, `label_oracle.cpp`, `resolve.cpp`) found six superlinear
+terms. Fixed and tested (C20): `hits_from_tuples` (O(coords × hits) → O(coords) per node — on the coordinate path
+`refseq33m` uses) and `max_support` (re-materialising per candidate → once per round). Landed in `01a5230a`
+("Remove three superlinear terms from the walker, byte-identical"): the edge-reuse check keyed by
+`(edge, segment)` and probed over the current path's own ancestors when that is fewer than the edge's uses (was
+O(P²) per level in `keep` mode, which the preset forces; the new `EdgeReuseProbes` test fails on the old code,
+62,074 probes against a bound of 32,220), the reconvergence state union as a two-pointer merge (was O(σa·σb)),
+and an explicit bound and counters on re-minimisation rounds at an ambiguous node (`edge_reuse_probes`,
+`reminimisation_rounds`, `max_reminimisation_rounds` under `counters`). Each was required to leave every result
+byte-identical; the three-way suite is the regression net.
 
-### 5.2b Open leads I have not resolved
+1. **The term that decides `refseq33m`.** Every label there is a header label, so every step reads a *tuple* row
+   from `TupleRowDiff<TupleCSC<BRWT>>`: the full row and all coordinate lists, of which ~20 labels are wanted.
+   Row population W, not the walker, is the cost. Round 1 showed the proposed boolean `rd_direct` (XOR of
+   `get(row, col)` along the row-diff path) is **invalid for tuple matrices** (membership is "tuple non-empty",
+   not a bit XOR). What *is* the right selected-column extraction for tuple row-diff — decode only the permitted
+   columns' tuples along the anchor path? Is it implementable without touching the on-disk format, and what does
+   it cost per step?
+2. **Annotate mode on a wide locus.** The oracle reads full rows by design and the spec calls it "a verification
+   tool at small radius". On `refseq33m` a node can carry 10⁴ labels; is there any use of annotate mode that
+   remains sensible there, or should the API refuse it above a label count?
+3. **The perf fixes.** For each, is the new code exact (same results, same reasons, same event order)? The brief
+   is in the commit messages; the edge-reuse change in particular must preserve C5's precedence and the `blocked`
+   events.
+4. **Caches.** `LabelQuery`'s cache is bounded by entries, not bytes (each entry carries per-label coordinate
+   lists); fetch keeps the working set resident. At |P| = 10³ with coordinates, what is the realistic footprint?
+5. Where would you expect the first wall on `refseq33m` now — and what single measurement would you run first?
 
-An internal pass over this code produced the following specific leads. I verified and fixed three of them
-(§5.2c); **the rest are open and are good starting points** — each names a place and a decidable question.
+### 5.4 Evidence honesty
 
-1. **Determinism of the `annotation` counters.** They are per-request (per `LabelOracle`), not per seed
-   (`walker.cpp` ~:2049, serialised `traverse.cpp` ~:632). For a request with seeds [A, B], does seed B report
-   the same counters as when submitted alone? If not, claim **C9** is false as stated, or the `annotation` block
-   belongs in `timing` (which is excluded from the contract).
-2. **`max_switch_sources` truncates by loss, not by switch cost** (`derive`, `walker.cpp` ~:1047). With a `table`
-   cost, |σ| = 70 and the cap at 64, if the only finite-cost source into the surviving target ranks 70th, is it
-   found? If not, **C1's exactness fails for table costs** — and does `ReferenceWalker`/the loss oracle ever run
-   with |σ| above the cap?
-3. **Caps are evaluated before `merge_level`** (`walker.cpp` ~:1708 vs ~:1523). Can an arm be truncated for
-   exceeding `max_live_paths` by heads that were about to merge away? And is the growth-bin invariant
-   (`max live paths ≤ max_live_paths`) trivially true because it is recorded *post*-merge while the cap is
-   checked *pre*-merge?
-4. **`select` MAX_SUPPORT in later rounds** (`resolve.cpp` ~:344–424). Candidate right ends are restricted to run
-   ends and any interval overlapping an already-taken one is dropped wholesale. With one label supporting
-   `[0,1000)` and `max_seeds: 3`, how many seeds come back, and does the "one binary search per candidate left
-   end" optimality argument still hold once `taken` is non-empty?
-5. **`merge_overlapping` (default true) can shrink a long seed** (`resolve.cpp` ~:458). With candidates
-   `A=[0,800)` and `B=[700,760)` under `longest_first`, does the frozen seed collapse to `[700,760)`? That would
-   directly defeat the "seeds as long as possible" requirement.
-6. **Trace semantics** (`resolve.cpp` ~:226, `walker.cpp` ~:1560). Are coordinate sets *unioned* across
-   occurrences, so a repeat lets a trace hop between copies inside one record? Is `trace_break` really a record
-   boundary, given that `num_kmers_in_sequence()` is never consulted — i.e. is a true record end ever detected?
-7. **Hairpin vs seed re-entry precedence** (`walker.cpp` ~:1586, `is_hairpin` ~:763). For a circular molecule in a
-   PRIMARY index whose closing step is self-reverse-complementary with `hairpins: skip`, is the reason
-   `rejoined_seed` (with `overlap_bp`) or a plain dead end? And for even k, does a palindromic source k-mer make
-   *every* outgoing step a hairpin, killing all labels at once?
-8. **`resolve` is quadratic in the label count** (`resolve.cpp` ~:207–263 linear-scans each node's hit list per
-   label). With `discover: {max_labels: 1000}` on a 100 kb query where most k-mers carry hundreds of labels, what
-   is the wall time and peak RSS — and is there anything that aborts it? (`bounds.time_budget_ms` is parsed and
-   discarded in `resolve`.)
-9. **Internal errors return HTTP 400** (`server_utils.cpp` `process_request`, unchanged). Spec §10.3 requires 500
-   for non-client errors. What status does a `CanonicalDBG` primary-graph inconsistency produce today, and does
-   the CLI still write its per-request error JSON on a non-`InvalidRequest` throw?
-10. **The header→(column, seq_id) index is cached forever, keyed on a raw `CoordToHeader*`**
-    (`label_oracle.cpp` ~:157–204). Is that identity-safe if one sidecar is destroyed and another allocated at the
-    same address, and how large does this static grow for a `refseq33m`-scale `.seqs`?
-
-### 5.2c Already found and fixed — do not re-report, but do check the fix
-
-1. **Multi-graph mode was dead on arrival.** The server consumes `graph` / `graph_path` to pick a shard, but the
-   strict parser never declared them, so the unknown-field check rejected **every** multi-graph request with
-   `unknown field 'graph'`. Invisible to the suite because the integration tests run a single-graph server. Fixed
-   by declaring both as known routing fields; a regression test now asserts the error is a routing error and not
-   a parse error. **Claim C12 was untested when written — please check it properly.**
-2. **`direct_bp` and the merge.** I first clamped `direct_bp` at the merge depth and a test correctly rejected it:
-   a reconvergence joins paths *at the same node*, so bases after the merge are identical on every route in, and
-   the label really does carry them in its own sequence. The resolution is that `direct_bp` is per-label along its
-   **own** route, while `LabelEnd::route_bp` is the per-path qualifier. Please check that this distinction is
-   actually sound and consistently applied (`LabelRun::route_bp` is now also reported).
-3. **`annotation.access` was parsed and silently ignored**; now rejected unless `"auto"`, since the spec promises
-   nothing is silently weakened.
-
-### 5.3 Efficiency at `refseq33m` scale — I am most unsure here
-
-Measured on the 9 Mbp fixture: a 3 kb two-arm traversal from a seed with 19 labels took **0.14 s** and requested
-**24,877 annotation rows**. That is roughly one row per step per arm, which is the expected shape — but the
-fixture has **9 columns**, and `refseq33m` has **33 M labels and a 333 GB coordinate annotation**.
-
-1. **The tuples path is the production path.** Header (accession) labels require coordinates, so every
-   `refseq33m` traversal uses `get_row_tuples` on `TupleRowDiff<TupleCSC<BRWT>>` — full row *and tuple*
-   reconstruction per node, where a node's row may carry thousands of labels each with coordinate lists, of which
-   we want ~20. Is that viable at 10³–10⁴ steps per request, or fatal? What is the realistic per-step cost?
-2. **The selected-column accessor was specified but not implemented.** The spec (§8.2) proposes `rd_direct`:
-   for `RowDiff<M>` where `M` supports `get(row,col)`, compute membership as the XOR of `diffs().get(r, c)` along
-   the row-diff path for only the permitted columns, decoding incrementally along an unbranched run. Only
-   `direct` / `rows` / `tuples` exist today. Is `rd_direct` the right fix, is it correct for *tuple* matrices
-   (where membership is "tuple non-empty"), and is there a better approach I am missing?
-3. **Cache growth.** `LabelQuery`'s cache is bounded by entry count (default 10⁶), not bytes, and each entry holds
-   a per-label coordinate list. At large permitted sets, is this a memory blowup? Is full eviction on overflow the
-   right policy?
-4. **Per-step graph cost.** On `PRIMARY`, each first visit adds O(k) reverse-complement index work; the left arm
-   on `DBGSuccinct` uses a `NodeFirstCache`. Are the spelling hints actually passed everywhere they should be, or
-   does some path fall back to `get_node_sequence()` per step?
-5. Where would you expect the first wall to be hit on `refseq33m` — annotation I/O, row reconstruction, label-set
-   churn, or output size? What measurement would you run first?
-
-### 5.4 Robustness
-
-1. Concurrency: all annotation reads are const and the loaded index is shared, with per-request caches. Is
-   anything actually shared-mutable? (Note a per-request `CanonicalDBG` clone is made precisely to avoid mutating
-   the shared wrapper.)
-2. The HTTP handlers run on the server's io threads, whose default count is **1**, so one long traversal blocks
-   `/search`. Documented, not fixed. How would you bound it?
-3. `process_request` maps **every** `std::exception` to HTTP 400, so an internal failure looks like a client
-   error. Pre-existing, but my `InvalidRequest` relies on it. Worth changing?
-4. Hostile or pathological input: a seed of exactly `k`; a seed that is one long homopolymer; a 1 Mbp query to
-   `resolve`; `max_extension_bp` of 10⁹; 10⁴ seeds in one request; a label name containing a tab or comma (seed
-   ids are built from length-prefixed label strings — is that injection-proof?).
-5. Disk-backed annotations (`RowDisk`) open a file view per `get_rows` call. Does the batching avoid per-node
-   calls on those representations?
+1. `LabelEnd::route_bp` (0 = the label carries this path's spelled bases; > 0 = merged in at that depth, supports
+   the leaf and the shared tail only) and `LabelArmSummary::direct_bp` (a label-consistent *route* of that length
+   exists, not a contiguous occurrence) were corrected in wording after round 2. Is every place a label is named
+   now unambiguous about which of the three kinds of support it has — k-mer route, trace, or merged-in?
+2. In annotate mode `label_summary` is computed from the recorded sets (`direct_bp` = continuous presence along
+   *some* route, exact when no list was cut, a lower bound otherwise). Is "lower bound otherwise" actually a lower
+   bound, or can a cut list make it an *over*-estimate?
+3. The derived set is the seed's *carrier* set, not one hit. Under `forbid` this is `path_common` over the carriers.
+   Can a consumer mistake a derived-set result for evidence about one particular record?
+4. `Event::text` qualifiers (`superseded`, `minority`, `below_min_labels`, `split_limit`, `hairpin`,
+   `switch_sources`) still carry distinctions that are not `EndReason` values. Round 1 flagged this as lossy; it
+   was kept. Is there a concrete misreading a consumer would make?
 
 ### 5.5 Design critique
 
-Please challenge the formulation itself, not just the code.
-
-1. Is **label set + change cost + loss budget** the right generalisation of the design note's discrete modes
-   (`within_label`, `path_common`, `any_of`, `sequence_trace`)? It makes them special cases — but does it make the
-   evidence harder to interpret than four explicit modes would be?
-2. **Reconvergence merging** is on by default: it is what keeps a population-scale walk from producing one path
-   per label through every bubble, but it is exactly what caused the §5.2 bug. Is merging-by-default right, given
-   that it weakens per-path evidence? Should it be opt-in?
-3. `max_support` selection maximises the *number* of labels covering a block, so on blaNDM it prefers the 231-k-mer
-   prefix shared by 25 carriers over the 783-k-mer gene carried in full by 19. The project owner wants seeds "as
-   long as possible", so `longest_first` exists too. Is a single objective with a length floor better than two
-   policies?
-4. Deliberately **not** implemented: tip windows and bubble windows (skip a short dead-end or a closed bubble
-   without spending a branch). Without them, a SNP bubble inside one sample stops that label at the first bubble
-   under `forbid`, and raising the branch limit grows the result exponentially. Is that the right thing to build
-   next, or is there a cheaper mechanism?
-5. The intended consumer is an LLM agent iterating: probe cheaply, read the diagnostics, retune, extend. Does the
-   contract support that loop, or does it presume a human reading JSON?
+1. **The walk rule.** "No (k+1)-mer twice per path" makes the set of walks finite but has consequences the tests
+   now pin as *known*: a homopolymer A^(k+3) yields the walks A^(k−1)·Z, A^k·Z, A^(k+1)·Z and **never the
+   record's own** A^(k+3)·Z — under k-mer *and* trace support (the coordinates force the record's path onto the
+   loop edge a second time). Likewise a tandem repeat is unrolled at most once. Is this the right rule for a tool
+   whose output is "candidate sequence"? Alternatives: no *node* twice (stricter, fewer walks), a per-path edge
+   multiplicity bound, or letting `trace` override edge reuse when coordinates continue (then trace walks could
+   be longer than k-mer walks, and `check_trace`'s prefix property would have to go).
+2. **Annotate as oracle vs annotate as product.** It was built as a verification tool; the user also wants it as
+   a way to "extract the whole trie from a match up to a size, independent of labels but with labels annotated".
+   Are the size bounds (`max_steps`, `max_output_bp`, `max_paths`, `max_live_paths`, time) plus `complete_to_bp`
+   the right contract for that, or is a bound on the *number of nodes entered per level* missing?
+3. **Breadth-first as the only order under the preset.** The completeness boundary depends on level-synchronous
+   exploration; `lowest_loss_first` and `most_supported_first` are refused with `exhaustive`. Is that the right
+   coupling?
+4. **Merging is still on by default** outside the preset, and still the thing that weakens per-path evidence
+   (`route_bp`). Round 1 asked whether it should be opt-in; I have not changed it. Argue it either way.
+5. **Not built, by choice:** an `hll` cost model (the user's formulation needs 0 or 1 switches, not similarity);
+   discovered switch targets (hopping into a label that does not carry the seed); a per-label `label_walks` view
+   (the union-of-single-label check covers the semantics; the view would be convenience). Which of these would
+   you build first, if any?
 
 ### 5.6 API and usability
 
-1. Given a result, can a consumer actually tell **why** a traversal stayed shallow or blew up, and which knob to
-   turn? The evidence offered is `growth` (per-bin live paths, distinct live labels, splits, reconvergences,
-   blocked repeats, label ends by reason), `branch_events`, `needed_budgets` (what budget *would* have kept a
-   label), and `cap_trigger`. What is missing?
-2. Output size: bounded in bases (`max_output_bp`) and events, but label lists scale with the permitted set. At
-   \|S\| = 1,000 is the JSON still usable? `output.detail: summary|tree|full` exists — is `summary` the right cheap
-   probe?
-3. Is `continuation` (a leaf's tail sequence + the labels covering it, re-submittable as a seed) a sound basis for
-   iterative deepening, given that it resets edge-reuse and branch state?
-4. Are the knob names and defaults in spec §5 the ones you would expose?
+1. Given a result, can an agent tell why a trie stayed shallow or exploded, and what to change? Evidence offered:
+   `complete_to_bp`, `cap_trigger`, `labels_per_node`, `growth` bins, `branch_events`, `needed_budgets`,
+   `walk_rule`. What is missing for the loop "probe → read → retune → extend"?
+2. The derived-label default: is returning the *carrier set* the right default when a user says "traverse from
+   how the match is labelled", or should the API require the user to pick one hit's labels?
+3. Trace support is BASIC-only (coordinates carry no strand in canonical indexes) and rejects merging. Is that a
+   reasonable surface, or a trap?
 
 ---
 
-## 6. Known limitations — please do not spend time re-reporting these
+## 6. Already found and fixed — do not re-report, but do check the fixes
 
-- **No `hll` cost model.** The "close enough labels" cost is `forbid` / `constant` / `table` only. The planned HLL
-  variant (from branch `origin/hm/aln_alt_label_change`: `log2(min(|B|, |A|+|B|−|A∪B|)) − log2|B|` over per-column
-  HyperLogLog sketches) needs a `libcount` submodule and a `.hll` sidecar, and must clamp the estimate so sketch
-  error cannot make a cost negative. **Do tell me if the cost model's shape is wrong.**
-- **No tip/bubble windows** (fields exist, stay zero). See §5.5.4.
-- **No GFA export** of the explored subgraph.
-- `max_steps` is enforced per path head, not at single-step granularity inside a chunk.
-- Beam overflow ranks by support only; there is no `queue` ranking option.
-- Trace support with *column* labels follows consecutive column coordinates and does not detect a record boundary
-  with consecutive global coordinates; header labels use local coordinates and do detect it.
-- No measurement on a real ATB or `refseq33m` shard yet — only the 9 Mbp fixture.
-- Untested: reverse-complement seed symmetry, a brute-force loss oracle, access-path invariance as an explicit
-  test, and several later spec cases.
+From round 1 and its follow-up:
+
+1. **Blocker:** trace support merged coordinate sets across a reconvergence and could report direct support no
+   single occurrence justifies → `trace` + `merge` is rejected with an actionable error.
+2. `LabelQuery` eviction mid-call → "Couldn't find key" crash → fetch keeps the call's working set; always inserts.
+3. `max_support` did not clip runs between rounds → fixed, tested (`MaxSupportClipsRunsBetweenRounds`).
+4. Multi-graph requests rejected with `unknown field 'graph'` → routing fields declared; regression test.
+5. `resolve` accepted and ignored `bounds.time_budget_ms` → rejected.
+6. Per-request annotation counters broke C9 → per-seed deltas.
+7. Negative `kmer_interval`, `annotation.access` other than `auto` → validated / rejected.
+8. C1 qualified by `max_switch_sources`; C3 restricted to `on_reconverge: keep`.
+9. Doc wording: "contiguously in its own sequence" overstated k-mer evidence; `route_bp` comments were inverted
+   (the unsupported part is the prefix *before* `route_bp`); the spec's exact read-out requires
+   `route_bp: 0` as well as `entered_by: seed` / `from_bp: 0`.
+10. Derived labels: O(L²·M) seed validation → one data-major sweep; no clock check during derivation → time budget
+    honoured, plus `--traverse-max-seed-labels`; `table` cost refused with derived labels (a by-name table would
+    silently mis-apply).
+11. From the review of the trie work: the oracle compared leaves, not claims → claims; event label lists and the
+    root carried no totals → every list has its true count; `exhaustive` could be subverted by
+    `max_switch_sources` under a `table` cost, by a derived set cut by `max_seed_labels`, and by the 64-label
+    annotate default → refused / reported; the per-node cap was enforced after the coordinate work it should
+    bound → before; `walk_rule` understated the enforced rule (even-k hairpins, hashed edges) → stated;
+    live-label counts over cut lists were stamped exact → inexact.
 
 ---
 
-## 7. How to verify anything you suspect
+## 7. Known limitations — please do not spend time re-reporting these
+
+- No `hll` cost model; no discovered switch targets; no tip/bubble windows; no GFA export; no `label_walks` view.
+- `trace` is BASIC-only and rejects merging; with *column* labels it cannot detect a record boundary that has
+  consecutive global coordinates (header labels can).
+- The homopolymer / tandem-repeat consequence of the walk rule (§5.5.1) is pinned, not solved.
+- `discover` in `resolve` does not scale (it truncates output, not work) — the supported path is labels from
+  `/search`; `resolve` is for a known label list.
+- Caches are bounded by entry count, not bytes. The header → (column, seq_id) index is keyed on a raw
+  `CoordToHeader*`.
+- No measurement on a `refseq33m` shard. The PRIMARY regime is measured on the SRA index (§5.3) but not
+  validated against records there (SRA reads have no "record" to compare with); its real-index evidence is the
+  JSON-level oracle agreement and the unit suite's canonical/primary cells.
+- `switch_on: any` has no independent reference; `on_reconverge: merge` is checked only through route soundness.
+
+---
+
+## 8. How to verify anything you suspect
 
 ```bash
 # Release and Debug (asserts on). AppleClang needs the -Wno-error flag; GCC does not.
@@ -368,33 +400,29 @@ cd metagraph/build_debug && cmake -DCMAKE_BUILD_TYPE=Debug   -DCMAKE_CXX_FLAGS=-
                          && make -j unit_tests
 # re-run cmake after ADDING a file: the source globs are not CONFIGURE_DEPENDS
 
-./unit_tests --gtest_filter='*Walker*:*LabelOracle*:*Resolve*:MiniRefSeq*'   # 104 tests
-./unit_tests                                                                  # full suite, 3767 tests
+./unit_tests --gtest_filter='*Walker*:*LabelOracle*:*Resolve*:*Trie*:MiniRefSeq*'   # 195 tests, ~12 s / ~15 s
+./unit_tests --gtest_filter='*TrieCases*'                                            # the 47 edge/non-edge cases
+TRIE_TIMINGS=1 ./unit_tests --gtest_filter='MiniRefSeq.TrieContract*'                # the real-index contract, phase timings
 
-# the real-format fixture (~25 s, downloads 42 NCBI records; MiniRefSeq* skips without it)
-../scripts/traversal/build_mini_refseq.sh ./mini_refseq ./metagraph \
-    ../scripts/traversal/mini_refseq_accessions.tsv
+# the real-format fixture (~25 s, downloads 42 NCBI records; MiniRefSeq* skips without it; run tests with cwd = build/)
+../scripts/traversal/build_mini_refseq.sh ./mini_refseq ./metagraph ../scripts/traversal/mini_refseq_accessions.tsv
 
 # CLI and HTTP routes end to end
-./test_venv/bin/python ../integration_tests/main.py --test_filter='*Traverse*'   # 12 tests
+./test_venv/bin/python ../integration_tests/main.py --test_filter='*Traverse*'      # 23 tests, ~13 s
 ```
 
-Current status: **104** traversal unit tests pass in Release and Debug; the **full 3767-test suite** passes in
-Release (3708 in Debug before the last change); **12** integration tests pass. A mutation check was run on the
-walker — reverting its semantic fixes fails 16 tests — so the suite has some teeth, but §5.2 shows it had a real
-blind spot, so **please distrust the tests as evidence of correctness.**
+Status at `01a5230a`: **195** traversal unit tests pass in Release and Debug, **23** integration tests pass. The
+oracle contract held on every cell (4 graph × annotation pairs × 3 modes × 5 permitted sets × 2 arms on the
+original fixture; 2 pairs × 3 modes × 2 arms on each of the 25 cases; 16 random fixtures at k = 7; the real
+index). Every disagreement found while building the suite was on the test side (my literal expectations), never
+in the walker — **which is exactly the pattern a circular oracle would also produce. Please distrust it.**
 
 ---
 
-## 8. How to report
+## 9. How to report
 
 For each finding: **severity** (blocker / major / minor), `file:line`, a **concrete failure scenario** (inputs or
-graph shape → the wrong output), and a suggested fix. Please separate:
-
-- **confirmed** — you traced the code and are sure;
-- **suspected** — needs a run or a fixture to settle (say which experiment would settle it);
-- **design disagreement** — the code does what it says, but it should say something else.
-
-If you think the honest summary is "this is sound but unproven at scale", say that too — I would rather hear it
-than a list of minor nits. And if a claim in §4 is simply unverifiable from the code as written, that itself is a
-finding: it means the contract is not expressed where a reader can check it.
+graph shape → the wrong output), and a suggested fix. Separate **confirmed** (traced), **suspected** (say which
+experiment would settle it) and **design disagreement**. If the honest summary is "the verification is sound and
+the open problem is tuple-row extraction at scale", say that; if you find the oracle circular anywhere, that is
+the finding I most want.
