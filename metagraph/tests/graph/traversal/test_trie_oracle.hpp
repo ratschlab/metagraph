@@ -57,7 +57,10 @@
  * what the walker states explicitly about that label and that successor
  * (BranchEvent::refused) or what the checker can verify itself from the seed and the
  * walk (a reused (k+1)-mer, a seed k-mer re-entered, a hairpin); the absence of a child
- * never establishes why it is absent. (2) Route support and termination are verified
+ * never establishes why it is absent. Since round 4 the statement must also be one the
+ * tuned run's strategy makes: a refusal's cause is checked against the knob it names,
+ * and a hairpin excuses an omission only when hairpins are skipped (SeedContext,
+ * refusal_problem). (2) Route support and termination are verified
  * separately: every claim must be a prefix of an exhaustive claim under its label, and
  * an end is compared with the exhaustive run's only when both runs decide it on the
  * same facts — a structural block on a route that passed a reconvergence is decided on
@@ -156,13 +159,26 @@ inline bool is_unknown_end(EndReason reason) {
     return is_censored(reason) || reason == EndReason::MAX_EXTENSION;
 }
 
-// What verifying a structural block takes besides the result: the seed (the k-mers a
-// step may re-enter, the edges it used) and whether the graph is stranded (canonical /
-// primary regimes compare edges and seed nodes on both strands). k is read off the
-// result: a seed of n bases has n - k + 1 k-mers.
+// What verifying discard evidence takes besides the result: the seed (the k-mers a step
+// may re-enter, the edges it used), whether the graph is stranded (canonical / primary
+// regimes compare edges and seed nodes on both strands), and the strategy and change
+// cost the TUNED run was made with. A refusal is valid only where the knob its cause
+// names is active and its condition holds, and a hairpin excuses an omission only where
+// the strategy skips hairpins: an event states what the walker did, the strategy says
+// whether that was a decision to prune (review round 4: a FOLLOWED hairpin and a refusal
+// with a cause no knob supports both excused a deleted child). The constructor makes
+// every caller name the strategy. k is read off the result: a seed of n bases has
+// n - k + 1 k-mers.
 struct SeedContext {
+    SeedContext(std::string seed, bool stranded, Strategy strategy,
+                LabelChangeCost cost = LabelChangeCost::forbid())
+          : seed(std::move(seed)), stranded(stranded), strategy(std::move(strategy)),
+            cost(std::move(cost)) {}
+
     std::string seed;
     bool stranded = false;
+    Strategy strategy;      // skip_hairpins, the branch / quorum / split knobs
+    LabelChangeCost cost;   // finite or not (a loss-budget refusal needs a finite one)
 };
 
 inline size_t k_of(const SeedResult &r) { return r.length_bp - r.num_kmers + 1; }
@@ -474,17 +490,163 @@ inline bool block_verified(const ArmResult &arm, const SeedContext &ctx, size_t 
     }
 }
 
+// the splits on the path to segment |s| of trie |arm|: the path's split count at every
+// node of |s| (Item::splits), which max_splits_per_path bounds
+inline size_t splits_above(const ArmResult &arm, size_t s) {
+    size_t n = 0;
+    for (; !arm.segments[s].parents.empty(); s = arm.segments[s].parents[0]) {
+        n++;
+    }
+    return n;
+}
+
+// The labels alive at depth |d| of segment |seg| of a constrain run under cost forbid —
+// σ at the node a branch event at (seg, d) was taken at: the labels at the last node
+// when |d| is it, else the labels at entry minus the lineages ended before |d|.
+inline std::set<LabelId> alive_ids(const Segment &seg, uint64_t d) {
+    if (d == seg.from_bp + seg.length_bp)
+        return std::set<LabelId>(seg.labels_end.begin(), seg.labels_end.end());
+    std::set<LabelId> alive(seg.labels_start.begin(), seg.labels_start.end());
+    for (const Event &ev : seg.events) {
+        if (ev.type == EventType::LABEL_END && ev.at_bp < d)
+            alive.erase(ev.label);
+    }
+    return alive;
+}
+
+// Why refusal |rf| of branch event |be| of the constrain run |r| is NOT one the walker
+// makes under the tuned run's strategy and cost (ctx); empty when it is. A refusal used
+// to be trusted on its cause string, so a deleted child passed with cause "branch" under
+// unlimited branching or with a cause no walker emits (review round 4, the trust
+// boundary). Now the cause has to name an active knob, and the knob's condition has to
+// hold at that node as far as the result shows it:
+//  - "branch": a finite max_label_branches, and every label named ambiguous there (in
+//    |ambiguous|, or its lineage on two or more successors: the children carrying it and
+//    the successors refused to it) and ended there with branch — the limit removes the
+//    source from every successor, so a label refused "branch" that goes on contradicts it;
+//  - "minority" / "below_min_labels": the quorum knob active (min_successor_labels > 1 or
+//    min_successor_fraction > 0; min_live_labels > 1) and the successor's count below it.
+//    |labels_per_successor| is counted before the branch-limit exclusions and the quorum
+//    after them, so the count is that less the labels refused "branch" on the successor;
+//    under forbid it is exact and the refusal must name exactly those labels;
+//  - "split_limit": a finite max_splits_per_path, reached by the splits above the node;
+//  - "loss_budget": a finite change cost;
+//  - anything else is no cause.
+// Under a finite cost one source may feed several targets, so the refused labels bound
+// the count from below and the dictionary bounds σ from above: a genuine refusal is never
+// rejected, a check is only weaker there (the checkers run under forbid, see alive_at).
+inline std::string refusal_problem(const SeedResult &r, const ArmResult &arm,
+                                   const SeedContext &ctx, const BranchEvent &be,
+                                   const BranchEvent::Refusal &rf) {
+    const Strategy &st = ctx.strategy;
+    const std::string cause = rf.cause ? rf.cause : "";
+    const bool forbid = !ctx.cost.finite();
+    auto has = [](const std::vector<LabelId> &ids, LabelId l) {
+        return std::find(ids.begin(), ids.end(), l) != ids.end();
+    };
+    auto name = [&](LabelId l) {
+        return l < r.label_dict.size() ? r.label_dict[l].name : "#" + std::to_string(l);
+    };
+    if (be.segment >= arm.segments.size())
+        return "the event's segment " + std::to_string(be.segment) + " does not exist";
+    const Segment &seg = arm.segments[be.segment];
+
+    if (cause == "branch") {
+        if (st.max_label_branches == Strategy::kUnlimited)
+            return "cause branch under unlimited max_label_branches";
+        for (LabelId l : rf.labels) {
+            std::set<char> on;   // the successors the lineage of l reached
+            for (const BranchEvent::Refusal &other : be.refused) {
+                if (has(other.labels, l))
+                    on.insert(other.ch);
+            }
+            if (be.at_bp == seg.from_bp + seg.length_bp) {
+                for (size_t c : seg.children) {
+                    const Segment &child = arm.segments[c];
+                    if (!child.sequence.empty() && has(child.labels_start, l))
+                        on.insert(outward(arm, child.sequence)[0]);
+                }
+            }
+            if (!has(be.ambiguous, l) && on.size() < 2)
+                return name(l) + " is refused for the branch limit but was not ambiguous there";
+            bool ended = false;
+            for (const Event &ev : seg.events) {
+                ended |= ev.type == EventType::LABEL_END && ev.at_bp == be.at_bp && ev.label == l
+                            && ev.reason == EndReason::BRANCH && ev.text.empty();
+            }
+            if (!ended)
+                return name(l) + " is refused for the branch limit but does not end there with branch";
+        }
+        return "";
+    }
+    if (cause == "minority" || cause == "below_min_labels") {
+        std::optional<size_t> initial;
+        for (size_t i = 0; i < be.chars.size() && i < be.labels_per_successor.size(); ++i) {
+            if (be.chars[i] == rf.ch)
+                initial = be.labels_per_successor[i];
+        }
+        if (!initial)
+            return "the successor has no label count on the event";
+        size_t excluded = 0;
+        for (const BranchEvent::Refusal &other : be.refused) {
+            if (other.ch == rf.ch && other.cause && std::string(other.cause) == "branch")
+                excluded += other.labels.size();
+        }
+        if (excluded > *initial)
+            return "more labels refused for the branch limit than the successor carried";
+        size_t n = *initial - excluded;
+        if (forbid && rf.labels.size() != n) {
+            return "refuses " + std::to_string(rf.labels.size()) + " label(s) of a successor that kept "
+                + std::to_string(n);
+        }
+        if (!forbid)
+            n = rf.labels.size();
+        if (cause == "minority") {
+            if (st.min_successor_labels <= 1 && st.min_successor_fraction <= 0)
+                return "cause minority with no quorum knob active";
+            const size_t sigma = forbid ? alive_ids(seg, be.at_bp).size() : r.label_dict.size();
+            if (!(n < st.min_successor_labels
+                    || static_cast<double>(n) < st.min_successor_fraction * static_cast<double>(sigma))) {
+                return "a successor keeping " + std::to_string(n) + " of " + std::to_string(sigma)
+                    + " labels meets the quorum";
+            }
+        } else {
+            if (st.min_live_labels <= 1)
+                return "cause below_min_labels with min_live_labels " + std::to_string(st.min_live_labels);
+            if (n >= st.min_live_labels)
+                return "a successor keeping " + std::to_string(n) + " labels meets min_live_labels";
+        }
+        return "";
+    }
+    if (cause == "split_limit") {
+        if (st.max_splits_per_path == Strategy::kUnlimited)
+            return "cause split_limit under unlimited max_splits_per_path";
+        const size_t splits = splits_above(arm, be.segment);
+        if (splits < st.max_splits_per_path) {
+            return "cause split_limit after " + std::to_string(splits) + " split(s) of "
+                + std::to_string(st.max_splits_per_path);
+        }
+        return "";
+    }
+    if (cause == "loss_budget")
+        return forbid ? "cause loss_budget under cost forbid (no switch has a price)" : "";
+    return "'" + cause + "' is not a refusal cause";
+}
+
 // Discard evidence for label |name| not taking base |ch| at depth |at| of |segment| of
 // a constrain run |r|, |walk| being the outward walk to that depth — evidence about
-// THAT label and THAT successor, and only what the walker states explicitly or the
-// checker can verify:
+// THAT label and THAT successor, and only what the walker states explicitly and the
+// strategy supports, or what the checker can verify:
 //  - a branch event there with a refusal (BranchEvent::refused) for |ch| naming the
-//    label: the walker says it refused that successor to that label, by a quorum, the
-//    split limit, the branch limit or the loss budget;
+//    label, by a quorum, the split limit, the branch limit or the loss budget, whose
+//    cause the tuned run's strategy supports at that node (refusal_problem);
 //  - a BLOCKED event there for |ch| naming the label among the labels that would have
 //    continued on it, whose structural reason the checker verifies on the seed and the
 //    walk (block_verified);
-//  - a HAIRPIN event there for |ch| naming the label, the step verified to be one.
+//  - a HAIRPIN event there for |ch| naming the label, the step verified to be one, where
+//    the strategy SKIPS hairpins: a hairpin event marked "followed" records a child that
+//    must be present (review round 4, finding 1: one excused its child's deletion — the
+//    geometry was checked, not the policy).
 // Nothing else counts; in particular the absence of a child proves nothing about why
 // it is absent. A branch event whose |ambiguous| names the label used to pass for a
 // refusal when the trie did not follow |ch| — but a result from which a FOLLOWED
@@ -506,7 +668,7 @@ inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, const See
         if (be.segment != segment || be.at_bp != at)
             continue;
         for (const BranchEvent::Refusal &rf : be.refused) {
-            if (rf.ch == ch && names(rf.labels))
+            if (rf.ch == ch && names(rf.labels) && refusal_problem(r, arm, ctx, be, rf).empty())
                 return true;
         }
     }
@@ -514,7 +676,10 @@ inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, const See
     for (const Event &ev : arm.segments[segment].events) {
         if (ev.at_bp != at || ev.ch != ch || !names(ev.labels))
             continue;
-        if ((ev.type == EventType::BLOCKED || ev.type == EventType::HAIRPIN)
+        if (ev.type == EventType::BLOCKED
+                && block_verified(arm, ctx, k, walk, ch, ev.type, ev.reason))
+            return true;
+        if (ev.type == EventType::HAIRPIN && ev.text != "followed" && ctx.strategy.skip_hairpins
                 && block_verified(arm, ctx, k, walk, ch, ev.type, ev.reason))
             return true;
     }
@@ -623,8 +788,11 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
 //     or a label that vanishes without any record, is a disagreement between the two
 //     runs and fails. Where A's own claim ended with a cap or at its radius
 //     (is_unknown_end) nothing is known beyond it: the tuned run may outlive it or end
-//     there for any reason.
-// |ctx| is what verifying a BLOCKED / HAIRPIN event takes (block_verified).
+//     there for any reason;
+//  and, before both, that every refusal the tuned run states is supported by its
+//  strategy (refusal_problem), whether or not an omission rests on it.
+// |ctx| is the seed and the strategy and cost the TUNED run was made with (SeedContext):
+// what verifying a BLOCKED / HAIRPIN event and a refusal takes.
 // The report lists every violation; check_tuned_subset() asserts that it is empty.
 inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &tuned,
                                         size_t a, const std::string &what,
@@ -640,6 +808,19 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
     const auto a_claims = label_claims(A, a, depth);
     const Leaves a_all = constrained_claims(A, a, depth);
     auto bp = [](uint64_t n) { return std::to_string(n); };
+
+    // 0. every refusal the tuned run states is one its strategy makes, whether or not an
+    //    omission below rests on it
+    for (const BranchEvent &be : ta.branch_events) {
+        for (const BranchEvent::Refusal &rf : be.refused) {
+            const std::string why = refusal_problem(tuned, ta, ctx, be, rf);
+            if (!why.empty()) {
+                problems.push_back(what + ": the refusal of " + std::string(1, rf.ch) + " ("
+                                   + (rf.cause ? rf.cause : "") + ") at " + bp(be.at_bp)
+                                   + " on segment " + bp(be.segment) + " is UNSUPPORTED: " + why);
+            }
+        }
+    }
 
     // 1. nothing is invented
     const auto t_claims = label_claims(tuned, a, depth);

@@ -837,9 +837,9 @@ TYPED_TEST(TrieOracle, TunedRunsArePrefixSubsetsAndEveryOmissionHasAReason) {
         st.max_output_bp = 130;
         cases.push_back({ "max_output_bp 130", st, f.pyt(), "" });
 
-        const trie::SeedContext ctx { f.X, mode != DeBruijnGraph::BASIC };
         for (const Case &c : cases) {
             const std::string what = where + c.name;
+            const trie::SeedContext ctx { f.X, mode != DeBruijnGraph::BASIC, c.st };
             auto t = run(*anno, f.X, as_list(kAllLabels), c.st);
             trie::SubsetReport right = trie::check_tuned_subset(A, t, kRight, what, ctx);
             trie::SubsetReport left = trie::check_tuned_subset(A, t, kLeft, what, ctx);
@@ -934,8 +934,8 @@ TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
-    const trie::SeedContext ctx { f.X, false };
-    auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    const trie::SeedContext ctx { f.X, false, exhaustive_at(LabelMode::CONSTRAIN, kRadius) };
+    auto A = run(*anno, f.X, as_list(kAllLabels), ctx.strategy);
     const trie::SubsetReport genuine = trie::tuned_subset_report(A, A, kRight, "genuine", ctx);
     EXPECT_TRUE(genuine.problems.empty()) << trie::listed(genuine.problems);
     EXPECT_EQ(8u, genuine.present);
@@ -997,8 +997,8 @@ TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
 TEST(Trie, TunedCheckerRejectsADeletedBranchUnderASharedLabel) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAAC", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
-    const trie::SeedContext ctx { "AAA", false };
-    auto A = run(*anno, "AAA", { "C" }, exhaustive_at(LabelMode::CONSTRAIN, 100));
+    const trie::SeedContext ctx { "AAA", false, exhaustive_at(LabelMode::CONSTRAIN, 100) };
+    auto A = run(*anno, "AAA", { "C" }, ctx.strategy);
     ASSERT_EQ(2u, A.arms[kRight].paths.size());
     EXPECT_TRUE(trie::tuned_subset_report(A, A, kRight, "genuine", ctx).problems.empty());
 
@@ -1038,8 +1038,8 @@ TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
     const std::string &X = b[0], &P = b[1], &Q = b[2];
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kK, { X + P, X + Q }, { "A", "B" }, DeBruijnGraph::BASIC);
-    const trie::SeedContext ctx { X, false };
-    auto A = run(*anno, X, { "A", "B" }, exhaustive_at(LabelMode::CONSTRAIN, 100));
+    const trie::SeedContext ctx { X, false, exhaustive_at(LabelMode::CONSTRAIN, 100) };
+    auto A = run(*anno, X, { "A", "B" }, ctx.strategy);
     ASSERT_EQ(2u, A.arms[kRight].paths.size());
     for (EndReason forged : { EndReason::EDGE_REUSE, EndReason::EDGE_REUSE_RC, EndReason::REACHED_SEED }) {
         SeedResult tuned = A;
@@ -1074,13 +1074,14 @@ TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
             kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
     auto E = run(*fixture, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
     const ArmResult &left = E.arms[kLeft];
+    const trie::SeedContext fixture_ctx { f.X, false, exhaustive_at(LabelMode::CONSTRAIN, kRadius) };
     size_t verified = 0;
     for (const Segment &seg : left.segments) {
         for (const Event &ev : seg.events) {
             if (ev.type != EventType::BLOCKED || ev.reason != EndReason::EDGE_REUSE)
                 continue;
             const std::string walk = f.two_laps().substr(0, ev.at_bp);
-            verified += trie::branch_recorded(E, left, trie::SeedContext{ f.X, false }, walk,
+            verified += trie::branch_recorded(E, left, fixture_ctx, walk,
                                               seg.id, ev.at_bp, ev.ch, E.label_dict.at(ev.labels[0]).name);
         }
     }
@@ -1099,8 +1100,8 @@ TEST(Trie, TunedCheckerRejectsAnInventedInteriorClaim) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
-    const trie::SeedContext ctx { f.X, false };
-    auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    const trie::SeedContext ctx { f.X, false, exhaustive_at(LabelMode::CONSTRAIN, kRadius) };
+    auto A = run(*anno, f.X, as_list(kAllLabels), ctx.strategy);
 
     SeedResult invented = A;
     ASSERT_EQ(1u, insert_label_end(invented, invented.arms[kRight], "S", f.Q[0], 1,
@@ -1170,8 +1171,9 @@ TEST(Trie, MergedCheckerRejectsAnInventedInteriorClaim) {
         p.end_reasons.fill(0);
         p.end_reasons[static_cast<size_t>(EndReason::RECORD_END)] = p.end_labels.size();
     }
-    const trie::SubsetReport rep3 = trie::tuned_subset_report(A, rewritten, kRight, "rewritten end_reasons",
-                                                              trie::SeedContext{ f.X, false });
+    const trie::SubsetReport rep3 = trie::tuned_subset_report(
+            A, rewritten, kRight, "rewritten end_reasons",
+            trie::SeedContext{ f.X, false, exhaustive_at(LabelMode::CONSTRAIN, kRadius) });
     ASSERT_FALSE(rep3.problems.empty()) << "the tuned checker accepted rewritten leaf reasons";
     EXPECT_TRUE(any_mentions(rep3.problems, "end_reasons disagree")) << trie::listed(rep3.problems);
 }
@@ -1307,7 +1309,6 @@ TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
 TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAACG", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
-    const trie::SeedContext ctx { "AAA", false };
     Strategy st = exhaustive_at(LabelMode::CONSTRAIN, 100);
     st.direction = Strategy::RIGHT;
     st.max_steps = 2;
@@ -1322,7 +1323,8 @@ TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
     st.max_steps = 100;
     auto keep = run(*anno, "AAA", { "C" }, st);
     EXPECT_EQ((std::set<std::string>{ "CG", "G" }), leaf_walks(keep.arms[kRight]));
-    const trie::SubsetReport tuned = trie::tuned_subset_report(A, keep, kRight, "uncapped keep", ctx);
+    const trie::SubsetReport tuned = trie::tuned_subset_report(A, keep, kRight, "uncapped keep",
+                                                               trie::SeedContext{ "AAA", false, st });
     EXPECT_TRUE(tuned.problems.empty()) << trie::listed(tuned.problems);
     EXPECT_EQ(2u, tuned.present + tuned.omitted);
     st.merge_reconverge = true;
@@ -1330,6 +1332,251 @@ TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
     const trie::RouteReport routes = trie::routes_subset_report(A, merged, kRight, "uncapped merged");
     EXPECT_TRUE(routes.problems.empty()) << trie::listed(routes.problems);
     EXPECT_EQ(2u, routes.checked);
+}
+
+#if ! _PROTEIN_GRAPH
+// Review round 4, finding 1: a FOLLOWED hairpin excused the deletion of its child.
+// CANONICAL, k = 3, records AAATT and AAATG under C, seed AAA, exhaustive (keep) with
+// hairpins followed: at depth 1 the step AAT → ATT is its own reverse complement, so the
+// walker follows it and flags it HAIRPIN(T, "followed", {C}) on the parent. With that
+// child and its paths deleted, the round-3 checker verified the step to be a hairpin and
+// took the event for the reason the child is missing (1 present, 1 omitted, no problem):
+// it checked the geometry, not the policy. A hairpin is discard evidence only where the
+// strategy skips hairpins, and a followed one never. The genuine skip still verifies:
+// walked with hairpins skipped, the fixture omits the T child for a reason the checker
+// accepts — but not under a context whose strategy follows hairpins.
+TEST(Trie, TunedCheckerRejectsADeletedFollowedHairpin) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAATT", "AAATG" }, { "C", "C" }, DeBruijnGraph::CANONICAL);
+    Strategy follow = exhaustive_at(LabelMode::CONSTRAIN, 100);
+    follow.direction = Strategy::RIGHT;
+    follow.skip_hairpins = false;
+    const trie::SeedContext ctx { "AAA", true, follow };
+    auto A = run(*anno, "AAA", { "C" }, follow);
+    const trie::SubsetReport genuine = trie::tuned_subset_report(A, A, kRight, "genuine", ctx);
+    EXPECT_TRUE(genuine.problems.empty()) << trie::listed(genuine.problems);
+
+    SeedResult tuned = A;
+    ArmResult &arm = tuned.arms[kRight];
+    size_t parent = arm.segments.size(), removed = arm.segments.size();
+    char hairpin = 0;
+    for (const Segment &s : arm.segments) {
+        for (const Event &ev : s.events) {
+            if (ev.type != EventType::HAIRPIN || ev.text != "followed")
+                continue;
+            for (size_t c : s.children) {
+                if (trie::outward(arm, arm.segments[c].sequence)[0] == ev.ch) {
+                    parent = s.id;
+                    removed = c;
+                    hairpin = ev.ch;
+                }
+            }
+        }
+    }
+    ASSERT_LT(removed, arm.segments.size()) << "no followed hairpin with a child";
+    EXPECT_EQ('T', hairpin);
+    auto &children = arm.segments[parent].children;
+    children.erase(std::remove(children.begin(), children.end(), removed), children.end());
+    arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
+        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+    }), arm.paths.end());
+    // the split is at the parent's end: the walk to it is the parent's route
+    const uint64_t at = arm.segments[parent].from_bp + arm.segments[parent].length_bp;
+    const std::string walk = trie::label_route(arm, parent, 0);
+    ASSERT_EQ(at, walk.size());
+    EXPECT_FALSE(trie::branch_recorded(tuned, arm, ctx, walk, parent, at, hairpin, "C"));
+    const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, "deleted followed hairpin", ctx);
+    EXPECT_GT(rep.omitted, 0u);
+    ASSERT_FALSE(rep.problems.empty()) << "the checker accepted a deleted followed hairpin";
+    EXPECT_TRUE(any_mentions(rep.problems, "with C alive and no recorded reason"))
+        << trie::listed(rep.problems);
+
+    // hairpins skipped: the T child is not walked, the HAIRPIN event says why
+    Strategy skip = follow;
+    skip.skip_hairpins = true;
+    auto skipped = run(*anno, "AAA", { "C" }, skip);
+    const trie::SeedContext skip_ctx { "AAA", true, skip };
+    const trie::SubsetReport accepted = trie::tuned_subset_report(A, skipped, kRight, "skipped hairpin", skip_ctx);
+    EXPECT_TRUE(accepted.problems.empty()) << trie::listed(accepted.problems);
+    EXPECT_GT(accepted.omitted, 0u) << "the skip case is vacuous";
+    size_t skipped_events = 0;
+    for (const Segment &s : skipped.arms[kRight].segments) {
+        for (const Event &ev : s.events) {
+            if (ev.type != EventType::HAIRPIN)
+                continue;
+            EXPECT_TRUE(ev.text.empty()) << "a followed hairpin under skip_hairpins";
+            const std::string to = trie::label_route(skipped.arms[kRight], s.id, 0).substr(0, ev.at_bp);
+            EXPECT_TRUE(trie::branch_recorded(skipped, skipped.arms[kRight], skip_ctx, to, s.id,
+                                              ev.at_bp, ev.ch, "C"));
+            // the same event is no evidence where the strategy follows hairpins
+            EXPECT_FALSE(trie::branch_recorded(skipped, skipped.arms[kRight], ctx, to, s.id,
+                                               ev.at_bp, ev.ch, "C"));
+            skipped_events++;
+        }
+    }
+    EXPECT_GE(skipped_events, 1u);
+    const trie::SubsetReport mismatched = trie::tuned_subset_report(A, skipped, kRight, "skip read as follow", ctx);
+    EXPECT_FALSE(mismatched.problems.empty()) << "a skipped hairpin excused under a follow strategy";
+}
+#endif
+
+// Review round 4, the trust boundary: a refusal was taken on its cause string. k = 3,
+// AAA·C and AAA·G under C, seed AAA, the G child deleted from the exhaustive trie: with
+// no refusal the omission is unexplained, but adding {G, "branch", C} — under unlimited
+// branching — or {G, "not_a_cause", C} made the checker pass. A refusal is now checked
+// against the strategy the tuned run was made with (refusal_problem): the cause must
+// name an active knob whose condition holds there. Every cause forged onto the exhaustive
+// run is rejected, the forgery under a finite branch limit too (C goes on along the C
+// child, which a branch-limit exclusion forbids). Genuine refusals of each cause pass,
+// including a quorum stop counted after a branch-limit exclusion on the same successor.
+TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAAC", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
+    const Strategy full = exhaustive_at(LabelMode::CONSTRAIN, 100);
+    const trie::SeedContext ctx { "AAA", false, full };
+    auto A = run(*anno, "AAA", { "C" }, full);
+    SeedResult tuned = A;
+    ArmResult &arm = tuned.arms[kRight];
+    const size_t root = trie::root_of(arm).id;
+    const size_t removed = arm.segments[root].children.back();
+    const char ch = arm.segments[removed].sequence[0];
+    arm.segments[root].children.pop_back();
+    arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
+        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+    }), arm.paths.end());
+    ASSERT_EQ(1u, arm.branch_events.size());
+    ASSERT_EQ(1u, trie::tuned_subset_report(A, tuned, kRight, "no refusal", ctx).problems.size());
+    const LabelId c = *trie::label_id(tuned, "C");
+    for (const char *cause : { "branch", "not_a_cause", "minority", "below_min_labels",
+                               "split_limit", "loss_budget" }) {
+        arm.branch_events[0].refused = { { ch, cause, { c } } };
+        EXPECT_FALSE(trie::branch_recorded(tuned, arm, ctx, "", root, 0, ch, "C")) << cause;
+        const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, cause, ctx);
+        EXPECT_EQ(2u, rep.problems.size()) << cause << trie::listed(rep.problems);
+        EXPECT_TRUE(any_mentions(rep.problems, "UNSUPPORTED")) << cause << trie::listed(rep.problems);
+        EXPECT_TRUE(any_mentions(rep.problems, "no recorded reason")) << cause << trie::listed(rep.problems);
+    }
+    // a finite allowance supports the cause, not this result: C was not excluded
+    Strategy limited = full;
+    limited.exhaustive = false;
+    limited.max_label_branches = 0;
+    arm.branch_events[0].refused = { { ch, "branch", { c } } };
+    const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, "branch, limit 0",
+                                                             trie::SeedContext{ "AAA", false, limited });
+    EXPECT_TRUE(any_mentions(rep.problems, "does not end there with branch")) << trie::listed(rep.problems);
+
+    // genuine refusals of every cause the walker emits under forbid pass
+    struct Case {
+        const char *cause;
+        std::vector<std::string> seqs, labels, permitted;
+        Strategy st;
+    };
+    std::vector<Case> cases;
+    Strategy st = full;
+    st.exhaustive = false;
+    st.max_label_branches = 0;
+    cases.push_back({ "branch", { "AAAC", "AAAG" }, { "C", "C" }, { "C" }, st });
+    st = full;
+    st.exhaustive = false;
+    st.min_live_labels = 2;
+    cases.push_back({ "below_min_labels", { "AAAC", "AAAC", "AAAG" }, { "C", "D", "C" }, { "C", "D" }, st });
+    st = full;
+    st.exhaustive = false;
+    st.max_splits_per_path = 0;
+    cases.push_back({ "split_limit", { "AAAC", "AAAG" }, { "C", "D" }, { "C", "D" }, st });
+    // A ambiguous and excluded; the C successor keeps B alone, below the quorum of 2
+    // (labels_per_successor says 2: it is counted before the exclusion)
+    st = full;
+    st.exhaustive = false;
+    st.max_label_branches = 0;
+    st.min_successor_labels = 2;
+    cases.push_back({ "minority", { "AAAC", "AAAC", "AAAG" }, { "A", "B", "A" }, { "A", "B" }, st });
+    for (const Case &k : cases) {
+        auto g = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, k.seqs, k.labels, DeBruijnGraph::BASIC);
+        Strategy reference = full;
+        reference.direction = Strategy::RIGHT;
+        Strategy tuned_st = k.st;
+        tuned_st.direction = Strategy::RIGHT;
+        auto E = run(*g, "AAA", k.permitted, reference);
+        auto t = run(*g, "AAA", k.permitted, tuned_st);
+        size_t with_cause = 0;
+        for (const BranchEvent &be : t.arms[kRight].branch_events) {
+            for (const auto &rf : be.refused)
+                with_cause += std::string(rf.cause) == k.cause;
+        }
+        EXPECT_GT(with_cause, 0u) << k.cause << ": the case refuses nothing";
+        const trie::SubsetReport r = trie::tuned_subset_report(E, t, kRight, k.cause,
+                                                               trie::SeedContext{ "AAA", false, tuned_st });
+        EXPECT_TRUE(r.problems.empty()) << k.cause << trie::listed(r.problems);
+        EXPECT_GT(r.omitted, 0u) << k.cause;
+    }
+}
+
+// Review round 4: the stricter checkers must not reject genuine output. On dense random
+// graphs (k = 3, five records after the seed under three labels, every mode, hairpins
+// followed and skipped) every tuned run — each branch, quorum and split knob, all of
+// them at once, a step cap — passes against its exhaustive trie: every refusal it states
+// is one its strategy makes, and a skipped hairpin excuses its omission (the reviewer's
+// dense sweep for finding 1, widened to every refusal cause). max_branch_events is
+// lifted because the refusals ARE the evidence and on a graph this dense the default
+// 100 events do not hold them all.
+TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
+    std::map<std::string, size_t> causes;
+    size_t cells = 0;
+    for (auto mode : all_modes()) {
+        for (bool skip : { false, true }) {
+            for (uint32_t s = 1; s <= 6; ++s) {
+                std::vector<std::string> seqs, labels;
+                for (uint32_t i = 0; i < 5; ++i) {
+                    seqs.push_back("AAA" + random_seq(12, s * 7 + i));
+                    labels.push_back(std::string(1, "CDECD"[i]));
+                }
+                auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, labels, mode);
+                Strategy full = exhaustive_at(LabelMode::CONSTRAIN, 8);
+                full.skip_hairpins = skip;
+                full.max_live_paths = 100000;
+                full.max_paths = 100000;
+                full.max_branch_events = 1000000;
+                auto A = run(*anno, "AAA", { "C", "D", "E" }, full);
+                for (int knob = 0; knob < 8; ++knob) {
+                    Strategy st = full;
+                    st.exhaustive = false;
+                    switch (knob) {
+                        case 0: st.max_label_branches = 0; break;
+                        case 1: st.max_label_branches = 1; break;
+                        case 2: st.min_successor_labels = 2; break;
+                        case 3: st.min_successor_fraction = 0.5; break;
+                        case 4: st.min_live_labels = 2; break;
+                        case 5: st.max_splits_per_path = 1; break;
+                        case 6:
+                            st.max_label_branches = 0;
+                            st.min_successor_labels = 2;
+                            st.min_successor_fraction = 0.4;
+                            st.max_splits_per_path = 2;
+                            break;
+                        case 7: st.max_steps = 10; break;
+                    }
+                    auto t = run(*anno, "AAA", { "C", "D", "E" }, st);
+                    const trie::SeedContext ctx { "AAA", mode != DeBruijnGraph::BASIC, st };
+                    for (size_t side : { kLeft, kRight }) {
+                        for (const BranchEvent &be : t.arms[side].branch_events) {
+                            for (const auto &rf : be.refused) causes[rf.cause]++;
+                        }
+                        const std::string what = "mode " + std::to_string(mode) + " skip "
+                            + std::to_string(skip) + " random " + std::to_string(s) + " knob "
+                            + std::to_string(knob) + " arm " + std::to_string(side);
+                        const trie::SubsetReport rep = trie::tuned_subset_report(A, t, side, what, ctx);
+                        ASSERT_TRUE(rep.problems.empty()) << trie::listed(rep.problems);
+                        cells++;
+                    }
+                }
+            }
+        }
+    }
+    // not vacuous: every cause the walker emits under forbid occurred
+    for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" })
+        EXPECT_GT(causes[cause], 0u) << cause;
+    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, cells);
 }
 
 // Finding 3 (the reference model, support: trace). Two occurrences of the seed under
