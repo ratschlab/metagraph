@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.1 (2026-10-02) — **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -538,10 +538,14 @@ event kept while capped label lists make its summaries lower bounds). Per seed r
 
 | dimension | values | guarantee |
 |---|---|---|
-| `walks` | `complete` · `partial` · `failed` | `complete`: every requested arm is complete to the radius under `walk_rule` and `completeness_scope`; `partial`: a valid certified prefix to each arm's `complete_to_bp`; `failed`: no valid traversal exists (structured reason in `limitations`/`resource_stop`) |
-| `branch_diagnostics` | `complete` · `cut` | every branch decision and refusal is reported; `cut`: only before each arm's `evidence.complete_to_bp` |
-| `label_evidence` | `complete` · `lower_bound` | recorded label sets and losses are exact; `lower_bound`: a cut list (`max_labels_per_node`) or a cut switch-source list (`max_switch_sources`) can have dropped carriers or raised losses. An intentionally *selected* label set is complete within its stated domain |
+| `walks` | `complete` · `partial` · `failed` | `complete` only when no walk-class limitation applies: every requested arm is complete to the radius **per path** (keep, or merge where no history was united) and no carrier of the seed was dropped; `partial`: any of `walk_domain`, `scope` with at least one merge, `seed_labels` applies — a valid certified prefix whose limits the `limitations` state; `failed`: no valid traversal exists (structured reason in `limitations`/`resource_stop`) |
+| `branch_diagnostics` | `complete` · `cut` | every branch decision and refusal is reported; `cut`: only before each arm's `evidence.complete_to_bp` (`branch_events`) |
+| `label_evidence` | `complete` · `lower_bound` · `qualified` | `complete` only when no label-class limitation applies; `lower_bound`: evidence may be *missing* or understated — cut lists (`label_lists`, `inexact_counts`), dropped carriers (`seed_labels`), a cut switch-source list (`switch_sources`), greedy losses (`greedy_losses`); `qualified`: something reported may be *overstated* — a column-label trace across a record boundary (`trace_record_boundaries`); `qualified` wins when both apply |
 | `delivery` | `inline` · `spooled` · `paged` | the body is in the response; `spooled`: complete in the spool behind the handle, the response holds the summary; `paged`: delivered in pages. Independent of `walks`, so a partial traversal can be spooled |
+
+*(v5.2, the owner's rule)* **Conservative by construction**: each dimension is `complete` only when no limitation of
+its class applies, so a reader can never find a limitation in `limitations` whose dimension still reads `complete`.
+
 
 **Stated limitations** (already being implemented on the JSON side, spec §7.0): per arm `evidence: {complete,
 complete_to_bp}` and `limitations: [{kind, knob, limit, observed, effect, complete_to_bp?}]` with kinds `walk_domain`,
