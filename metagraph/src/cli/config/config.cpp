@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <cctype>
 #include <cstring>
 #include <iostream>
 #include <unordered_set>
@@ -360,6 +361,10 @@ Config::Config(int argc, char *argv[]) {
             traverse_resolve = true;
         } else if (!strcmp(argv[i], "--index-release")) {
             index_release = get_value(i++);
+        } else if (!strcmp(argv[i], "--index-name")) {
+            index_name = get_value(i++);
+        } else if (!strcmp(argv[i], "--index-manifest")) {
+            index_manifest = get_value(i++);
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
             traverse_max_time_ms = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
@@ -612,6 +617,23 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRAVERSE && (infbase.empty() || infbase_annotators.size() != 1)) {
         std::cerr << "Error: traverse requires a graph (-i) and exactly one annotation (-a)" << std::endl;
         print_usage_and_exit = true;
+    }
+
+    if ((identity == TRAVERSE || identity == SERVER_QUERY)
+            && (!index_name.empty() || !index_manifest.empty())) {
+        if (fnames.size() && identity == SERVER_QUERY) {
+            // one name and one manifest describe one index, not a list of them
+            std::cerr << "Error: --index-name and --index-manifest describe a single index "
+                         "(-i / -a), not a graph list" << std::endl;
+            print_usage_and_exit = true;
+        }
+        for (char c : index_name) {
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '_' && c != '-') {
+                std::cerr << "Error: --index-name must match [A-Za-z0-9._-]+" << std::endl;
+                print_usage_and_exit = true;
+                break;
+            }
+        }
     }
 
     if (identity == SERVER_QUERY
@@ -1454,6 +1476,8 @@ if (advanced) {
             fprintf(stderr, "Available options for traverse:\n");
             fprintf(stderr, "\t   --resolve \t\t\treport label support and seed candidates instead of traversing [off]\n");
             fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in results; requests may pin it []\n");
+            fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
+            fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle (files with size and sha256); its digest is the index identity []\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1481,6 +1505,8 @@ if (advanced) {
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
             fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
+            fprintf(stderr, "\t   --index-name [STR] \t\tname of the index (-i / -a only) in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
+            fprintf(stderr, "\t   --index-manifest [FILE] \tmanifest of the index bundle (-i / -a only); its digest is the index identity []\n");
             fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tcap on bounds.time_budget_ms per /traverse seed, 0 = unlimited [30000]\n");
             fprintf(stderr, "\t   --traverse-max-seeds [INT] \t\tcap on seeds per /traverse request, 0 = unlimited [64]\n");
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");

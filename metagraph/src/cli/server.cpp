@@ -1,3 +1,6 @@
+#include <map>
+#include <mutex>
+
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
@@ -319,12 +322,47 @@ int run_server(Config *config) {
     VectorMap<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
     bool loaded_with_mmap = utils::with_mmap();
 
+    // The index identity stated by /traverse and /resolve (DESIGN-traverse-graphlet.md
+    // §3.1). Single-index mode: --index-name and --index-manifest, checked against the
+    // loaded files before the index is served; the meta fingerprint once the index is
+    // loaded. Multi-index mode: the meta fingerprint per index, computed on first use.
+    IndexIdentity single_identity;
+    std::mutex identities_mutex;
+    std::map<const AnnotatedDBG*, IndexIdentity> identities;
+    auto identity_of = [&](const AnnotatedDBG &index) -> IndexIdentity {
+        if (config->fnames.empty())
+            return single_identity;
+        std::lock_guard<std::mutex> lock(identities_mutex);
+        auto it = identities.find(&index);
+        if (it == identities.end()) {
+            IndexIdentity id;
+            id.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(index));
+            it = identities.emplace(&index, std::move(id)).first;
+        }
+        return it->second;
+    };
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
+        // a manifest of another bundle is refused before hours of loading, not after
+        try {
+            single_identity.name = config->index_name;
+            if (!config->index_manifest.empty()) {
+                single_identity.fp = index_manifest_fingerprint(
+                        config->index_manifest, { config->infbase, config->infbase_annotators[0] });
+                logger->info("[Server] Index manifest {}: index_fp {}", config->index_manifest,
+                             single_identity.fp);
+            }
+        } catch (const std::exception &e) {
+            logger->error("[Server] {}", e.what());
+            std::exit(1);
+        }
         anno_graph = graph_loader.enqueue([&]() {
             logger->info("[Server] Loading graph and annotation in parallel...");
             auto anno_graph = initialize_annotated_dbg(*config);
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+            // set before the future is ready, so every request sees it complete
+            single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
             return anno_graph;
         });
     } else {
@@ -575,8 +613,9 @@ int run_server(Config *config) {
             Json::Value json = parse_json_string(content);
             const auto &index = resolve_traverse_index(json, *config, anno_graph,
                                                        indexes, graphs_cache);
+            const IndexIdentity identity = identity_of(index);
             return process_resolve_request(json, index, config->index_release,
-                                           config->resolve_max_query_bp);
+                                           config->resolve_max_query_bp, &identity);
         }, /* compact */ true);
     };
 
@@ -595,7 +634,8 @@ int run_server(Config *config) {
             limits.max_seeds = config->traverse_max_seeds;
             limits.max_seed_bp = config->traverse_max_seed_bp;
             limits.max_seed_labels = config->traverse_max_seed_labels;
-            return process_traverse_request(json, index, config->index_release, limits);
+            const IndexIdentity identity = identity_of(index);
+            return process_traverse_request(json, index, config->index_release, limits, &identity);
         }, /* compact */ true);
     };
 
@@ -610,7 +650,7 @@ int run_server(Config *config) {
                                      "returned per request by POST /resolve and /traverse");
             }
             graph::traversal::LabelOracle oracle(*anno_graph.get());
-            Json::Value caps = capabilities_to_json(oracle, config->index_release);
+            Json::Value caps = capabilities_to_json(oracle, config->index_release, &single_identity);
             caps["max_time_ms"] = config->traverse_max_time_ms;
             caps["max_seeds"] = static_cast<Json::UInt64>(config->traverse_max_seeds);
             caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);

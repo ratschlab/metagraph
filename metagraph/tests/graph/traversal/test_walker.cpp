@@ -3504,10 +3504,11 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_EQ("bounds.max_live_paths", right["limitations"][0]["knob"].asString());
 
     // scope: merging (constrain's default) closes the bubble once. Every walk of the
-    // united-history rule is present, so the walks are complete for that rule; the
-    // weaker scope is stated by the limitation and by completeness_scope
+    // united-history rule is present, but not every walk per path: a merge that united a
+    // history makes the walks partial (conservative outcome, DESIGN-traverse-graphlet.md
+    // §14 v5.2), stated by the limitation and by completeness_scope
     out = traverse(request(ABC, R"({"direction": "right"})"), none);
-    EXPECT_EQ("complete/complete/complete/inline", outcome_of(out["results"][0]));
+    EXPECT_EQ("partial/complete/complete/inline", outcome_of(out["results"][0]));
     right = out["results"][0]["arms"]["right"];
     EXPECT_EQ("united_history", right["completeness_scope"].asString());
     ASSERT_EQ(std::vector<std::string>{ "scope" }, kinds_of(right["limitations"]));
@@ -3543,9 +3544,10 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_EQ(3u, result["limitations"][0]["observed"].asUInt64());
     EXPECT_FALSE(result["limitations"][0].isMember("server_limit"));
     EXPECT_EQ(nothing, kinds_of(result["arms"]["right"]["limitations"]));
-    // the labels taken are the domain (§7.0): their walks and evidence are complete, and
-    // what the cap left out is stated by the seed_labels entry
-    EXPECT_EQ("complete/complete/complete/inline", outcome_of(result));
+    // a carrier the cap left out takes its walks and its evidence with it: both axes say
+    // so (conservative outcome, DESIGN-traverse-graphlet.md §14 v5.2), and the seed_labels
+    // entry says which knob brings it back
+    EXPECT_EQ("partial/complete/lower_bound/inline", outcome_of(result));
 
     // server_clamp: the server lowers the derived-set cap to 2. The derived seed runs
     // into it (and its seed_labels entry names the server's maximum); a seed with an

@@ -106,6 +106,10 @@ class Config {
     // traversal (see docs/SPEC-labeled-traversal-core.md)
     bool traverse_resolve = false;          // run resolve/select instead of traversal
     std::string index_release;              // echoed in responses; requests may pin it
+    // the index identity of DESIGN-traverse-graphlet.md §3.1 (single-index mode): a
+    // name for humans and routing, and the bundle manifest whose digest is the identity
+    std::string index_name;
+    std::string index_manifest;
     // Server-side caps for POST /traverse (0 = unlimited). They are deliberately
     // non-zero by default: a request that names NO labels makes the server derive the
     // permitted set, whose cost is set by the seed and the index rather than by
