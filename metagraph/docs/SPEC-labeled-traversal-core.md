@@ -272,8 +272,8 @@ to a header).
 - **`exhaustive`** (default `false`): the preset of §6.9 — unlimited branch allowance, `on_reconverge: keep`, no
   split limit, no quorum, no beam. It changes the *defaults* of those knobs; a knob given explicitly with a
   conflicting value is **rejected** (400) rather than overridden.
-- `branching.max_label_branches` and `branching.max_splits_per_path` accept an integer or the string
-  `"unlimited"`, and the normalized echo uses `"unlimited"` where it applies.
+- `branching.max_label_branches`, `branching.max_splits_per_path` and `output.max_branch_events` accept an
+  integer or the string `"unlimited"`, and the normalized echo uses `"unlimited"` where it applies.
 - Values above are placeholders, not benchmarked defaults.
 
 ## 6. Traversal semantics
@@ -638,6 +638,16 @@ so no new order is needed; what the bound needs is a **per-level completion boun
   against the exhaustive trie knows which ends it may compare: route support is per-label and scope-free, but
   a structural block (`edge_reuse`, `edge_reuse_rc`, `rejoined_seed` by block precedence) on a route that
   passed a merge is decided on the united history and need not be where the per-path trie ends the label.
+- **Two boundaries, one per question.** `complete_to_bp` bounds the *walks* (what is present);
+  `evidence.complete_to_bp` (§7.0, §7.2) bounds the *reasons* (why something is absent): below it every
+  branch decision and refusal the walker made is reported. They are independent — the first is set by the
+  size caps, the second by `output.max_branch_events` — and both are level boundaries for the same reason
+  (exploration is level-synchronous, so decisions are made, and events produced, in non-decreasing depth).
+  A successor not taken at depth d is guaranteed its recorded reason when d < `evidence.complete_to_bp`; at
+  or beyond it the reason may be among the events not kept, and the response says so (a `branch_events`
+  limitation). A head the size cap left unexpanded needs no event: it was ended with the cap's reason. The
+  tuned-run checker applies exactly this rule (§6.9: such an omission counts as `unexplained_capped`, not as
+  a failure, and only at or beyond the boundary).
 - The depth at which the structural trie stops is itself a measurement: "the unconstrained trie explodes at 40 bp
   here" is a reportable property of the locus.
 
@@ -677,6 +687,53 @@ tool for an agent exploring the graph *locally* before committing to labels, and
   note's "probe cheaply, read the diagnostics, retune" loop; the beam is the cheap probe that reaches far, the
   constrained walk is the one whose output is a claim.
 
+## 7. Response
+
+### 7.0 Guarantees and stated limitations
+
+**Principle.** Every response certifies what it covers and states every cap that limited it, with the request
+field to turn: nothing is cut silently. A cap either leaves the result complete, or the result says where the
+cut starts, what was cut and which knob controls it — the model is `complete_to_bp` (§6.10).
+
+- **What is certified, per arm.** `complete_to_bp` under `walk_rule` and `completeness_scope` (§6.10): every
+  admissible walk of at most that many bases is present. `evidence: {complete, complete_to_bp}`: below
+  `evidence.complete_to_bp` every branch decision and every refusal the walker made is in `branch_events`
+  (§7.2), so every successor not taken there carries its reason; `{"complete": true, "complete_to_bp": null}`
+  when no event was dropped. How the two boundaries relate: §6.10.
+- **What limited it.** `limitations`, per arm and per seed result, in every `detail` level; `[]` when nothing
+  did. Each entry is `{kind, knob, limit, observed, effect}`, plus `complete_to_bp` for a limitation with a
+  depth boundary. `knob` names the request field relative to `strategy` (as `strategy.clamped` does), `limit`
+  is its value in this run, `observed` what the run met against it — for a cap, the demand that exceeded
+  `limit` — and `effect` says in one sentence what is missing and how to get it. A kind is emitted only when it
+  applies:
+
+| `kind` | Where | Emitted when | `knob` | `observed` |
+|---|---|---|---|---|
+| `walk_domain` | arm | `status` is not `complete`: the cap in `cap_trigger`, then any other cap that ended walks after it (a beam, then a step cap) | the cap's field: `bounds.max_steps`, `bounds.max_live_paths` (also a beam's width), `bounds.max_paths`, `bounds.max_output_bp`, `bounds.time_budget_ms` | what the cap compared at the trip: steps of the seed, bases of the arm, leaves + live heads, live heads (beam: heads of the level), elapsed ms; for a later cap the walks it ended. `complete_to_bp` = the arm's |
+| `branch_events` | arm | events were dropped by the cap | `output.max_branch_events` | `branch_events_total`; `complete_to_bp` = `evidence.complete_to_bp` |
+| `label_lists` | arm | `labels_per_node.nodes_truncated > 0` | `labels.max_labels_per_node` | `labels_per_node.max_seen` |
+| `inexact_counts` | arm | a live-label count in `frontier_remaining`, `cap_trigger` or a `growth` bin is flagged `exact: false` | `labels.max_labels_per_node` | how many counts are flagged |
+| `switch_sources` | arm | a label ended `label_lost` with the qualifier `switch_sources` | `labels.max_switch_sources` | how many such ends |
+| `scope` | arm | `completeness_scope: united_history` | `branching.on_reconverge` (`limit: "merge"`) | merges done (0: no history was united) |
+| `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
+| `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
+
+```json
+"evidence": {"complete": false, "complete_to_bp": 25},
+"limitations": [{"kind": "branch_events", "knob": "output.max_branch_events", "limit": 1, "observed": 3,
+                 "complete_to_bp": 25, "effect": "branch decisions and refusals at or beyond complete_to_bp are
+                 not reported; more were produced: raise the knob or set it to \"unlimited\""}]
+```
+
+- **Not limitations:** semantic stops (`dead_end`, `label_lost`, `max_extension_bp`, …) — the requested domain
+  is complete there — and `dropped_labels` (named labels that do not support the seed). A seed whose permitted
+  set could not be derived is an `error` result (§7.1), not a limited one.
+- So an arm with `limitations: []` is exactly what its strategy defines to `bounds.max_extension_bp`: every
+  walk per path, every reason, every recorded list in full. Two gaps remain that no entry states: §6.3's
+  `max_switch_sources` approximation under a `table` cost when the cut source goes on along another successor
+  (it does not end, so no `switch_sources` end is recorded; `"unlimited"` removes it), and `tip_window_bp` /
+  `bubble_window_bp`, which are accepted and echoed but not implemented (§13, I3 note 1).
+
 ### 7.1 Per seed (`detail: full`)
 
 ```json
@@ -686,9 +743,13 @@ tool for an agent exploring the graph *locally* before committing to labels, and
            "labels_from_seed": false, "labels_supporting_total": 2, "labels_dropped": 0,
            "labels_dropped_digest": ""},
   "label_dict": [{"name": "NZ_STEQ01000045.1", "kind": "header"}, {"name": "573", "kind": "column"}],
+  "limitations": [],
   "arms": {
     "right": {
       "status": "complete", "frontier_remaining": {"live_paths": 0, "live_labels": 0, "exact": true},
+      "evidence": {"complete": true, "complete_to_bp": null},
+      "limitations": [{"kind": "scope", "knob": "branching.on_reconverge", "limit": "merge", "observed": 0,
+                       "effect": "…"}],
       "segments": [
         {"id": 0, "parents": [], "from_bp": 0, "length_bp": 812, "sequence": "…",
          "labels": [0, 1], "labels_at_end": [0],
@@ -744,9 +805,13 @@ tool for an agent exploring the graph *locally* before committing to labels, and
 - `growth[arm]`: per bin of `profile_bin_bp`: max live paths, distinct live labels, live (path, label) pairs,
   divergences, ambiguous branches taken, splits, reconvergences, bubbles, tips, `blocked_repeat`, label ends by
   reason, steps.
-- `branch_events[arm]`: the first `max_branch_events` in queue order **plus** the top `max_branch_events` by labels
-  affected; each with position, successor characters, per-successor label counts and lookahead
-  `{bp_until_end_or_window, reason}`, ambiguous labels, labels dropped by `branch`/`minority`/`loss_budget`, and
+- `branch_events[arm]`: the first `output.max_branch_events` events in processing order (default 100, or
+  `"unlimited"`). Exploration is level-synchronous, so an arm produces its events in non-decreasing `at_bp`
+  and the kept prefix ends at a depth: the arm's `evidence.complete_to_bp` (§7.0) is the `at_bp` of the first
+  event **not** kept, and every event at a smaller depth — every ambiguity and every refusal decided there — is
+  in the list (at that depth and beyond some may be missing; a `branch_events` limitation then states the cut
+  with `branch_events_total` as `observed`). Each event has its position, successor characters, per-successor
+  label counts, ambiguous labels, labels dropped by `branch`/`minority`/`loss_budget`, and
   `refused: [{char, cause, labels}]` — one entry per (successor, cause) the walker decided **not** to follow for
   labels whose lineage would have continued on it, with those labels (the sources alive at the node,
   ascending). The causes and when each is emitted:
@@ -766,8 +831,10 @@ tool for an agent exploring the graph *locally* before committing to labels, and
   name an active knob whose condition holds at that node (the test checkers do, `refusal_problem`), and a
   `hairpin` event is a reason for a missing successor only under `hairpins: skip` — one marked `followed`
   records a child that is present. A step with a refusal always emits a branch event; `branch_events_truncated`
-  = total − shown. Refusals live in the events, so a run whose events were cut by `max_branch_events` has
-  incomplete refusal evidence: raise the cap when the evidence is what is wanted.
+  = total − shown. Refusals live in the events, so a cut by `max_branch_events` cuts refusal evidence — but
+  only from `evidence.complete_to_bp` on, and the response says where: below it an omission must carry its
+  reason, at or beyond it a consumer cannot expect one (the checker counts such an omission as
+  `unexplained_capped`). Set the knob to `"unlimited"` when the evidence for the whole trie is what is wanted.
 - `needed_budget` histogram per arm (from `loss_budget` events); `cost_preview` for P under pairwise models
   (min/median/max of `cost(seed label → extra)`, units stated).
 - `counters`: steps, successor enumerations, annotation access (path used, keys mapped, rows reconstructed,
@@ -803,6 +870,8 @@ Per arm, in both modes:
   `on_reconverge: keep`, `united_history` under `merge`) so that a checker can pick the termination scope it
   verifies against instead of parsing `walk_rule`. `frontier_remaining` and `cap_trigger` count the heads a cap
   cut, not heads that had already reached the radius (those end as `max_extension_bp`).
+- `evidence` (the boundary of `branch_events`) and `limitations` (every cap that limited the arm, with the knob
+  to turn), §7.0.
 - `labels_per_node: {cap, max_seen, nodes_truncated}` — `cap` is `labels.max_labels_per_node`, `max_seen` the
   largest true label count met at a node, `nodes_truncated` how many recorded lists lost labels to the cap: the
   root's boundary list, every node entered, every successor not taken (listed on its `blocked` / `hairpin`

@@ -487,6 +487,29 @@ From round 4:
     graphs, every mode, both hairpin policies, each knob, all knobs at once, a step cap) shows the stricter
     checkers reject nothing genuine.
 
+From the owner:
+
+31. **Guarantees, or a stated limitation.** The owner's requirement: a result either carries a guarantee or
+    states its limitation — "if more branch events are needed, it should be returned that this max was achieved
+    and hence likely more was needed." `complete_to_bp` is the model; the branch-event cap was the cap that cut
+    evidence silently (spec §7.2 also promised a "top N by labels affected" that never existed). Now: the walker
+    keeps the first `max_branch_events` events in level order and records
+    `ArmResult::branch_events_complete_to_bp`, the `at_bp` of the first event not kept — events come in
+    non-decreasing depth (asserted in Debug), so every event, refusal and ambiguity below it is kept.
+    `output.max_branch_events` accepts `"unlimited"`. Every arm reports `evidence: {complete, complete_to_bp}`
+    and every arm and seed result `limitations: [{kind, knob, limit, observed, effect, complete_to_bp?}]`, `[]`
+    when nothing limited it, in all detail levels: `walk_domain`, `branch_events`, `label_lists`,
+    `inexact_counts`, `switch_sources`, `scope` per arm; `seed_labels` and `server_clamp` per seed (spec §7.0).
+    `knob` is the request field to turn; for a cap `observed` is the demand that exceeded `limit`
+    (`CapTrigger::demand`). `tuned_subset_report` honours the boundary: an omission with no recorded reason at or
+    beyond it counts as `unexplained_capped`, below it is a problem exactly as before.
+    `CheckersAcceptGenuineTunedRunsOnDenseGraphs` now runs with the default cap (54 of 576 arm cells cut, 14
+    omissions beyond the boundary, none below; the kept events are checked to be the uncapped run's prefix) and
+    `…WithAllEvents` with `"unlimited"` (nothing cut, nothing unexplained). `Walker.BranchEventsCompleteToBp`,
+    `Walker.LimitationsStateExactlyWhatLimitedTheResult`, `test_traverse_states_every_limitation`. Not covered by
+    an entry, and stated in §7.0 instead: §6.3's `max_switch_sources` approximation when the cut source goes on
+    elsewhere, and the accepted-but-unimplemented tip/bubble windows.
+
 Not changed, by decision (see §5.5 / §7): the trace seed cap ordering (presence → cap → trace validation),
 repeated edges under trace, the even-k palindromic-node rule, the constrain-mode merge default, `switch_on: any`
 without a reference, and `switch_on: loss` being per successor (§5.2.7 — the latter is the one I intend to
