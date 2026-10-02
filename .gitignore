@@ -21,6 +21,8 @@ database-cli
 *._*
 metagraph/build*
 metagraph/**/build*
+# the mini-refseq fixture builder is a script, not a build directory (DESIGN-traverse-graphlet.md §3.1)
+!metagraph/scripts/traversal/build_mini_refseq.sh
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
