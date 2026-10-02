@@ -1,9 +1,9 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** draft v4 (2026-10-02), revised after three external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
-v3 `91bda3e9`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3) and §15 (v4) and
-marked *(v2)*/*(v3)*/*(v4)* where they are made. §14 is the resource and guarantee contract. Not frozen: the shared
-golden vectors, whole-document fixtures and exhaustion fixtures of §2.7 are the freeze gate. Companion documents:
+**Status:** draft v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
+v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
+(v4) and §16 (v5) and marked where they are made. §14 is the resource and guarantee contract; §14.1 separates what
+is frozen with MGT v1 from what is enforced in stages. Not frozen: the fixtures of §2.7 and §14 are the freeze gate. Companion documents:
 `SPEC-labeled-traversal-core.md` (the traversal contract this builds on; §7.5 will carry §2 of this document once
 accepted), `DESIGN-labeled-traversal-endpoint.md` (the owner's design note), `REVIEW-REQUEST-graphlet-design.md`
 (the review prompt for this design).
@@ -81,7 +81,7 @@ Additional corrections: `LabelEnd.route_bp` is the *entry's* route_bp (walker.cp
 
 ## 2.2 Records
 
-Document order: `H [J] S X* L*`, then per requested arm, left before right: `A B* V*`, then per segment in id order `G P* E* T? C?`, then `R*`; finally `Z`.
+Document order: `H [J] S X* L* O Q? K*` *(v5: O, Q, K)*, then per requested arm, left before right: `A B* V*`, then per segment in id order `G P* E* T? C?`, then `R*`; finally `Z`.
 
 ```
 H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp> <seed_index> walk <index_ns|*> <index_fp|*> <index_meta_fp>
@@ -100,8 +100,12 @@ L <c|h> <column> <seq_id|*> <prefix_len> <suffix>
                                        # name = previous L name[:prefix_len] + suffix (front coding). column/seq_id =
                                        # LabelRef (the stable cross-retrieval join key). seq_id * for column labels.
 A <l|r> <status c|t|p> <complete_to_bp> <scope p|u> <live_paths> <live_labels> <exact> <max_seen> <nodes_truncated>
-  <steps,successor_enumerations,output_bp,pair_evaluations,edge_reuse_probes,reminimisation_rounds,max_reminimisation_rounds>
-  <cap_trigger reason,at_bp,segment,live_paths,live_labels,exact | *> <branch_events_total>
+  <counters name=value,... >   # (v5) named and extensible, in the walker's order: steps, successor_enumerations,
+                               # output_bp, pair_evaluations, edge_reuse_probes, reminimisation_rounds,
+                               # max_reminimisation_rounds, refusal_scans, switch_sources_cut, ... — an unknown name
+                               # is preserved by the reader, so a newer writer never breaks an older reader
+  <cap_trigger reason,at_bp,segment,live_paths,live_labels,exact,demand | *> <branch_events_total>
+  <evidence_complete_to_bp|*>   # (v5) branch-event boundary (* = no event dropped)
   <n_segments> <n_runs> <n_leaves> <n_splits> <n_merges> <bases>          # the last six validate the body
 B <from_bp> <max_live_paths> <distinct_live_labels> <live_pairs> <exact> <steps> <divergences> <ambiguous_branches>
   <splits> <reconvergences> <bubbles> <tips> <blocked_repeat> <label_ends code:n,... | .>     # one per growth bin
@@ -140,6 +144,17 @@ R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev
                                        # (v2) <branches> <loss>: the lineage's TERMINAL values when the run ended or was
                                        # closed (LabelRun::branches/loss, §4). Valid at to_bp only: a claim cut at an
                                        # earlier depth reports them as unknown, never as the value at the cut.
+O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l> <delivery i|s|p>
+                                       # (v5) the per-seed guarantee dimensions (§14), one per document, before the arms
+Q <scope> <resource> <phase> <requested> <effective> <used> <remaining> <actions csv> <message>
+                                       # (v5) resource_stop (§14), at most one per document, after O; message is the
+                                       # free-text last field (percent-encoded like names)
+K <arm l|r|*> <kind> <knob> <limit> <observed> <complete_to_bp|*> <extra name=value,...|.>
+                                       # (v5) one stated limitation; arm * = seed-level (seed_labels, server_clamp,
+                                       # derivation). limit/observed are typed: an integer, a float (codec rule), or
+                                       # the literal `unlimited`; <extra> holds further fields (server_limit, demand).
+                                       # `effect` is NOT stored: it is reconstructed from the normative template of its
+                                       # kind (§14) and the stored fields, byte-identical in both languages
 Z <line count of the document including this line>
 ```
 
@@ -206,7 +221,7 @@ Envelope unchanged (`release`, `capabilities`(+2 keys), `strategy`(+`output.deta
           "labels_supporting_total","labels_dropped","labels_dropped_digest","num_labels","num_seed_labels"},
  "label_mode": "constrain|annotate", "duplicate"?: true,
  "arms": {"left"?: {"status","complete_to_bp","completeness_scope","frontier_remaining":{…},"labels_per_node":{…},
-                    "cap_trigger"?:{…},"counters":{7},"branch_events_total",
+                    "cap_trigger"?:{…},"counters":{…all counters, by name},"branch_events_total","evidence":{…},"limitations":[…],
                     "counts": {"segments","leaves","splits","merges","runs","bases","max_bp",
                                "label_ends":{reason:n},"leaves_by_reason":{path_reason|"semantic":n}}},
           "right"?: {…}},
@@ -512,14 +527,16 @@ either an answer is complete, or a valid shallower answer is returned together w
 cut, why, and which knob or action would go further. Nothing is cut silently, and no resource measure may change the
 question being answered without saying so.
 
-**Outcomes.** Per seed result, `outcome` is one of:
+**Outcome: four independent dimensions *(v5)*.** v4's single value could not say "partial traversal, spooled",
+and "all evidence present" was stronger than any one boolean (an annotate run can reach its radius with every branch
+event kept while capped label lists make its summaries lower bounds). Per seed result (JSON `outcome`, MGT `O`):
 
-| outcome | meaning |
-|---|---|
-| `complete` | every arm complete to the requested radius under `walk_rule`/`completeness_scope`; all evidence present |
-| `partial` | a **valid certified prefix**: each arm's `complete_to_bp` (and `evidence.complete_to_bp`) says how far the guarantee goes; `limitations` lists every cap that limited it; `resource_stop` says why it stopped when a budget did |
-| `failed` | no valid traversal exists (e.g. the seed's own rows exceeded the memory budget, the derivation was refused) — an error with a structured reason, never a half-built result |
-| `deferred` | the traversal is complete but delivery is spooled or paged (the body exceeds the transport limit); the handle and the pages carry it |
+| dimension | values | guarantee |
+|---|---|---|
+| `walks` | `complete` · `partial` · `failed` | `complete`: every requested arm is complete to the radius under `walk_rule` and `completeness_scope`; `partial`: a valid certified prefix to each arm's `complete_to_bp`; `failed`: no valid traversal exists (structured reason in `limitations`/`resource_stop`) |
+| `branch_diagnostics` | `complete` · `cut` | every branch decision and refusal is reported; `cut`: only before each arm's `evidence.complete_to_bp` |
+| `label_evidence` | `complete` · `lower_bound` | recorded label sets and losses are exact; `lower_bound`: a cut list (`max_labels_per_node`) or a cut switch-source list (`max_switch_sources`) can have dropped carriers or raised losses. An intentionally *selected* label set is complete within its stated domain |
+| `delivery` | `inline` · `spooled` · `paged` | the body is in the response; `spooled`: complete in the spool behind the handle, the response holds the summary; `paged`: delivered in pages. Independent of `walks`, so a partial traversal can be spooled |
 
 **Stated limitations** (already being implemented on the JSON side, spec §7.0): per arm `evidence: {complete,
 complete_to_bp}` and `limitations: [{kind, knob, limit, observed, effect, complete_to_bp?}]` with kinds `walk_domain`,
@@ -533,32 +550,53 @@ accepts `"unlimited"`), `label_lists`, `switch_sources`, `inexact_counts`, `scop
 wide first level or one enormous annotation row (annotate mode materialises a full row, or every coordinate tuple,
 before cutting the recorded list — label_oracle.cpp). So:
 
-- *Memory and work budgets in the walker*: `bounds.max_memory_mb` (simultaneously retained allocations: label state
-  per head, segments, runs, recorded sets, the row cache) and the existing `max_steps`/time budget for work. Checked
-  **before** each expensive allocation (a level's successor batch, a row fetch, a tuple decode) and during bounded
-  batches. On exhaustion the walker stops at the last completed level: an unfinished level never raises
-  `complete_to_bp`, the stop reason is `resource_limit` (`Y`), and `resource_stop` is filled.
-- *Reserve for delivery*: a fraction of the memory and time budget is reserved for finalisation and serialisation of
-  the partial result, so a stop at the limit can still be delivered.
-- *Row-level guard*: a single annotation row (or coordinate tuple set) estimated above the remaining budget is not
-  decoded; the step stops with `resource_stop.phase = annotation_decode` and the suggestion to use a more selective
-  seed or a label-constrained query (narrowing the radius would not help).
-
-`resource_stop` = `{scope: locus|analysis|service, resource: memory|work|time|delivery|capacity, phase:
-annotation_decode|traversal|finalisation|serialisation|parse|compare, message, requested, effective, used,
-remaining, suggested_actions: [...]}`. Suggested actions by cause: traversal too broad → `use_available_prefix`,
-`narrow_label_selection`, `select_branches`; one row too expensive → `more_selective_seed`, `constrain_labels`;
-allowance exhausted → completed loci returned, others `not_started`, the agent prioritises; service capacity → a
-separate `service_unavailable` with `retry_after`; delivery too large → `deferred` with the spooled graphlet and
-pages.
+- *What counts* *(v5)*. **Memory**: every allocation the request retains at once — the walker's state (heads'
+  label states, segments, runs, events, recorded sets), the request's `LabelQuery`/`LabelRecorder` caches, the
+  decode scratch of the annotation reads it issues (row-diff dependency rows, coordinate tuples), and the output
+  buffers. The index itself (mmapped graph and annotation) and process-wide shared caches are not charged to a
+  request; a shared cache that grows because of a request is charged to it. **Work**: *charged work units*, a
+  weighted sum of counters the walker already keeps — successor enumerations, rows decoded (weighted by their
+  row-diff dependency path length), coordinates mapped, pair evaluations, refusal scans, edge-reuse probes,
+  re-minimisation rounds — not CPU time and not elapsed time; `max_steps` alone undercounts (one step can perform
+  many source–target comparisons). Elapsed time stays a separate deadline. The deadline and the budgets are checked
+  at least every *W* work units (a bounded interval, stated in `capabilities`).
+- *Row decoding is budget-aware inside the decoder* *(v5)*. Estimating the *final* row does not bound peak memory:
+  row-diff reconstruction loads its dependency rows, whose differences can cancel into a tiny result
+  (`row_diff.hpp`). The annotation reads used by traversal go through a decode path that charges each dependency row
+  and tuple as it is materialised and aborts the batch, without side effects, when the request's remaining budget
+  would be exceeded; the step then stops with `resource_stop.phase = annotation_decode` and the suggestion to use a
+  more selective seed or a label-constrained query (narrowing the radius would not help). Until that decode path
+  exists (§14.1) the memory bound is *soft* and every response says so (`limitations: memory_bound_soft`, observed
+  = the measured overshoot).
+- *Atomic commit per head* *(v5)*. "Check before each allocation" is not enough when earlier mutations already
+  happened: the walker ends a switch source's run before it allocates the split's children, so a denial in between
+  would leave inconsistent runs, events or split records, and lowering `complete_to_bp` does not repair them.
+  Processing a head becomes two-phase: **plan** (successors, derived states, label ends, splits, merges — no
+  mutation of the result) → **admit** (reserve the plan's allocations *and* the cost of later stopping and
+  delivering what it creates, see the next bullet) → **commit** (apply; cannot fail). A head that is not admitted is
+  censored exactly like a head beyond a cap today (its walk ends at the last committed level with `resource_limit`),
+  and the level it belongs to does not count toward `complete_to_bp`.
+- *Delivery is accounted per expansion, not reserved as a fraction* *(v5)*. A fixed reserve fails on a comb-shaped
+  trie (one terminating branch per split): segments grow linearly, but materialising every leaf's ancestor chain is
+  quadratic. So (a) paths are **lazy** — `PathResult` keeps its leaf; ancestor chains are produced while serialising,
+  from parent pointers, through bounded buffers (MGT stores no chains at all; JSON `detail: full` streams them) — and
+  (b) admission charges each committed head with the incremental delivery cost of what it adds in the requested
+  output format. The guarantee: **every committed prefix remains deliverable within the resources already reserved
+  for it.**
 
 **Scopes.** *Locus*: peak working memory and cumulative work across both arms, retries and continuations of one
 locus. *Analysis*: total work across loci, an overall deadline, retained graphlet memory and spool storage.
-*Service*: concurrent workers and aggregate memory reservations. Requests carry a stable `budget_id` (analysis) and
-`locus_id`; splitting a request or retrying never resets an allowance — memory limits what is held at once, work
-accumulates across attempts. The backend enforces the locus scope per request (it sees one request); the analysis
-and service scopes belong to the MCP layer / search service, which forwards the remaining locus allowance as the
-request's bounds and accounts the reported usage.
+*Service*: concurrent workers and aggregate memory reservations. Requests carry a stable `budget_id` (analysis), a
+`locus_id`, and *(v5)* a fresh `attempt_id` per dispatch; splitting a request or retrying never resets an allowance —
+memory limits what is held at once, work accumulates across attempts.
+
+*(v5)* **An authoritative ledger with reservations**, not reported usage: two requests that each receive the same
+remaining allowance before either reports would both spend it. The MCP layer / search service keeps a ledger per
+`budget_id` and `locus_id` (atomic operations, e.g. Redis) and **reserves** an allowance for an attempt before
+dispatching it; the reservation is the request's bounds; the backend returns its usage on every response, successful
+or not; the ledger **reconciles** reserved against used on the response, and **releases** a reservation on
+cancellation, or on lease expiry when a response is lost (the attempt is then charged its full reservation, since
+its spending is unknown). The backend enforces the locus scope per request; the ledger enforces the rest.
 
 **No silent semantic changes.** Enabling a beam, dropping labels, raising a cut, switching `on_reconverge` or the
 support kind changes the question or the evidence; none of them is ever applied as a resource measure. When the
@@ -566,14 +604,32 @@ agent chooses one, the response says what it changed (`strategy` echo + `limitat
 
 **The local library has budgets too.** Parsing (a compact MGT expands into large label sets), route enumeration,
 comparisons and exports run under allocation and work budgets; an interrupted comparison returns
-`comparable: unknown` / `incomplete`, never equality, and an interrupted parse is an error, never a partial graphlet.
+`comparable: unknown` / `incomplete`, never equality, and an interrupted parse is a **local failure**: the original body (or the handle to it) is kept unchanged and the failure is reported — a shallower graphlet cannot be manufactured from a cut-off parse.
 
 **Continuation is a new traversal.** It does not resume the original exhaustive search (the backend keeps no
 frontier or edge history between requests); its result is certified on its own, with the overlap stated.
 
-**Freeze-gate fixtures for this section.** Exhaustion during annotation decoding, mid-level traversal, finalisation
-and Python parsing; in each case a valid shallower result is delivered whenever one exists (`partial` with the right
-`complete_to_bp` and `resource_stop`), and `failed` only when none does.
+**Freeze-gate fixtures for this section.** Exhaustion during annotation decoding (including a row-diff row whose
+dependencies are dense but whose result is tiny), mid-level traversal, finalisation and serialisation: a valid
+shallower result is delivered whenever one exists (`walks: partial` with the right `complete_to_bp` and
+`resource_stop`), `failed` only when none does. *(v5)* Allocation denial injected inside a head's commit around a
+switch, a split and a merge (the result stays consistent: runs, events, splits and paths agree); a comb-shaped trie
+(finalisation stays within the admitted reservation); concurrent attempts against one ledger entry (no double
+spending; a lost response charged its reservation); a partial traversal delivered spooled (`walks: partial`,
+`delivery: spooled`); a non-zero `refusal_scans` and an unknown future counter round-tripping through `A`; an
+interrupted Python parse keeping the original body and reporting a local failure.
+
+## 14.1 What is frozen with MGT v1, and what is enforced in stages *(v5)*
+
+Frozen with the format (the wire contract): the `O`, `Q`, `K` records and the `A` counters/evidence fields; the
+`resource_limit` end reason; the four outcome dimensions; the `limitations` kinds and their effect templates; the
+`resource_stop` structure; `attempt_id`/`budget_id`/`locus_id` in requests and usage in every response. Enforced in
+stages, each stated in every response until it lands (`limitations` entries): (1) **now** — the existing caps, the
+evidence boundary, stated limitations, the outcome dimensions (being implemented in the JSON); (2) the two-phase
+head commit and lazy paths in the walker; (3) the budget-aware row-diff decode path in the annotation library
+(`memory_bound_soft` until then); (4) the ledger in the search service. The promise at every stage is the same:
+deliver the largest certified prefix that can be safely committed and delivered, and state the limiting resource and
+the useful next action — the stages only move hard bounds from *stated* to *enforced*.
 
 # 15. Changes in v4 (after the external review of v3 and the owner's guarantee requirement)
 
@@ -583,3 +639,16 @@ and Python parsing; in each case a valid shallower result is delivered whenever 
 | 2 | `route_only` created claims for runs that start after the cut | run-start guard first; future runs make no claim; zero-length boundary claims defined | §5.1 |
 | 3 | no representation of resource stops; no guarantee statement | `outcome` (complete/partial/failed/deferred), `resource_stop`, `resource_limit` end reason (`Y`), per-arm `evidence` + `limitations` (also in MGT: `A` field, `K` records), budgets per locus/analysis/service, reserve for delivery, row-level guard, local-library budgets, exhaustion fixtures in the freeze gate | §2.1, §3, §14 |
 | 4 | `max_branch_events` cut refusal evidence silently | boundary `evidence.complete_to_bp` + a `branch_events` limitation naming the knob; `"unlimited"` accepted (implemented now, spec §7.0/§7.2) | §14 |
+
+# 16. Changes in v5 (after the external review of v4)
+
+| # | v4 problem | v5 change | where |
+|---|---|---|---|
+| 1 | a row guard on the final row does not bound decoding (row-diff dependencies); `max_steps` undercounts work | decode path that charges dependency rows and tuples and aborts without side effects; charged work units; bounded interval between checks; what counts as memory defined; `memory_bound_soft` stated until it lands | §14 |
+| 2 | "check before each allocation" can leave inconsistent records (a switch source ended before split children are allocated) | two-phase plan → admit → commit per head; denied heads censored like a cap; allocation-denial fixtures around switches, splits, merges | §14 |
+| 3 | a fixed delivery reserve fails on comb-shaped tries (quadratic path materialisation) | lazy paths serialised from parent pointers; delivery cost charged per admitted expansion; every committed prefix deliverable | §14 |
+| 4 | wire contract incomplete: no grammar for evidence / `K`; `refusal_scans` cannot round-trip; `outcome`/`resource_stop` unassigned | `A` counters named and extensible + evidence field; `O`, `Q`, `K` records with scope and typed values; effect reconstructed from normative templates | §2.2, §3 |
+| 5 | one outcome value conflates walk completeness, branch diagnostics, label evidence and delivery | four independent dimensions (also being implemented in the JSON now) | §14 |
+| 6 | aggregate budgets by reported usage allow double spending | ledger with atomic reservations, reconciliation, lease expiry; `attempt_id`; usage on every response; work = charged units | §14 |
+| 7 | the parse rule implied a shallower graphlet could be made from a cut-off parse | local failure, original body/handle kept | §14 |
+| 8 | the freeze gate missed the above | fixtures added; §14.1 separates the frozen contract from staged enforcement | §14, §14.1 |

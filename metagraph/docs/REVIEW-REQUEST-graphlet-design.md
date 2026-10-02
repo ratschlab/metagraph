@@ -1,5 +1,15 @@
 # Review request: the traversal graphlet design (retrieve once, process locally)
 
+> **Round 5 (design v5).** Your v4 review is addressed in v5 (§16 lists the changes): a budget-aware decode path that
+> charges row-diff dependencies and aborts without side effects (memory stated as `memory_bound_soft` until it
+> exists) and charged work units; a two-phase plan → admit → commit per head; lazy paths with delivery cost charged
+> per admitted expansion; the wire contract completed (`A` named, extensible counters + evidence field; `O`, `Q`, `K`
+> records with scope and typed values, effects from normative templates); four independent outcome dimensions
+> (walks, branch_diagnostics, label_evidence, delivery); a reservation ledger with `attempt_id`, reconciliation and
+> lease expiry; the parse rule fixed. §14.1 now separates what freezes with MGT v1 (the wire contract) from what is
+> enforced in stages. Please check whether that separation is sound — i.e. whether anything in the frozen contract
+> would have to change once the staged enforcement lands.
+
 > **Round 4 (design v4).** Your v3 review and resource proposal are addressed in v4 (§15 lists the changes, §14 is the
 > new resource and guarantee contract): `index_fp` is now the digest of the immutable index bundle via a build
 > manifest (no manifest → joins are unverifiable; the metadata hash survives only as a negative check; a
