@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <random>
@@ -2693,6 +2694,289 @@ TEST(WalkerDerive, TraceCoordinatesSurviveCompaction) {
     named.labels = { "cA", "cB" };
     auto explicitly = traverse_seed(other, named, st, LabelChangeCost::forbid());
     EXPECT_EQ(serialize(explicitly), serialize(derived));
+}
+
+
+// A derived header must resolve back to its own column. Two columns hold a record
+// named ACC; only column B's carries the seed. The derivation finds B's, but an
+// explicit list resolves "ACC" to the FIRST column holding it, so the derived list
+// would not be resubmittable: it is refused, naming the header. The column kind and
+// an explicit column name still work.
+TEST(WalkerCoord, DerivedHeaderMustResolveBackToItsColumn) {
+    auto b = clean_blocks({ 60, 40, 60 }, 61);
+    const std::string &L = b[0], &M = b[1], &T = b[2];
+    const std::string in_a = L, in_b = M + T;   // the seed M is only in column B's record
+    const uint64_t na = in_a.size() - kK + 1, nb = in_b.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { in_a, in_b }, { "A", "B" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    std::vector<std::vector<std::string>> headers { { "ACC" }, { "ACC" } };
+    std::vector<std::vector<uint64_t>> num_kmers { { na }, { nb } };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno, &cth);
+
+    Seed seed;
+    seed.sequence = M;
+    Strategy st;
+    try {
+        traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        FAIL() << "a derived header that resolves to another column was accepted";
+    } catch (const SeedDerivationError &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("'ACC'")) << e.what();
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("another annotation column")) << e.what();
+    }
+    // the column kind derives B, and B explicitly still works
+    st.seed_label_kind = LabelKind::COLUMN;
+    auto by_column = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_EQ(1u, by_column.label_dict.size());
+    EXPECT_EQ("B", by_column.label_dict[0].name);
+    EXPECT_EQ(T.size(), by_column.arms[kRight].paths[0].length_bp);
+    seed.labels = { "B" };
+    auto explicitly = traverse_seed(oracle, seed, Strategy(), LabelChangeCost::forbid());
+    EXPECT_EQ(T.size(), explicitly.arms[kRight].paths[0].length_bp);
+}
+
+
+// Whether a seed's labels can be derived must not depend on annotation.batch_kmers. A
+// header record A^66000·tail: the k-mer A^11 alone carries ~66k coordinates, over the
+// guard for max_seed_labels = 1; the cheapest-row choice and the guard look at a window
+// of 64 k-mers whatever the fetch batch is, so a seed starting in the homopolymer is
+// accepted with batch 1 as with batch 64, and the two runs are identical.
+TEST(WalkerCoord, DerivationDoesNotDependOnBatchKmers) {
+    const std::string tail = "CGTCGACTGCTACGTACGATCGATGC";
+    const std::string record = std::string(66000, 'A') + tail;
+    const uint64_t n = record.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { record }, { "F" }, DeBruijnGraph::BASIC, true, { 0 });
+    std::vector<std::vector<std::string>> headers { { "H" } };
+    std::vector<std::vector<uint64_t>> num_kmers { { n } };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+
+    Seed seed;
+    seed.sequence = std::string(kK, 'A') + tail.substr(0, 8);
+    std::string first;
+    for (size_t batch : { 1, 64 }) {
+        LabelOracle oracle(*anno, &cth);
+        Strategy st;
+        st.max_seed_labels = 1;
+        st.batch_kmers = batch;
+        st.max_extension_bp = 200;
+        SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        ASSERT_EQ(1u, r.label_dict.size()) << "batch " << batch;
+        EXPECT_EQ("H", r.label_dict[0].name);
+        EXPECT_EQ(tail.size() - 8, r.arms[kRight].paths[0].length_bp) << "batch " << batch;
+        if (first.empty()) {
+            first = serialize(r);
+        } else {
+            EXPECT_EQ(first, serialize(r)) << "batch " << batch;
+        }
+    }
+}
+
+
+// A head that has already reached the radius when a seed-level cap trips is complete,
+// not out of budget: two linear branches, radius 2, max_steps 3 — the first head
+// reaches depth 2 (max_extension_bp), the second is cut at depth 1 (max_steps), and
+// the boundary is 1.
+TEST(Walker, HeadsAtTheRadiusAreCompleteWhenACapTrips) {
+    auto b = clean_blocks({ 30, 40, 40 }, 62);
+    for (uint32_t s = 63; b[1][0] == b[2][0]; ++s)
+        b = clean_blocks({ 30, 40, 40 }, s);
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { X + P, X + Q }, { "A", "B" }, DeBruijnGraph::BASIC);
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 2;
+    st.max_steps = 3;
+    auto res = run(*anno, X, { "A", "B" }, st);
+    const ArmResult &arm = res.arms[kRight];
+    EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
+    EXPECT_EQ(1u, arm.complete_to_bp);
+    ASSERT_EQ(2u, arm.paths.size());
+    std::map<uint64_t, EndReason> ends;
+    for (const auto &p : arm.paths) {
+        for (size_t r = 0; r < kNumEndReasons; ++r) {
+            if (p.end_reasons[r])
+                ends[p.length_bp] = static_cast<EndReason>(r);
+        }
+    }
+    ASSERT_EQ(2u, ends.size());
+    EXPECT_STREQ("max_extension_bp", to_string(ends.at(2)));
+    EXPECT_STREQ("max_steps", to_string(ends.at(1)));
+}
+
+
+namespace {
+
+std::string random_dna(std::mt19937 &rng, size_t len) {
+    std::string s;
+    for (size_t i = 0; i < len; ++i) s += "ACGT"[rng() % 4];
+    return s;
+}
+
+// does some root-to-leaf route of |arm| spell |wanted| as a prefix?
+bool spells_prefix(const ArmResult &arm, size_t s, const std::string &wanted, size_t at = 0) {
+    const Segment &seg = arm.segments[s];
+    const std::string x = seg.sequence.substr(0, wanted.size() - at);
+    if (wanted.compare(at, x.size(), x) != 0)
+        return false;
+    at += x.size();
+    if (at == wanted.size())
+        return true;
+    for (size_t c : seg.children) {
+        if (spells_prefix(arm, c, wanted, at))
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+// Annotate mode over a MERGED DAG: two records of one label that disagree in 26 places
+// and rejoin after each — O(N) segments but 2^N routes. The summary must be computed per
+// segment (union of the parents' surviving sets), not per route; the per-route walk it
+// replaces took seconds here and grew exponentially.
+TEST(Walker, AnnotateSummaryIsLinearOnAMergedDag) {
+    const size_t k = 21, n = 26;
+    std::mt19937 rng(18881);
+    const std::string seed_seq = random_dna(rng, 35);
+    std::string a = seed_seq, b = seed_seq;
+    for (size_t i = 0; i < n; ++i) {
+        std::string x = random_dna(rng, 35), y = random_dna(rng, 35), join = random_dna(rng, 35);
+        while (x[0] == y[0]) y = random_dna(rng, 35);
+        a += x + join;
+        b += y + join;
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, { a, b }, { "A", "A" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = seed_seq;
+    Strategy st;
+    st.label_mode = LabelMode::ANNOTATE;
+    st.direction = Strategy::RIGHT;
+    st.merge_reconverge = true;
+    st.max_extension_bp = 10000;
+    const auto start = std::chrono::steady_clock::now();
+    auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    const ArmResult &arm = r.arms[kRight];
+    EXPECT_EQ(ArmResult::COMPLETE, arm.status);
+    EXPECT_LT(arm.segments.size(), 4 * n);   // a compact DAG, not a trie of 2^n leaves
+    EXPECT_EQ(1u, arm.paths.size());
+    ASSERT_EQ(1u, r.label_dict.size());
+    // the label is on every node of both records, so its direct support is the whole flank
+    EXPECT_EQ(a.size() - seed_seq.size(), r.label_summary[0][kRight].direct_bp);
+    EXPECT_EQ(a.size() - seed_seq.size(), r.label_summary[0][kRight].reach_bp);
+    EXPECT_LT(elapsed, 5.0) << "the summary is not linear in the DAG";
+}
+
+
+// The completeness certificate under merging: a merge unites the edge histories of the
+// routes it joins, so a walk admissible on its own path (A's P·R·Q·E, 190 bp) is present
+// under `keep` and lost under `merge` where B's Q edges are imported into A's history.
+// The walk rule the response carries must say so whenever merging is on.
+TEST(Walker, MergedWalkRuleIsQualified) {
+    const size_t k = 21;
+    std::mt19937 rng(8042);
+    const std::string S = random_dna(rng, 30), P = random_dna(rng, 70), Y = random_dna(rng, 40),
+                      R = random_dna(rng, 40), Q = random_dna(rng, 40), E = random_dna(rng, 40);
+    const std::string A = S + P + R + Q + E, B = S + Y.substr(0, 30) + Q + R;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, { A, B }, { "A", "B" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    for (bool merge : { false, true }) {
+        Seed seed;
+        seed.sequence = S;
+        Strategy st;
+        st.label_mode = LabelMode::ANNOTATE;
+        st.direction = Strategy::RIGHT;
+        st.merge_reconverge = merge;
+        st.max_extension_bp = 300;
+        auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        const ArmResult &arm = r.arms[kRight];
+        EXPECT_EQ(ArmResult::COMPLETE, arm.status) << merge;
+        const std::string rule = walk_rule_statement(st, oracle);
+        if (!merge) {
+            EXPECT_TRUE(spells_prefix(arm, 0, P + R + Q + E)) << "keep lost A's own walk";
+            EXPECT_EQ(std::string::npos, rule.find("edge histories are united")) << rule;
+        } else {
+            // the conservative merge: pinned as the documented behaviour, not endorsed
+            EXPECT_FALSE(spells_prefix(arm, 0, P + R + Q + E));
+            EXPECT_NE(std::string::npos, rule.find("edge histories are united")) << rule;
+            EXPECT_NE(std::string::npos, rule.find("on_reconverge: keep gives the per-path set")) << rule;
+        }
+    }
+}
+
+
+// Label-free exploration (spec §6.11): annotate mode with a beam of width 1 and
+// most_supported_first follows, at every fork, the branch carried by more labels — here
+// P (3 labels) over Q (1) at the seed boundary and then P1 (2) over P2 (1) — and reports
+// itself as pruned with the per-node support recorded; breadth_first would keep whichever
+// head was created first.
+TEST(Walker, LabelFreeBeamFollowsTheMostSupportedBranch) {
+    auto b = clean_blocks({ 30, 30, 30, 30, 30 }, 64);
+    for (uint32_t s = 65; b[1][0] == b[2][0] || b[3][0] == b[4][0]; ++s)
+        b = clean_blocks({ 30, 30, 30, 30, 30 }, s);
+    const std::string &X = b[0], &P = b[1], &Q = b[2], &P1 = b[3], &P2 = b[4];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { X + P + P1, X + P + P1, X + P + P2, X + Q }, { "A", "B", "C", "D" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = X;
+    Strategy st;
+    st.label_mode = LabelMode::ANNOTATE;
+    st.direction = Strategy::RIGHT;
+    st.on_overflow = Strategy::BEAM;
+    st.max_live_paths = 1;
+    st.order = Strategy::MOST_SUPPORTED_FIRST;
+    st.max_extension_bp = 200;
+    auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    const ArmResult &arm = r.arms[kRight];
+    EXPECT_EQ(ArmResult::PRUNED, arm.status);
+    ASSERT_TRUE(arm.cap_trigger.has_value());
+    EXPECT_STREQ("beam_pruned", to_string(arm.cap_trigger->reason));
+    // the pruned heads stay on record as stubs ended beam_pruned; exactly one walk goes on
+    const PathResult *kept = nullptr;
+    for (const PathResult &p : arm.paths) {
+        ASSERT_TRUE(p.path_reason.has_value());
+        if (*p.path_reason == EndReason::BEAM_PRUNED) {
+            EXPECT_LE(p.length_bp, P.size() + 1);
+        } else {
+            EXPECT_EQ(nullptr, kept) << "two walks survived a beam of width 1";
+            kept = &p;
+        }
+    }
+    ASSERT_NE(nullptr, kept);
+    EXPECT_EQ(P + P1, spell_path(arm, *kept));
+    EXPECT_STREQ("dead_end", to_string(*kept->path_reason));
+    // pruned right after the first level: the 1-base walks are all present, nothing longer
+    EXPECT_EQ(1u, arm.complete_to_bp);
+    // the per-node support is on record: 3 labels along P, 2 along P1
+    auto labels_at_depth = [&](uint64_t d) -> size_t {
+        for (size_t s : kept->segments) {
+            for (const LabelSetRun &run : arm.segments[s].label_sets) {
+                if (run.from_bp < d && d <= run.to_bp) {
+                    EXPECT_FALSE(run.truncated());
+                    return run.labels.size();
+                }
+            }
+        }
+        ADD_FAILURE() << "no recorded set at depth " << d;
+        return 0;
+    };
+    EXPECT_EQ(3u, labels_at_depth(P.size()));
+    EXPECT_EQ(2u, labels_at_depth(P.size() + P1.size()));
+    // and per sample, how far some recorded route carries it: A and B the whole walk, C
+    // to the P1 fork plus the one-base P2 stub the beam left there, D only the one-base Q
+    // stub — the stubs are recorded nodes and count, the spelled walk is not what
+    // direct_bp measures
+    std::map<std::string, uint64_t> direct;
+    for (size_t i = 0; i < r.label_dict.size(); ++i)
+        direct[r.label_dict[i].name] = r.label_summary[i][kRight].direct_bp;
+    EXPECT_EQ(P.size() + P1.size(), direct["A"]);
+    EXPECT_EQ(P.size() + P1.size(), direct["B"]);
+    EXPECT_EQ(P.size() + 1, direct["C"]);
+    EXPECT_EQ(1u, direct["D"]);
 }
 
 } // namespace

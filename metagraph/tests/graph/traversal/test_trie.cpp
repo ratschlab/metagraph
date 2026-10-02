@@ -1258,10 +1258,19 @@ TEST(Trie, WalkRuleStatesWhatTheWalkerEnforces) {
         EXPECT_FALSE(has(s, "canonical")) << s;
         EXPECT_FALSE(has(s, "even k")) << s;
         EXPECT_FALSE(has(s, "128-bit")) << s;
-        EXPECT_TRUE(has(s, "takes no hairpin step")) << s;
+        // a basic graph holds one strand: check_structure() never tests for hairpins
+        // there, and the statement says so whatever the knob
+        EXPECT_TRUE(has(s, "single-strand graph has no hairpins")) << s;
+        EXPECT_FALSE(has(s, "hairpin step")) << s;
         st.skip_hairpins = false;
-        EXPECT_TRUE(has(walk_rule_statement(st, oracle), "may take hairpin steps")) << s;
+        EXPECT_TRUE(has(walk_rule_statement(st, oracle), "single-strand graph has no hairpins")) << s;
         st.skip_hairpins = true;
+        // merging unites the edge histories of the routes it joins, so the set of walks
+        // the certificate quantifies over is qualified whenever merging is on
+        EXPECT_TRUE(has(s, "edge histories are united")) << s;
+        st.merge_reconverge = false;
+        EXPECT_FALSE(has(walk_rule_statement(st, oracle), "edge histories are united")) << s;
+        st.merge_reconverge = true;
         st.label_mode = LabelMode::ANNOTATE;
         EXPECT_TRUE(has(walk_rule_statement(st, oracle), "labels present at its nodes are recorded"));
         st.label_mode = LabelMode::CONSTRAIN;

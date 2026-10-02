@@ -841,10 +841,13 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     // |batch_kmers| the caller asked for: batching the row reconstruction is what makes a
     // long seed fast, but a sub-batch is reconstructed BEFORE the intersection or the
     // clock can stop it, so the work that can be wasted has to stay bounded.
+    // The FIRST sub-batch is always kMaxChunk wide, whatever batch_kmers says: it is the
+    // window in which the cheapest row is chosen and the candidate guard below is
+    // applied, and whether a seed is accepted must not depend on a fetch-size knob.
     constexpr size_t kMaxChunk = 64;
     const size_t chunk = std::clamp<size_t>(strategy_.batch_kmers, 1, kMaxChunk);
-    for (size_t begin = 0; begin < keys.size(); begin += chunk) {
-        const size_t end = std::min(keys.size(), begin + chunk);
+    for (size_t begin = 0, width = kMaxChunk; begin < keys.size(); begin += width, width = chunk) {
+        const size_t end = std::min(keys.size(), begin + width);
         std::vector<Row> rows;
         rows.reserve(end - begin);
         for (size_t i = begin; i < end; ++i) {
@@ -902,11 +905,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             std::iter_swap(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(best));
             if (cost[best] > max_candidates) {
                 throw SeedDerivationError(
-                        "The permitted set cannot be derived from this seed: its narrowest "
-                        "k-mer alone has " + std::to_string(cost[best])
-                        + " candidates, over the limit of " + std::to_string(max_candidates)
-                        + ". Extend the seed so that the intersection can narrow it, or name "
-                          "the labels explicitly.");
+                        "The permitted set cannot be derived from this seed: the narrowest of "
+                        "its first " + std::to_string(end - begin) + " k-mers alone has "
+                        + std::to_string(cost[best]) + " annotation entries (columns plus "
+                        "k-mer coordinates, an upper bound on its labels), over the limit of "
+                        + std::to_string(max_candidates) + ". Start the seed in a less "
+                          "repetitive k-mer, or name the labels explicitly.");
             }
         }
 
@@ -1061,6 +1065,22 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         + *names[i] + "' occurs in more than one annotation column, so the "
                         "derived list cannot be resubmitted as explicit labels. Set "
                         "seed_label_kind to \"column\" or name the labels explicitly.");
+            }
+        }
+        // ... and a header that also occurs in a column NOT carrying the seed is just as
+        // unusable: an explicit list resolves a name to the FIRST column holding it,
+        // which need not be the derived one. Every derived name must resolve back to its
+        // own (column, seq_id).
+        for (const Key &key : live) {
+            const std::string &name = name_of(key);
+            const std::optional<LabelRef> back = oracle_.find_header(name);
+            if (!back || back->column != key.first || back->seq_id != key.second) {
+                throw SeedDerivationError(
+                        "The labels derived from the seed are not resubmittable: the sequence "
+                        "header '" + name + "' also occurs in another annotation column"
+                        + (back ? " (" + oracle_.column_name(back->column) + ")" : std::string())
+                        + ", which an explicit label list would resolve it to. Set "
+                          "seed_label_kind to \"column\" or name the labels explicitly.");
             }
         }
     }
@@ -1726,12 +1746,19 @@ void Walker::sort_items(std::vector<Item> &items) const {
                      < std::make_pair(min_loss(b.state), b.path_id);
             });
             break;
-        case Strategy::MOST_SUPPORTED_FIRST:
-            std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
-                return std::make_tuple(b.state.size(), min_loss(a.state), a.path_id)
-                     < std::make_tuple(a.state.size(), min_loss(b.state), b.path_id);
+        case Strategy::MOST_SUPPORTED_FIRST: {
+            // support = the labels alive on the head (constrain) or recorded at its node
+            // (annotate), so that a label-free beam follows the majority continuation at a
+            // fork instead of whichever head was created first (spec §6.11)
+            auto support = [this](const Item &item) {
+                return annotate_ ? item.present.size() : item.state.size();
+            };
+            std::sort(items.begin(), items.end(), [&](const Item &a, const Item &b) {
+                return std::make_tuple(support(b), min_loss(a.state), a.path_id)
+                     < std::make_tuple(support(a), min_loss(b.state), b.path_id);
             });
             break;
+        }
     }
 }
 
@@ -1996,10 +2023,16 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
     for (size_t i = 0; i < order.size(); ++i) {
         order[i] = i;
     }
+    // most supported first: the labels alive on the head (constrain) or recorded at its
+    // node (annotate) — a label-free beam then follows the majority continuation at a
+    // fork rather than whichever head was created first (spec §6.11)
+    auto support = [this](const Item &item) {
+        return annotate_ ? item.present.size() : item.state.size();
+    };
     std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
         const Item &x = arm.next[a], &y = arm.next[b];
-        return std::make_tuple(y.state.size(), min_loss(x.state), x.path_id)
-             < std::make_tuple(x.state.size(), min_loss(y.state), y.path_id);
+        return std::make_tuple(support(y), min_loss(x.state), x.path_id)
+             < std::make_tuple(support(x), min_loss(y.state), y.path_id);
     });
     std::vector<Item> kept;
     bool exact = true;
@@ -2049,13 +2082,19 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
     arm.result.frontier_live_labels = labels;
     arm.result.frontier_live_labels_exact = exact;
     arm.result.status = ArmResult::TRUNCATED;
+    // a head that has already reached the radius is complete, not out of budget (the
+    // same rule stop_frontier applies to the frontier)
+    auto censor = [&](Item &item) {
+        censor_item(arm, item, item.ext_bp >= strategy_.max_extension_bp
+                                   ? EndReason::MAX_EXTENSION : reason);
+    };
     if (items) {
         for (size_t j = from; j < items->size(); ++j) {
-            censor_item(arm, (*items)[j], reason);
+            censor((*items)[j]);
         }
     }
     for (Item &item : arm.next) {
-        censor_item(arm, item, reason);
+        censor(item);
     }
     arm.next.clear();
     arm.frontier.clear();
@@ -2852,17 +2891,30 @@ void Walker::summarize_annotate() {
                 }
             }
         }
-        // direct_bp: continuous presence from the seed boundary along SOME route — a
-        // walk over the DAG from the root (segment 0) carrying the labels still present
-        // on every node so far; a merged segment is entered once per parent. Exact when
-        // no per-node list was cut (nodes_labels_truncated == 0), a lower bound otherwise.
-        std::vector<std::pair<size_t, std::vector<LabelId>>> stack;
-        stack.emplace_back(0, segs[0].labels_start);
-        std::vector<LabelId> still;
-        while (!stack.empty()) {
-            auto [s, alive] = std::move(stack.back());
-            stack.pop_back();
+        // direct_bp: continuous presence from the seed boundary along SOME route.
+        // Segments are created parents-first (new_segment appends), so one pass in id
+        // order that enters each segment with the UNION of its parents' surviving sets
+        // visits every segment once; walking the routes instead was exponential on a
+        // merged DAG (N nested diamonds: O(N) segments, 2^N routes). The union is exact
+        // for an existential claim: a label survives a segment iff it is present on its
+        // runs, whichever route brought it in. Exact when no per-node list was cut
+        // (nodes_labels_truncated == 0), a lower bound otherwise.
+        std::vector<std::vector<LabelId>> alive_end(segs.size());
+        std::vector<LabelId> alive, still;
+        for (size_t s = 0; s < segs.size(); ++s) {
             const Segment &seg = segs[s];
+            alive.clear();
+            if (seg.parents.empty()) {
+                alive = seg.labels_start;
+            } else {
+                for (size_t p : seg.parents) {
+                    assert(p < s);
+                    still.clear();
+                    std::set_union(alive.begin(), alive.end(), alive_end[p].begin(),
+                                   alive_end[p].end(), std::back_inserter(still));
+                    alive.swap(still);
+                }
+            }
             for (const LabelSetRun &run : seg.label_sets) {
                 if (alive.empty())
                     break;
@@ -2877,16 +2929,12 @@ void Walker::summarize_annotate() {
                 }
                 alive.swap(still);
             }
-            if (alive.empty())
-                continue;
             const uint64_t end = seg.from_bp + seg.length_bp;
             for (LabelId l : alive) {
                 LabelArmSummary &x = result_.label_summary[l][a];
                 x.direct_bp = std::max(x.direct_bp, end);
             }
-            for (size_t c : seg.children) {
-                stack.emplace_back(c, alive);
-            }
+            alive_end[s] = alive;
         }
     }
 }
@@ -3060,12 +3108,27 @@ std::string walk_rule_statement(const Strategy &st, const LabelOracle &oracle) {
     if (stranded)
         s += " (of either strand)";
     s += ", and ";
-    std::string hairpin = "a self-reverse-complementary (k+1)-mer";
-    if (stranded && k % 2 == 0)
-        hairpin += " or a step into or out of a self-reverse-complementary k-mer node (even k)";
-    s += st.skip_hairpins
-        ? "takes no hairpin step (" + hairpin + "); "
-        : "may take hairpin steps (" + hairpin + "), which are flagged; ";
+    if (!stranded) {
+        // check_structure() tests for hairpins in stranded regimes only: a basic graph
+        // holds one strand, so a self-reverse-complementary step is an ordinary step there
+        s += "takes every step regardless of strand (a single-strand graph has no hairpins); ";
+    } else {
+        std::string hairpin = "a self-reverse-complementary (k+1)-mer";
+        if (k % 2 == 0)
+            hairpin += " or a step into or out of a self-reverse-complementary k-mer node (even k)";
+        s += st.skip_hairpins
+            ? "takes no hairpin step (" + hairpin + "); "
+            : "may take hairpin steps (" + hairpin + "), which are flagged; ";
+    }
+    if (st.merge_reconverge) {
+        // merge_level unites the edge histories of the routes it joins (conservative), so
+        // the walks present are those admissible under the UNITED history, fewer than the
+        // per-path set the rule above describes; the certificate must say so
+        s += "after a reconvergence the merged walk is also barred from every edge used by "
+             "any route merged into it (edge histories are united under on_reconverge: "
+             "merge, so fewer walks are present than per path; on_reconverge: keep gives "
+             "the per-path set); ";
+    }
     s += st.label_mode == LabelMode::ANNOTATE
         ? "every such walk is followed and the labels present at its nodes are recorded"
         : "it is followed while some permitted label supports every node of it under the "

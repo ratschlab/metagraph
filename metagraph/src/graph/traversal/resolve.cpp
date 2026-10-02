@@ -299,6 +299,42 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
 namespace {
 
+// A Fenwick tree of counts over positions 0..n-1: add, the sum over positions < i, and
+// the position of the k-th unit, each in O(log n).
+struct Fenwick {
+    std::vector<uint32_t> tree;
+    size_t n;
+    size_t top = 1;   // the largest power of two <= n (1 when n == 0)
+
+    explicit Fenwick(size_t size) : tree(size + 1, 0), n(size) {
+        while (top * 2 <= n) {
+            top *= 2;
+        }
+    }
+    void add(size_t i, uint32_t v) {
+        for (++i; i <= n; i += i & (~i + 1)) {
+            tree[i] += v;
+        }
+    }
+    uint32_t prefix(size_t i) const {   // sum over positions < i
+        uint32_t s = 0;
+        for (; i > 0; i -= i & (~i + 1)) {
+            s += tree[i];
+        }
+        return s;
+    }
+    size_t kth(uint32_t k) const {   // the 0-based position holding the k-th unit (1-based k)
+        size_t pos = 0;
+        for (size_t step = top; step; step >>= 1) {
+            if (pos + step <= n && tree[pos + step] < k) {
+                pos += step;
+                k -= tree[pos];
+            }
+        }
+        return pos;
+    }
+};
+
 // does label l have a run containing [begin, end)?
 bool covers(const LabelProfile &lp, const KmerInterval &iv) {
     for (const auto &run : lp.runs) {
@@ -415,20 +451,36 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 std::optional<Picked> best;
                 size_t best_count = 0;
                 size_t next_run = 0;
-                std::vector<uint64_t> ends;   // ends of runs with begin <= a, sorted
+                // the ends of the runs with begin <= a, as counts over the compressed run
+                // ends: an insertion, "how many ends >= x" and "the smallest end >= x" each
+                // cost O(log r) (keeping them in a sorted vector made the sweep O(r^2))
+                std::vector<uint64_t> coords;
+                coords.reserve(runs.size());
+                for (const Run &run : runs) {
+                    coords.push_back(run.end);
+                }
+                std::sort(coords.begin(), coords.end());
+                coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
+                auto index_of = [&](uint64_t x) {
+                    return static_cast<size_t>(std::lower_bound(coords.begin(), coords.end(), x)
+                                               - coords.begin());
+                };
+                Fenwick ends(coords.size());
+                uint32_t inserted = 0;
                 for (uint64_t a : candidate_a) {
                     while (next_run < runs.size() && runs[next_run].begin <= a) {
-                        ends.insert(std::upper_bound(ends.begin(), ends.end(), runs[next_run].end),
-                                    runs[next_run].end);
+                        ends.add(index_of(runs[next_run].end), 1);
+                        inserted++;
                         next_run++;
                     }
                     if (a + min_kmers > profile.num_kmers)
                         break;
-                    auto it = std::lower_bound(ends.begin(), ends.end(), a + min_kmers);
-                    if (it == ends.end())
+                    const size_t lo = index_of(a + min_kmers);
+                    const uint32_t below = lo < coords.size() ? ends.prefix(lo) : inserted;
+                    if (below == inserted)
                         continue;
-                    KmerInterval iv { a, *it };
-                    size_t count = ends.end() - it;
+                    KmerInterval iv { a, coords[ends.kth(below + 1)] };
+                    size_t count = inserted - below;
                     bool better = !best
                         || count > best_count
                         || (count == best_count

@@ -862,6 +862,35 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(200, ret.status_code, ret.text)
         return ret.json()
 
+    def test_api_annotate_defaults_to_keep_and_merging_qualifies_the_walk_rule(self):
+        """HTTP: without `exhaustive`, annotate mode defaults to `on_reconverge: keep` (it
+        promises the per-path trie) while constrain mode keeps merging as its default; when
+        merging is on, `walk_rule` says the edge histories are united. The physical fetch
+        counters live in `timing`, not in the invariant `result.annotation`."""
+        ret = self._post('traverse', {
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'direction': 'right', 'labels': {'mode': 'annotate'},
+                         'bounds': {'max_extension_bp': 20}},
+        })
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self.assertEqual('keep', out['strategy']['branching']['on_reconverge'])
+        self.assertNotIn('edge histories are united', out['walk_rule'])
+        ret = self._post('traverse', {
+            'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+            'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 20}},
+        })
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self.assertEqual('merge', out['strategy']['branching']['on_reconverge'])
+        self.assertIn('edge histories are united', out['walk_rule'])
+        self.assertIn('on_reconverge: keep gives the per-path set', out['walk_rule'])
+        result = out['results'][0]
+        self.assertEqual({'access_path', 'keys_mapped', 'rows_requested', 'direct_reads'},
+                         set(result['annotation'].keys()))
+        for key in ('rows_fetched', 'tuple_rows_fetched', 'coords_mapped'):
+            self.assertIn(key, result['timing'])
+
     def test_api_traverse_annotate_mode(self):
         """HTTP, `labels.mode: annotate`: every structural successor is followed and the
         labels present are recorded; the response carries the completeness contract."""

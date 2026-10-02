@@ -284,7 +284,10 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             : nullptr;
         st.max_label_branches = (st.exhaustive || annotate) ? Strategy::kUnlimited : 0;
         st.max_splits_per_path = (st.exhaustive || annotate) ? Strategy::kUnlimited : 64;
-        st.merge_reconverge = !st.exhaustive;
+        // annotate promises the whole trie, i.e. the per-path walks; merging unites edge
+        // histories and drops walks (walk_rule says so when it is on), so there it is
+        // opt-in rather than the default
+        st.merge_reconverge = !st.exhaustive && !annotate;
         if (t.has("branching")) {
             Strict b(t.raw("branching"), "strategy.branching");
             st.max_label_branches = limit_or_unlimited(b, "max_label_branches",
@@ -857,15 +860,18 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     ann["access_path"] = r.access_path;
     ann["keys_mapped"] = uint_json(r.annotation_counters.keys_mapped);
     ann["rows_requested"] = uint_json(r.annotation_counters.rows_requested);
-    ann["rows_fetched"] = uint_json(r.annotation_counters.rows_fetched);
-    ann["tuple_rows_fetched"] = uint_json(r.annotation_counters.tuple_rows_fetched);
     ann["direct_reads"] = uint_json(r.annotation_counters.direct_reads);
-    ann["coords_mapped"] = uint_json(r.annotation_counters.coords_mapped);
     j["annotation"] = ann;
     if (timing) {
         Json::Value t;
         t["elapsed_ms"] = r.elapsed_seconds * 1000;
         t["cache_hits"] = uint_json(r.annotation_counters.cache_hits);
+        // physical fetch work: prefetching along unbranched runs changes these with
+        // annotation.batch_kmers while the walk does not (spec §6.8), so they are
+        // timing, not part of the invariant result
+        t["rows_fetched"] = uint_json(r.annotation_counters.rows_fetched);
+        t["tuple_rows_fetched"] = uint_json(r.annotation_counters.tuple_rows_fetched);
+        t["coords_mapped"] = uint_json(r.annotation_counters.coords_mapped);
         t["annotation_fetch_ms"] = r.annotation_counters.fetch_seconds * 1000;
         j["timing"] = t;
     }
