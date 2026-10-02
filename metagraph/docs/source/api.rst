@@ -94,6 +94,14 @@ Additionally, the method accepts the following keyword arguments:
         :rtype:     pandas.DataFrame
 
 
+Labeled traversal: graphlets
+----------------------------
+To extend a seed sequence through the graph and see which labels support each extension, use the
+``/traverse`` endpoint through the ``metagraph.traverse`` package of this API: one request returns a
+compact, lossless *graphlet*, which is then queried locally (walks, claims, label routes, comparisons,
+FASTA/GFA, continuations). See :ref:`graphlets`.
+
+
 Examples
 --------
 
