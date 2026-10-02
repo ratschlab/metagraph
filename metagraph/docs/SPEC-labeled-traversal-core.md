@@ -267,7 +267,11 @@ to a header).
   continuation sequence** (`sequence: ""`; its labels and loss are still reported); `1 … k − 1` is **rejected**
   naming k, because a continuation shorter than k is not valid `/traverse` input; from k on the continuation is a
   resubmittable seed.
-- `bounds.*` scopes are in §6.8. `frontier.*` in §6.8. `output.detail`: `summary | tree | full` (§7).
+- `bounds.*` scopes are in §6.8. `frontier.*` in §6.8. `output.detail`: `summary | tree | full | graphlet`
+  (§7; `graphlet` is the lossless compact retrieval format of §7.5: a small JSON summary per seed with the MGT
+  text embedded). `output.timing` (default `true`) adds the `timing` blocks. Both are request fields, not walker
+  knobs, and the normalized echo carries them like every other field, so the echoed strategy is resubmittable
+  verbatim.
 - **`labels.mode`**: `constrain` (default; everything above) | `annotate` (§6.9: every structural successor is
   followed, the labels present are recorded, nothing is filtered). In `annotate` mode `seeds[].labels`,
   `labels.extra`, a `change_cost` other than `forbid`, a `loss_budget`, the quorum knobs, `bounds.min_live_labels`
@@ -733,14 +737,20 @@ is rejected instead (§5).
 
   | axis | values | meaning |
   |---|---|---|
-  | `walks` | `complete` \| `partial` \| `failed` | `complete`: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`). `partial`: a valid certified prefix — some arm was truncated or pruned, and its `complete_to_bp` and `walk_domain` limitation say how far the guarantee goes. `failed`: no traversal — the permitted set could not be derived (§6.1 step 4); the result has no `arms`, an `error`, and a `derivation` limitation |
-  | `branch_diagnostics` | `complete` \| `cut` | `cut`: some arm's `evidence.complete` is `false` — branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported (the `branch_events` limitation) |
-  | `label_evidence` | `complete` \| `lower_bound` | `lower_bound`: recorded label lists were cut (`labels_per_node.nodes_truncated > 0`, the `label_lists` limitation; annotate mode's `label_summary` and the counts flagged `exact: false` are then lower bounds), or a `max_switch_sources` cut may have raised a loss or missed a switch entry (`counters.switch_sources_cut > 0`, the `switch_sources` limitation). The permitted set the request chose — an explicit list, or the derived carriers taken under `max_seed_labels` — is the domain, not a cut of the evidence within it: what the cap left out is stated by the `seed_labels` limitation |
+  | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4); the result has no `arms`, an `error`, and a `derivation` limitation |
+  | `branch_diagnostics` | `complete` \| `cut` | `cut`: a `branch_events` limitation — some arm's `evidence.complete` is `false`, and branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported |
+  | `label_evidence` | `complete` \| `lower_bound` \| `qualified` | `lower_bound`: evidence may be *missing or understated* — recorded lists were cut (`label_lists`, `inexact_counts`: annotate mode's `label_summary` and the counts flagged `exact: false` are lower bounds), carriers of the seed were cut (`seed_labels`), a `max_switch_sources` cut may have raised a loss or missed a switch entry (`switch_sources`), or losses were re-minimised greedily (`greedy_losses`). `qualified`: something reported may be *overstated* — a column-label trace cannot see a record boundary (`trace_record_boundaries`); `qualified` wins when both apply |
   | `delivery` | `inline` | the whole result is in this response; `spooled` / `paged` are reserved for the graphlet delivery path (`DESIGN-traverse-graphlet.md` §14) |
 
-  A failed derivation reports `{"walks": "failed", "branch_diagnostics": "complete", "label_evidence":
-  "complete", "delivery": "inline"}`: nothing was walked, so nothing else was cut. Each axis is backed by the
-  per-arm fields and the `limitations` below, which say how far it holds and which knob would go further.
+  **Conservative by construction** (`DESIGN-traverse-graphlet.md` §14, v5.2): each axis is computed from the
+  result's own `limitations` (seed level and every arm), so an axis reads `complete` exactly when no limitation
+  of its class is stated — a reader never finds a limitation whose axis still says `complete`, and never a
+  non-complete axis without the limitation that explains it. `server_clamp` and `derivation` belong to no class:
+  what a clamp caused is stated by the `walk_domain` or `seed_labels` entry it led to. A failed derivation
+  reports `{"walks": "failed", "branch_diagnostics": "complete", "label_evidence": "complete", "delivery":
+  "inline"}` — nothing was walked, so nothing else was cut — except that carriers cut before a trace check
+  (its `seed_labels` entry) make `label_evidence` a `lower_bound`. Each axis is backed by the per-arm fields and
+  the `limitations` below, which say how far it holds and which knob would go further.
 - **What is certified, per arm.** `complete_to_bp` under `walk_rule` and `completeness_scope` (§6.10): every
   admissible walk of at most that many bases is present. `evidence: {complete, complete_to_bp}`: below
   `evidence.complete_to_bp` every branch decision and every refusal the walker made is in `branch_events`
@@ -785,7 +795,7 @@ is rejected instead (§5).
 - **Formerly unstated gaps, now stated per response:** (1) `support: trace` with **column** labels follows consecutive
   column coordinates and cannot detect a record boundary whose global coordinates are consecutive (header labels
   detect it): stated as the seed-level limitation `trace_record_boundaries` (knob `labels.seed_label_kind`,
-  observed = the number of column labels). (2) Under `support: trace`, `dropped_labels[].runs` are k-mer presence
+  observed = the number of column labels), with `outcome.label_evidence: qualified`. (2) Under `support: trace`, `dropped_labels[].runs` are k-mer presence
   runs: every dropped label carries `runs_kind: "presence"`. (3) Under a finite change cost with a finite
   `max_label_branches`, losses after a branch-limit exclusion are re-minimised greedily (§6.3, §6.4) and need not be
   optimal: stated as the arm limitation `greedy_losses` (knob `branching.max_label_branches`, observed = the
@@ -795,7 +805,8 @@ is rejected instead (§5).
   delivery bounds and the `delivery` block (§6.7, §13 deviation 8), a request-level time budget and `not_started`
   (§6.8), `beam_rank` and a `beam_pruned: [...]` list (§6.8), tip and bubble windows (§6.5), the `hll` cost model
   (§9), `duplicate_of` (§6.1; the response has `duplicate: true`), `seed_offset` / `orientation` / `overlap_bp` on
-  `rejoined_seed` (§6.6), the `label_lists: delta` encoding (§7.1), and in §7.2 `cost_preview`, the
+  `rejoined_seed` (§6.6), the `label_lists: delta` encoding (§7.1; superseded by the graphlet's delta-coded
+  sets, §7.5), and in §7.2 `cost_preview`, the
   `rc_index_range` and resource-cap-hit counters and the `bubble_len_bp` of a `reconverge` event.
 
 ### 7.1 Per seed (`detail: full`)
@@ -872,7 +883,25 @@ is rejected instead (§5).
 - `detail: summary` returns `seed`, `outcome`, `limitations`, `label_summary`, per-leaf `{length_bp, n_labels,
   end_reasons}`, the per-arm diagnostics of §7.2 and `continuation`s, but no segments, splits, runs, events or
   sequences — the cheap probe to run before committing to a radius.
-  `tree` adds segments without sequences.
+  `tree` adds segments without sequences. `graphlet` returns per seed the summary of §7.5 and the whole result
+  as MGT text (`graphlet`), from which the `full` result is reproduced exactly (§7.5.6).
+- **Fields that make the result reconstructible** (additive; no existing field changed):
+  `runs[]`: `segment` — the segment on which the run ended (its `label_end` event, if it has one, is there at
+  `to_bp`) or was closed by a merge (a parent of the merged segment); `branches`, `loss` — the lineage's
+  values at that point. A run can end with **no** event: a switch source whose lineage goes on only under
+  other names ends `label_lost` silently, documented by the `switch` event(s) at `to_bp` (on the children when
+  the source ends at a split; §13 note 20). `segments[].labels_via_parent` on a merged segment (more than one
+  parent): per parent, the labels whose kept entry came through it (empty lists in `annotate` mode).
+  `hairpin` events: `followed` (`hairpins: follow`, the child is present) vs skipped. `revisit` events:
+  `length_bp` (the distance difference to the first arrival) and `same_distance` (a `keep`-mode join at one
+  node and depth). `label_dict[]`: `column`, and `seq_id` for header labels — the `LabelRef` that joins a label
+  across retrievals (a name alone can be ambiguous). `growth[].label_ends` is an object even when empty (was
+  `null`).
+- **Derivable fields** (the graphlet stores none of them): `children`, `paths`, `splits`, `end_labels` and
+  `end_reasons` of a leaf (its labels' runs), `label_end` events (the runs), `reconverge` events (the merged
+  segments), `labels_at_end`, `label_summary`, `needed_budgets` (the `loss_budget` ends; a histogram, its
+  order is not information), `branch_events_truncated`, every `*_truncated` flag. **Events at one `at_bp` are
+  unordered**: the list is sorted by position only.
 
 ### 7.2 Diagnostics (the tuning evidence, always present)
 
@@ -972,6 +1001,235 @@ root segment has no run (it adds no base); its `labels` list is the seed boundar
 `end_reasons` are empty, `path_reason` is always set, and a `continuation` (at the radius or a cap) lists the
 labels recorded on *every* node of its tail — each of them validates as a seed label of that continuation, so the
 tail stays valid `/traverse` input.
+
+### 7.5 The graphlet (MGT v1)
+
+`output.detail: graphlet` returns, per seed, a small JSON summary with the **whole** result embedded as one
+line-based text, MGT v1 (`DESIGN-traverse-graphlet.md` §2, as implemented; where this section and the design
+differ, the differences are the decisions listed in §7.5.8). The text is lossless: the `detail: full` result of the
+same request is reproduced from it and its summary (§7.5.6). It is written by a streaming writer straight from the
+walker's result (no JSON tree), is self-contained (seed, dictionary, provenance and orientation rule are in it). Measured with
+`scripts/traversal/graphlet_measure.py --cli` on the mini-refseq fixture (the whole blaNDM-1 seed, nine strategies,
+200–1000 bp): the body is 11–29 % of the compact `full` JSON (23–60 % gzipped against gzipped), much of it the
+bases themselves; the largest case, annotate at 600 bp (2,020 segments, 1,012 leaves), is 210 KB against 1.90 MB
+(11 %; 16 KB against 70 KB gzipped) and parses in 20 ms. **Size targets: unverified.** The design's targets for
+constrained retrievals (< 15 % of the compact `full` JSON, ~7.5 % projected for the 2,500-leaf SRA trie, gzip
+~33–50 %) are **not met on mini-refseq**: every constrained case is 18–29 % (gzip 48–60 %; merge 600 bp 22 %,
+exhaustive 1000 bp 23 %, in which the fixed records `H S A K L O Z` are 8 % of the body and the bases ~70 %), so
+the miss is not a small-locus effect of fixed costs, and the 7.5 % projection rests on SRA's ~24 bp per
+segment, which has not been measured. Met: annotate (~10 % target; 11 %), the per-seed summary (< 10 KB;
+1.5–2.4 KB), T40's body < ½ of `full`; per-record costs match the estimates (G ~26 B per segment, R ~27 B per
+run). The figures are not to be quoted as met until `graphlet_measure.py --server <SRA>` has run, and the MGT v1
+freeze is gated on that measurement; if SRA misses too, the bases (`G`) are the lever (optional 2-bit packing,
+or bases only on request with spelling through `graphlet_sequence`). A seed whose permitted set could not be
+derived keeps the failed shape of §7.1 (no `graphlet`).
+
+#### 7.5.1 Lexical rules
+
+- One record per line, terminated by LF (the only line separator: names may hold VT, FF, NEL, LS, PS raw). Fields
+  are separated by one space; the first field is a capital letter, the record type. Every field is printable
+  ASCII without spaces, except the **last field of `X`, `L`, `Q` and `K`** (a name, a suffix, a message, an
+  effect), which is free text running to the end of the line, preserved exactly: in it `%`, LF and CR are
+  written `%25 %0A %0D` (uppercase) and nothing else is escaped; any other `%` sequence or a raw LF/CR is
+  invalid.
+- **Integers** decimal, no sign, no leading zero. **Floats** (costs, losses, budgets, demands; all ≥ 0): the
+  shortest round-trip significant digits of the double (C++ `std::to_chars(..., chars_format::scientific)`
+  without a precision = Python `repr`) **expanded positionally**: zeros up to the decimal point, a `.` only before
+  a non-empty fraction, no trailing zeros, `-0` → `0`, +∞ → `inf` (`1e23` → `100000000000000000000000`,
+  `2.5e-07` → `0.00000025`). Booleans `0|1`.
+- `*` = "absent" or "derive by this field's rule" (§7.5.3); `.` = the empty list. Lists are comma-separated.
+- **RANGES**: strictly ascending ids, every maximal run of ≥ 2 consecutive ids written `a-b` (`{5,6}` is `5-6`),
+  a lone id `a`; `.` = empty. A reader checks every id against the id space (the number of `L` records) before it
+  expands a run, so a corrupt token of a few bytes (`0-3000000000`) fails without allocating in proportion to
+  the range.
+- **SETEXPR** against a base set: `RANGES` (explicit) | `!` (= the base) | `!R` | `!+A` | `!R+A` (base minus R
+  plus A; R and A non-empty RANGES; an empty part is omitted, never written `.`). The writer emits the shorter in
+  bytes, a tie explicit; a delta needs a base, its R must lie in the base and its A outside it (else the reader
+  derived another base: an error). Bases: `G.entry` → parent[0]'s end set, for a merge the union of all its
+  parents' end sets, the root none (explicit only); `G.end` → this segment's entry set; `P` → the previous `P`
+  of the segment, the first `P` the entry set; `C.labels` → the leaf's end set.
+- **Typed values** (`K`): `i:<integer>` (0 … 2⁶⁴−1) | `f:<float>` | `s:<string>` | `u` (unlimited). In `s:` every
+  byte outside 0x21–0x7E, and `%` and `,`, is `%XX` (uppercase hex), every other byte raw; the decoded bytes must
+  be UTF-8. The string `unlimited` is `s:unlimited`; the knob value "unlimited" is `u`.
+- **Codes.** End reasons: `D` dead_end, `L` label_lost, `B` loss_budget, `R` branch, `U` edge_reuse,
+  `V` edge_reuse_rc, `J` rejoined_seed, `T` trace_break, `X` max_extension_bp, `S` max_steps, `P` max_live_paths,
+  `N` max_paths, `O` max_output_bp, `M` time_budget, `W` beam_pruned (`Y` resource_limit is reserved). A label
+  end's text qualifier is a second letter: `Rm` minority, `Rb` below_min_labels, `Rs` split_limit, `Dh` hairpin,
+  `Ls` superseded, `Lx` switch_sources.
+- Every token has exactly one valid spelling and readers reject every other one (`1.0`, `01`, `0,1`, `%41`, a
+  `!` without a base, …); the only freedoms are field-level (`*` vs an explicit value, explicit vs delta
+  SETEXPR, a shorter front-coding prefix), which parse and dump in canonical form. The shared golden vectors
+  `api/python/tests/data/traverse/codec_vectors.tsv` (10,433 vectors; generated by
+  `scripts/traversal/make_codec_vectors.py`) are read byte-exactly by the C++ test
+  (`GraphletCodec.GoldenVectors`) and the Python library.
+
+#### 7.5.2 Records, in document order
+
+`H S X* L* O Q? K*`, then per requested arm, left before right, `A B* V*`, then per segment in id order
+`G P* E* T? C?`, then the arm's `R*`; finally `Z`. (`J`, the response envelope of a saved file, is written
+by the library after `H`, never by the server.)
+
+```
+H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp>
+  <seed_index> walk <index_ns|*> <index_fp|*> <index_meta_fp>
+    cap = labels.max_labels_per_node; seed_index = the seed's position in the request; walk = the orientation
+    rule (§7.5.4); the index identity of §10.3 (* = no name / no manifest)
+S <validated_seed_id> <length_bp> <num_kmers> <num_seed_labels> <SEQUENCE>
+    the seed as validated: case-mapped, request orientation
+X <reason> <a-b,c-d,…|.> <name>
+    a dropped seed label: its reason and its k-mer presence runs on the seed, as given ([a, b] pairs)
+L <c|h> <column> <seq_id|*> <prefix_len> <suffix>
+    one per label_dict entry, label id = ordinal. name = previous name[:prefix_len] + suffix: prefix_len counts
+    BYTES of the previous name's UTF-8, cut back to a code-point boundary, so the suffix is valid UTF-8; the
+    first L's previous name is "". The space before the suffix is always written (an empty suffix leaves the
+    line ending in a space). seq_id is * for a column label. Names come from FASTA headers and file names,
+    which need not be UTF-8: the server makes every label and dropped-label name valid UTF-8 once, before any
+    output (each maximal ill-formed subsequence → U+FFFD, = Python's decode('utf-8', 'replace')), so
+    detail: full, the summary and the body carry the same bytes and graphlet_bytes holds after transport
+O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l|q> <delivery i|s|p>
+    the per-seed outcome (§7.0); q = qualified (DESIGN v5.2)
+Q <scope> <resource> <phase> <requested VALUE|*> <effective VALUE|*> <used VALUE|*> <remaining VALUE|*>
+  <actions csv|.> <message>
+    a resource stop (DESIGN §14): reserved, never written today (no budget can stop a walk yet). The four
+    amounts are typed like K's values (the design left them untyped; a budget can be an integer, a float or
+    "unlimited"), * = not stated; actions = the suggested next actions ([a-z_] tokens); message = free text
+K <arm l|r|*> <kind> <knob> <limit VALUE> <observed VALUE> <complete_to_bp|*> <extra name=VALUE,…|.> <effect>
+    one entry of `limitations` (§7.0), the JSON entry itself: arm * = seed level. Seed-level entries first,
+    then the left arm's, then the right arm's, each list in its JSON order. extra = every further key of the
+    entry (server_limit, label_ends, …) in byte order of name; effect = the stored sentence (free text)
+A <l|r> <status c|t|p> <complete_to_bp> <scope p|u> <live_paths> <live_labels> <exact> <max_seen>
+  <nodes_truncated> <counters> <cap_trigger|*> <branch_events_total> <evidence_complete_to_bp|*>
+  <n_segments> <n_runs> <n_leaves> <n_splits> <n_merges> <bases>
+    counters = name=value,… in the walker's order (steps, successor_enumerations, output_bp,
+    pair_evaluations, edge_reuse_probes, reminimisation_rounds, max_reminimisation_rounds, refusal_scans,
+    switch_sources_cut); a reader keeps a name it does not know. cap_trigger =
+    reason,at_bp,segment,live_paths,live_labels,exact,demand. evidence * = no branch event dropped. The last six
+    validate the body: G records, R records, T records, G records with a split, G records with > 1 parent, and
+    the sum of G.length_bp
+B <from_bp> <max_live_paths> <distinct_live_labels> <live_pairs> <exact> <steps> <divergences>
+  <ambiguous_branches> <splits> <reconvergences> <bubbles> <tips> <blocked_repeat> <label_ends code:n,…|.>
+    one per growth bin; label_ends in end-reason order. An arm may have none: when a cap trips on the left
+    arm at depth 0, the right arm is stopped before it ran a level (its growth is [], every count 0)
+V <at_bp> <segment> <chars|.> <labels_per_successor csv|.> <ambiguous RANGES> <dropped RANGES>
+  <refused char:cause:RANGES;…|.>
+    the stored branch events (the only record of a successor not taken)
+G <parents csv|*> <from_bp> <length_bp> <entry SETEXPR|*> <entry_total|*> <end SETEXPR|*>
+  <partition RANGES|RANGES|…|*> <split 0|1|*> <first_base|*> <bases|.|*>
+    segment id = ordinal (parents are created first). split = Split::ambiguous of the split at this segment's
+    end, * = it does not end in a split. bases in WALKING order (§7.5.4), . = none (length 0), * = absent
+    (`sequences: false`); first_base only without bases: a split child's first base, * otherwise
+P <from_bp> <to_bp> <total> <SETEXPR>
+    annotate mode: one recorded LabelSetRun
+E <at_bp> s <from> <to> <cost>                      switch
+E <at_bp> b <char> <reason code> <total> <RANGES>   blocked successor
+E <at_bp> h <char> <total> <RANGES> <f|s>           hairpin followed | skipped
+E <at_bp> v <segment> <length_bp | =>               revisit: distance difference, = same_distance
+E <at_bp> t <char> <length_bp>   E <at_bp> u <length_bp> <alleles>     tip / bubble: reserved
+    the segment's events in stored order, without label_end (from R) and reconverge (from G)
+T <path_reason code|*> <label:loss:branches:route_bp,…|.>
+    this segment is a leaf; * = no path reason (semantic end); the extras list the leaf labels whose loss,
+    branches or route_bp (the entry's latest merge stamp) is non-zero
+C <n> <loss_used> <branches_used> <labels SETEXPR> [<sequence>]
+    the leaf's continuation; the sequence is written only where it is not derived (§7.5.3)
+R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev_run|*>
+  <structural_successors|*> <branches> <loss> [<needed_budget>]
+    run id = ordinal (ArmResult::runs order). segment = LabelRun::segment. end = code[+qualifier] (ended with
+    a label_end event on <segment> at to_bp) | Lw (ended label_lost silently: a switch source that went on
+    under other names) | m (closed by the merge at to_bp, ended = false). from_label:cost * = entered by seed;
+    structural_successors * for Lw and m; needed_budget only for code B. branches, loss = the lineage's
+    values when the run ended or was closed (§7.1)
+Z <line count of the document, this line included>
+```
+
+#### 7.5.3 The `*` rules (canonical form)
+
+The writer computes each rule from the walker's own data and writes `*` **exactly when** the rule reproduces the
+walker's value, the explicit value otherwise; every SETEXPR in its shortest form. So every document the server
+writes is canonical, `dump(parse(x)) == x`, and every dump tests the rules. A value the grammar cannot express
+(a derivation that does not hold) fails the request with a 500 instead of producing a wrong document.
+
+- `G.parents *` = the root. `G.entry *` (constrain only): the root → `0 … num_seed_labels−1`; a merge → the union
+  of its partition. Never `*` in annotate mode.
+- `G.entry_total *` = |entry|.
+- `G.end *`: constrain → start from the entry set and apply, ordered by position with removals before additions
+  at one position, every `R` anchored on this segment with `to_bp < from_bp + length_bp` (remove its label) and
+  every `E … s` on it (add its `to`); annotate → the last `P` set, or the entry set without `P`.
+- `G.partition *` = no merge (|parents| ≤ 1), or annotate mode, where it means one empty list per parent.
+- `T.path_reason *` = none; `R.from_label:cost *` = entered by seed; `R.prev_run *` = none.
+- `C.sequence` absent = derived: right arm the last n bases of seed + natural(right flank), left arm the first n
+  bases of natural(left flank) + seed (n ≤ |seed| + flank; it may cross into the seed). It is written when the
+  flank's bases are absent (`sequences: false`) and n > 0.
+
+#### 7.5.4 Orientation
+
+`walk` in `H`: every `G` stores its bases in walking order on **both** arms, so outward index
+`i ∈ [from_bp, from_bp + length_bp)` is `bases[i − from_bp]` and every position field indexes bases directly.
+Natural orientation: right flank = concatenation root → leaf; left flank = reverse(concatenation root → leaf)
+(= today's `sequence` fields, which hold each left segment reversed). Whole molecule: natural(left) + seed +
+natural(right); seed coordinate of outward `i`: |seed| + i (right), −(i+1) (left).
+
+#### 7.5.5 The summary (per seed)
+
+```
+{"seed": {seed_id, validated_seed_id, seed_id_mismatch, length_bp, num_kmers, labels_from_seed,
+          labels_supporting_total, labels_dropped, labels_dropped_digest, num_labels, num_seed_labels},
+ "label_mode", "duplicate"?, "outcome", "limitations",
+ "arms": {"left"?|"right"?: {status, complete_to_bp, completeness_scope, frontier_remaining, labels_per_node,
+          cap_trigger?, evidence, limitations, counters, branch_events_total,
+          counts: {segments, leaves, splits, merges, runs, bases, max_bp,
+                   label_ends: {reason: n},            run ends by reason, silent ends included (= growth)
+                   leaves_by_reason: {path_reason | "semantic": n}}}},
+ "annotation", "timing"?, "graphlet": "<MGT text>", "graphlet_bytes", "graphlet_lines"}
+```
+
+No names, per-segment, per-leaf or per-label data (they are in the text). `timing` (per seed and per response)
+gains `serialize_ms`, the time spent building the response for it (JSON and text).
+
+#### 7.5.6 Stored and derived
+
+Stored: bases, the DAG, entry sets where not implied, merge partitions, annotate presence runs, runs with their
+anchor, end token, `route_bp`, switch source and cost, `prev_run`, structural successors, terminal branches and
+loss and `needed_budget`, leaf path reasons with their labels' (loss, branches, route_bp), continuations, the
+switch/blocked/hairpin/revisit events, growth bins, branch events, seed, dropped labels, the dictionary,
+outcome and limitations. Derived exactly as the walker's finalisation: `children`; leaves (segments with `T`);
+`paths` (leaf ordinal in segment order, chain through `parents[0]`, `length_bp = from_bp + length_bp`);
+`end_labels` (the `R` anchored at the leaf with `to_bp` = the path length, ascending label, with the `T` extras)
+and `end_reasons`; `label_end` events (`R` with a code end, at `to_bp`, reason = qualifier text or the enum,
+`needed_budget` for `B`); `reconverge` events (a `G` with > 1 parents, at `from_bp`); `splits` (single-parent
+children grouped by parent, ordered by (at_bp, first child); `kind` from `G.split`; `labels_before` = |parent end
+set| (constrain) or the parent's last `P` total, else its entry total (annotate); per branch: first base,
+`labels_distinct` = the child's entry total, `labels` = its entry set cut to `cap`); `labels_at_end` = `G.end`;
+`label_summary` (the normative pseudocode of `DESIGN-traverse-graphlet.md` §5.1); `needed_budgets`;
+`branch_events_truncated`; continuation sequences; `seed.labels`; every `*_truncated` flag (total > |list|);
+`dropped_labels[].runs_kind` (`presence`). `Graphlet.ReaderRebuildsTheFullResult` (C++) rebuilds the `full`
+result from the text and the summary and compares it with the server's own on merged, kept, annotate, beam,
+switching, capped, cut-list, hairpin, `sequences: false` and batch fixtures; the Python library
+(`api/python/metagraph/traverse`) does the same on every body of T38–T41 (§11.3) and on the whole-document
+fixtures `api/python/tests/data/traverse/documents/` (most generated by the CLI from tiny indexes,
+`scripts/traversal/graphlet_fixtures.py --from-cli … --check`).
+
+#### 7.5.7 Index identity
+
+`H` carries the identity of §10.3: labels are joined across retrievals by `(kind, column, seq_id)` only when the
+`index_fp` agree; a missing `index_fp` makes a join unverifiable, never equal; `index_meta_fp` can only prove two
+indexes different.
+
+#### 7.5.8 Decisions where the design was silent or stale
+
+- `H` has three identity fields (the design's worked excerpt §2.6 still shows two); `O.label_evidence` admits
+  `q` (v5.2's `qualified`, written under `trace_record_boundaries`, §7.0).
+- `G.bases` `.` for a zero-length segment when sequences are on (`*` would not say whether `sequence` is `""` or
+  absent); `first_base` is written only for split children (the only first bases today's JSON reports with
+  `sequences: false`).
+- The `G.entry` base of a merge is the union of its parents' end sets in **both** modes (§2.1 of the design;
+  its §2.3 mentions parent[0] for annotate).
+- `C.sequence` is written whenever it is not derivable or differs, not only "when G carries no bases".
+- `K`: a JSON string "unlimited" is `u`, every other string `s:`; a JSON integer `i:`, a JSON real `f:` (a
+  floating knob stays a float even when integral: `f:30000`); extras in byte order of name; seed-level
+  entries first.
+- `T` keeps the grammar's extras although `R` now carries the same terminal loss and branches (only
+  `route_bp` differs from the run's).
+- `R`: a single-letter end code when the label end has no qualifier; `Lw` and `m` as in the grammar.
 
 ## 8. Annotation access (`LabelOracle`)
 
@@ -1081,7 +1339,27 @@ the server.
 
 - **Capabilities** (also in `/stats` and every resolve/traverse response): `k`, `regime`, `alphabet`,
   `num_labels`, `has_coordinates`, `has_coord_to_header`, `cost_models_available`, access path, server maxima,
-  `schema_version`, `release`.
+  `schema_version`, `release`, `graphlet_format` (1: the MGT version `detail: graphlet` writes, §7.5),
+  `detail_levels` (`["summary", "tree", "full", "graphlet"]`) and the **index identity**
+  (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
+  - `index_ns`: `--index-name NAME` (`[A-Za-z0-9._-]+`), a name for humans and routing, not identity; `null`
+    when unset.
+  - `index_fp`: the identity — the lowercase hex sha256 of the index bundle's **manifest** file list
+    (`--index-manifest FILE`): a JSON object with `files: [{path, size, sha256}, …]` (every file the server
+    loads: graph, annotation and sidecars such as `.anchors`, `.rd_succ`, `.seqs`), hashed as the lines
+    `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys (builder, inputs) are metadata. The
+    build hashes the files once; the server reads the digests, checks that every loaded file is listed (by base
+    name) with its size, and that an `index_fp` the manifest states is the computed one, and refuses to serve
+    otherwise. `null` without a manifest: labels joined across retrievals are then unverifiable, never equal.
+    `scripts/traversal/build_mini_refseq.sh` writes `<out>/annotation.relaxed.relabeled.manifest.json`
+    (`MANIFEST_ONLY=1` writes it for an existing build).
+  - `index_meta_fp`: FNV-1a-64 (16 hex) over k, regime, alphabet, the annotation's row count and its ordered
+    column names, and whether coordinates and a `CoordToHeader` exist — always present, and only a **negative**
+    check: a mismatch proves two indexes different, equality proves nothing (an index whose columns swap their
+    memberships keeps it).
+  Both flags describe one index (`-i`/`-a`) and are refused with a graph list; in multi-graph mode `index_ns` and
+  `index_fp` are `null` and `index_meta_fp` is computed per index on first use. The CLI (`metagraph traverse`)
+  takes the same two flags.
 - Single-graph mode: as `/search`. **Multi mode:** `graph` (name) is required; the server selects the
   `(graph, annotation)` pairs under that name whose labels contain every seed and `extra` label: exactly one →
   use it; several sharing one loaded graph → a union oracle (membership = OR, column ids namespaced per pair);
@@ -1173,6 +1451,10 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T35 | size caps vs the completeness guarantee | `TrieCasesCaps`: `max_steps` 1…120, `max_live_paths` 1–3 (stop and beam), `max_output_bp` 1…90, `max_paths` 1–2 on the nested bubbles, three modes: every tuned run is a prefix-subset with a reason per omission, its walks equal the exhaustive trie's at every depth ≤ `complete_to_bp`, and `complete_to_bp` never decreases as `max_steps` grows | Caps |
 | T36 | the contract on a real index | `MiniRefSeq.TrieContractAgainstTheSourceRecords`: the string model from the 42 source records (k = 31, basic, unmasked, RowDiff<BRWT> + coordinates, header labels); the whole blaNDM seed (19 carriers; 24 structural walks left, 2 right at 300 bp) and three 150 bp windows: records ⇔ T ⇔ A, trace ⇔ records, no '$' in any output; at 1000 bp the 19 carriers' claims under k-mer and trace support equal the records' | — |
 | T37 | stated limitations and outcome (§7.0) | `Walker.LimitationsStateExactlyWhatLimitedTheResult` and `test_traverse_states_every_limitation`: each kind produced by its knob and absent without it, the four `outcome` axes per case; `WalkerTest.SwitchSourcesCutWithoutALabelEnd`: a `table` cost whose cut source goes on along another successor — no `switch_sources` end, E entered at 0.8 instead of 0.5, `switch_sources_cut` 1 and the limitation stated; `"unlimited"`: 0.5, nothing stated; `Walker.UnimplementedWindowsAndShortContinuationsAreRefused`: a non-zero tip / bubble window and `continuation_bp` 1 … k − 1 are 400s naming the field (and k), 0 is accepted; clamped integer knobs serialize as integers | — |
+| T38 | the graphlet round trip (`DESIGN-traverse-graphlet.md` §9 T37) | `TestTraverseGraphlet.test_t37_round_trip` (CLI, 14 strategies: merge, keep, annotate exhaustive and beam, quorum, left only, `max_steps`, `max_steps: 1` in annotate mode (an arm with no growth bin), `max_labels_per_node: 1`, `sequences: false`, a radius below k, trace with column labels, a switch at a split, and a 3-seed batch with a failed derivation and a duplicate) and `test_api_graphlet` (HTTP, gzip): `detail: full` and `detail: graphlet` of one request; `from_response(r, out).to_json()` equals the full result after the §2.5 normalisation, `parse(text).dump() == text`, `is_canonical`, the `A` counts and the summary's counts describe the body, `graphlet_lines == Z`, `check_rules()` empty, label ends ≤ runs, every `Lw` run continued by a switched run at its `to_bp`. `test_t37_cli_fixtures_are_reproduced`: the whole-document fixtures are what this binary writes for their requests on their tiny indexes, byte for byte, and each still shows its counterexample (§9 v2 list). `GraphletCodec.GoldenVectors` (C++) and `test_traverse_codec` (Python): the 10,433 shared codec vectors | — |
+| T39 | orientation (design T38) | `spell(left) + seed + spell(right)` is each record (acc1/acc2/acc3); the library's continuations equal the server's on both arms, contained (40 of 60 bp) and crossing into the seed (k of 10 bp); a continuation the library derives (`next_request`) is accepted and extends the walk | — |
+| T40 | the oracle and the identity through the library (design T39) | `constrain.compare(annotate, mode='claims')` equal under the permitted labels and `only_in_b` = acc2 over all; exhaustive vs annotate equal in `claims`, `walks`, `labels`; tuned vs exhaustive `prefix_subset` with acc2's omission at 0 for `minority`; §3.1: two indexes over swapped memberships share `index_meta_fp`, differ in `index_fp` and never compare equal, without a manifest `unverifiable` | — |
+| T41 | the graphlet protocol (design T40) | summary key sets; `output.detail/timing` echoed and resubmittable; `graphlet_format`, `detail_levels` and the index identity in capabilities and `H`; `sequences: false` (no bases, first bases on split children, continuation sequences, `splits[].char` reproduced); two runs byte-equal; body < ½ of the compact full JSON | — |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
@@ -1317,6 +1599,20 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
     — for every permitted label its maximal label-consistent walks — with the walker's label ends, not leaves
     with leaves: a label whose walk ends inside a walk that other labels continue is a claim of its own and
     its end position is checked.
+20. **Run anchors and terminal values** (`LabelRun::segment`, `branches`, `loss`; `DESIGN-traverse-graphlet.md`
+    §4). The walker records on every run the segment on which it ended or was closed and the lineage's branch
+    count and loss at that point, set where the run ends (`end_run`, from the ending entry and the head's
+    segment) and where a merge closes it (on the parent the closed entry came through). Neither the events nor
+    the paths determine them: clones made at a split are identical rows, a merge of three parents closes several
+    runs at one depth, and branch counts are taken before quorum filtering, so an interior end's count can
+    depend on a successor that left no trace. **A run can end without a `label_end` event:** a switch source
+    whose lineage continues only under other names ends `label_lost` silently (the `switch` events at its
+    `to_bp` document it, on the children when it ends at a split), so "every ended run has a `label_end`
+    event" is false while "every `label_end` event belongs to exactly one run" holds.
+    `Trie.EveryRunIsAnchoredWhereItEnds` checks all three kinds of end on the trie fixtures and dense
+    switching graphs.
+21. **Orientation of the graphlet** (§7.5.4): bases are stored in walking order on both arms, so positions index
+    them directly; the JSON keeps the natural orientation.
 
 **Open decisions (need input or data):**
 
