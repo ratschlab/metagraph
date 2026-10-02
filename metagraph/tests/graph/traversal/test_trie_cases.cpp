@@ -842,11 +842,12 @@ TEST(TrieCasesCaps, SweepAgainstTheCompletenessGuarantee) {
         SeedResult A = run(*anno, X, labels, exhaustive(LabelMode::CONSTRAIN, radius));
         ASSERT_EQ(ArmResult::COMPLETE, A.arms[kRight].status) << where;
 
+        const trie::SeedContext ctx { X, mode != DeBruijnGraph::BASIC };
         auto tuned = [&](const Strategy &st, const std::string &what) {
             SeedResult t = run(*anno, X, labels, st);
             for (size_t a : { kLeft, kRight }) {
                 const ArmResult &arm = t.arms[a];
-                trie::check_tuned_subset(A, t, a, what);
+                trie::check_tuned_subset(A, t, a, what, ctx);
                 // complete up to complete_to_bp: the same walks at every depth
                 for (uint64_t n = 0; n <= arm.complete_to_bp; ++n) {
                     std::set<std::string> want, got;

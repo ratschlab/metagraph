@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "graph/traversal/walker.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 /*
@@ -49,7 +50,20 @@
  * of each (tuned_subset_report, routes_subset_report) returns the report, the EXPECT
  * wrapper (check_tuned_subset, check_routes_subset) asserts that it is empty, and a
  * test can corrupt a result on purpose and assert that the report is NOT empty — the
- * checkers are themselves under test (review round 2: three accepted corruptions).
+ * checkers are themselves under test (review round 2: three accepted corruptions;
+ * round 3: two more, and one valid result rejected).
+ *
+ * Three rules the checkers follow since round 3. (1) Evidence for an omission is only
+ * what the walker states explicitly about that label and that successor
+ * (BranchEvent::refused) or what the checker can verify itself from the seed and the
+ * walk (a reused (k+1)-mer, a seed k-mer re-entered, a hairpin); the absence of a child
+ * never establishes why it is absent. (2) Route support and termination are verified
+ * separately: every claim must be a prefix of an exhaustive claim under its label, and
+ * an end is compared with the exhaustive run's only when both runs decide it on the
+ * same facts — a structural block on a route that passed a reconvergence is decided on
+ * the united edge history (§6.10), which the per-path trie does not have. (3) A reference
+ * claim that ended with a cap or at the radius establishes prefix support only, not
+ * where the label stops.
  */
 namespace mtg {
 namespace test {
@@ -132,6 +146,28 @@ inline bool is_block(EndReason reason) {
     return reason == EndReason::EDGE_REUSE || reason == EndReason::EDGE_REUSE_RC
         || reason == EndReason::REACHED_SEED;
 }
+
+// an end that says nothing about where the label stops: a censoring cap, the beam, or
+// the radius — the run did not look further. A REFERENCE claim ending so establishes
+// prefix support up to there and nothing beyond: neither that the label goes on nor
+// that it stops (review round 3: a reference capped at max_steps 2 rejected valid
+// uncapped results for "outliving" it or for ending at its boundary with dead_end).
+inline bool is_unknown_end(EndReason reason) {
+    return is_censored(reason) || reason == EndReason::MAX_EXTENSION;
+}
+
+// What verifying a structural block takes besides the result: the seed (the k-mers a
+// step may re-enter, the edges it used) and whether the graph is stranded (canonical /
+// primary regimes compare edges and seed nodes on both strands). k is read off the
+// result: a seed of n bases has n - k + 1 k-mers.
+struct SeedContext {
+    std::string seed;
+    bool stranded = false;
+};
+
+inline size_t k_of(const SeedResult &r) { return r.length_bp - r.num_kmers + 1; }
+
+inline std::string revcomp(std::string s) { ::reverse_complement(s); return s; }
 
 inline std::string shown(const std::string &w) { return w.empty() ? "<empty>" : w; }
 
@@ -398,67 +434,88 @@ inline const PathResult* leaf_path(const ArmResult &arm, size_t segment) {
     return nullptr;
 }
 
-// the bases the trie continues with at depth |at| of |segment|: inside the segment its
-// own next base, at its end the first base of every child
-inline std::set<char> continuations(const ArmResult &arm, size_t segment, uint64_t at) {
-    const Segment &seg = arm.segments[segment];
-    const std::string seq = outward(arm, seg.sequence);
-    std::set<char> out;
-    if (at < seg.from_bp)
-        return out;
-    const uint64_t j = at - seg.from_bp;
-    if (j < seq.size()) {
-        out.insert(seq[j]);
-    } else if (j == seq.size()) {
-        for (size_t c : seg.children) {
-            const std::string cs = outward(arm, arm.segments[c].sequence);
-            if (!cs.empty())
-                out.insert(cs[0]);
-        }
+// Whether the checker can see, from the seed and the outward |walk| alone, the
+// structural fact that a BLOCKED or HAIRPIN event for base |ch| at the end of |walk|
+// asserts — the walker's reason is not taken on trust, since a forged event would
+// otherwise excuse any deletion (review round 3, finding 1):
+//  - edge_reuse / edge_reuse_rc: the step's (k+1)-mer (on a stranded graph: or its
+//    reverse complement) occurs on the seed-plus-walk already;
+//  - rejoined_seed: the k-mer stepped into (either strand when stranded) is a seed k-mer;
+//  - a hairpin: the step is its own reverse complement or, for even k, a node on it is
+//    (the walker's is_hairpin); a basic graph has none.
+inline bool block_verified(const ArmResult &arm, const SeedContext &ctx, size_t k,
+                           const std::string &walk, char ch, EventType type, EndReason reason) {
+    const bool right = arm.arm == Arm::RIGHT;
+    const std::string so_far = right ? ctx.seed + walk
+                                     : std::string(walk.rbegin(), walk.rend()) + ctx.seed;
+    if (so_far.size() < k)
+        return false;
+    const std::string from = right ? so_far.substr(so_far.size() - k) : so_far.substr(0, k);
+    const std::string step = right ? from + ch : ch + from;
+    const std::string into = right ? step.substr(1) : step.substr(0, k);
+    auto occurs = [&](const std::string &hay, const std::string &needle) {
+        return hay.find(needle) != std::string::npos
+            || (ctx.stranded && hay.find(revcomp(needle)) != std::string::npos);
+    };
+    if (type == EventType::HAIRPIN) {
+        return ctx.stranded && (step == revcomp(step)
+                                || (k % 2 == 0 && (from == revcomp(from) || into == revcomp(into))));
     }
-    return out;
+    if (type != EventType::BLOCKED)
+        return false;
+    switch (reason) {
+        case EndReason::EDGE_REUSE:
+        case EndReason::EDGE_REUSE_RC:
+            return occurs(so_far, step);
+        case EndReason::REACHED_SEED:
+            return occurs(ctx.seed, into);
+        default:
+            return false;
+    }
 }
 
 // Discard evidence for label |name| not taking base |ch| at depth |at| of |segment| of
-// a constrain run |r| — evidence about THAT label and THAT successor:
-//  - a branch event there listing |ch| among the labelled admissible successors whose
-//    |dropped| names the label: it was ended there by the branch limit, a quorum, the
-//    split limit or the loss budget; or whose |ambiguous| names the label while the
-//    trie does not follow |ch| there: the label went on along another successor and
-//    |ch|, labelled and admissible, was refused by a quorum or the split limit (a
-//    labelled admissible successor is followed otherwise, and a label that lost every
-//    successor is in |dropped|);
+// a constrain run |r|, |walk| being the outward walk to that depth — evidence about
+// THAT label and THAT successor, and only what the walker states explicitly or the
+// checker can verify:
+//  - a branch event there with a refusal (BranchEvent::refused) for |ch| naming the
+//    label: the walker says it refused that successor to that label, by a quorum, the
+//    split limit, the branch limit or the loss budget;
 //  - a BLOCKED event there for |ch| naming the label among the labels that would have
-//    continued on it, with a structural reason (edge_reuse, edge_reuse_rc,
-//    rejoined_seed);
-//  - a HAIRPIN event there for |ch| naming the label: the step was skipped.
-// A branch event alone proves nothing: an ambiguity that was FOLLOWED on every
-// successor emits one too (|dropped| empty), and a result from which a subtree was
-// deleted still carries it (review round 2, finding 1).
-inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, size_t segment,
-                            uint64_t at, char ch, const std::string &name) {
+//    continued on it, whose structural reason the checker verifies on the seed and the
+//    walk (block_verified);
+//  - a HAIRPIN event there for |ch| naming the label, the step verified to be one.
+// Nothing else counts; in particular the absence of a child proves nothing about why
+// it is absent. A branch event whose |ambiguous| names the label used to pass for a
+// refusal when the trie did not follow |ch| — but a result from which a FOLLOWED
+// branch was deleted looks exactly like that (review round 3, finding 1); and a
+// BLOCKED event counts on its reason being TRUE here, not on its reason being
+// structural (a forged edge_reuse at depth 0 is no reuse). |dropped| is no evidence
+// either: a dropped label has a label end, which the caller sees first.
+inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, const SeedContext &ctx,
+                            const std::string &walk, size_t segment, uint64_t at, char ch,
+                            const std::string &name) {
     const std::optional<LabelId> id = label_id(r, name);
     if (!id)
         return false;
+    EXPECT_EQ(at, walk.size()) << "the walk to depth " << at << " has " << walk.size() << " bases";
     auto names = [&](const std::vector<LabelId> &ids) {
         return std::find(ids.begin(), ids.end(), *id) != ids.end();
     };
-    const bool followed = continuations(arm, segment, at).count(ch) > 0;
     for (const BranchEvent &be : arm.branch_events) {
-        if (be.segment != segment || be.at_bp != at
-                || std::find(be.chars.begin(), be.chars.end(), ch) == be.chars.end())
+        if (be.segment != segment || be.at_bp != at)
             continue;
-        if (names(be.dropped))
-            return true;
-        if (!followed && names(be.ambiguous))
-            return true;
+        for (const BranchEvent::Refusal &rf : be.refused) {
+            if (rf.ch == ch && names(rf.labels))
+                return true;
+        }
     }
+    const size_t k = k_of(r);
     for (const Event &ev : arm.segments[segment].events) {
         if (ev.at_bp != at || ev.ch != ch || !names(ev.labels))
             continue;
-        if (ev.type == EventType::BLOCKED && is_block(ev.reason))
-            return true;
-        if (ev.type == EventType::HAIRPIN && !followed)
+        if ((ev.type == EventType::BLOCKED || ev.type == EventType::HAIRPIN)
+                && block_verified(arm, ctx, k, walk, ch, ev.type, ev.reason))
             return true;
     }
     return false;
@@ -479,6 +536,41 @@ struct SubsetReport {
     size_t omitted = 0;   // ... it leaves early, each with a recorded reason
     Problems problems;    // every violation found; empty iff the tuned run passes
 };
+
+// A leaf's redundant records agree with the events (constrain mode): its end_labels
+// are exactly the labels with a LABEL_END at its depth on its last segment, and its
+// end_reasons count those events' reasons. The checkers read the events, so a result
+// whose leaf lists were cleared or rewritten used to pass them while the output a
+// client reads was wrong (review round 3: the coverage boundary).
+inline void check_leaf_records(const SeedResult &r, const ArmResult &arm,
+                               const std::string &what, Problems *problems) {
+    for (const PathResult &p : arm.paths) {
+        if (p.segments.empty())
+            continue;
+        const Segment &last = arm.segments[p.segments.back()];
+        const uint64_t depth = last.from_bp + last.length_bp;
+        std::set<std::string> ended, listed;
+        std::array<uint32_t, kNumEndReasons> by_reason {};
+        for (const Event &ev : last.events) {
+            if (ev.type == EventType::LABEL_END && ev.at_bp == depth) {
+                ended.insert(r.label_dict.at(ev.label).name);
+                by_reason[static_cast<size_t>(ev.reason)]++;
+            }
+        }
+        for (const LabelEnd &e : p.end_labels) {
+            listed.insert(r.label_dict.at(e.label).name);
+        }
+        if (listed != ended) {
+            problems->push_back(what + ": leaf " + std::to_string(p.id) + " lists "
+                                + std::to_string(listed.size()) + " end label(s) but "
+                                + std::to_string(ended.size()) + " label(s) end at its depth");
+        }
+        if (by_reason != p.end_reasons) {
+            problems->push_back(what + ": leaf " + std::to_string(p.id)
+                                + ": end_reasons disagree with its label end events");
+        }
+    }
+}
 
 // The claims of a constrain run: every (walk prefix, label) at which the run ends a
 // label, with the reason — i.e. every stretch the run says the label carries, leaf or
@@ -529,16 +621,21 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
 //     discard evidence for the label and the base not taken (branch_recorded). A label
 //     ended with a SEMANTIC reason (label_lost, dead_end, ...) where A continues it,
 //     or a label that vanishes without any record, is a disagreement between the two
-//     runs and fails.
+//     runs and fails. Where A's own claim ended with a cap or at its radius
+//     (is_unknown_end) nothing is known beyond it: the tuned run may outlive it or end
+//     there for any reason.
+// |ctx| is what verifying a BLOCKED / HAIRPIN event takes (block_verified).
 // The report lists every violation; check_tuned_subset() asserts that it is empty.
 inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &tuned,
-                                        size_t a, const std::string &what) {
+                                        size_t a, const std::string &what,
+                                        const SeedContext &ctx) {
     const ArmResult &ta = tuned.arms[a];
     const ArmResult &aa = A.arms[a];
     SubsetReport rep;
     Problems &problems = rep.problems;
     if (!is_trie(ta))
         problems.push_back(what + ": the tuned run is not a trie (merging on)");
+    check_leaf_records(tuned, ta, what, &problems);
     const uint64_t depth = aa.complete_to_bp;
     const auto a_claims = label_claims(A, a, depth);
     const Leaves a_all = constrained_claims(A, a, depth);
@@ -607,8 +704,10 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                     if (const Event *end = label_end_at(tuned, *seg, l, d)) {
                         if (d == w.size()) {
                             // both runs end the label here: the reasons agree unless
-                            // the tuned run ran into a cap exactly there
-                            if (!is_cut(end->reason) && a_reason
+                            // the tuned run ran into a cap exactly there, or the
+                            // exhaustive claim itself ended with a cap or at the radius
+                            // and so says nothing about why the label stops
+                            if (!is_cut(end->reason) && a_reason && !is_unknown_end(*a_reason)
                                     && std::string(to_string(*a_reason)) != to_string(end->reason)) {
                                 problems.push_back(what + ": " + l + " ends at " + bp(d) + " on "
                                                    + shown(w) + " for different reasons: exhaustive "
@@ -627,9 +726,10 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                         break;
                     }
                     if (d == w.size()) {
-                        // the exhaustive claim was itself cut at the boundary: nothing
-                        // is claimed beyond it. Otherwise the tuned run outlives it.
-                        if (a_reason) {
+                        // the exhaustive claim was itself cut at the boundary, or ended
+                        // with a cap or at the radius: nothing is claimed beyond it.
+                        // Otherwise the tuned run outlives it.
+                        if (a_reason && !is_unknown_end(*a_reason)) {
                             problems.push_back(what + ": label " + l + " outlives the exhaustive walk "
                                                + shown(w) + " (" + bp(w.size()) + " bp, ended there with "
                                                + to_string(*a_reason) + ") in the tuned run");
@@ -641,7 +741,7 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                     if (j < seq.size()) {
                         if (seq[j] == w[d])
                             continue;   // the tuned run follows w
-                        if (!branch_recorded(tuned, ta, seg->id, d, w[d], l)) {
+                        if (!branch_recorded(tuned, ta, ctx, w.substr(0, d), seg->id, d, w[d], l)) {
                             problems.push_back(what + ": the tuned run leaves " + shown(w) + " at "
                                                + bp(d) + " (takes " + seq[j] + ", not " + w[d]
                                                + ") with " + l + " alive and no recorded reason");
@@ -676,7 +776,7 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                                                + " alive and no recorded reason while the "
                                                  "exhaustive trie continues to " + shown(w));
                         }
-                    } else if (!branch_recorded(tuned, ta, seg->id, d, w[d], l)) {
+                    } else if (!branch_recorded(tuned, ta, ctx, w.substr(0, d), seg->id, d, w[d], l)) {
                         problems.push_back(what + ": the tuned run drops " + w[d] + " at " + bp(d)
                                            + " on " + shown(w) + " with " + l
                                            + " alive and no recorded reason");
@@ -696,8 +796,8 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
 }
 
 inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tuned,
-                                       size_t a, const std::string &what) {
-    SubsetReport rep = tuned_subset_report(A, tuned, a, what);
+                                       size_t a, const std::string &what, const SeedContext &ctx) {
+    SubsetReport rep = tuned_subset_report(A, tuned, a, what, ctx);
     EXPECT_TRUE(rep.problems.empty())
         << what << ": the tuned run fails the prefix-subset property ("
         << rep.problems.size() << " problem(s)):" << listed(rep.problems);
@@ -707,10 +807,14 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
 // The flank of |label| ending at segment |leaf| in walking order, following at each
 // join the parent the label entered through (Segment::labels_via_parent). A label that
 // enters a join through no listed parent goes into |problems| when given, else fails.
+// |*joined| is set when the route passes a join (|leaf| included): from there on the
+// walk is under the united edge history of §6.10.
 inline std::string label_route(const ArmResult &arm, size_t leaf, LabelId label,
-                               Problems *problems = nullptr) {
+                               Problems *problems = nullptr, bool *joined = nullptr) {
     std::string rev;   // leaf -> root
     size_t s = leaf;
+    if (joined)
+        *joined = false;
     while (true) {
         const Segment &seg = arm.segments[s];
         const std::string piece = outward(arm, seg.sequence);
@@ -719,6 +823,8 @@ inline std::string label_route(const ArmResult &arm, size_t leaf, LabelId label,
             break;
         size_t next = seg.parents[0];
         if (seg.parents.size() > 1) {
+            if (joined)
+                *joined = true;
             bool found = false;
             for (size_t p = 0; p < seg.labels_via_parent.size() && !found; ++p) {
                 const auto &via = seg.labels_via_parent[p];
@@ -747,23 +853,83 @@ struct RouteReport {
     Problems problems;    // every violation found; empty iff the merged run passes
 };
 
+// The segment of trie |arm| on whose events the step at the end of |route| (outward)
+// is recorded: the one spelling the route's last base, or the root for an empty
+// route — a split's events sit on the parent at its end. Null when the trie has no
+// such walk.
+inline const Segment* segment_at(const ArmResult &arm, const std::string &route) {
+    const Segment *seg = &root_of(arm);
+    uint64_t d = 0;
+    while (true) {
+        const std::string seq = outward(arm, seg->sequence);
+        for (size_t j = 0; j < seq.size(); ++j, ++d) {
+            if (d == route.size())
+                return seg;
+            if (seq[j] != route[d])
+                return nullptr;
+        }
+        if (d == route.size())
+            return seg;
+        const Segment *next = nullptr;
+        for (size_t c : seg->children) {
+            const std::string cs = outward(arm, arm.segments[c].sequence);
+            if (!cs.empty() && cs[0] == route[d])
+                next = &arm.segments[c];
+        }
+        if (!next)
+            return nullptr;
+        seg = next;
+    }
+}
+
+// whether trie |arm| of |r| records, at the end of |route|, a BLOCKED successor with
+// |reason| among whose labels is |name|
+inline bool blocked_in_trie(const SeedResult &r, const ArmResult &arm, const std::string &route,
+                            const std::string &name, EndReason reason) {
+    const Segment *seg = segment_at(arm, route);
+    const std::optional<LabelId> id = label_id(r, name);
+    if (!seg || !id)
+        return false;
+    for (const Event &ev : seg->events) {
+        if (ev.type == EventType::BLOCKED && ev.at_bp == route.size() && ev.reason == reason
+                && std::find(ev.labels.begin(), ev.labels.end(), *id) != ev.labels.end())
+            return true;
+    }
+    return false;
+}
+
 // Merging on: a leaf's spelled walk is not evidence for a label merged in at a join
 // (LabelEnd::route_bp > 0) — the label's own route is. EVERY label end of the merged
 // run is checked on its own route: the leaves' labels and every LABEL_END inside a
 // segment (a leaf-only check would miss an end inserted inside a segment: review round
-// 2, finding 2). The route must be a prefix of an exhaustive CLAIM under that label (a
-// claim, not a leaf: the exhaustive run may end the label inside a walk other labels go
-// on with), and an end for a reason that does not depend on the edge history
-// (dead_end, label_lost, rejoined_seed, the radius, a trace break) must be where the
-// exhaustive run ends the label too, for the same reason. An edge-reuse end may come
-// earlier under merging (§6.10: a merge unites the edge histories of the routes it
-// joins), so for it the prefix condition is all that is required. A merge closes a
-// duplicate lineage without a label end, so every LABEL_END event is a real end.
+// 2, finding 2). A merge closes a duplicate lineage without a label end, so every
+// LABEL_END event is a real end. Two things are verified separately for each:
+//  1. route support, always: the route must be a prefix of an exhaustive CLAIM under
+//     that label (a claim, not a leaf: the exhaustive run may end the label inside a
+//     walk other labels go on with);
+//  2. termination, only where both runs decide it on the same facts. On a route that
+//     passed NO join the merged run has the per-path edge history of the trie, so a
+//     semantic end must be where the exhaustive run ends the label, for the same
+//     reason. On a route AT OR AFTER a join the walk is under the united edge history
+//     of the joined routes (§6.10, completeness_scope united_history), which the trie
+//     does not have: a structural block there (edge_reuse, edge_reuse_rc,
+//     rejoined_seed — the last by block precedence when every continuation is barred)
+//     is a united-history termination and only the prefix condition applies, except
+//     that seed re-entry is a fact about the node, not the history, so the trie must
+//     record the seed-node successor at that node too (a BLOCKED rejoined_seed naming
+//     the label, or the label ending there). Ends that depend on no history
+//     (dead_end, label_lost, record_end, the radius) must still be exactly where the
+//     exhaustive run ends the label, joined or not; where the exhaustive claim itself
+//     ended with a cap or at the radius, its reason is unknown and not compared.
+// Review round 3, finding 2: a valid merged result (two routes reconverging at a node
+// whose every continuation one of them had used) was rejected for ending with
+// rejoined_seed where the per-path trie continues.
 // The report lists every violation; check_routes_subset() asserts that it is empty.
 inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &merged,
                                         size_t a, const std::string &what) {
     const ArmResult &ma = merged.arms[a];
-    const uint64_t depth = A.arms[a].complete_to_bp;
+    const ArmResult &aa = A.arms[a];
+    const uint64_t depth = aa.complete_to_bp;
     const Leaves full = constrained_claims(A, a, depth);
     const auto a_claims = label_claims(A, a, depth);
     RouteReport rep;
@@ -777,41 +943,60 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
         }
         return false;
     };
-    // one label end: |route| the label's own route to it, |reason| how it ended there
+    // one label end: |route| the label's own route to it, |reason| how it ended there,
+    // |joined| whether the route passed a join (the end is then under the united history)
     auto check_end = [&](std::string route, const std::string &l,
-                         std::optional<EndReason> reason, const std::string &where) {
+                         std::optional<EndReason> reason, bool joined, const std::string &where) {
         rep.checked++;
         if (route.size() > depth) {
             route.resize(depth);
             reason.reset();
         }
+        // 1. route support
         if (!supported(route, l)) {
             problems.push_back(what + ": the route of " + l + " to " + where + " (" + shown(route)
                                + ", " + bp(route.size()) + " bp) is not a prefix of an exhaustive "
                                  "claim under that label: INVENTED");
             return;
         }
-        if (!reason || is_cut(*reason) || *reason == EndReason::EDGE_REUSE
-                || *reason == EndReason::EDGE_REUSE_RC)
+        // 2. termination
+        if (!reason || is_cut(*reason))
             return;
         auto it = full.find(route);
-        if (it == full.end() || !it->second.count(l)) {
+        const bool a_ends_here = it != full.end() && it->second.count(l);
+        std::optional<EndReason> a_reason;
+        if (auto jt = a_claims.find(route); jt != a_claims.end()) {
+            if (auto kt = jt->second.find(l); kt != jt->second.end())
+                a_reason = kt->second;
+        }
+        if (joined && is_block(*reason)) {
+            // the trie evaluated the same node's successors (unless its own claim ended
+            // there unknowing), so it has the seed-node successor on record too
+            if (*reason == EndReason::REACHED_SEED
+                    && !blocked_in_trie(A, aa, route, l, EndReason::REACHED_SEED)
+                    && !(a_reason && is_unknown_end(*a_reason))) {
+                problems.push_back(what + ": the merged run ends " + l + " at " + where + " ("
+                                   + shown(route) + ", " + bp(route.size()) + " bp) with rejoined_seed, "
+                                     "but the exhaustive trie records no seed-node successor for "
+                                     "that label there: an INVENTED end");
+            }
+            return;
+        }
+        if (!a_ends_here) {
             problems.push_back(what + ": the merged run ends " + l + " at " + where + " ("
                                + shown(route) + ", " + bp(route.size()) + " bp) with "
                                + to_string(*reason) + " while the exhaustive trie continues it: "
                                  "an INVENTED end");
             return;
         }
-        if (auto jt = a_claims.find(route); jt != a_claims.end()) {
-            auto kt = jt->second.find(l);
-            if (kt != jt->second.end() && kt->second
-                    && std::string(to_string(*kt->second)) != to_string(*reason)) {
-                problems.push_back(what + ": " + l + " ends at " + where + " for different reasons: "
-                                   "exhaustive " + to_string(*kt->second) + ", merged "
-                                   + to_string(*reason));
-            }
+        if (a_reason && !is_unknown_end(*a_reason)
+                && std::string(to_string(*a_reason)) != to_string(*reason)) {
+            problems.push_back(what + ": " + l + " ends at " + where + " for different reasons: "
+                               "exhaustive " + to_string(*a_reason) + ", merged "
+                               + to_string(*reason));
         }
     };
+    check_leaf_records(merged, ma, what, &problems);
 
     // the leaves: a leaf label's route and the spelled walk share everything from
     // route_bp on, and the leaf lists exactly the labels ended at its depth
@@ -855,7 +1040,8 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
                 continue;
             const std::string &l = merged.label_dict.at(ev.label).name;
             const std::string where = "segment " + bp(seg.id) + " at " + bp(ev.at_bp);
-            std::string route = label_route(ma, seg.id, ev.label, &problems);
+            bool joined = false;
+            std::string route = label_route(ma, seg.id, ev.label, &problems, &joined);
             if (route.size() != end || ev.at_bp > end || ev.at_bp < seg.from_bp) {
                 problems.push_back(what + ": the route of " + l + " to " + where + " spells "
                                    + bp(route.size()) + " bases for a segment over ["
@@ -863,7 +1049,7 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
                 continue;
             }
             route.resize(ev.at_bp);
-            check_end(route, l, ev.reason, where);
+            check_end(route, l, ev.reason, joined, where);
         }
     }
     return rep;

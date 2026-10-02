@@ -837,11 +837,12 @@ TYPED_TEST(TrieOracle, TunedRunsArePrefixSubsetsAndEveryOmissionHasAReason) {
         st.max_output_bp = 130;
         cases.push_back({ "max_output_bp 130", st, f.pyt(), "" });
 
+        const trie::SeedContext ctx { f.X, mode != DeBruijnGraph::BASIC };
         for (const Case &c : cases) {
             const std::string what = where + c.name;
             auto t = run(*anno, f.X, as_list(kAllLabels), c.st);
-            trie::SubsetReport right = trie::check_tuned_subset(A, t, kRight, what);
-            trie::SubsetReport left = trie::check_tuned_subset(A, t, kLeft, what);
+            trie::SubsetReport right = trie::check_tuned_subset(A, t, kRight, what, ctx);
+            trie::SubsetReport left = trie::check_tuned_subset(A, t, kLeft, what, ctx);
             EXPECT_EQ(claims_right, right.present + right.omitted) << what;
             EXPECT_EQ(claims_left, left.present + left.omitted) << what;
             // the case is not vacuous: it does prune
@@ -920,19 +921,22 @@ bool any_mentions(const trie::Problems &problems, const std::string &needle) {
 
 } // namespace
 
-// Finding 1. The Q subtree is deleted from an (exhaustive, hence tuned-shaped) result
-// and the bubble's ordinary ambiguity event is kept: it says C followed BOTH branches
-// and nothing was dropped. The old branch_recorded() took any branch event listing the
-// missing base as the recorded reason for every omission through it — B's claims
-// among them, which nothing dropped: 5 present, 3 omitted, no failure. Discard
-// evidence is now about the label and the successor: B is neither dropped nor
-// ambiguous there, so the omission of (Q·Y·Z, B) has no record.
+// Finding 1 (round 2). The Q subtree is deleted from an (exhaustive, hence
+// tuned-shaped) result and the bubble's ordinary ambiguity event is kept: it says C
+// followed BOTH branches and nothing was dropped. The old branch_recorded() took any
+// branch event listing the missing base as the recorded reason for every omission
+// through it — B's claims among them, which nothing dropped: 5 present, 3 omitted, no
+// failure. Discard evidence is about the label and the successor, and (round 3,
+// finding 1) only what the walker states explicitly: the event has no refusal for Q,
+// so neither B's claim nor C's two claims through Q have a record — the round-2
+// checker still excused C's, inferring "refused" from the deleted child.
 TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    const trie::SeedContext ctx { f.X, false };
     auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
-    const trie::SubsetReport genuine = trie::tuned_subset_report(A, A, kRight, "genuine");
+    const trie::SubsetReport genuine = trie::tuned_subset_report(A, A, kRight, "genuine", ctx);
     EXPECT_TRUE(genuine.problems.empty()) << trie::listed(genuine.problems);
     EXPECT_EQ(8u, genuine.present);
     EXPECT_EQ(0u, genuine.omitted);
@@ -961,23 +965,126 @@ TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
     }
     ASSERT_NE(nullptr, bubble);
     EXPECT_TRUE(bubble->dropped.empty());
+    EXPECT_TRUE(bubble->refused.empty());
     EXPECT_EQ((std::set<std::string>{ "C" }), trie::name_set(tuned, bubble->ambiguous));
     EXPECT_NE(bubble->chars.end(), std::find(bubble->chars.begin(), bubble->chars.end(), f.Q[0]));
-    // ... and is no evidence that B was dropped from Q; on the genuine result, where Q
-    // is followed, it is evidence for nobody
-    EXPECT_FALSE(trie::branch_recorded(tuned, arm, root, 0, f.Q[0], "B"));
-    EXPECT_FALSE(trie::branch_recorded(A, A.arms[kRight], root, 0, f.Q[0], "B"));
-    EXPECT_FALSE(trie::branch_recorded(A, A.arms[kRight], root, 0, f.Q[0], "C"));
+    // ... and is no evidence that anybody was refused Q, on the corrupted result as on
+    // the genuine one
+    for (const char *l : { "B", "C" }) {
+        EXPECT_FALSE(trie::branch_recorded(tuned, arm, ctx, "", root, 0, f.Q[0], l)) << l;
+        EXPECT_FALSE(trie::branch_recorded(A, A.arms[kRight], ctx, "", root, 0, f.Q[0], l)) << l;
+    }
 
-    const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, "deleted Q");
+    const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, "deleted Q", ctx);
     EXPECT_EQ(5u, rep.present);
     EXPECT_EQ(3u, rep.omitted);
     ASSERT_FALSE(rep.problems.empty()) << "the checker accepted a silently deleted branch";
-    // exactly B's claim (Q·Y·Z, B) is unexplained; C's two claims through Q are covered
-    // by the recorded ambiguity (C went on along P, Q is not followed)
-    EXPECT_EQ(1u, rep.problems.size()) << trie::listed(rep.problems);
+    // all three claims through Q are unexplained: (Q·Y·Z, B), (Q·Y·Z, C), (Q·Y·T, C)
+    EXPECT_EQ(3u, rep.problems.size()) << trie::listed(rep.problems);
     EXPECT_TRUE(any_mentions(rep.problems, "with B alive and no recorded reason"))
         << trie::listed(rep.problems);
+    EXPECT_TRUE(any_mentions(rep.problems, "with C alive and no recorded reason"))
+        << trie::listed(rep.problems);
+}
+
+// Round 3, finding 1: the same deletion where the deleted branch is carried by the
+// ambiguous label ONLY. k = 3, records AAA·C and AAA·G both labelled C, seed AAA: C is
+// ambiguous at the boundary and followed on both, so the event is {ambiguous: C,
+// dropped: none}. Deleting the G child left that event unchanged, and the round-2
+// checker read "C ambiguous, G not followed" as "G refused to C by a quorum": 1
+// present, 1 omitted, no failure. A refusal is now something the walker states
+// (BranchEvent::refused), never something inferred from a missing child.
+TEST(Trie, TunedCheckerRejectsADeletedBranchUnderASharedLabel) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAAC", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
+    const trie::SeedContext ctx { "AAA", false };
+    auto A = run(*anno, "AAA", { "C" }, exhaustive_at(LabelMode::CONSTRAIN, 100));
+    ASSERT_EQ(2u, A.arms[kRight].paths.size());
+    EXPECT_TRUE(trie::tuned_subset_report(A, A, kRight, "genuine", ctx).problems.empty());
+
+    SeedResult tuned = A;
+    ArmResult &arm = tuned.arms[kRight];
+    const size_t root = trie::root_of(arm).id;
+    ASSERT_EQ(2u, arm.segments[root].children.size());
+    const size_t removed = arm.segments[root].children.back();
+    const char removed_ch = arm.segments[removed].sequence[0];
+    arm.segments[root].children.pop_back();
+    arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
+        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+    }), arm.paths.end());
+    ASSERT_EQ(1u, arm.branch_events.size());
+    EXPECT_EQ((std::set<std::string>{ "C" }), trie::name_set(tuned, arm.branch_events[0].ambiguous));
+    EXPECT_TRUE(arm.branch_events[0].dropped.empty());
+    EXPECT_TRUE(arm.branch_events[0].refused.empty());
+
+    const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight, "deleted branch", ctx);
+    EXPECT_EQ(1u, rep.present);
+    EXPECT_EQ(1u, rep.omitted);
+    ASSERT_EQ(1u, rep.problems.size()) << trie::listed(rep.problems);
+    EXPECT_TRUE(any_mentions(rep.problems, std::string("drops ") + removed_ch + " at 0"))
+        << trie::listed(rep.problems);
+    EXPECT_TRUE(any_mentions(rep.problems, "with C alive and no recorded reason"))
+        << trie::listed(rep.problems);
+}
+
+// Round 3, finding 1, second half: a deleted branch excused by a FORGED structural
+// block. The round-2 checker accepted a BLOCKED event on its reason being structural;
+// an edge_reuse at depth 0 of a clean fixture is no reuse (no (k+1)-mer of the seed
+// is the step), and a rejoined_seed there re-enters nothing (no k-mer of the seed is
+// the one stepped into). Both are verified on the seed and the walk now and both
+// forgeries fail; the walker's genuine blocks on the same fixture still verify.
+TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
+    auto b = fork_blocks(3);
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P, X + Q }, { "A", "B" }, DeBruijnGraph::BASIC);
+    const trie::SeedContext ctx { X, false };
+    auto A = run(*anno, X, { "A", "B" }, exhaustive_at(LabelMode::CONSTRAIN, 100));
+    ASSERT_EQ(2u, A.arms[kRight].paths.size());
+    for (EndReason forged : { EndReason::EDGE_REUSE, EndReason::EDGE_REUSE_RC, EndReason::REACHED_SEED }) {
+        SeedResult tuned = A;
+        ArmResult &arm = tuned.arms[kRight];
+        const size_t root = trie::root_of(arm).id;
+        const size_t removed = arm.segments[root].children.back();
+        Event ev;
+        ev.type = EventType::BLOCKED;
+        ev.at_bp = 0;
+        ev.ch = arm.segments[removed].sequence[0];
+        ev.labels = arm.segments[removed].labels_start;
+        ev.labels_total = ev.labels.size();
+        ev.reason = forged;
+        arm.segments[root].events.push_back(ev);
+        arm.segments[root].children.pop_back();
+        arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
+            return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+        }), arm.paths.end());
+        const std::string name = tuned.label_dict.at(ev.labels[0]).name;
+        EXPECT_FALSE(trie::branch_recorded(tuned, arm, ctx, "", root, 0, ev.ch, name)) << to_string(forged);
+        const trie::SubsetReport rep = trie::tuned_subset_report(A, tuned, kRight,
+                                                                 std::string("forged ") + to_string(forged), ctx);
+        EXPECT_EQ(1u, rep.present) << to_string(forged);
+        EXPECT_EQ(1u, rep.omitted) << to_string(forged);
+        ASSERT_EQ(1u, rep.problems.size()) << to_string(forged) << trie::listed(rep.problems);
+        EXPECT_TRUE(any_mentions(rep.problems, "no recorded reason")) << trie::listed(rep.problems);
+    }
+    // the verification accepts what is true: on the oracle fixture's tandem repeat the
+    // second lap's loop edge IS reused, and the walker's BLOCKED edge_reuse there verifies
+    const OracleFixture f(kFixtureSeed);
+    auto fixture = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    auto E = run(*fixture, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    const ArmResult &left = E.arms[kLeft];
+    size_t verified = 0;
+    for (const Segment &seg : left.segments) {
+        for (const Event &ev : seg.events) {
+            if (ev.type != EventType::BLOCKED || ev.reason != EndReason::EDGE_REUSE)
+                continue;
+            const std::string walk = f.two_laps().substr(0, ev.at_bp);
+            verified += trie::branch_recorded(E, left, trie::SeedContext{ f.X, false }, walk,
+                                              seg.id, ev.at_bp, ev.ch, E.label_dict.at(ev.labels[0]).name);
+        }
+    }
+    EXPECT_EQ(1u, verified) << "the loop edge's genuine reuse should verify exactly once";
 }
 
 // Finding 2. A label end invented INSIDE a segment of a tuned result: LABEL_END(S,
@@ -992,13 +1099,14 @@ TEST(Trie, TunedCheckerRejectsAnInventedInteriorClaim) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    const trie::SeedContext ctx { f.X, false };
     auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
 
     SeedResult invented = A;
     ASSERT_EQ(1u, insert_label_end(invented, invented.arms[kRight], "S", f.Q[0], 1,
                                    EndReason::DEAD_END));
     ASSERT_TRUE(trie::constrained_claims(invented, kRight, kRadius).at(f.Q.substr(0, 1)).count("S"));
-    const trie::SubsetReport rep = trie::tuned_subset_report(A, invented, kRight, "S invented on Q");
+    const trie::SubsetReport rep = trie::tuned_subset_report(A, invented, kRight, "S invented on Q", ctx);
     // the exhaustive claims know nothing of it, so the forward walk still finds all 8
     EXPECT_EQ(8u, rep.present);
     EXPECT_EQ(0u, rep.omitted);
@@ -1008,7 +1116,7 @@ TEST(Trie, TunedCheckerRejectsAnInventedInteriorClaim) {
 
     SeedResult early = A;
     ASSERT_EQ(1u, insert_label_end(early, early.arms[kRight], "S", f.P[0], 1, EndReason::DEAD_END));
-    const trie::SubsetReport rep2 = trie::tuned_subset_report(A, early, kRight, "S ended early on P");
+    const trie::SubsetReport rep2 = trie::tuned_subset_report(A, early, kRight, "S ended early on P", ctx);
     ASSERT_FALSE(rep2.problems.empty()) << "the checker accepted an invented semantic end";
     // clause 1 sees an invented end, clause 2 (following S's exhaustive claim) the
     // same end as a disagreement between the two walkers
@@ -1045,6 +1153,183 @@ TEST(Trie, MergedCheckerRejectsAnInventedInteriorClaim) {
     EXPECT_EQ(1u, rep.problems.size()) << trie::listed(rep.problems);
     EXPECT_TRUE(any_mentions(rep.problems, "the route of S to segment")) << trie::listed(rep.problems);
     EXPECT_TRUE(any_mentions(rep.problems, "INVENTED")) << trie::listed(rep.problems);
+
+    // Round 3, the coverage boundary: the checkers read the label end EVENTS, so a
+    // result whose leaves' end_labels were cleared passed while the lists a client
+    // reads were empty. The leaf records are cross-checked against the events now, in
+    // both checkers.
+    SeedResult cleared = merged;
+    for (PathResult &p : cleared.arms[kRight].paths) {
+        p.end_labels.clear();
+    }
+    const trie::RouteReport rep2 = trie::routes_subset_report(A, cleared, kRight, "cleared end_labels");
+    ASSERT_FALSE(rep2.problems.empty()) << "the merged checker accepted cleared leaf labels";
+    EXPECT_TRUE(any_mentions(rep2.problems, "lists 0 end label(s)")) << trie::listed(rep2.problems);
+    SeedResult rewritten = A;
+    for (PathResult &p : rewritten.arms[kRight].paths) {
+        p.end_reasons.fill(0);
+        p.end_reasons[static_cast<size_t>(EndReason::RECORD_END)] = p.end_labels.size();
+    }
+    const trie::SubsetReport rep3 = trie::tuned_subset_report(A, rewritten, kRight, "rewritten end_reasons",
+                                                              trie::SeedContext{ f.X, false });
+    ASSERT_FALSE(rep3.problems.empty()) << "the tuned checker accepted rewritten leaf reasons";
+    EXPECT_TRUE(any_mentions(rep3.problems, "end_reasons disagree")) << trie::listed(rep3.problems);
+}
+
+// Round 3, finding 2: a VALID merged result the round-2 checker rejected. k = 3, the
+// one record AAAGTAATAA under C, seed AAA, radius 8 (the graph is node-centric: every
+// pair of k-mers overlapping by k - 1 is an edge, so AAA leads to AAG and to AAT). The
+// walks G·T·A·A·T·A·A and T·A·A·G·T·A·A both reach node TAA at depth 7 and merge there.
+// Each on its own could go on (TAA→AAG for the first, TAA→AAT for the second), but
+// under the united edge history (§6.10) the first has used TAA→AAT and the second
+// TAA→AAG, and TAA→AAA re-enters the seed: every continuation is barred and C ends
+// with rejoined_seed by block precedence. The keep trie continues both walks to the
+// radius, so the old rule — a rejoined_seed end must be where the trie ends the label
+// — called it an invented end. Termination on a joined route is judged under the
+// united history now: the structural block passes on prefix support, and the seed
+// re-entry itself, a fact about the node, is confirmed by the trie's own BLOCKED
+// event there.
+TEST(Trie, MergedCheckerAcceptsAUnitedHistoryTermination) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAAGTAATAA" }, { "C" }, DeBruijnGraph::BASIC);
+    Strategy st = exhaustive_at(LabelMode::CONSTRAIN, 8);
+    st.direction = Strategy::RIGHT;
+    auto A = run(*anno, "AAA", { "C" }, st);
+    ASSERT_EQ(ArmResult::COMPLETE, A.arms[kRight].status);
+    EXPECT_EQ(8u, A.arms[kRight].complete_to_bp);
+    EXPECT_STREQ("per_path", A.arms[kRight].completeness_scope);
+    st.exhaustive = false;
+    st.merge_reconverge = true;
+    auto merged = run(*anno, "AAA", { "C" }, st);
+    const ArmResult &arm = merged.arms[kRight];
+    EXPECT_STREQ("united_history", arm.completeness_scope);
+    ASSERT_FALSE(trie::is_trie(arm)) << "no join?";
+    // the join at depth 7 ends C with rejoined_seed, where the trie goes on
+    size_t joined_ends = 0;
+    for (const Segment &seg : arm.segments) {
+        if (seg.parents.size() < 2)
+            continue;
+        for (const Event &ev : seg.events) {
+            if (ev.type != EventType::LABEL_END)
+                continue;
+            joined_ends++;
+            EXPECT_EQ(7u, ev.at_bp);
+            EXPECT_STREQ("rejoined_seed", to_string(ev.reason));
+        }
+    }
+    EXPECT_GE(joined_ends, 1u);
+    EXPECT_TRUE(trie::constrained_claims(A, kRight, 8).count("GTAATAAG"));
+    const trie::RouteReport rep = trie::routes_subset_report(A, merged, kRight, "AAAGTAATAA merged");
+    EXPECT_TRUE(rep.problems.empty()) << trie::listed(rep.problems);
+    EXPECT_GE(rep.checked, 2u);
+
+    // ... while a rejoined_seed the trie does not confirm is still invented: forged in
+    // place of a genuine dead_end at a joined leaf of the oracle fixture (the end of Z,
+    // where no successor leads into the seed)
+    const OracleFixture f(kFixtureSeed);
+    auto fixture = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    auto E = run(*fixture, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    Strategy mst;
+    mst.max_extension_bp = kRadius;
+    mst.max_label_branches = Strategy::kUnlimited;
+    mst.merge_reconverge = true;
+    SeedResult forged = run(*fixture, f.X, as_list(kAllLabels), mst);
+    ASSERT_TRUE(trie::routes_subset_report(E, forged, kRight, "genuine").problems.empty());
+    size_t forged_ends = 0;
+    for (PathResult &p : forged.arms[kRight].paths) {
+        // the Z leaf, spelled through whichever bubble branch is the first parent
+        const std::string w = trie::walk_of(forged.arms[kRight], p);
+        if (w != f.pyz() && w != f.qyz())
+            continue;
+        Segment &last = forged.arms[kRight].segments[p.segments.back()];
+        for (Event &ev : last.events) {
+            if (ev.type == EventType::LABEL_END && ev.at_bp == p.length_bp) {
+                ev.reason = EndReason::REACHED_SEED;
+                forged_ends++;
+            }
+        }
+        p.end_reasons.fill(0);
+        p.end_reasons[static_cast<size_t>(EndReason::REACHED_SEED)] = forged_ends;
+    }
+    ASSERT_EQ(3u, forged_ends) << "A, B and C end at the end of Z";
+    const trie::RouteReport rep2 = trie::routes_subset_report(E, forged, kRight, "forged rejoined_seed");
+    EXPECT_EQ(3u, rep2.problems.size()) << trie::listed(rep2.problems);
+    EXPECT_TRUE(any_mentions(rep2.problems, "records no seed-node successor")) << trie::listed(rep2.problems);
+}
+
+// Round 3, finding 2, at scale: on dense random k = 3 graphs (three records of 30
+// random bases after the seed AAA, one label) every genuine merged run passes the
+// route checker against its exhaustive trie. Reconvergences are everywhere at k = 3,
+// so the united-history terminations the checker has to accept and the per-path ends
+// it still compares exactly both occur in numbers — a wrong rule either way would
+// show as false rejections here (the reviewer's valid-merge stress, 250 seeds).
+TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
+    size_t joined_ends = 0, checked = 0;
+    for (uint32_t seed = 1; seed <= 80; ++seed) {
+        const std::vector<std::string> seqs { "AAA" + random_seq(30, seed * 3),
+                                              "AAA" + random_seq(30, seed * 3 + 1),
+                                              "AAA" + random_seq(30, seed * 3 + 2) };
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                3, seqs, { "C", "C", "C" }, DeBruijnGraph::BASIC);
+        Strategy st = exhaustive_at(LabelMode::CONSTRAIN, 8);
+        st.direction = Strategy::RIGHT;
+        st.max_live_paths = 100000;
+        st.max_paths = 100000;
+        auto A = run(*anno, "AAA", { "C" }, st);
+        ASSERT_EQ(ArmResult::COMPLETE, A.arms[kRight].status) << "seed " << seed;
+        st.exhaustive = false;
+        st.merge_reconverge = true;
+        auto merged = run(*anno, "AAA", { "C" }, st);
+        const std::string what = "seed " + std::to_string(seed);
+        const trie::RouteReport rep = trie::routes_subset_report(A, merged, kRight, what);
+        EXPECT_TRUE(rep.problems.empty()) << what << trie::listed(rep.problems);
+        checked += rep.checked;
+        for (const Segment &seg : merged.arms[kRight].segments) {
+            if (seg.parents.size() < 2)
+                continue;
+            for (const Event &ev : seg.events)
+                joined_ends += ev.type == EventType::LABEL_END;
+        }
+    }
+    // the sweep is not vacuous: ends under the united history did occur
+    EXPECT_GT(joined_ends, 0u);
+    EXPECT_GT(checked, 80u);
+}
+
+// Round 3, minor: a REFERENCE whose own claim ended with a cap establishes prefix
+// support, not where the label stops. k = 3, AAA·CG and AAA·G under C, seed AAA; the
+// reference runs with max_steps 2 and is complete through depth 1, where both of its
+// claims are censored (max_steps). Uncapped tuned and merged runs continue C·G to
+// depth 2 and end G at depth 1 with dead_end; the old checkers rejected the first for
+// outliving the reference and the second for ending at its boundary for another
+// reason. A censored reference end is unknown: prefix support only.
+TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAACG", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
+    const trie::SeedContext ctx { "AAA", false };
+    Strategy st = exhaustive_at(LabelMode::CONSTRAIN, 100);
+    st.direction = Strategy::RIGHT;
+    st.max_steps = 2;
+    auto A = run(*anno, "AAA", { "C" }, st);
+    ASSERT_EQ(ArmResult::TRUNCATED, A.arms[kRight].status);
+    ASSERT_EQ(1u, A.arms[kRight].complete_to_bp);
+    for (const PathResult &p : A.arms[kRight].paths) {
+        EXPECT_EQ(1u, p.length_bp);
+        EXPECT_EQ(1u, p.end_reasons[static_cast<size_t>(EndReason::MAX_STEPS)]);
+    }
+    st.exhaustive = false;
+    st.max_steps = 100;
+    auto keep = run(*anno, "AAA", { "C" }, st);
+    EXPECT_EQ((std::set<std::string>{ "CG", "G" }), leaf_walks(keep.arms[kRight]));
+    const trie::SubsetReport tuned = trie::tuned_subset_report(A, keep, kRight, "uncapped keep", ctx);
+    EXPECT_TRUE(tuned.problems.empty()) << trie::listed(tuned.problems);
+    EXPECT_EQ(2u, tuned.present + tuned.omitted);
+    st.merge_reconverge = true;
+    auto merged = run(*anno, "AAA", { "C" }, st);
+    const trie::RouteReport routes = trie::routes_subset_report(A, merged, kRight, "uncapped merged");
+    EXPECT_TRUE(routes.problems.empty()) << trie::listed(routes.problems);
+    EXPECT_EQ(2u, routes.checked);
 }
 
 // Finding 3 (the reference model, support: trace). Two occurrences of the seed under
