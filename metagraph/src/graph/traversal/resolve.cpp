@@ -413,6 +413,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                                   candidate_a.end());
 
                 std::optional<Picked> best;
+                size_t best_count = 0;
                 size_t next_run = 0;
                 std::vector<uint64_t> ends;   // ends of runs with begin <= a, sorted
                 for (uint64_t a : candidate_a) {
@@ -429,19 +430,22 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     KmerInterval iv { a, *it };
                     size_t count = ends.end() - it;
                     bool better = !best
-                        || count > best->labels.size()
-                        || (count == best->labels.size()
+                        || count > best_count
+                        || (count == best_count
                             && (iv.size() > best->kmers.size()
                                 || (iv.size() == best->kmers.size() && iv.begin < best->kmers.begin)));
                     if (better) {
-                        // materialize the label list only for a new best
-                        auto labels = covering_labels(profile, iv);
-                        assert(labels.size() == count);
-                        best = Picked{ iv, std::move(labels), {} };
+                        // only the count is needed to compare candidates; the label
+                        // list is materialised once, for the winner, below (doing it on
+                        // every improvement made a round O(r^2) in the number of runs)
+                        best = Picked{ iv, {}, {} };
+                        best_count = count;
                     }
                 }
                 if (!best)
                     break;
+                best->labels = covering_labels(profile, best->kmers);
+                assert(best->labels.size() == best_count);
                 taken.push_back(best->kmers);
                 std::sort(taken.begin(), taken.end());
                 picked.push_back(*best);

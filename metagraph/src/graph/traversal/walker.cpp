@@ -38,6 +38,10 @@ const char* to_string(EventType type) {
     return "unknown";
 }
 
+const char* to_string(LabelMode mode) {
+    return mode == LabelMode::ANNOTATE ? "annotate" : "constrain";
+}
+
 
 namespace {
 
@@ -76,6 +80,18 @@ namespace {
  * - Edge identity: 2-bit packed (k+1)-mer when it fits 64 bits, otherwise a 128-bit
  *   FNV-1a pair; two distinct (k+1)-mers colliding on the pair are treated as the
  *   same edge (conservative: blocks), the full string is not kept.
+ * - Annotate mode (§6.9) shares the level loop, the structural admissibility
+ *   (check_structure: hairpin, seed re-entry, per-path edge reuse), the caps, merging
+ *   and the segment DAG with constrain mode, and nothing of the label state: items
+ *   carry the labels PRESENT at their node (LabelRecorder, full rows) and
+ *   process_item_annotate() follows every admissible successor. Leaves end with a
+ *   path_reason and no label ends; segments carry the present sets as runs.
+ * - Completeness boundary (§6.10): a cap trips between two heads of one level, so
+ *   ArmState::boundary records the extension depth of the first head NOT expanded (or
+ *   the depth of the first pruned head); complete_to_bp is its minimum with the
+ *   requested radius. Heads that already reached the radius when the time budget or a
+ *   seed-level cap trips are ended with max_extension_bp, not censored, so that an arm
+ *   whose every walk is present is reported complete.
  */
 
 constexpr char kSentinel = boss::BOSS::kSentinel;
@@ -114,6 +130,9 @@ struct Item {
     uint32_t splits = 0;
     size_t path_id = 0;
     bool revisiting = false;        // inside a stretch of nodes seen at another distance
+    // annotate mode: the labels present at |node| (capped) and their true count
+    std::vector<LabelId> present;
+    size_t present_total = 0;
 };
 
 struct Succ {
@@ -146,6 +165,7 @@ struct Cand {
     size_t initial_labels = 0;      // |σ_v| before any source was excluded
     bool truncated = false;         // derive() cut the switch sources (max_switch_sources)
     SourceKey cut {};               // key of the last eligible source when truncated
+    LabelRecorder::NodeLabels present;   // annotate mode: the labels at the successor
     bool admissible() const { return !skipped && !blocked; }
     void reset() {
         succ = nullptr;
@@ -159,6 +179,8 @@ struct Cand {
         quorum_text = "";
         initial_labels = 0;
         truncated = false;
+        present.labels.clear();
+        present.total = 0;
     }
 };
 
@@ -209,6 +231,9 @@ struct ArmState {
     size_t finished_leaves = 0;
     size_t next_path_id = 1;
     bool stopped = false;
+    // extension depth of the first head not expanded (or first pruned): the level it
+    // belongs to is partial and does not count toward complete_to_bp
+    uint64_t boundary = std::numeric_limits<uint64_t>::max();
     // ancestor marks of |marked_segment| (ancestors never change after creation)
     std::vector<uint32_t> visit_mark;
     uint32_t visit_epoch = 0;
@@ -321,7 +346,8 @@ class Walker {
             cost_(cost), release_id_(release_id), k_(oracle.get_k()),
             regime_(oracle.regime()), canonical_(oracle.canonical()),
             nfc_(oracle.node_first_cache()),
-            trace_(strategy.support == Support::TRACE) {}
+            trace_(strategy.support == Support::TRACE),
+            annotate_(strategy.label_mode == LabelMode::ANNOTATE) {}
 
     SeedResult run();
 
@@ -358,6 +384,19 @@ class Walker {
                                           const std::vector<Succ> &succs,
                                           const LabelQuery::NodeHits *hits,
                                           size_t remaining_in_level);
+    // annotate mode: every structurally admissible successor is followed
+    std::optional<EndReason> process_item_annotate(ArmState &arm, Item &item,
+                                                   const std::vector<Succ> &succs,
+                                                   const LabelRecorder::NodeLabels *present,
+                                                   size_t remaining_in_level);
+    // structural admissibility of the step item -> c.succ (both modes): hairpin, seed
+    // re-entry, per-path edge reuse; requires c.kmer
+    void check_structure(ArmState &arm, const Item &item, Cand &c);
+    // the caps, decided before anything is committed; nf = successors to follow
+    std::optional<EndReason> cap_check(const ArmState &arm, size_t nf,
+                                       size_t remaining_in_level) const;
+    void account_steps(ArmState &arm, uint64_t at, size_t nf);
+    void record_edge(ArmState &arm, size_t segment, const Cand &c);
     void prefetch(ArmState &arm, const std::vector<Item> &items,
                   const std::vector<std::vector<Succ>> &succs);
     void arrival(ArmState &arm, Item &item);
@@ -365,7 +404,22 @@ class Walker {
     void beam(ArmState &arm, uint64_t depth);
     void trip(ArmState &arm, EndReason reason, std::vector<Item> &items, size_t index);
     void stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items, size_t from);
+    // end the frontier of |arm| with |reason|; heads that already reached the radius
+    // are complete (max_extension_bp), not censored
+    void stop_frontier(ArmState &arm, EndReason reason);
     bool time_exceeded() const;
+
+    // ---- recorded labels (annotate mode) and bounded label lists (both modes)
+    std::vector<LabelId> labels_at(const Item &item) const {
+        return annotate_ ? item.present : labels_of(item.state);
+    }
+    // the first max_labels_per_node ids of a sorted list, counting the cut
+    std::vector<LabelId> bounded(ArmState &arm, const std::vector<LabelId> &labels, size_t total);
+    // append the labels present at the node entered by the step at |at| to the
+    // segment's runs
+    void record_present(ArmState &arm, size_t segment, uint64_t at,
+                        const LabelRecorder::NodeLabels &nl);
+    void summarize_annotate();
 
     // ---- label state
     void derive(const State &sigma, const std::vector<Target> &targets,
@@ -391,14 +445,17 @@ class Walker {
     // ---- bookkeeping
     GrowthBin& bin(ArmState &arm, uint64_t bp);
     size_t new_segment(ArmState &arm, std::vector<size_t> parents, uint64_t from_bp,
-                       const State &state);
+                       std::vector<LabelId> labels_start, size_t labels_start_total);
     uint32_t new_run(ArmState &arm, LabelId label, uint64_t from_bp, bool by_switch,
                      LabelId from, double cost, uint32_t prev);
     void mark_ancestors(ArmState &arm, size_t seg);
     bool is_ancestor_or_self(const ArmState &arm, size_t anc, size_t seg) const;
     void record_live(ArmState &arm, uint64_t bp, const std::vector<Item> &items);
+    // distinct labels on the heads a[from_a..] and b; |*exact| is cleared when a head
+    // carries a list cut by max_labels_per_node (annotate mode), so the count is a
+    // lower bound
     size_t distinct_labels(const std::vector<Item> &a, const std::vector<Item> &b,
-                           size_t from_a);
+                           size_t from_a, bool *exact);
     void finalize(ArmState &arm);
     void summarize();
 
@@ -413,13 +470,15 @@ class Walker {
     const CanonicalDBG *canonical_;
     const NodeFirstCache *nfc_;
     const bool trace_;
+    const bool annotate_;
 
     Timer timer_;
     SeedResult result_;
     std::string seed_upper_;
     std::vector<node_index> nodes_;
     tsl::hopscotch_set<node_index> seed_nodes_;
-    std::unique_ptr<LabelQuery> query_;
+    std::unique_ptr<LabelQuery> query_;         // constrain mode
+    std::unique_ptr<LabelRecorder> recorder_;   // annotate mode
     // trace support: live coordinates of each kept seed label at the arm boundaries
     std::vector<SmallVector<Coord>> boundary_coords_[2];
 
@@ -490,6 +549,37 @@ void Walker::validate_seed() {
     result_.length_bp = seq.size();
     result_.num_kmers = nodes_.size();
 
+    // ---- seed nodes (either orientation in canonical regimes)
+    for (node_index n : nodes_) {
+        seed_nodes_.insert(n);
+    }
+    if (regime_ != Regime::BASIC) {
+        std::string rc = seed_upper_;
+        ::reverse_complement(rc);
+        for (node_index n : map_to_nodes_sequentially(graph_, rc)) {
+            if (n != npos)
+                seed_nodes_.insert(n);
+        }
+    }
+
+    // ---- annotate mode: no permitted set, nothing to validate the seed against. The
+    // dictionary is filled by the recorder as labels are met; the seed id is the one of
+    // the sequence under no labels.
+    if (annotate_) {
+        if (!seed_.labels.empty()) {
+            throw std::invalid_argument("labels.mode \"annotate\" records the labels present and "
+                                        "filters by none: omit seeds[].labels ("
+                                        + std::to_string(seed_.labels.size()) + " given)");
+        }
+        result_.num_seed_labels = 0;
+        result_.labels_supporting_total = 0;
+        result_.validated_seed_id = make_seed_id(release_id_, seed_upper_,
+                                                 regime_ != Regime::BASIC, {});
+        result_.seed_id_mismatch = !seed_.seed_id.empty()
+                                    && seed_.seed_id != result_.validated_seed_id;
+        return;
+    }
+
     // ---- labels
     if (trace_) {
         if (!oracle_.has_coordinates())
@@ -539,51 +629,54 @@ void Walker::validate_seed() {
     // request index (seed labels, then extra) -> dictionary id, UINT32_MAX if dropped
     std::vector<LabelId> dict_of_request(seed_refs.size() + strategy_.extra.size(), UINT32_MAX);
     std::vector<std::string> kept_names;
-    for (LabelId l = 0; l < seed_refs.size(); ++l) {
-        std::vector<bool> supported(all_supported ? 0 : keys.size(), false);
-        std::vector<Coord> live;
-        bool chain_ok = true;
-        for (size_t i = 0; !all_supported && i < keys.size(); ++i) {
-            // Every producer of NodeHits sorts by label id (LabelQuery::fetch and
-            // derive_seed_labels alike), so this is a binary search. It used to be a
-            // scan over all hits of the k-mer, which made the validation O(L^2 * M) in
-            // the number of seed labels — tolerable while that was the list the caller
-            // typed, not while it is a set the machine derives.
-            const SmallVector<Coord> *coords = nullptr;
-            const LabelQuery::NodeHits &node = hits[i];
-            auto it = std::lower_bound(node.begin(), node.end(), l,
-                                       [](const LabelQuery::Hit &h, LabelId x) {
-                                           return h.label < x;
-                                       });
-            if (it != node.end() && it->label == l) {
-                supported[i] = true;
-                coords = &it->coords;
-            }
-            if (!trace_ || !supported[i])
-                continue;
-            if (i == 0) {
-                live.assign(coords->begin(), coords->end());
+    // Per-label support, gathered in ONE sweep over the k-mers that scatters every hit
+    // into its label's run list — O(hits), the size of the data, the shape resolve.cpp
+    // uses — instead of looking each label up at each k-mer (which was O(L*M*log L)
+    // and, before that, O(L^2*M)). Under trace support the live coordinate set of
+    // every label advances in that same sweep. Nothing L x M is materialised: a
+    // derived non-trace set left |hits| empty on purpose (all_supported).
+    const size_t num_refs = seed_refs.size();
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> runs(num_refs);
+    std::vector<uint64_t> supported_kmers(num_refs, 0);
+    std::vector<std::vector<Coord>> live(trace_ ? num_refs : 0);
+    std::vector<uint8_t> chain_ok(num_refs, 1);
+    std::vector<Coord> next_live;
+    for (size_t i = 0; !all_supported && i < keys.size(); ++i) {
+        for (const LabelQuery::Hit &h : hits[i]) {
+            const LabelId l = h.label;
+            supported_kmers[l]++;
+            if (runs[l].empty() || runs[l].back().second != i) {
+                runs[l].emplace_back(i, i + 1);
             } else {
-                std::vector<Coord> next;
-                for (Coord c : *coords) {
-                    if (c > 0 && std::binary_search(live.begin(), live.end(), c - 1))
-                        next.push_back(c);
-                }
-                live.swap(next);
+                runs[l].back().second = i + 1;
             }
-            if (live.empty())
-                chain_ok = false;
+            if (!trace_)
+                continue;
+            std::vector<Coord> &lv = live[l];
+            if (i == 0) {
+                lv.assign(h.coords.begin(), h.coords.end());
+            } else {
+                next_live.clear();
+                for (Coord c : h.coords) {
+                    if (c > 0 && std::binary_search(lv.begin(), lv.end(), c - 1))
+                        next_live.push_back(c);
+                }
+                lv.swap(next_live);
+            }
+            if (lv.empty())
+                chain_ok[l] = 0;
         }
-        bool all = all_supported
-                || std::all_of(supported.begin(), supported.end(), [](bool b) { return b; });
-        if (all && chain_ok) {
+    }
+    for (LabelId l = 0; l < num_refs; ++l) {
+        const bool all = all_supported || supported_kmers[l] == keys.size();
+        if (all && chain_ok[l]) {
             dict_of_request[l] = result_.label_dict.size();
             result_.label_dict.push_back(seed_refs[l]);
             kept_names.push_back(seed_refs[l].name);
             if (trace_) {
-                SmallVector<Coord> right(live.begin(), live.end());
+                SmallVector<Coord> right(live[l].begin(), live[l].end());
                 SmallVector<Coord> left;
-                for (Coord c : live) {
+                for (Coord c : live[l]) {
                     left.push_back(c - (keys.size() - 1));
                 }
                 boundary_coords_[static_cast<size_t>(Arm::RIGHT)].push_back(right);
@@ -593,15 +686,7 @@ void Walker::validate_seed() {
             DroppedLabel dropped;
             dropped.name = seed_refs[l].name;
             dropped.reason = "seed_unsupported";
-            for (uint64_t i = 0; i < supported.size(); ++i) {
-                if (!supported[i])
-                    continue;
-                if (dropped.runs.empty() || dropped.runs.back().second != i) {
-                    dropped.runs.emplace_back(i, i + 1);
-                } else {
-                    dropped.runs.back().second = i + 1;
-                }
-            }
+            dropped.runs = std::move(runs[l]);
             result_.dropped_labels.push_back(std::move(dropped));
         }
     }
@@ -664,19 +749,6 @@ void Walker::validate_seed() {
             throw std::invalid_argument("Extra label '" + result_.label_dict[id].name
                                         + "' is unreachable: no seed label can switch to it "
                                         "within the loss budget");
-        }
-    }
-
-    // ---- seed nodes (either orientation in canonical regimes)
-    for (node_index n : nodes_) {
-        seed_nodes_.insert(n);
-    }
-    if (regime_ != Regime::BASIC) {
-        std::string rc = seed_upper_;
-        ::reverse_complement(rc);
-        for (node_index n : map_to_nodes_sequentially(graph_, rc)) {
-            if (n != npos)
-                seed_nodes_.insert(n);
         }
     }
 }
@@ -972,6 +1044,16 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     }
     // The cap bounds the traversal state, not the discovery: everything above it was
     // found anyway, so it is counted and digested rather than silently forgotten.
+    // Under `exhaustive` it is not cut at all: the preset promises that no walk is
+    // dropped, and every walk of a dropped carrier would be. Refuse instead, naming
+    // the two levers the caller has.
+    if (live.size() > strategy_.max_seed_labels && strategy_.exhaustive) {
+        throw SeedDerivationError(
+                std::to_string(live.size()) + " labels carry the seed and max_seed_labels is "
+                + std::to_string(strategy_.max_seed_labels) + ": under `exhaustive` the "
+                  "derived set is not truncated (every walk of a dropped carrier would be "
+                  "missing from the trie); raise labels.max_seed_labels or name the labels");
+    }
     if (live.size() > strategy_.max_seed_labels) {
         uint64_t digest = kFnvOffsetBasis;
         for (size_t i = strategy_.max_seed_labels; i < live.size(); ++i) {
@@ -1049,7 +1131,15 @@ void Walker::init_arm(ArmState &arm) {
             e.coords = boundary_coords_[static_cast<size_t>(arm.arm)][l];
         root.state.push_back(e);
     }
-    root.segment = new_segment(arm, {}, 0, root.state);
+    if (annotate_) {
+        // the boundary k-mer's own labels: the root's entry node, from which
+        // continuous presence (label_summary.direct_bp) is measured
+        auto nl = recorder_->fetch({ oracle_.key_of(root.node, root.kmer) });
+        root.present = bounded(arm, nl[0].labels, nl[0].total);
+        root.present_total = nl[0].total;
+    }
+    root.segment = new_segment(arm, {}, 0, labels_at(root),
+                               annotate_ ? root.present_total : root.state.size());
     for (Entry &e : root.state) {
         e.run = new_run(arm, e.label, 0, false, 0, 0, UINT32_MAX);
     }
@@ -1204,12 +1294,13 @@ GrowthBin& Walker::bin(ArmState &arm, uint64_t bp) {
 }
 
 size_t Walker::new_segment(ArmState &arm, std::vector<size_t> parents, uint64_t from_bp,
-                           const State &state) {
+                           std::vector<LabelId> labels_start, size_t labels_start_total) {
     Segment seg;
     seg.id = arm.result.segments.size();
     seg.parents = std::move(parents);
     seg.from_bp = from_bp;
-    seg.labels_start = labels_of(state);
+    seg.labels_start = std::move(labels_start);
+    seg.labels_start_total = labels_start_total;
     arm.result.segments.push_back(std::move(seg));
     arm.walk_seq.emplace_back();
     arm.leaves.emplace_back();
@@ -1263,15 +1354,31 @@ bool Walker::is_ancestor_or_self(const ArmState &arm, size_t anc, size_t seg) co
 }
 
 size_t Walker::distinct_labels(const std::vector<Item> &a, const std::vector<Item> &b,
-                               size_t from_a) {
+                               size_t from_a, bool *exact) {
     ++label_epoch_;
     size_t n = 0;
+    *exact = true;
+    auto mark = [&](LabelId l) {
+        // the dictionary grows during the walk in annotate mode
+        if (label_stamp_.size() <= l)
+            label_stamp_.resize(l + 1, 0);
+        if (label_stamp_[l] != label_epoch_) {
+            label_stamp_[l] = label_epoch_;
+            ++n;
+        }
+    };
     auto count = [&](const Item &item) {
-        for (const Entry &e : item.state) {
-            if (label_stamp_[e.label] != label_epoch_) {
-                label_stamp_[e.label] = label_epoch_;
-                ++n;
+        if (annotate_) {
+            // a cut list hides labels: the count over it is a lower bound
+            if (item.present_total > item.present.size())
+                *exact = false;
+            for (LabelId l : item.present) {
+                mark(l);
             }
+            return;
+        }
+        for (const Entry &e : item.state) {
+            mark(e.label);
         }
     };
     for (size_t i = from_a; i < a.size(); ++i) {
@@ -1286,13 +1393,15 @@ size_t Walker::distinct_labels(const std::vector<Item> &a, const std::vector<Ite
 void Walker::record_live(ArmState &arm, uint64_t bp, const std::vector<Item> &items) {
     size_t pairs = 0;
     for (const Item &item : items) {
-        pairs += item.state.size();
+        pairs += annotate_ ? item.present.size() : item.state.size();
     }
-    size_t labels = distinct_labels(items, {}, 0);
+    bool exact = true;
+    size_t labels = distinct_labels(items, {}, 0, &exact);
     GrowthBin &b = bin(arm, bp);
     b.max_live_paths = std::max(b.max_live_paths, items.size());
     b.max_live_labels = std::max(b.max_live_labels, labels);
     b.max_live_pairs = std::max(b.max_live_pairs, pairs);
+    b.live_labels_exact &= exact;
 }
 
 
@@ -1324,7 +1433,7 @@ void Walker::end_label(ArmState &arm, const Item &item, const Entry &e, EndReaso
 
 void Walker::finish_path(ArmState &arm, Item &item, std::optional<EndReason> path_reason) {
     Segment &seg = arm.result.segments[item.segment];
-    seg.labels_end = labels_of(item.state);
+    seg.labels_end = labels_at(item);
     LeafInfo &leaf = arm.leaves[item.segment];
     leaf.is_leaf = true;
     leaf.path_reason = path_reason;
@@ -1334,7 +1443,9 @@ void Walker::finish_path(ArmState &arm, Item &item, std::optional<EndReason> pat
         leaf.end_reasons[static_cast<size_t>(run.end_reason)]++;
         leaf.end_labels.push_back({ e.label, e.loss, e.branches, e.run, e.route_bp });
     }
-    if (path_reason)
+    // a continuation is for a walk that could go on: the radius or a cap, never a
+    // structural end (annotate mode ends every path with a path_reason)
+    if (path_reason && (is_resource_stop(*path_reason) || *path_reason == EndReason::MAX_EXTENSION))
         leaf.continuation = make_continuation(arm, item);
     arm.finished_leaves++;
 }
@@ -1388,6 +1499,31 @@ Continuation Walker::make_continuation(ArmState &arm, const Item &item) {
     uint64_t covered_from = n >= item.ext_bp ? 0 : item.ext_bp - n;
     c.loss_used = kInfiniteLoss;
     c.branches_used = UINT32_MAX;
+    if (annotate_) {
+        // the labels recorded on EVERY node of the tail (an intersection over the
+        // runs covering it; a lower bound where a run's list was cut, which the arm's
+        // nodes_labels_truncated reports). Such a label validates as a seed label of
+        // the continuation, so the tail stays valid /traverse input.
+        std::vector<LabelId> alive = item.present;
+        for (size_t s = item.segment; !alive.empty(); ) {
+            const Segment &seg = arm.result.segments[s];
+            for (auto it = seg.label_sets.rbegin(); it != seg.label_sets.rend() && !alive.empty(); ++it) {
+                if (it->to_bp <= covered_from)
+                    break;
+                std::vector<LabelId> still;
+                std::set_intersection(alive.begin(), alive.end(), it->labels.begin(),
+                                      it->labels.end(), std::back_inserter(still));
+                alive.swap(still);
+            }
+            if (seg.from_bp <= covered_from || seg.parents.empty())
+                break;
+            s = seg.parents[0];
+        }
+        c.labels = std::move(alive);
+        c.loss_used = 0;
+        c.branches_used = 0;
+        return c;
+    }
     for (const Entry &e : item.state) {
         const LabelRun &run = arm.result.runs[e.run];
         if (run.from_bp <= covered_from && e.route_bp <= covered_from) {
@@ -1645,8 +1781,13 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             arm.lookahead.emplace(chain_curs[j], std::move(chain_entries[j]));
         }
     }
-    if (!warm_keys.empty())
-        query_->warm(warm_keys);
+    if (!warm_keys.empty()) {
+        if (annotate_) {
+            recorder_->warm(warm_keys);
+        } else {
+            query_->warm(warm_keys);
+        }
+    }
     if (arm.lookahead.size() > kMaxLookahead) {
         for (const auto &kv : arm.lookahead) {
             if (kv.second.succs.size() == 1)
@@ -1770,7 +1911,11 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
                 }
             }
         }
-        size_t m = new_segment(arm, parents, depth, st);
+        // in annotate mode the join is purely structural (same node, same depth) and
+        // the merged segment's entry labels are the node's own
+        size_t m = new_segment(arm, parents, depth,
+                               annotate_ ? primary.present : labels_of(st),
+                               annotate_ ? primary.present_total : st.size());
         Segment &mseg = arm.result.segments[m];
         mseg.labels_via_parent.assign(parents.size(), {});
         for (size_t j = 0; j < g.size(); ++j) {
@@ -1783,7 +1928,7 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
             }
             Segment &seg = arm.result.segments[item.segment];
             seg.children.push_back(m);
-            seg.labels_end = labels_of(item.state);
+            seg.labels_end = labels_at(item);
         }
         Event ev;
         ev.at_bp = depth;
@@ -1807,6 +1952,10 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
 void Walker::beam(ArmState &arm, uint64_t depth) {
     if (strategy_.on_overflow != Strategy::BEAM || arm.next.size() <= strategy_.max_live_paths)
         return;
+    // heads at the radius are complete and end as such at the next level: pruning them
+    // would report a beam cut on a level that is in fact entirely present
+    if (depth >= strategy_.max_extension_bp)
+        return;
     std::vector<size_t> order(arm.next.size());
     for (size_t i = 0; i < order.size(); ++i) {
         order[i] = i;
@@ -1817,7 +1966,8 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
              < std::make_tuple(x.state.size(), min_loss(y.state), y.path_id);
     });
     std::vector<Item> kept;
-    const size_t live_labels = distinct_labels(arm.next, {}, 0);
+    bool exact = true;
+    const size_t live_labels = distinct_labels(arm.next, {}, 0, &exact);
     for (size_t i = 0; i < order.size(); ++i) {
         Item &item = arm.next[order[i]];
         if (i < strategy_.max_live_paths) {
@@ -1825,8 +1975,11 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
         } else {
             if (!arm.result.cap_trigger) {
                 arm.result.cap_trigger = CapTrigger{ EndReason::BEAM_PRUNED, depth, item.segment,
-                                                     arm.next.size(), live_labels };
+                                                     arm.next.size(), live_labels, exact };
             }
+            // the pruned heads are walks of length |depth| that will not be expanded:
+            // walks of that length are all present, longer ones are not
+            arm.boundary = std::min(arm.boundary, item.ext_bp);
             censor_item(arm, item, EndReason::BEAM_PRUNED);
         }
     }
@@ -1843,13 +1996,22 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
     size_t live = arm.next.size() + (items ? items->size() - from : 0);
     if (!live)
         return;
-    size_t labels = items ? distinct_labels(*items, arm.next, from)
-                          : distinct_labels(arm.next, {}, 0);
+    bool exact = true;
+    size_t labels = items ? distinct_labels(*items, arm.next, from, &exact)
+                          : distinct_labels(arm.next, {}, 0, &exact);
     const Item &first = items && from < items->size() ? (*items)[from] : arm.next.front();
-    if (!arm.result.cap_trigger)
-        arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, first.segment, live, labels };
+    if (!arm.result.cap_trigger) {
+        arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, first.segment,
+                                             live, labels, exact };
+    }
+    // Levels are synchronous, so every head of |items| before |from| was expanded and
+    // none after it: walks of length first.ext_bp are all present, longer ones are
+    // not. (When only |arm.next| is left, first.ext_bp is the completed level's
+    // successor depth, which is then complete too.)
+    arm.boundary = std::min(arm.boundary, first.ext_bp);
     arm.result.frontier_live_paths = live;
     arm.result.frontier_live_labels = labels;
+    arm.result.frontier_live_labels_exact = exact;
     arm.result.status = ArmResult::TRUNCATED;
     if (items) {
         for (size_t j = from; j < items->size(); ++j) {
@@ -1864,13 +2026,31 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
     arm.stopped = true;
 }
 
+void Walker::stop_frontier(ArmState &arm, EndReason reason) {
+    if (arm.frontier.empty())
+        return;
+    // heads that already reached the radius are complete, not out of budget: ending
+    // them as such keeps "status complete <=> complete_to_bp == max_extension_bp"
+    std::vector<Item> rest;
+    for (Item &item : arm.frontier) {
+        if (item.ext_bp >= strategy_.max_extension_bp) {
+            censor_item(arm, item, EndReason::MAX_EXTENSION);
+        } else {
+            rest.push_back(std::move(item));
+        }
+    }
+    arm.frontier.swap(rest);
+    if (!arm.frontier.empty())
+        stop_arm(arm, reason, &arm.frontier, 0);
+}
+
 void Walker::trip(ArmState &arm, EndReason reason, std::vector<Item> &items, size_t index) {
     stop_arm(arm, reason, &items, index);
     if (reason == EndReason::MAX_STEPS) {
         seed_stopped_ = true;
         for (ArmState &other : arms_) {
-            if (&other != &arm && !other.frontier.empty())
-                stop_arm(other, reason, &other.frontier, 0);
+            if (&other != &arm)
+                stop_frontier(other, reason);
         }
     }
 }
@@ -1898,7 +2078,13 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             keys.push_back(key_of_succ(arm.arm, items[i].kmer, s));
         }
     }
-    std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys);
+    std::vector<LabelQuery::NodeHits> hits;
+    std::vector<LabelRecorder::NodeLabels> present;
+    if (annotate_) {
+        present = recorder_->fetch(keys);
+    } else {
+        hits = query_->fetch(keys);
+    }
     prefetch(arm, items, succs);
 
     size_t offset = 0;
@@ -1908,9 +2094,11 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             censor_item(arm, item, EndReason::MAX_EXTENSION);
             continue;
         }
-        const LabelQuery::NodeHits *item_hits = hits.data() + offset;
+        const size_t remaining = items.size() - i - 1;
+        auto cap = annotate_
+            ? process_item_annotate(arm, item, succs[i], present.data() + offset, remaining)
+            : process_item(arm, item, succs[i], hits.data() + offset, remaining);
         offset += succs[i].size();
-        auto cap = process_item(arm, item, succs[i], item_hits, items.size() - i - 1);
         if (cap) {
             trip(arm, *cap, items, i);
             return;
@@ -1979,39 +2167,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             std::sort(c.targets.begin(), c.targets.end(),
                       [](const Target &a, const Target &b) { return a.label < b.label; });
         }
-        step_kmer(side, item.kmer, succs[i].ch, &step_);
-        if (regime_ != Regime::BASIC && is_hairpin(item.kmer, c.kmer, step_)) {
-            c.hairpin = true;
-            c.skipped = strategy_.skip_hairpins;
-        }
-        if (c.skipped)
-            continue;
-        if (seed_nodes_.count(succs[i].node)) {
-            c.blocked = true;
-            c.block_reason = EndReason::REACHED_SEED;
-            continue;
-        }
-        auto [key, rc] = edge_key(step_);
-        c.key_lo = key.lo;
-        c.key_hi = key.hi;
-        c.rc = rc;
-        auto it = arm.used_edges.find(key);
-        if (it != arm.used_edges.end()) {
-            mark_ancestors(arm, item.segment);
-            bool same = false, opposite = false;
-            for (const EdgeUse &u : it->second) {
-                if (!is_ancestor_or_self(arm, u.segment(), item.segment))
-                    continue;
-                (u.rc() == c.rc ? same : opposite) = true;
-            }
-            if (opposite) {
-                c.blocked = true;
-                c.block_reason = EndReason::EDGE_REUSE_RC;
-            } else if (same) {
-                c.blocked = true;
-                c.block_reason = EndReason::EDGE_REUSE;
-            }
-        }
+        check_structure(arm, item, c);
     }
 
     // ---- label recurrence and per-lineage branching (fixpoint over excluded sources)
@@ -2102,17 +2258,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     const size_t nf = followed.size();
 
     // ---- caps, decided before anything is committed
-    if (nf) {
-        if (steps_total_ + nf > strategy_.max_steps)
-            return EndReason::MAX_STEPS;
-        if (arm.result.output_bp + nf > strategy_.max_output_bp)
-            return EndReason::MAX_OUTPUT;
-        size_t live_after = remaining_in_level + arm.next.size() + nf;
-        if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
-            return EndReason::MAX_PATHS;
-        if (strategy_.on_overflow == Strategy::STOP && live_after > strategy_.max_live_paths)
-            return EndReason::MAX_LIVE_PATHS;
-    }
+    if (auto cap = cap_check(arm, nf, remaining_in_level))
+        return cap;
 
     // ---- commit: events for inadmissible label-carrying successors and followed hairpins
     for (const Cand &c : cands_) {
@@ -2124,6 +2271,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         ev.at_bp = at;
         ev.ch = c.succ->ch;
         ev.labels = labels_of(c.state);
+        ev.labels_total = ev.labels.size();   // the live state is never cut
         if (c.skipped) {
             ev.type = EventType::HAIRPIN;
         } else if (c.blocked) {
@@ -2259,24 +2407,14 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     // ---- steps
-    {
-        GrowthBin &b = bin(arm, at);
-        b.steps += nf;
-    }
-    arm.result.steps += nf;
-    arm.result.output_bp += nf;
-    steps_total_ += nf;
-
-    auto record_edge = [&](size_t segment, const Cand &c) {
-        arm.used_edges[EdgeKey{ c.key_lo, c.key_hi }].push_back(EdgeUse(segment, c.rc));
-    };
+    account_steps(arm, at, nf);
 
     if (nf == 1) {
         Cand &c = *followed[0];
         commit_entries(arm, item, item.segment, c.state, at, nullptr);
         arm.walk_seq[item.segment].push_back(c.succ->ch);
         arm.result.segments[item.segment].length_bp++;
-        record_edge(item.segment, c);
+        record_edge(arm, item.segment, c);
         item.node = c.succ->node;
         std::swap(item.kmer, c.kmer);       // keep the buffers for the next step
         item.ext_bp = at + 1;
@@ -2287,7 +2425,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     // ---- split
-    Split split { at, item.segment, {}, !ambiguous_taken.empty() };
+    Split split { at, item.segment, {}, !ambiguous_taken.empty(), item.state.size(), {} };
     {
         GrowthBin &b = bin(arm, at);
         b.splits++;
@@ -2301,13 +2439,21 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     std::vector<uint32_t> taken;
     for (size_t j = 0; j < nf; ++j) {
         Cand &c = *followed[j];
-        size_t child = new_segment(arm, { item.segment }, at, c.state);
+        std::vector<LabelId> child_labels = labels_of(c.state);
+        size_t child = new_segment(arm, { item.segment }, at, child_labels, child_labels.size());
         arm.result.segments[item.segment].children.push_back(child);
         split.children.push_back(child);
+        // the trie view: the labels continuing on this branch (bounded list, true count)
+        SplitBranch br;
+        br.segment = child;
+        br.ch = c.succ->ch;
+        br.labels_distinct = child_labels.size();
+        br.labels = bounded(arm, child_labels, child_labels.size());
+        split.branches.push_back(std::move(br));
         commit_entries(arm, item, child, c.state, at, &taken);
         arm.walk_seq[child].push_back(c.succ->ch);
         arm.result.segments[child].length_bp = 1;
-        record_edge(child, c);
+        record_edge(arm, child, c);
         Item ni;
         ni.segment = child;
         ni.node = c.succ->node;
@@ -2323,11 +2469,232 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     return std::nullopt;
 }
 
+void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
+    step_kmer(arm.arm, item.kmer, c.succ->ch, &step_);
+    if (regime_ != Regime::BASIC && is_hairpin(item.kmer, c.kmer, step_)) {
+        c.hairpin = true;
+        c.skipped = strategy_.skip_hairpins;
+    }
+    if (c.skipped)
+        return;
+    if (seed_nodes_.count(c.succ->node)) {
+        c.blocked = true;
+        c.block_reason = EndReason::REACHED_SEED;
+        return;
+    }
+    auto [key, rc] = edge_key(step_);
+    c.key_lo = key.lo;
+    c.key_hi = key.hi;
+    c.rc = rc;
+    auto it = arm.used_edges.find(key);
+    if (it == arm.used_edges.end())
+        return;
+    mark_ancestors(arm, item.segment);
+    bool same = false, opposite = false;
+    for (const EdgeUse &u : it->second) {
+        if (!is_ancestor_or_self(arm, u.segment(), item.segment))
+            continue;
+        (u.rc() == c.rc ? same : opposite) = true;
+    }
+    if (opposite) {
+        c.blocked = true;
+        c.block_reason = EndReason::EDGE_REUSE_RC;
+    } else if (same) {
+        c.blocked = true;
+        c.block_reason = EndReason::EDGE_REUSE;
+    }
+}
+
+std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf,
+                                           size_t remaining_in_level) const {
+    if (!nf)
+        return std::nullopt;
+    if (steps_total_ + nf > strategy_.max_steps)
+        return EndReason::MAX_STEPS;
+    if (arm.result.output_bp + nf > strategy_.max_output_bp)
+        return EndReason::MAX_OUTPUT;
+    size_t live_after = remaining_in_level + arm.next.size() + nf;
+    if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
+        return EndReason::MAX_PATHS;
+    if (strategy_.on_overflow == Strategy::STOP && live_after > strategy_.max_live_paths)
+        return EndReason::MAX_LIVE_PATHS;
+    return std::nullopt;
+}
+
+void Walker::account_steps(ArmState &arm, uint64_t at, size_t nf) {
+    bin(arm, at).steps += nf;
+    arm.result.steps += nf;
+    arm.result.output_bp += nf;
+    steps_total_ += nf;
+}
+
+void Walker::record_edge(ArmState &arm, size_t segment, const Cand &c) {
+    arm.used_edges[EdgeKey{ c.key_lo, c.key_hi }].push_back(EdgeUse(segment, c.rc));
+}
+
+std::vector<LabelId> Walker::bounded(ArmState &arm, const std::vector<LabelId> &labels,
+                                     size_t total) {
+    arm.result.max_labels_at_node = std::max(arm.result.max_labels_at_node, total);
+    if (total > strategy_.max_labels_per_node || labels.size() > strategy_.max_labels_per_node)
+        arm.result.nodes_labels_truncated++;
+    if (labels.size() <= strategy_.max_labels_per_node)
+        return labels;
+    return std::vector<LabelId>(labels.begin(), labels.begin() + strategy_.max_labels_per_node);
+}
+
+void Walker::record_present(ArmState &arm, size_t segment, uint64_t at,
+                            const LabelRecorder::NodeLabels &nl) {
+    // the recorder already cut the list to the cap; this counts the cut
+    std::vector<LabelId> labels = bounded(arm, nl.labels, nl.total);
+    auto &sets = arm.result.segments[segment].label_sets;
+    if (!sets.empty() && sets.back().to_bp == at && sets.back().labels_total == nl.total
+            && sets.back().labels == labels) {
+        sets.back().to_bp = at + 1;
+        return;
+    }
+    LabelSetRun run;
+    run.from_bp = at;
+    run.to_bp = at + 1;
+    run.labels = std::move(labels);
+    run.labels_total = nl.total;
+    sets.push_back(std::move(run));
+}
+
+std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item,
+                                                       const std::vector<Succ> &succs,
+                                                       const LabelRecorder::NodeLabels *present,
+                                                       size_t remaining_in_level) {
+    const uint64_t at = item.ext_bp;
+    const Arm side = arm.arm;
+    if (succs.empty()) {
+        finish_path(arm, item, EndReason::DEAD_END);
+        return std::nullopt;
+    }
+
+    cands_.resize(succs.size());
+    std::vector<Cand*> followed;
+    uint8_t blocked = 0;
+    for (size_t i = 0; i < succs.size(); ++i) {
+        Cand &c = cands_[i];
+        c.reset();
+        c.succ = &succs[i];
+        c.present = present[i];
+        succ_kmer(side, item.kmer, succs[i].ch, &c.kmer);
+        check_structure(arm, item, c);
+        c.followed = c.admissible();
+        if (c.followed) {
+            followed.push_back(&c);
+        } else if (c.blocked) {
+            blocked = std::max(blocked, block_rank(c.block_reason));
+        }
+    }
+    const size_t nf = followed.size();
+    if (auto cap = cap_check(arm, nf, remaining_in_level))
+        return cap;
+
+    // ---- commit: every successor not followed, and every followed hairpin, is reported
+    // with the labels present there — the only way a reader can tell what a blocked
+    // continuation would have carried. The recorder already cut the list to the cap;
+    // for a successor that is NOT followed this event is the only place its list
+    // appears, so the cut is counted here (a followed hairpin's node is recorded and
+    // counted by record_present below, so its event only repeats the list).
+    for (const Cand &c : cands_) {
+        if (c.followed && !c.hairpin)
+            continue;
+        Event ev;
+        ev.at_bp = at;
+        ev.ch = c.succ->ch;
+        ev.labels = c.followed ? c.present.labels
+                               : bounded(arm, c.present.labels, c.present.total);
+        ev.labels_total = c.present.total;
+        if (c.skipped) {
+            ev.type = EventType::HAIRPIN;
+        } else if (c.blocked) {
+            ev.type = EventType::BLOCKED;
+            ev.reason = c.block_reason;
+            bin(arm, at).blocked_repeat++;
+        } else {
+            ev.type = EventType::HAIRPIN;
+            ev.text = "followed";
+        }
+        arm.result.segments[item.segment].events.push_back(std::move(ev));
+    }
+
+    if (!nf) {
+        // a structural end: the path's reason (no label lineage ends in this mode);
+        // a successor that was only a skipped hairpin is a dead end with its event
+        finish_path(arm, item, blocked ? block_reason_of_rank(blocked) : EndReason::DEAD_END);
+        return std::nullopt;
+    }
+
+    account_steps(arm, at, nf);
+
+    if (nf == 1) {
+        Cand &c = *followed[0];
+        arm.walk_seq[item.segment].push_back(c.succ->ch);
+        arm.result.segments[item.segment].length_bp++;
+        record_present(arm, item.segment, at, c.present);
+        record_edge(arm, item.segment, c);
+        item.node = c.succ->node;
+        std::swap(item.kmer, c.kmer);
+        item.ext_bp = at + 1;
+        item.present = std::move(c.present.labels);
+        item.present_total = c.present.total;
+        arrival(arm, item);
+        arm.next.push_back(std::move(item));
+        return std::nullopt;
+    }
+
+    // ---- split: a divergence of walks; "ambiguous" is a lineage notion, and there
+    // is no lineage here
+    Split split { at, item.segment, {}, false, item.present_total, {} };
+    {
+        GrowthBin &b = bin(arm, at);
+        b.splits++;
+        b.divergences++;
+    }
+    arm.result.segments[item.segment].labels_end = item.present;
+    for (size_t j = 0; j < nf; ++j) {
+        Cand &c = *followed[j];
+        size_t child = new_segment(arm, { item.segment }, at, c.present.labels, c.present.total);
+        arm.result.segments[item.segment].children.push_back(child);
+        split.children.push_back(child);
+        SplitBranch br;
+        br.segment = child;
+        br.ch = c.succ->ch;
+        br.labels_distinct = c.present.total;
+        br.labels = c.present.labels;    // already cut to the cap by the recorder
+        split.branches.push_back(std::move(br));
+        arm.walk_seq[child].push_back(c.succ->ch);
+        arm.result.segments[child].length_bp = 1;
+        record_present(arm, child, at, c.present);
+        record_edge(arm, child, c);
+        Item ni;
+        ni.segment = child;
+        ni.node = c.succ->node;
+        ni.kmer = std::move(c.kmer);
+        ni.ext_bp = at + 1;
+        ni.splits = item.splits + 1;
+        ni.path_id = arm.next_path_id++;
+        ni.present = std::move(c.present.labels);
+        ni.present_total = c.present.total;
+        arrival(arm, ni);
+        arm.next.push_back(std::move(ni));
+    }
+    arm.result.splits.push_back(std::move(split));
+    return std::nullopt;
+}
+
 
 /********************************* outputs **********************************/
 
 void Walker::finalize(ArmState &arm) {
     ArmResult &res = arm.result;
+    // every walk up to the first unexpanded head's depth is present; a complete arm
+    // (no boundary) is complete to the radius
+    res.complete_to_bp = std::min(arm.boundary, strategy_.max_extension_bp);
+    assert((res.status == ArmResult::COMPLETE) == (res.complete_to_bp == strategy_.max_extension_bp)
+           || !res.requested);
     for (size_t s = 0; s < res.segments.size(); ++s) {
         Segment &seg = res.segments[s];
         if (strategy_.sequences) {
@@ -2404,10 +2771,71 @@ void Walker::summarize() {
     }
 }
 
+void Walker::summarize_annotate() {
+    result_.label_summary.assign(result_.label_dict.size(), {});
+    for (ArmState &arm : arms_) {
+        const size_t a = static_cast<size_t>(arm.arm);
+        const auto &segs = arm.result.segments;
+        if (segs.empty())
+            continue;
+        // reach_bp: the furthest position at which the label was recorded on any path
+        for (const Segment &seg : segs) {
+            for (const LabelSetRun &run : seg.label_sets) {
+                for (LabelId l : run.labels) {
+                    LabelArmSummary &s = result_.label_summary[l][a];
+                    s.reach_bp = std::max(s.reach_bp, run.to_bp);
+                }
+            }
+        }
+        // direct_bp: continuous presence from the seed boundary along SOME route — a
+        // walk over the DAG from the root (segment 0) carrying the labels still present
+        // on every node so far; a merged segment is entered once per parent. Exact when
+        // no per-node list was cut (nodes_labels_truncated == 0), a lower bound otherwise.
+        std::vector<std::pair<size_t, std::vector<LabelId>>> stack;
+        stack.emplace_back(0, segs[0].labels_start);
+        std::vector<LabelId> still;
+        while (!stack.empty()) {
+            auto [s, alive] = std::move(stack.back());
+            stack.pop_back();
+            const Segment &seg = segs[s];
+            for (const LabelSetRun &run : seg.label_sets) {
+                if (alive.empty())
+                    break;
+                still.clear();
+                std::set_intersection(alive.begin(), alive.end(), run.labels.begin(),
+                                      run.labels.end(), std::back_inserter(still));
+                for (LabelId l : alive) {
+                    if (!std::binary_search(still.begin(), still.end(), l)) {
+                        LabelArmSummary &x = result_.label_summary[l][a];
+                        x.direct_bp = std::max(x.direct_bp, run.from_bp);
+                    }
+                }
+                alive.swap(still);
+            }
+            if (alive.empty())
+                continue;
+            const uint64_t end = seg.from_bp + seg.length_bp;
+            for (LabelId l : alive) {
+                LabelArmSummary &x = result_.label_summary[l][a];
+                x.direct_bp = std::max(x.direct_bp, end);
+            }
+            for (size_t c : seg.children) {
+                stack.emplace_back(c, alive);
+            }
+        }
+    }
+}
+
 SeedResult Walker::run() {
     validate_seed();
     init_edge_coding();
-    query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
+    if (annotate_) {
+        const LabelKind kind = strategy_.seed_label_kind.value_or(
+                oracle_.coord_to_header() ? LabelKind::HEADER : LabelKind::COLUMN);
+        recorder_ = std::make_unique<LabelRecorder>(oracle_, kind, strategy_.max_labels_per_node);
+    } else {
+        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
+    }
     scratch_.init(result_.label_dict.size());
     label_stamp_.assign(result_.label_dict.size(), 0);
 
@@ -2427,8 +2855,7 @@ SeedResult Walker::run() {
             break;
         if (depth > 0 && time_exceeded()) {
             for (ArmState &arm : arms_) {
-                if (!arm.frontier.empty())
-                    stop_arm(arm, EndReason::TIME_BUDGET, &arm.frontier, 0);
+                stop_frontier(arm, EndReason::TIME_BUDGET);
             }
             break;
         }
@@ -2441,17 +2868,25 @@ SeedResult Walker::run() {
         ++depth;
     }
 
+    if (annotate_) {
+        // the labels met along either arm, in the order first seen
+        result_.label_dict = recorder_->labels();
+    }
     for (ArmState &arm : arms_) {
         finalize(arm);
         arm.result.pair_evaluations = 0;
     }
     arms_[static_cast<size_t>(Arm::RIGHT)].result.pair_evaluations = pair_evaluations_;
-    summarize();
+    if (annotate_) {
+        summarize_annotate();
+    } else {
+        summarize();
+    }
 
     result_.arms[static_cast<size_t>(Arm::LEFT)] = std::move(arms_[0].result);
     result_.arms[static_cast<size_t>(Arm::RIGHT)] = std::move(arms_[1].result);
     result_.annotation_counters = oracle_.counters();
-    result_.access_path = query_->access_path();
+    result_.access_path = annotate_ ? recorder_->access_path() : query_->access_path();
     result_.elapsed_seconds = timer_.elapsed();
     return std::move(result_);
 }
@@ -2459,17 +2894,126 @@ SeedResult Walker::run() {
 } // namespace
 
 
+void validate_strategy(const Strategy &st, const LabelChangeCost &cost) {
+    if (st.loss_budget < 0)
+        throw std::invalid_argument("Negative loss budget");
+    if (st.min_successor_fraction < 0 || st.min_successor_fraction > 1)
+        throw std::invalid_argument("min_successor_fraction must be in [0, 1]");
+    if (!st.max_live_paths)
+        throw std::invalid_argument("max_live_paths must be positive");
+    if (!st.max_labels_per_node)
+        throw std::invalid_argument("max_labels_per_node must be positive");
+    // A conflicting knob is refused, never overridden: a caller who asked for the
+    // exhaustive trie and got a pruned one would have no way to tell.
+    auto conflict = [](const char *knob, const char *required, const std::string &why) {
+        throw std::invalid_argument(std::string(knob) + " " + why + "; set it to " + required
+                                    + " or omit it");
+    };
+    if (st.exhaustive) {
+        const std::string why = "conflicts with `exhaustive` (every admissible walk must be "
+                                "explored and kept)";
+        if (st.max_label_branches != Strategy::kUnlimited)
+            conflict("branching.max_label_branches", "\"unlimited\"", why);
+        if (st.merge_reconverge) {
+            conflict("branching.on_reconverge", "\"keep\"",
+                     "conflicts with `exhaustive` (an exhaustive result is a trie of walks, "
+                     "not a DAG)");
+        }
+        if (st.max_splits_per_path != Strategy::kUnlimited)
+            conflict("branching.max_splits_per_path", "\"unlimited\"", why);
+        if (st.min_successor_labels > 1)
+            conflict("branching.min_successor_labels", "1", why + " and a quorum prunes");
+        if (st.min_successor_fraction > 0)
+            conflict("branching.min_successor_fraction", "0", why + " and a quorum prunes");
+        if (st.min_live_labels > 1)
+            conflict("bounds.min_live_labels", "1", why + " and a quorum prunes");
+        if (st.on_overflow == Strategy::BEAM) {
+            conflict("frontier.on_overflow", "\"stop\"",
+                     "conflicts with `exhaustive` (a beam prunes; a cap has to stop the arm and "
+                     "report complete_to_bp instead)");
+        }
+        // derive() sorts the switch sources of a pairwise cost and keeps the cheapest
+        // max_switch_sources: a target label reachable only from a cut source is not
+        // entered, and if it was the only label on that successor the walk into it is
+        // pruned with no path-level reason. CONSTANT and FORBID never cut.
+        if (cost.model() == LabelChangeCost::TABLE
+                && st.max_switch_sources != Strategy::kUnlimited) {
+            conflict("labels.max_switch_sources", "\"unlimited\"",
+                     "conflicts with `exhaustive` under a \"table\" change cost (a cut source "
+                     "list can leave a target label unentered and so prune a label-consistent "
+                     "walk)");
+        }
+    }
+    if (st.label_mode == LabelMode::ANNOTATE) {
+        const std::string why = "does not apply in labels.mode \"annotate\" (labels are recorded, "
+                                "not filtered: there is no permitted set)";
+        if (!st.extra.empty())
+            conflict("labels.extra", "[]", why);
+        if (cost.finite())
+            conflict("labels.change_cost", "{\"model\": \"forbid\"}", why);
+        if (st.loss_budget > 0)
+            conflict("labels.loss_budget", "0", why);
+        if (st.min_successor_labels > 1)
+            conflict("branching.min_successor_labels", "1", why);
+        if (st.min_successor_fraction > 0)
+            conflict("branching.min_successor_fraction", "0", why);
+        if (st.min_live_labels > 1)
+            conflict("bounds.min_live_labels", "1", why);
+        if (st.support == Support::TRACE) {
+            conflict("support", "\"kmer\"",
+                     "cannot be \"trace\" in labels.mode \"annotate\": a coordinate trace is "
+                     "per-label evidence and needs a permitted set, which this mode has none of");
+        }
+    }
+}
+
+std::string walk_rule_statement(const Strategy &st, const LabelOracle &oracle) {
+    const size_t k = oracle.get_k();
+    const bool stranded = oracle.regime() != Regime::BASIC;
+    // the edge coding of Walker::init_edge_coding(): a (k+1)-mer is packed exactly
+    // when it fits 64 bits, otherwise identified by a 128-bit FNV-1a pair
+    size_t symbols = 0;
+    for (char c : oracle.graph().alphabet()) {
+        symbols += c != kSentinel;
+    }
+    size_t bits = 1;
+    while ((size_t(1) << bits) < symbols) {
+        ++bits;
+    }
+    const bool packable = (k + 1) * bits <= 64;
+
+    std::string s = "every walk of at most complete_to_bp bases from the seed boundary is present "
+                    "when it uses no (k+1)-mer edge twice on its own path (";
+    s += stranded
+        ? "edges are compared as canonical (k+1)-mers, each use keeping its orientation"
+        : "edges are compared as (k+1)-mers";
+    if (!packable) {
+        s += ", identified by a 128-bit FNV-1a hash of the (k+1)-mer, so a hash collision "
+             "blocks a step as a reuse";
+    }
+    s += "), enters no seed node";
+    if (stranded)
+        s += " (of either strand)";
+    s += ", and ";
+    std::string hairpin = "a self-reverse-complementary (k+1)-mer";
+    if (stranded && k % 2 == 0)
+        hairpin += " or a step into or out of a self-reverse-complementary k-mer node (even k)";
+    s += st.skip_hairpins
+        ? "takes no hairpin step (" + hairpin + "); "
+        : "may take hairpin steps (" + hairpin + "), which are flagged; ";
+    s += st.label_mode == LabelMode::ANNOTATE
+        ? "every such walk is followed and the labels present at its nodes are recorded"
+        : "it is followed while some permitted label supports every node of it under the "
+          "strategy's label rules";
+    return s;
+}
+
 SeedResult traverse_seed(LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy,
                          const LabelChangeCost &cost,
                          const std::string &release_id) {
-    if (strategy.loss_budget < 0)
-        throw std::invalid_argument("Negative loss budget");
-    if (strategy.min_successor_fraction < 0 || strategy.min_successor_fraction > 1)
-        throw std::invalid_argument("min_successor_fraction must be in [0, 1]");
-    if (!strategy.max_live_paths)
-        throw std::invalid_argument("max_live_paths must be positive");
+    validate_strategy(strategy, cost);
     Walker walker(oracle, seed, strategy, cost, release_id);
     return walker.run();
 }

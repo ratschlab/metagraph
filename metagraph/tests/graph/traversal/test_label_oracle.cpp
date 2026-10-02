@@ -376,4 +376,110 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabelsAndCoordinates) {
     EXPECT_GT(oracle.counters().coords_mapped, 0u);
 }
 
+// Annotate-mode recording of header labels (LabelRecorder): the true count is the
+// number of SEQUENCES a k-mer occurs in, which only the coordinate mapping tells —
+// but a sequence's coordinates are contiguous, so one mapping per (column, sequence)
+// is enough. A k-mer repeated three times in one record costs one mapping, not three.
+// And the row cache is bounded in kept keys as well as in rows: a tiny key budget
+// evicts on every call and still answers every key.
+TYPED_TEST(LabelOracleCoordTest, RecorderMapsOneCoordinatePerSequence) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    auto rnd = make_sequences(4, 40, 21);
+    // R (exactly k bases, so one k-mer) occurs three times in s1 and once in s2, both
+    // in column F; U occurs in s1 only
+    const std::string R = rnd[3].substr(0, kTestK);
+    const std::string s1 = rnd[0] + R + rnd[1] + R + rnd[2] + R;
+    const std::string s2 = rnd[3].substr(kTestK) + R;
+    const std::string U = rnd[2].substr(5, kTestK);
+    ASSERT_EQ(std::string::npos, s2.find(U));
+    std::vector<std::string> seqs { s1, s2 };
+    std::vector<std::string> labels { "F", "F" };
+    uint64_t n1 = s1.size() - kTestK + 1, n2 = s2.size() - kTestK + 1;
+    auto anno = build_anno_graph<Graph, Annotation>(kTestK, seqs, labels, DeBruijnGraph::BASIC,
+                                                    true, { 0, n1 });
+    std::vector<std::vector<std::string>> headers(1);
+    std::vector<std::vector<uint64_t>> num_kmers(1);
+    headers[0] = { "acc1", "acc2" };
+    num_kmers[0] = { n1, n2 };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno, &cth);
+    ASSERT_TRUE(oracle.has_coordinates());
+
+    LabelRecorder recorder(oracle, LabelKind::HEADER, 10);
+    auto name_of = [&](LabelId l) { return recorder.labels().at(l).name; };
+    // R: four coordinates (three in acc1, one in acc2), two sequences, two mappings
+    auto keys = oracle.keys_of_sequence(R);
+    ASSERT_EQ(1u, keys.size());
+    ASSERT_NE(npos, keys[0]);
+    uint64_t before = oracle.counters().coords_mapped;
+    auto nl = recorder.fetch(keys);
+    ASSERT_EQ(1u, nl.size());
+    EXPECT_EQ(2u, nl[0].total);
+    ASSERT_EQ(2u, nl[0].labels.size());
+    EXPECT_FALSE(nl[0].truncated());
+    EXPECT_EQ("acc1", name_of(nl[0].labels[0]));
+    EXPECT_EQ("acc2", name_of(nl[0].labels[1]));
+    EXPECT_EQ(2u, oracle.counters().coords_mapped - before);
+    // U: one coordinate, one sequence, one mapping
+    keys = oracle.keys_of_sequence(U);
+    ASSERT_EQ(1u, keys.size());
+    ASSERT_NE(npos, keys[0]);
+    before = oracle.counters().coords_mapped;
+    nl = recorder.fetch(keys);
+    EXPECT_EQ(1u, nl[0].total);
+    ASSERT_EQ(1u, nl[0].labels.size());
+    EXPECT_EQ("acc1", name_of(nl[0].labels[0]));
+    EXPECT_EQ(1u, oracle.counters().coords_mapped - before);
+    // over the whole of s1 the mappings are bounded by the (row, sequence) pairs, which
+    // is at most two per row, while the coordinates of the R rows alone are twelve
+    auto all = oracle.keys_of_sequence(s1);
+    LabelRecorder fresh(oracle, LabelKind::HEADER, 10);
+    before = oracle.counters().coords_mapped;
+    auto rows = fresh.fetch(all);
+    size_t pairs = 0;
+    for (const auto &r : rows) pairs += r.total;
+    std::vector<node_index> distinct = all;
+    std::sort(distinct.begin(), distinct.end());
+    distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
+    EXPECT_LE(oracle.counters().coords_mapped - before, 2 * distinct.size());
+    EXPECT_GE(pairs, all.size());
+
+    // a key budget of 3: every call that fetches overflows it, evicts wholesale and
+    // refetches its whole working set, so every key is still answered, identically
+    LabelRecorder tiny(oracle, LabelKind::HEADER, 10, 1'000'000, 3);
+    std::vector<node_index> front(all.begin(), all.begin() + all.size() / 2);
+    std::vector<node_index> back(all.begin() + all.size() / 2, all.end());
+    auto f1 = tiny.fetch(front);
+    auto b1 = tiny.fetch(back);
+    auto f2 = tiny.fetch(front);
+    auto b2 = tiny.fetch(back);
+    ASSERT_EQ(f1.size(), f2.size());
+    for (size_t i = 0; i < f1.size(); ++i) {
+        EXPECT_EQ(f1[i].labels, f2[i].labels) << i;
+        EXPECT_EQ(f1[i].total, f2[i].total) << i;
+    }
+    ASSERT_EQ(b1.size(), b2.size());
+    for (size_t i = 0; i < b1.size(); ++i) {
+        EXPECT_EQ(b1[i].labels, b2[i].labels) << i;
+        EXPECT_EQ(b1[i].total, b2[i].total) << i;
+    }
+    // ... and agrees with an unbounded recorder that named the labels in the same order
+    LabelRecorder big(oracle, LabelKind::HEADER, 10);
+    auto rf = big.fetch(front);
+    auto rb = big.fetch(back);
+    ASSERT_EQ(big.labels().size(), tiny.labels().size());
+    for (size_t l = 0; l < big.labels().size(); ++l) {
+        EXPECT_EQ(big.labels()[l].name, tiny.labels()[l].name);
+    }
+    for (size_t i = 0; i < rf.size(); ++i) {
+        EXPECT_EQ(rf[i].labels, f1[i].labels) << i;
+        EXPECT_EQ(rf[i].total, f1[i].total) << i;
+    }
+    for (size_t i = 0; i < rb.size(); ++i) {
+        EXPECT_EQ(rb[i].labels, b1[i].labels) << i;
+        EXPECT_EQ(rb[i].total, b1[i].total) << i;
+    }
+}
+
 } // namespace

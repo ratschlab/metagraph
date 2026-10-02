@@ -197,6 +197,77 @@ class LabelQuery {
                           NodeHits *hits) const;
 };
 
+
+/**
+ * The labels PRESENT at annotation keys, with no permitted set: `labels.mode: annotate`
+ * (spec §6.9). Every key costs a FULL row (or tuple row): there is nothing to narrow
+ * the read to, which is why this is a verification tool for small radii and not a
+ * search primitive. Labels are named on first sight, in the order the walk consumes
+ * them, so the dictionary is deterministic for a deterministic walk and independent
+ * of prefetching (warm() caches raw rows and assigns no ids).
+ *
+ * Per key the list is capped at |max_labels_per_node| — the first that many labels in
+ * ascending (column, seq_id) order — and the TRUE count is returned beside it, so a cut
+ * list is never mistaken for the whole set. For HEADER labels the count needs the
+ * coordinates mapped to sequences, which costs one mapping per (column, sequence) the
+ * k-mer occurs in, not one per coordinate (a sequence's coordinates are contiguous).
+ *
+ * The row cache is bounded in rows (|max_cache_size|) and in kept keys
+ * (|max_cache_keys|, its memory: a row holds up to the cap), whichever trips first;
+ * both evict wholesale.
+ */
+class LabelRecorder {
+  public:
+    struct NodeLabels {
+        std::vector<LabelId> labels;   // ascending ids, at most max_labels_per_node
+        size_t total = 0;              // distinct labels at the key; > labels.size() when cut
+        bool truncated() const { return total > labels.size(); }
+    };
+
+    // Throws std::invalid_argument when |kind| is HEADER and the index has no
+    // CoordToHeader, or when max_labels_per_node is 0.
+    LabelRecorder(const LabelOracle &oracle,
+                  LabelKind kind,
+                  size_t max_labels_per_node,
+                  size_t max_cache_size = 1'000'000,
+                  size_t max_cache_keys = 64'000'000);
+
+    LabelKind kind() const { return kind_; }
+    size_t max_labels_per_node() const { return cap_; }
+    // the labels named so far (LabelId == index)
+    const std::vector<LabelRef>& labels() const { return dict_; }
+    // "rows" or "tuples"
+    const char* access_path() const;
+
+    // Labels at every key (npos yields an empty list with total 0). Ids are assigned
+    // here, in |keys| order.
+    std::vector<NodeLabels> fetch(const std::vector<node_index> &keys);
+    // Fetch the misses into the row cache without naming anything (lookahead).
+    void warm(const std::vector<node_index> &keys);
+
+  private:
+    // (column, seq_id); seq_id is 0 for COLUMN labels
+    using Key = std::pair<Column, uint64_t>;
+    struct RawRow {
+        std::vector<Key> kept;         // the first |cap_| keys, ascending
+        size_t total = 0;
+    };
+
+    const LabelOracle &oracle_;
+    LabelKind kind_;
+    size_t cap_;
+    size_t max_cache_size_;
+    size_t max_cache_keys_;
+    size_t cached_keys_ = 0;           // sum over cached rows of max(1, |kept|)
+    std::vector<LabelRef> dict_;
+    tsl::hopscotch_map<Column, LabelId> column_ids_;
+    tsl::hopscotch_map<Column, tsl::hopscotch_map<uint64_t, LabelId>> header_ids_;
+    tsl::hopscotch_map<node_index, RawRow> cache_;
+
+    void fetch_uncached(const std::vector<node_index> &keys);
+    LabelId id_of(const Key &key);
+};
+
 } // namespace traversal
 } // namespace graph
 } // namespace mtg

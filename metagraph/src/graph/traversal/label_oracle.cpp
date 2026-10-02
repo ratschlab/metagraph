@@ -342,6 +342,10 @@ void LabelQuery::hits_from_row(const BinaryMatrix::SetBitPositions &row, NodeHit
 }
 
 void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits *hits) const {
+    // label id -> position in |hits|. A header label is reached once per coordinate,
+    // so locating its entry must be O(1): scanning the hits built so far per coordinate
+    // made this O(coords x hits) per node, on the coordinate path real indexes use.
+    tsl::hopscotch_map<LabelId, size_t> slot;
     for (const auto &[c, coords] : row) {
         if (auto it = column_labels_.find(c); it != column_labels_.end()) {
             Hit hit{ it->second, {} };
@@ -349,6 +353,7 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
                 hit.coords.assign(coords.begin(), coords.end());
                 std::sort(hit.coords.begin(), hit.coords.end());
             }
+            slot.emplace(it->second, hits->size());
             hits->push_back(std::move(hit));
         }
         auto ht = header_labels_.find(c);
@@ -359,14 +364,11 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
             auto lt = ht->second.find(seq_id);
             if (lt == ht->second.end())
                 continue;
-            auto found = std::find_if(hits->begin(), hits->end(),
-                                      [&](const Hit &h) { return h.label == lt->second; });
-            if (found == hits->end()) {
+            auto [pos, inserted] = slot.try_emplace(lt->second, hits->size());
+            if (inserted)
                 hits->push_back(Hit{ lt->second, {} });
-                found = hits->end() - 1;
-            }
             if (with_coords_)
-                found->coords.push_back(local);
+                (*hits)[pos->second].coords.push_back(local);
         }
     }
     for (Hit &hit : *hits) {
@@ -500,6 +502,187 @@ const LabelQuery::NodeHits& LabelQuery::fetch(node_index key) {
         cache_.clear();
     fetch_uncached({ key });
     return cache_.at(key);
+}
+
+
+/******************************** LabelRecorder *******************************/
+
+LabelRecorder::LabelRecorder(const LabelOracle &oracle,
+                             LabelKind kind,
+                             size_t max_labels_per_node,
+                             size_t max_cache_size,
+                             size_t max_cache_keys)
+      : oracle_(oracle), kind_(kind), cap_(max_labels_per_node),
+        max_cache_size_(max_cache_size), max_cache_keys_(max_cache_keys) {
+    if (!cap_)
+        throw std::invalid_argument("max_labels_per_node must be positive");
+    if (kind_ == LabelKind::HEADER) {
+        if (!oracle_.has_coordinates()) {
+            throw std::invalid_argument("Recording sequence header labels requires an "
+                                        "annotation with coordinates");
+        }
+        if (!oracle_.coord_to_header()) {
+            throw std::invalid_argument("Recording sequence header labels requires a "
+                                        "CoordToHeader index; set seed_label_kind to \"column\"");
+        }
+    }
+}
+
+const char* LabelRecorder::access_path() const {
+    return kind_ == LabelKind::HEADER ? "tuples" : "rows";
+}
+
+LabelId LabelRecorder::id_of(const Key &key) {
+    if (kind_ == LabelKind::COLUMN) {
+        auto it = column_ids_.find(key.first);
+        if (it != column_ids_.end())
+            return it->second;
+    } else {
+        auto ct = header_ids_.find(key.first);
+        if (ct != header_ids_.end()) {
+            auto it = ct->second.find(key.second);
+            if (it != ct->second.end())
+                return it->second;
+        }
+    }
+    LabelRef ref;
+    ref.kind = kind_;
+    ref.column = key.first;
+    ref.seq_id = kind_ == LabelKind::HEADER ? key.second : 0;
+    ref.name = kind_ == LabelKind::COLUMN ? oracle_.column_name(key.first)
+                                          : oracle_.header_name(key.first, key.second);
+    const LabelId id = dict_.size();
+    dict_.push_back(std::move(ref));
+    if (kind_ == LabelKind::COLUMN) {
+        column_ids_.emplace(key.first, id);
+    } else {
+        header_ids_[key.first].emplace(key.second, id);
+    }
+    return id;
+}
+
+void LabelRecorder::fetch_uncached(const std::vector<node_index> &keys) {
+    if (keys.empty())
+        return;
+    std::vector<Row> rows;
+    rows.reserve(keys.size());
+    for (node_index key : keys) {
+        assert(key != npos);
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+    }
+    std::vector<RawRow> result(keys.size());
+    if (kind_ == LabelKind::COLUMN) {
+        auto fetched = oracle_.get_rows(rows);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            // SetBitPositions are ascending columns
+            RawRow &r = result[i];
+            r.total = fetched[i].size();
+            for (size_t j = 0; j < fetched[i].size() && j < cap_; ++j) {
+                r.kept.emplace_back(fetched[i][j], 0);
+            }
+        }
+    } else {
+        auto fetched = oracle_.get_row_tuples(rows);
+        std::vector<Key> all;
+        std::vector<Coord> coords;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            all.clear();
+            for (const auto &[c, tuple] : fetched[i]) {
+                // The true count needs to know which SEQUENCES of the column this k-mer
+                // belongs to, and only the coordinate mapping tells. But the sequences
+                // of a column occupy contiguous coordinate ranges, so one mapping per
+                // sequence is enough: map the first coordinate of a sequence, then skip
+                // to the first coordinate past that sequence's range. A k-mer repeated
+                // a thousand times in one record costs one rank/select, not a thousand.
+                coords.assign(tuple.begin(), tuple.end());
+                std::sort(coords.begin(), coords.end());
+                for (auto it = coords.begin(); it != coords.end(); ) {
+                    const auto [seq_id, local] = oracle_.map_coord(c, *it);
+                    all.emplace_back(c, seq_id);
+                    const Coord end = *it - local + oracle_.num_kmers_in_sequence(c, seq_id);
+                    it = std::lower_bound(it, coords.end(), end);
+                }
+            }
+            std::sort(all.begin(), all.end());
+            all.erase(std::unique(all.begin(), all.end()), all.end());
+            RawRow &r = result[i];
+            r.total = all.size();
+            r.kept.assign(all.begin(), all.begin() + std::min(all.size(), cap_));
+        }
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        // a row costs at least one slot even when nothing is on it
+        cached_keys_ += std::max<size_t>(1, result[i].kept.size());
+        cache_[keys[i]] = std::move(result[i]);
+    }
+}
+
+std::vector<LabelRecorder::NodeLabels>
+LabelRecorder::fetch(const std::vector<node_index> &keys) {
+    std::vector<node_index> wanted;
+    wanted.reserve(keys.size());
+    for (node_index key : keys) {
+        if (key == npos)
+            continue;
+        oracle_.counters().rows_requested++;
+        if (cache_.count(key))
+            oracle_.counters().cache_hits++;
+        wanted.push_back(key);
+    }
+    std::sort(wanted.begin(), wanted.end());
+    wanted.erase(std::unique(wanted.begin(), wanted.end()), wanted.end());
+    std::vector<node_index> missing;
+    for (node_index key : wanted) {
+        if (!cache_.count(key))
+            missing.push_back(key);
+    }
+    if (!missing.empty()) {
+        // the cache is bounded in rows AND in kept keys (its memory), since a row holds
+        // up to |cap_| of them; either bound exceeded evicts wholesale, and the whole
+        // working set is then refetched so that the lookups below cannot throw
+        if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_) {
+            cache_.clear();
+            cached_keys_ = 0;
+            missing = wanted;
+        }
+        fetch_uncached(missing);
+    }
+    std::vector<NodeLabels> result;
+    result.reserve(keys.size());
+    for (node_index key : keys) {
+        NodeLabels nl;
+        if (key != npos) {
+            const RawRow &raw = cache_.at(key);
+            nl.total = raw.total;
+            nl.labels.reserve(raw.kept.size());
+            // ids are assigned in consumption order; the list is reported by id
+            for (const Key &k : raw.kept) {
+                nl.labels.push_back(id_of(k));
+            }
+            std::sort(nl.labels.begin(), nl.labels.end());
+        }
+        result.push_back(std::move(nl));
+    }
+    return result;
+}
+
+void LabelRecorder::warm(const std::vector<node_index> &keys) {
+    std::vector<node_index> missing;
+    for (node_index key : keys) {
+        if (key != npos && !cache_.count(key))
+            missing.push_back(key);
+    }
+    if (missing.empty())
+        return;
+    std::sort(missing.begin(), missing.end());
+    missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_) {
+        cache_.clear();
+        cached_keys_ = 0;
+    }
+    if (missing.size() >= max_cache_size_)
+        return;
+    fetch_uncached(missing);
 }
 
 } // namespace traversal

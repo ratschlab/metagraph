@@ -2,6 +2,7 @@
 #define __TRAVERSAL_WALKER_HPP__
 
 #include <array>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -84,37 +85,77 @@ class LabelChangeCost {
 };
 
 
+/**
+ * What labels mean to the walk (spec §6.9).
+ *
+ * CONSTRAIN: admissibility requires a surviving permitted label (the label state of
+ * §6.3, branch limits, quorum, switching). ANNOTATE: admissibility is purely
+ * structural — every non-'$' successor is followed, subject only to the per-path
+ * edge-reuse rule, hairpin skipping and seed re-entry — and the labels present at
+ * every node are RECORDED (Segment::label_sets) instead of filtering anything. There
+ * is no permitted set, no loss budget, no switching, no quorum and no branch limit in
+ * that mode; it exists to produce an oracle that shares no label logic with the
+ * constrained walk, so that one can verify the other.
+ */
+enum class LabelMode { CONSTRAIN, ANNOTATE };
+const char* to_string(LabelMode mode);
+
 struct Strategy {
     enum Direction { BOTH, LEFT, RIGHT };
     enum Order { BREADTH_FIRST, LOWEST_LOSS_FIRST, MOST_SUPPORTED_FIRST };
     enum Overflow { STOP, BEAM };
 
+    // "no limit" for max_label_branches and max_splits_per_path
+    static constexpr size_t kUnlimited = std::numeric_limits<size_t>::max();
+
     Direction direction = BOTH;
     Support support = Support::KMER;
 
+    // The exhaustive preset (spec §6.9): unlimited branch allowance, on_reconverge
+    // keep (a trie, not a DAG), no quorum, no beam, no split limit. It sets nothing
+    // by itself — validate_strategy() REJECTS a strategy that asks for `exhaustive`
+    // and for a conflicting knob, because asking for the exhaustive trie and getting
+    // a pruned one is the failure this flag exists to prevent. The JSON layer fills
+    // the preset values in for omitted knobs.
+    bool exhaustive = false;
+
     // labels
+    LabelMode label_mode = LabelMode::CONSTRAIN;
+    // Cap on every per-node label list in the output: the recorded sets of annotate
+    // mode (Segment::label_sets, labels_start / labels_end) and the per-branch lists
+    // of the trie view in both modes. The true count is always reported beside a cut
+    // list (LabelSetRun::labels_total, SplitBranch::labels_distinct) and every cut is
+    // counted in ArmResult::nodes_labels_truncated — a silently incomplete label list
+    // would defeat the oracle's purpose.
+    size_t max_labels_per_node = 64;
     std::vector<std::string> extra;
     double loss_budget = 0;
     bool switch_on_loss_only = true;
+    // Pairwise (TABLE) costs only: the cheapest that many sources are considered per
+    // step (or kUnlimited). A cut source list can leave a target label unentered, so
+    // under `exhaustive` with a TABLE cost it must be kUnlimited (validate_strategy).
     size_t max_switch_sources = 64;
     // Cap on a set DERIVED from the seed (Seed::labels empty). It bounds the
     // traversal state, not the derivation: the labels above the cap are discovered
-    // either way and reported as SeedResult::labels_dropped / _digest.
+    // either way and reported as SeedResult::labels_dropped / _digest. Under
+    // `exhaustive` a derived set over the cap is REFUSED (SeedDerivationError)
+    // instead of cut: the preset promises that no walk is dropped.
     size_t max_seed_labels = 1000;
-    // What a derived label denotes. Unset (the default) means HEADER when the index
-    // has a CoordToHeader (labels are the indexed sequences / accessions) and COLUMN
-    // otherwise. Ignored when Seed::labels is given.
+    // What a label the walker names by itself denotes — a label DERIVED from the seed
+    // (Seed::labels empty) or one RECORDED in annotate mode. Unset (the default) means
+    // HEADER when the index has a CoordToHeader (labels are the indexed sequences /
+    // accessions) and COLUMN otherwise. Ignored when Seed::labels is given.
     std::optional<LabelKind> seed_label_kind;
 
     // branching
-    size_t max_label_branches = 0;
+    size_t max_label_branches = 0;     // or kUnlimited
     size_t min_successor_labels = 1;
     double min_successor_fraction = 0;
     uint64_t tip_window_bp = 0;
     uint64_t bubble_window_bp = 0;
     bool merge_reconverge = true;
     bool skip_hairpins = true;
-    size_t max_splits_per_path = 64;
+    size_t max_splits_per_path = 64;   // or kUnlimited
 
     // bounds
     uint64_t max_extension_bp = 5000;
@@ -202,7 +243,25 @@ struct Event {
     uint64_t length_bp = 0;
     size_t structural_successors = 0;
     std::vector<LabelId> labels;     // affected labels (or segments for joins)
+    // BLOCKED / HAIRPIN: the distinct labels at the successor; > |labels| when the list
+    // was cut by Strategy::max_labels_per_node (annotate mode). The list of a not
+    // followed successor appears nowhere else, so a cut here is counted in
+    // ArmResult::nodes_labels_truncated like any recorded node's.
+    size_t labels_total = 0;
+    bool truncated() const { return labels_total > labels.size(); }
     std::string text;
+};
+
+// Annotate mode: the labels present on every node of a stretch of a segment. Runs are
+// maximal stretches with an identical (capped list, total) and are half-open over
+// outward base indices, so [from_bp, to_bp) covers the nodes entered by steps
+// from_bp + 1 .. to_bp.
+struct LabelSetRun {
+    uint64_t from_bp = 0;
+    uint64_t to_bp = 0;
+    std::vector<LabelId> labels;     // ascending, at most Strategy::max_labels_per_node
+    size_t labels_total = 0;         // distinct labels at those nodes; > |labels| when cut
+    bool truncated() const { return labels_total > labels.size(); }
 };
 
 struct Segment {
@@ -210,14 +269,25 @@ struct Segment {
     std::vector<size_t> parents;
     // joins only (|parents| > 1): per parent, the labels whose kept entry entered
     // through it, so that per-label routes through the DAG stay reconstructible
+    // (constrain mode; empty in annotate mode, which tracks no lineages)
     std::vector<std::vector<LabelId>> labels_via_parent;
     std::vector<size_t> children;
     uint64_t from_bp = 0;
     uint64_t length_bp = 0;
     std::string sequence;            // bases added, natural orientation
+    // The labels at the segment's ENTRY node (the seed boundary for the root, the
+    // first node of the segment otherwise) and at its last node. In constrain mode
+    // these are the live permitted labels; in annotate mode the labels present,
+    // capped at max_labels_per_node. |labels_start_total| is the true count at the
+    // entry node (> |labels_start| when cut): the root's boundary node is in no run,
+    // so this is the only place its count is reported; the last node's count is on
+    // the last run.
     std::vector<LabelId> labels_start;
+    size_t labels_start_total = 0;
     std::vector<LabelId> labels_end;
     std::vector<Event> events;       // sorted by at_bp
+    // annotate mode only: the labels present along the segment, as runs
+    std::vector<LabelSetRun> label_sets;
 };
 
 struct LabelRun {
@@ -270,11 +340,24 @@ struct PathResult {
     std::optional<Continuation> continuation;
 };
 
+// The trie view of a split (design note §5.1.1): per branch, the labels at the
+// branch's first node. A child's count need NOT be a share of the parent's: one label
+// may follow several branches (an ambiguous branch in constrain mode; always possible
+// in annotate mode), so the children's counts can sum to more than labels_before.
+struct SplitBranch {
+    size_t segment = 0;
+    char ch = 0;                     // the branch's first base, walking direction
+    size_t labels_distinct = 0;      // labels at the branch's first node (true count)
+    std::vector<LabelId> labels;     // the first max_labels_per_node of them, ascending
+};
+
 struct Split {
-    uint64_t at_bp;
+    uint64_t at_bp;                  // = the shared prefix length from the seed boundary
     size_t segment;
     std::vector<size_t> children;
     bool ambiguous;                  // some label followed several children
+    size_t labels_before = 0;        // distinct labels at the split node
+    std::vector<SplitBranch> branches;   // parallel to children
 };
 
 struct GrowthBin {
@@ -282,6 +365,9 @@ struct GrowthBin {
     size_t max_live_paths = 0;
     size_t max_live_labels = 0;      // distinct labels alive in the bin
     size_t max_live_pairs = 0;       // (path, label) pairs
+    // false when a head counted in this bin carried a list cut by max_labels_per_node
+    // (annotate mode): the two counts above are then lower bounds
+    bool live_labels_exact = true;
     uint64_t steps = 0;
     size_t divergences = 0;
     size_t ambiguous_branches = 0;
@@ -309,6 +395,7 @@ struct CapTrigger {
     size_t segment;
     size_t live_paths;
     size_t live_labels;
+    bool live_labels_exact;          // see GrowthBin::live_labels_exact
 };
 
 struct ArmResult {
@@ -319,7 +406,29 @@ struct ArmResult {
     Status status = COMPLETE;
     size_t frontier_live_paths = 0;  // remaining when stopped
     size_t frontier_live_labels = 0;
+    // false when a remaining head carried a cut list (annotate mode): the count above
+    // is then a lower bound
+    bool frontier_live_labels_exact = true;
     std::optional<CapTrigger> cap_trigger;
+    /**
+     * The completeness boundary (spec §6.10). Exploration is level-synchronous, so a
+     * cap trips between two heads of one level: the heads expanded before it have all
+     * their children, the heads after it have none. The level is then PARTIAL and does
+     * not count. complete_to_bp is the extension depth up to which EVERY admissible walk
+     * is present: every walk of at most complete_to_bp bases from the seed boundary that
+     * obeys the per-path edge-reuse rule is in |segments|, and every path that ended
+     * before complete_to_bp ended for the reported semantic reason. Walks longer than
+     * that may be present (the partial level's children) but nothing is claimed about
+     * them. It equals Strategy::max_extension_bp exactly when status == COMPLETE.
+     */
+    uint64_t complete_to_bp = 0;
+    // Per-node label lists cut by Strategy::max_labels_per_node: how many recorded
+    // positions (annotate mode: the root's boundary node, every node entered and every
+    // not followed successor listed on a BLOCKED / HAIRPIN event; both modes:
+    // trie-view branches) lost labels, and the largest true count seen. Non-zero means
+    // the recorded sets are incomplete.
+    size_t nodes_labels_truncated = 0;
+    size_t max_labels_at_node = 0;
 
     std::vector<Segment> segments;
     std::vector<Split> splits;
@@ -364,7 +473,9 @@ struct SeedResult {
     bool seed_id_mismatch = false;
     uint64_t length_bp = 0;
     uint64_t num_kmers = 0;
-    std::vector<LabelRef> label_dict;          // seed labels first, then extra
+    // constrain mode: seed labels first, then extra. Annotate mode: every label
+    // recorded along either arm, in the order first seen (num_seed_labels is 0).
+    std::vector<LabelRef> label_dict;
     size_t num_seed_labels = 0;
     // The seed labels were derived from the seed (Seed::labels was empty). Then
     // |labels_dropped| is how many of them Strategy::max_seed_labels cut, with an
@@ -386,6 +497,29 @@ struct SeedResult {
     double elapsed_seconds = 0;
     const char *access_path = "";
 };
+
+/**
+ * Reject a strategy whose knobs contradict each other (spec §6.9): `exhaustive` with a
+ * branch limit, a split limit, reconvergence merging, a quorum, a beam, or a bounded
+ * max_switch_sources under a TABLE cost (a cut source list can leave a target label
+ * unentered and so prune a label-consistent walk); annotate mode with label machinery
+ * (extra labels, a loss budget, a switch cost, a branch limit, a quorum, trace
+ * support). Throws std::invalid_argument naming the knob and the value the preset or
+ * mode requires. traverse_seed() calls it; the JSON layer calls it after filling the
+ * preset's values in for omitted knobs.
+ */
+void validate_strategy(const Strategy &strategy, const LabelChangeCost &cost);
+
+/**
+ * What "every walk is present" quantifies over (spec §6.10): the per-path edge-reuse
+ * rule, hairpin handling and seed re-entry, as the walker enforces them on THIS
+ * index — the regime decides whether seed nodes of both strands count, k whether a
+ * self-reverse-complementary k-mer node is a hairpin too (even k), and k with the
+ * alphabet whether edges are compared exactly or by a 128-bit hash. Stated in the
+ * output so that a reader knows which walks complete_to_bp covers — the rule is
+ * what makes "all walks" finite in a graph with cycles.
+ */
+std::string walk_rule_statement(const Strategy &strategy, const LabelOracle &oracle);
 
 /**
  * Validate the seed and extend it in both directions under |strategy|.
