@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **stage 1 implemented** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -426,7 +426,34 @@ Backend-calling: `traverse_capabilities(index)`; `traverse_resolve(index, sequen
 
 Local over a handle: `graphlet_summary(handle, arm?)`; `graphlet_walks(handle, arm, rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60)`; `graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, continuation; *(v3)* the chain is paged by `cursor` like a list); `graphlet_support(handle, arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C"); `graphlet_labels(handle, arm?, rank=direct_bp|reach_bp, n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes); `graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0, route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)` (≤ 16 KB slice); `graphlet_export(handle, format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes, records}`; `graphlet_compare(a, b, arm, mode, cursor?) -> Comparison dict` (preconditions *(v2/v3)*: same index identity (§3.1) and the same oriented seed sequence, else `comparable: false`; differing completeness scopes → `comparable: qualified`; *(v3)* returns the counts and the first page of `only_in_a` / `only_in_b` / `differ`, with `next_cursor`; `graphlet_export(format=json, what=compare|walk, …)` writes the complete lists to a file — a truncated field is always recoverable by cursor or export); `graphlet_subtrie(handle, labels, arm?) -> derived handle`; `graphlet_list/free/save/load`. Unknown handle → "replay with traverse_fetch(replay=<handle>)" (the store keeps the request).
 
+**§6 as implemented in stage 1 (the tool layer, `mcp_tools.py`)** — where the code refined the text above:
+the evidence block on every local answer is `{complete_to_bp, exact, support, reconverge, scope, outcome,
+limitations}` (plus `view`/`qualified` on a derived handle; `exact` requires complete label evidence and no cut
+lists); `graphlet_list` is paged (`rows`, `total`, `next_cursor`); `graphlet_walks` takes `route_consistent`, and
+walks/claims report `filtered` counts (e.g. `filtered.route_only`) instead of dropping rows silently;
+`graphlet_summary(detail='limitations')`; rows carry `labels_in_total`/`labels_out_total`/`n_labels_total`; errors
+are structured results with codes `unknown_label`, `backend_error`, `backend_unreachable`, `io_error`,
+`path_not_allowed`, `not_replayable`, `view_unsupported`, `not_in_view`, `result_too_large`; exports and saves take
+file names confined to the export directory (default `<spool>/exports`); the cursor secret is created in the spool
+when none is passed. There is no streaming validator: a parse builds the model once and releases it, so the peak is
+the full model (§14's "streaming parse" is not delivered).
+
 # 7. Size and memory (SRA case; estimates from per-record byte costs, to be re-measured by `scripts/traversal/graphlet_measure.py`)
+
+**Measured on the SRA primary index (stage 1, `graphlet_measure.py --server`, 2026-10-02)** — these replace the
+estimates below as the reference numbers:
+
+| retrieval | body | gzip | full JSON (compact) | body / JSON | gzip / gzip | summary | parse | model |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 16S (1,396 bp), exhaustive constrain, 300 bp | 460 KB | 53 KB | 3.99 MB | 11.5 % | 27 % | 3.6 KB | 46 ms | 4.4 MB |
+| 16S, label-free trie (annotate), 300 bp | 434 KB | 93 KB | 4.59 MB | 9.4 % | 28 % | 2.9 KB | 46 ms | 3.4 MB |
+| 16S, default walk, 3 kb | 3 KB | 1 KB | 10 KB | 33 % (fixed overhead: seed, header) | 73 % | 2.4 KB | < 1 ms | < 0.1 MB |
+| random 50-mer, label-free beam 20 (most supported), 10 kb | 3.5 MB | 196 KB | 75 MB | 4.7 % | 3 % | 3.6 KB | 0.9 s | 30 MB |
+
+Targets of §7/§10 met on the case they were set for (< 15 % of compact JSON; summary < 10 KB). The interner hit
+rate was 0.997 (constrain) and 0.83 (annotate, 2,264 distinct sets) — no per-arm alias table is needed. The small
+mini_refseq retrievals (18–29 %) are dominated by fixed per-document overhead.
+
 
 *(v2) These are estimates under an interning assumption, not bounds.* The model's memory depends on how many label sets are distinct: 5,000 distinct 827-label arrays are ~17 MB for the arrays alone before model objects, interner keys, names and caches, and a synthetic fragmented-set case produced ~17 MB of `SETEXPR` text — so v1's "1 MB pessimistic" is not a bound. `graphlet_measure.py` must report set cardinalities, membership changes per step and the interner hit rate on the SRA retrievals; a per-arm alias table is considered only after those numbers.
 
