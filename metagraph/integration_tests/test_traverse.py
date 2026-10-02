@@ -671,6 +671,91 @@ class TestTraverseCLI(TestTraverseBase):
                          event['labels_per_successor'])
         self.assertEqual(['acc2'], [names[l] for l in event['dropped']])
 
+    def test_traverse_states_every_limitation(self):
+        """Every cap that limited a result is stated in `limitations` with the request field
+        to turn (spec §7.0), in every detail level, and a run nothing limited states none.
+        `output.max_branch_events` accepts "unlimited" and echoes it so."""
+        seed = {'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}
+
+        def run(strategy, seeds=None):
+            strategy = dict({'direction': 'right', 'bounds': {'max_extension_bp': BLOCK}},
+                            **strategy)
+            out, rc = self._traverse({'seeds': seeds or [seed], 'strategy': strategy})
+            self.assertEqual(0, rc, out.get('error'))
+            return out
+
+        def kinds(limitations):
+            return [l['kind'] for l in limitations]
+
+        keep = {'on_reconverge': 'keep'}
+        out = run({'branching': keep, 'output': {'max_branch_events': 'unlimited'}})
+        self.assertEqual('unlimited', out['strategy']['output']['max_branch_events'])
+        result = out['results'][0]
+        self.assertEqual([], result['limitations'])
+        right = result['arms']['right']
+        self.assertEqual('complete', right['status'])
+        self.assertEqual([], right['limitations'])
+        self.assertEqual({'complete': True, 'complete_to_bp': None}, right['evidence'])
+        # the echo parses back, and the default stays 100
+        again = run({'branching': keep, 'output': out['strategy']['output']})
+        self.assertEqual('unlimited', again['strategy']['output']['max_branch_events'])
+        self.assertEqual(100, run({})['strategy']['output']['max_branch_events'])
+        bad, rc = self._traverse({'seeds': [seed],
+                                  'strategy': {'output': {'max_branch_events': 'lots'}}})
+        self.assertEqual(1, rc)
+        self.assertIn('max_branch_events', bad['error'])
+
+        # walk_domain: the RIGHT1 / RIGHT2 fork needs two live paths
+        for detail in ('summary', 'tree', 'full'):
+            right = run({'branching': keep, 'bounds': {'max_extension_bp': BLOCK, 'max_live_paths': 1},
+                         'output': {'detail': detail}})['results'][0]['arms']['right']
+            self.assertEqual('truncated', right['status'])
+            self.assertEqual(['walk_domain'], kinds(right['limitations']), detail)
+            walk = right['limitations'][0]
+            self.assertEqual('bounds.max_live_paths', walk['knob'])
+            self.assertEqual(1, walk['limit'])
+            self.assertEqual(2, walk['observed'])
+            self.assertEqual(right['complete_to_bp'], walk['complete_to_bp'])
+
+        # branch_events: the quorum refusal at the fork is the only event; keeping none
+        # puts the evidence boundary at the fork
+        right = run({'branching': dict(keep, min_successor_labels=2),
+                     'output': {'max_branch_events': 0}})['results'][0]['arms']['right']
+        self.assertEqual({'complete': False, 'complete_to_bp': 0}, right['evidence'])
+        self.assertEqual(['branch_events'], kinds(right['limitations']))
+        events = right['limitations'][0]
+        self.assertEqual('output.max_branch_events', events['knob'])
+        self.assertEqual(0, events['limit'])
+        self.assertEqual(1, events['observed'])
+        self.assertEqual(0, events['complete_to_bp'])
+        self.assertEqual(1, right['branch_events_truncated'])
+
+        # scope: merging, constrain mode's default (no bubble here: nothing merged)
+        right = run({})['results'][0]['arms']['right']
+        self.assertEqual(['scope'], kinds(right['limitations']))
+        self.assertEqual('branching.on_reconverge', right['limitations'][0]['knob'])
+        self.assertEqual('merge', right['limitations'][0]['limit'])
+        self.assertEqual(0, right['limitations'][0]['observed'])
+
+        # label_lists (and the counts over the cut lists): annotate mode, one label a list
+        right = run({'labels': {'mode': 'annotate', 'max_labels_per_node': 1}},
+                    seeds=[{'sequence': self.element}])['results'][0]['arms']['right']
+        self.assertEqual(['label_lists', 'inexact_counts'], kinds(right['limitations']))
+        lists = right['limitations'][0]
+        self.assertEqual('labels.max_labels_per_node', lists['knob'])
+        self.assertEqual(1, lists['limit'])
+        self.assertEqual(right['labels_per_node']['max_seen'], lists['observed'])
+
+        # seed_labels: the derived carrier set cut to two
+        result = run({'branching': keep, 'labels': {'max_seed_labels': 2}},
+                     seeds=[{'sequence': self.element}])['results'][0]
+        self.assertEqual(['seed_labels'], kinds(result['limitations']))
+        cut = result['limitations'][0]
+        self.assertEqual('labels.max_seed_labels', cut['knob'])
+        self.assertEqual(2, cut['limit'])
+        self.assertEqual(result['seed']['labels_supporting_total'], cut['observed'])
+        self.assertEqual([], result['arms']['right']['limitations'])
+
 
 class TestTraverseAPI(TestTraverseBase):
     @classmethod
@@ -753,6 +838,9 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(over, clamped['labels.max_seed_labels']['requested'])
         self.assertEqual(caps['max_seed_labels'],
                          clamped['labels.max_seed_labels']['effective'])
+        # ... but the three carriers fit under it: the clamp bound nothing in this seed,
+        # so the seed states no limitation (spec §7.0)
+        self.assertEqual([], out['results'][0]['limitations'])
 
         # `time_budget_ms: 0` means "do not extend" for the WALK, but it is also the only
         # bound on deriving a permitted set the caller did not name, so a derived seed has
@@ -766,6 +854,11 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(caps['max_time_ms'], out['strategy']['bounds']['time_budget_ms'])
         self.assertIn('bounds.time_budget_ms',
                       [c['field'] for c in out['strategy']['clamped']])
+        # the walk ran under a budget the request did not ask for: stated on the seed
+        self.assertEqual([{'kind': 'server_clamp', 'knob': 'bounds.time_budget_ms',
+                           'limit': caps['max_time_ms'], 'observed': 0}],
+                         [{k: l[k] for k in ('kind', 'knob', 'limit', 'observed')}
+                          for l in out['results'][0]['limitations']])
         # an explicit list keeps the zero: there it bounds nothing but the walk
         ret = self._post('traverse', {
             'seeds': [{'sequence': self.element, 'labels': ['acc1']}], 'strategy': zero})

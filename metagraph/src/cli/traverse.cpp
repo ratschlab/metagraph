@@ -330,7 +330,11 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
                 { { "summary", "summary" }, { "tree", "tree" }, { "full", "full" } });
             st.sequences = o.boolean("sequences", true);
             st.profile_bin_bp = o.uint("profile_bin_bp", 100, 1);
-            st.max_branch_events = o.uint("max_branch_events", 100);
+            // refusals are the evidence for a successor not taken, so the cap on them
+            // must be removable: "unlimited" keeps every event (§7.2)
+            st.max_branch_events = limit_or_unlimited(o, "max_branch_events", 100,
+                                                      std::numeric_limits<size_t>::max() - 1,
+                                                      nullptr);
             st.continuation_bp = o.uint("continuation_bp", 1000, 0);
             req.timing = o.boolean("timing", true);
         }
@@ -530,7 +534,7 @@ Json::Value strategy_to_json(const Strategy &st, const CostSpec &cost) {
     Json::Value o;
     o["sequences"] = st.sequences;
     o["profile_bin_bp"] = uint_json(st.profile_bin_bp);
-    o["max_branch_events"] = uint_json(st.max_branch_events);
+    o["max_branch_events"] = limit_json(st.max_branch_events);
     o["continuation_bp"] = uint_json(st.continuation_bp);
     j["output"] = o;
     Json::Value a;
@@ -577,6 +581,137 @@ static Json::Value event_to_json(const Event &ev) {
     return j;
 }
 
+// ---------------------------------------------------------------- stated limitations
+
+// One entry of `limitations` (spec §7.0): what limited the result, the request field
+// that controls it (relative to `strategy`, as in strategy.clamped), its value, what the
+// run met against it, and what is missing because of it — so that an agent turns the
+// knob instead of parsing prose, and nothing is cut without saying so.
+static Json::Value limitation(const char *kind, const std::string &knob, Json::Value limit,
+                              Json::Value observed, const std::string &effect) {
+    Json::Value j;
+    j["kind"] = kind;
+    j["knob"] = knob;
+    j["limit"] = std::move(limit);
+    j["observed"] = std::move(observed);
+    j["effect"] = effect;
+    return j;
+}
+
+// The request field a resource stop answers to (§6.7) and its value; a beam's width is
+// bounds.max_live_paths.
+static std::pair<std::string, Json::Value> cap_knob(EndReason reason, const Strategy &st) {
+    switch (reason) {
+        case EndReason::MAX_STEPS: return { "bounds.max_steps", uint_json(st.max_steps) };
+        case EndReason::MAX_LIVE_PATHS:
+        case EndReason::BEAM_PRUNED: return { "bounds.max_live_paths", uint_json(st.max_live_paths) };
+        case EndReason::MAX_PATHS: return { "bounds.max_paths", uint_json(st.max_paths) };
+        case EndReason::MAX_OUTPUT: return { "bounds.max_output_bp", uint_json(st.max_output_bp) };
+        case EndReason::TIME_BUDGET: return { "bounds.time_budget_ms", Json::Value(st.time_budget_ms) };
+        default: return { "", Json::Value() };
+    }
+}
+
+static bool ended_by(const ArmResult &arm, EndReason reason) {
+    if (arm.cap_trigger && arm.cap_trigger->reason == reason)
+        return true;
+    return std::any_of(arm.paths.begin(), arm.paths.end(),
+                       [&](const PathResult &p) { return p.path_reason == reason; });
+}
+
+// Every cap that limited this arm, each emitted only when it did (spec §7.0).
+static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
+    Json::Value out(Json::arrayValue);
+    // The walk domain: the cap that set complete_to_bp, then any other cap that ended
+    // walks after it — a beam prunes a level and a step cap trips later, and raising
+    // only the first knob would run into the second.
+    if (arm.status != ArmResult::COMPLETE && arm.cap_trigger) {
+        std::vector<EndReason> caps { arm.cap_trigger->reason };
+        std::map<EndReason, size_t> walks_cut;
+        for (const PathResult &p : arm.paths) {
+            if (!p.path_reason || !is_resource_stop(*p.path_reason))
+                continue;
+            walks_cut[*p.path_reason]++;
+            if (std::find(caps.begin(), caps.end(), *p.path_reason) == caps.end())
+                caps.push_back(*p.path_reason);
+        }
+        for (EndReason r : caps) {
+            const bool trigger = r == arm.cap_trigger->reason;
+            std::string effect = "every walk of at most complete_to_bp bp is present, longer walks may be "
+                                 "missing: ";
+            effect += r == EndReason::BEAM_PRUNED
+                ? "the beam kept the best-supported max_live_paths heads of a level and pruned the rest"
+                : std::string("the exploration stopped at this cap (") + to_string(r) + ")";
+            if (!trigger)
+                effect += " after the cap that set complete_to_bp, so raising only that knob stops here";
+            effect += "; raise the knob";
+            auto [knob, limit] = cap_knob(r, st);
+            // at the trigger what the cap compared, which exceeded the limit; for a later
+            // cap (no trigger of its own) the walks it ended
+            const double demand = arm.cap_trigger->demand;
+            Json::Value observed = !trigger ? uint_json(walks_cut[r])
+                                 : r == EndReason::TIME_BUDGET ? Json::Value(demand)
+                                 : uint_json(static_cast<uint64_t>(demand));
+            Json::Value j = limitation("walk_domain", knob, limit, observed, effect);
+            j["complete_to_bp"] = uint_json(arm.complete_to_bp);
+            out.append(j);
+        }
+    }
+    if (arm.branch_events_complete_to_bp != std::numeric_limits<uint64_t>::max()) {
+        Json::Value j = limitation("branch_events", "output.max_branch_events",
+                                   limit_json(st.max_branch_events), uint_json(arm.branch_events_total),
+                                   "branch decisions and refusals at or beyond complete_to_bp are not "
+                                   "reported; more were produced: raise the knob or set it to "
+                                   "\"unlimited\"");
+        j["complete_to_bp"] = uint_json(arm.branch_events_complete_to_bp);
+        out.append(j);
+    }
+    if (arm.nodes_labels_truncated) {
+        out.append(limitation("label_lists", "labels.max_labels_per_node",
+                              uint_json(st.max_labels_per_node), uint_json(arm.max_labels_at_node),
+                              std::to_string(arm.nodes_labels_truncated) + " recorded label list(s) are "
+                              "cut at the cap; every list carries its true count, and what is derived "
+                              "from the lists (annotate mode's label_summary, an oracle filtered from "
+                              "the recorded sets) is a lower bound; raise the knob"));
+    }
+    size_t cut_sources = 0;
+    for (const Segment &s : arm.segments) {
+        for (const Event &ev : s.events) {
+            cut_sources += ev.type == EventType::LABEL_END && ev.text == "switch_sources";
+        }
+    }
+    if (cut_sources) {
+        out.append(limitation("switch_sources", "labels.max_switch_sources",
+                              limit_json(st.max_switch_sources), uint_json(cut_sources),
+                              "label(s) ended label_lost (switch_sources) because they were not among "
+                              "the cheapest sources priced for a switch; a switch within the budget may "
+                              "exist; raise the knob or set it to \"unlimited\""));
+    }
+    size_t inexact = !arm.frontier_live_labels_exact
+                   + (arm.cap_trigger && !arm.cap_trigger->live_labels_exact);
+    for (const GrowthBin &g : arm.growth) {
+        inexact += !g.live_labels_exact;
+    }
+    if (inexact) {
+        out.append(limitation("inexact_counts", "labels.max_labels_per_node",
+                              uint_json(st.max_labels_per_node), uint_json(inexact),
+                              "the live-label counts flagged \"exact\": false (frontier_remaining, "
+                              "cap_trigger, growth bins) counted heads carrying a cut list and are lower "
+                              "bounds; raise the knob"));
+    }
+    if (std::string(arm.completeness_scope) == "united_history") {
+        // observed: the merges that actually united histories (0: none was reduced)
+        size_t merges = 0;
+        for (const GrowthBin &g : arm.growth) {
+            merges += g.reconvergences;
+        }
+        out.append(limitation("scope", "branching.on_reconverge", "merge", uint_json(merges),
+                              "completeness holds for the united-history rule, not per path; use "
+                              "\"keep\" for the per-path guarantee"));
+    }
+    return out;
+}
+
 static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const std::string &detail) {
     Json::Value j;
     j["status"] = arm.status == ArmResult::COMPLETE ? "complete"
@@ -601,6 +736,17 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     lpn["max_seen"] = uint_json(arm.max_labels_at_node);
     lpn["nodes_truncated"] = uint_json(arm.nodes_labels_truncated);
     j["labels_per_node"] = lpn;
+    // the evidence boundary (§7.0): below complete_to_bp every branch decision and
+    // refusal is reported; null when nothing was cut
+    const bool evidence_complete
+        = arm.branch_events_complete_to_bp == std::numeric_limits<uint64_t>::max();
+    Json::Value evidence;
+    evidence["complete"] = evidence_complete;
+    evidence["complete_to_bp"] = evidence_complete ? Json::Value()
+                                                   : uint_json(arm.branch_events_complete_to_bp);
+    j["evidence"] = evidence;
+    // every cap that limited this arm, with the knob to turn; empty when none did
+    j["limitations"] = arm_limitations(arm, st);
     if (arm.cap_trigger) {
         Json::Value c;
         c["reason"] = to_string(arm.cap_trigger->reason);
@@ -836,6 +982,18 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     }
     seed["dropped_labels"] = dropped;
     j["seed"] = seed;
+    // the caps that limited the seed itself (§7.0); process_traverse_request adds the
+    // server clamps this seed ran into
+    Json::Value lims(Json::arrayValue);
+    if (r.labels_dropped) {
+        lims.append(limitation("seed_labels", "labels.max_seed_labels", uint_json(st.max_seed_labels),
+                               uint_json(r.labels_supporting_total),
+                               std::to_string(r.labels_dropped) + " label(s) carrying the whole seed "
+                               "were not taken (labels_dropped_digest identifies them): walks only they "
+                               "carry are missing; raise the knob, or traverse the complement with an "
+                               "explicit list"));
+    }
+    j["limitations"] = lims;
     j["label_mode"] = to_string(st.label_mode);
     Json::Value dict(Json::arrayValue);
     for (const auto &l : r.label_dict) {
@@ -1053,6 +1211,44 @@ static LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::st
     return LabelChangeCost::forbid();
 }
 
+// The request-level clamps (strategy.clamped) that bound THIS seed's result, added to
+// its `limitations` as kind server_clamp: a request cannot raise past them, so the agent
+// must know which ones it ran into — a lowered derived-set cap that cut the derived set,
+// a lowered time budget that tripped, and a budget raised from zero (the walk ran
+// although the request asked for none). The seed_labels entry also gets the server's
+// maximum, beyond which raising its knob does nothing.
+static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json::Value &clamped) {
+    Json::Value &lims = (*rj)["limitations"];
+    for (const Json::Value &c : clamped) {
+        const std::string field = c["field"].asString();
+        const bool lowered = c["effective"].asDouble() < c["requested"].asDouble();
+        bool affected = false;
+        if (field == "labels.max_seed_labels") {
+            affected = r.labels_dropped > 0;
+            for (Json::Value &l : lims) {
+                if (affected && l["kind"].asString() == "seed_labels")
+                    l["server_limit"] = uint_json(c["effective"].asUInt64());
+            }
+        } else if (field == "bounds.time_budget_ms") {
+            affected = !lowered;
+            for (const ArmResult &a : r.arms) {
+                affected |= a.requested && ended_by(a, EndReason::TIME_BUDGET);
+            }
+        }
+        if (!affected)
+            continue;
+        // strategy.clamped carries numbers as doubles; an integer knob reads as one here
+        auto value = [&](const Json::Value &v) {
+            return field == "labels.max_seed_labels" ? uint_json(v.asUInt64()) : v;
+        };
+        lims.append(limitation("server_clamp", field, value(c["effective"]), value(c["requested"]),
+                               lowered ? "the server lowered the requested value to its maximum and "
+                                         "this seed ran into it; a request cannot raise it further"
+                                       : "the server raised the requested value (it also bounds the "
+                                         "derivation of a permitted set); the walk ran under it"));
+    }
+}
+
 Json::Value process_traverse_request(const Json::Value &json,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const std::string &release,
@@ -1141,6 +1337,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             SeedResult r = traverse_seed(oracle, seed, req.strategy, cost, release);
             r.annotation_counters = per_seed(r.annotation_counters);
             Json::Value rj = seed_result_to_json(r, req.strategy, req.detail, req.timing);
+            state_server_clamps(&rj, r, clamped);
             if (!seen_ids.insert(r.validated_seed_id).second)
                 rj["duplicate"] = true;
             results.append(rj);

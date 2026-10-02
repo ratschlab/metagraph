@@ -173,6 +173,8 @@ struct Strategy {
     // output
     bool sequences = true;
     uint64_t profile_bin_bp = 100;
+    // per arm, the first that many branch events in level order are kept (or
+    // kUnlimited); ArmResult::branch_events_complete_to_bp states where a cut starts
     size_t max_branch_events = 100;
     uint64_t continuation_bp = 1000;
 
@@ -415,6 +417,13 @@ struct CapTrigger {
     size_t live_paths;
     size_t live_labels;
     bool live_labels_exact;          // see GrowthBin::live_labels_exact
+    // What the cap compared at the trip, which exceeded its limit: the seed's steps with
+    // the step about to be taken (max_steps), the arm's bases likewise (max_output_bp),
+    // leaves plus live heads (max_paths), live heads (max_live_paths; the beam: the
+    // heads of the level before pruning), elapsed milliseconds (time_budget_ms). So a
+    // response can state how far beyond the knob the run needed to go, not only that it
+    // stopped (live_paths counts the heads the cap cut, which can be below the limit).
+    double demand = 0;
 };
 
 struct ArmResult {
@@ -461,8 +470,18 @@ struct ArmResult {
     std::vector<PathResult> paths;
     std::vector<LabelRun> runs;
     std::vector<GrowthBin> growth;
+    // The first Strategy::max_branch_events branch events in processing order, of
+    // branch_events_total. Levels are synchronous, so an arm produces its events in
+    // non-decreasing at_bp, and the cut is a depth boundary like complete_to_bp:
+    // branch_events_complete_to_bp is the at_bp of the FIRST event not stored
+    // (UINT64_MAX when none was dropped). Every branch event at a depth below it —
+    // every refusal and every ambiguity the walker decided there — is in
+    // |branch_events|; at or beyond it some may be missing. Refusals are the evidence
+    // for a successor not taken (§7.2), so this bounds where an omission is
+    // guaranteed to carry its reason.
     std::vector<BranchEvent> branch_events;
     size_t branch_events_total = 0;
+    uint64_t branch_events_complete_to_bp = std::numeric_limits<uint64_t>::max();
     std::vector<double> needed_budgets;
 
     uint64_t steps = 0;

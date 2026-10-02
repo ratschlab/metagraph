@@ -22,6 +22,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "cli/traverse.hpp"
 
 
 namespace {
@@ -3199,6 +3200,274 @@ TEST(Walker, LossBudgetRefusalWhileTheSourceGoesOn) {
             EXPECT_TRUE(be.refused.empty()) << where << ": a refusal within the budget";
         }
     }
+}
+
+
+Json::Value parse_json(const std::string &text) {
+    Json::Value v;
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    std::istringstream in(text);
+    EXPECT_TRUE(Json::parseFromStream(builder, in, &v, &errs)) << errs;
+    return v;
+}
+
+std::vector<std::string> kinds_of(const Json::Value &limitations) {
+    EXPECT_TRUE(limitations.isArray());
+    std::vector<std::string> out;
+    for (const Json::Value &l : limitations) {
+        out.push_back(l["kind"].asString());
+    }
+    return out;
+}
+
+// Branch events are kept in level order up to output.max_branch_events, and the cut is
+// a depth boundary (spec §7.2): one label on a main walk X·Y with side branches off Y at
+// three depths is ambiguous at each fork, so the right arm produces one event per
+// depth. Keeping n of them puts the boundary at the depth of the (n+1)-th; every event
+// kept lies below it, and the response says so — `evidence` and a `branch_events`
+// limitation naming the knob — in every detail level. Keeping exactly as many as were
+// produced cuts nothing.
+TEST(Walker, BranchEventsCompleteToBp) {
+    const std::vector<uint64_t> depths { 10, 25, 40 };
+    std::vector<std::string> b;
+    for (uint32_t seed = 50; ; ++seed) {
+        b = clean_blocks({ 30, 60, 20, 20, 20 }, seed);
+        bool forks = true;
+        for (size_t i = 0; i < depths.size(); ++i) {
+            forks &= b[2 + i][0] != b[1][depths[i]];
+        }
+        if (forks)
+            break;
+    }
+    const std::string &X = b[0], &Y = b[1];
+    std::vector<std::string> seqs { X + Y };
+    for (size_t i = 0; i < depths.size(); ++i) {
+        seqs.push_back(X + Y.substr(0, depths[i]) + b[2 + i]);
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, seqs, std::vector<std::string>(seqs.size(), "A"), DeBruijnGraph::BASIC);
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.merge_reconverge = false;
+    for (size_t cap : { size_t(0), size_t(1), size_t(2), size_t(3), Strategy::kUnlimited }) {
+        st.max_branch_events = cap;
+        const std::string where = "max_branch_events "
+            + (cap == Strategy::kUnlimited ? std::string("unlimited") : std::to_string(cap));
+        const SeedResult res = run(*anno, X, { "A" }, st);
+        const ArmResult &arm = res.arms[kRight];
+        check_invariants(arm, st);
+        // the walk does not depend on the cap: the main walk and one leaf per side branch
+        EXPECT_EQ(depths.size() + 1, arm.paths.size()) << where;
+        EXPECT_EQ(ArmResult::COMPLETE, arm.status) << where;
+        ASSERT_EQ(depths.size(), arm.branch_events_total) << where;
+        const size_t kept = std::min(cap, depths.size());
+        ASSERT_EQ(kept, arm.branch_events.size()) << where;
+        for (size_t i = 0; i < kept; ++i) {
+            EXPECT_EQ(depths[i], arm.branch_events[i].at_bp) << where;
+            EXPECT_EQ((std::vector<LabelId>{ 0 }), arm.branch_events[i].ambiguous) << where;
+        }
+        // the boundary is the depth of the first event not kept, and every event kept
+        // lies below it
+        const bool complete = kept == depths.size();
+        const uint64_t boundary = complete ? std::numeric_limits<uint64_t>::max() : depths[kept];
+        EXPECT_EQ(boundary, arm.branch_events_complete_to_bp) << where;
+        for (const BranchEvent &be : arm.branch_events) {
+            EXPECT_LT(be.at_bp, arm.branch_events_complete_to_bp) << where;
+        }
+
+        for (const char *detail : { "summary", "tree", "full" }) {
+            const Json::Value j = cli::seed_result_to_json(res, st, detail, false)["arms"]["right"];
+            const std::string at = where + ", detail " + detail;
+            ASSERT_TRUE(j.isMember("evidence")) << at;
+            EXPECT_EQ(complete, j["evidence"]["complete"].asBool()) << at;
+            if (complete) {
+                EXPECT_TRUE(j["evidence"]["complete_to_bp"].isNull()) << at;
+                EXPECT_EQ(std::vector<std::string>{}, kinds_of(j["limitations"])) << at;
+            } else {
+                EXPECT_EQ(boundary, j["evidence"]["complete_to_bp"].asUInt64()) << at;
+                ASSERT_EQ(std::vector<std::string>{ "branch_events" }, kinds_of(j["limitations"])) << at;
+                const Json::Value &l = j["limitations"][0];
+                EXPECT_EQ("output.max_branch_events", l["knob"].asString()) << at;
+                EXPECT_EQ(cap, l["limit"].asUInt64()) << at;
+                // more were produced than the knob kept
+                EXPECT_EQ(depths.size(), l["observed"].asUInt64()) << at;
+                EXPECT_EQ(boundary, l["complete_to_bp"].asUInt64()) << at;
+                EXPECT_NE(std::string::npos, l["effect"].asString().find("unlimited")) << at;
+            }
+            EXPECT_EQ(depths.size() - kept, j["branch_events_truncated"].asUInt64()) << at;
+        }
+    }
+
+    // the knob takes "unlimited" and echoes it so; the default stays 100
+    Json::Value request = parse_json(R"({"seeds": [{"sequence": "ACGTACGTACGTACGT"}],
+                                         "strategy": {"output": {"max_branch_events": "unlimited"}}})");
+    cli::TraverseRequest parsed = cli::parse_traverse_request(request);
+    EXPECT_EQ(Strategy::kUnlimited, parsed.strategy.max_branch_events);
+    EXPECT_EQ("unlimited",
+              cli::strategy_to_json(parsed.strategy, parsed.cost)["output"]["max_branch_events"].asString());
+    request["strategy"]["output"]["max_branch_events"] = 7;
+    EXPECT_EQ(7u, cli::parse_traverse_request(request).strategy.max_branch_events);
+    request["strategy"]["output"]["max_branch_events"] = "lots";
+    EXPECT_THROW(cli::parse_traverse_request(request), cli::InvalidRequest);
+    request["strategy"].removeMember("output");
+    parsed = cli::parse_traverse_request(request);
+    EXPECT_EQ(100u, parsed.strategy.max_branch_events);
+    EXPECT_EQ(100u, cli::strategy_to_json(parsed.strategy, parsed.cost)["output"]["max_branch_events"].asUInt64());
+}
+
+// Every cap that limited a result is stated in `limitations` (spec §7.0) — and only
+// those: each kind is produced here by the one knob that causes it and is absent from
+// the unconstrained run. A bubble on the right of the seed X (A and B on P, C on Q, both
+// closing into Y) gives a fork, a reconvergence and three labels at every node.
+TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
+    const auto b = fork_blocks(60, { 30, 20, 20, 30 });
+    const std::string &X = b[0], &P = b[1], &Q = b[2], &Y = b[3];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P + Y, X + P + Y, X + Q + Y }, { "A", "B", "C" }, DeBruijnGraph::BASIC);
+    auto request = [&](const std::vector<std::string> &labels, const std::string &strategy) {
+        Json::Value r;
+        Json::Value seed;
+        seed["sequence"] = X;
+        for (const std::string &l : labels) {
+            seed["labels"].append(l);
+        }
+        r["seeds"].append(seed);
+        r["strategy"] = parse_json(strategy);
+        return r;
+    };
+    auto traverse = [&](const Json::Value &req, const cli::TraverseLimits &limits) {
+        return cli::process_traverse_request(req, *anno, "", limits);
+    };
+    const cli::TraverseLimits none;
+    const std::vector<std::string> nothing;
+    const std::vector<std::string> ABC { "A", "B", "C" };
+
+    // nothing limits a complete per-path run with every label and every event
+    Json::Value out = traverse(request(ABC, R"({"direction": "right",
+                                                "branching": {"on_reconverge": "keep"}})"), none);
+    Json::Value result = out["results"][0];
+    Json::Value right = result["arms"]["right"];
+    EXPECT_EQ("complete", right["status"].asString());
+    EXPECT_EQ(2u, right["paths"].size());
+    EXPECT_EQ(nothing, kinds_of(right["limitations"]));
+    EXPECT_EQ(nothing, kinds_of(result["limitations"]));
+    EXPECT_TRUE(right["evidence"]["complete"].asBool());
+    EXPECT_TRUE(right["evidence"]["complete_to_bp"].isNull());
+
+    // walk_domain: the fork needs two live paths
+    out = traverse(request(ABC, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                    "bounds": {"max_live_paths": 1}})"), none);
+    right = out["results"][0]["arms"]["right"];
+    EXPECT_EQ("truncated", right["status"].asString());
+    ASSERT_EQ(std::vector<std::string>{ "walk_domain" }, kinds_of(right["limitations"]));
+    const Json::Value &walk = right["limitations"][0];
+    EXPECT_EQ("bounds.max_live_paths", walk["knob"].asString());
+    EXPECT_EQ(1u, walk["limit"].asUInt64());
+    EXPECT_EQ(2u, walk["observed"].asUInt64());   // what the fork needed
+    EXPECT_EQ(right["complete_to_bp"], walk["complete_to_bp"]);
+    EXPECT_EQ(0u, walk["complete_to_bp"].asUInt64());
+    EXPECT_EQ(nothing, kinds_of(out["results"][0]["limitations"]));
+
+    // scope: merging (constrain's default) closes the bubble once
+    out = traverse(request(ABC, R"({"direction": "right"})"), none);
+    right = out["results"][0]["arms"]["right"];
+    EXPECT_EQ("united_history", right["completeness_scope"].asString());
+    ASSERT_EQ(std::vector<std::string>{ "scope" }, kinds_of(right["limitations"]));
+    EXPECT_EQ("branching.on_reconverge", right["limitations"][0]["knob"].asString());
+    EXPECT_EQ("merge", right["limitations"][0]["limit"].asString());
+    EXPECT_EQ(1u, right["limitations"][0]["observed"].asUInt64());
+
+    // label_lists and inexact_counts: annotate mode, one label per recorded list ...
+    out = traverse(request(nothing, R"({"direction": "right",
+                                        "labels": {"mode": "annotate", "max_labels_per_node": 1}})"), none);
+    right = out["results"][0]["arms"]["right"];
+    EXPECT_EQ("complete", right["status"].asString());
+    ASSERT_EQ((std::vector<std::string>{ "label_lists", "inexact_counts" }), kinds_of(right["limitations"]));
+    for (const Json::Value &l : right["limitations"]) {
+        EXPECT_EQ("labels.max_labels_per_node", l["knob"].asString());
+        EXPECT_EQ(1u, l["limit"].asUInt64());
+    }
+    EXPECT_EQ(3u, right["limitations"][0]["observed"].asUInt64());   // the largest true count
+    // ... and nothing with the default cap
+    out = traverse(request(nothing, R"({"direction": "right", "labels": {"mode": "annotate"}})"), none);
+    EXPECT_EQ(nothing, kinds_of(out["results"][0]["arms"]["right"]["limitations"]));
+
+    // seed_labels: the derived carrier set {A, B, C} cut to two
+    const std::string derived_two = R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                        "labels": {"max_seed_labels": 2}})";
+    out = traverse(request(nothing, derived_two), none);
+    result = out["results"][0];
+    ASSERT_EQ(std::vector<std::string>{ "seed_labels" }, kinds_of(result["limitations"]));
+    EXPECT_EQ("labels.max_seed_labels", result["limitations"][0]["knob"].asString());
+    EXPECT_EQ(2u, result["limitations"][0]["limit"].asUInt64());
+    EXPECT_EQ(3u, result["limitations"][0]["observed"].asUInt64());
+    EXPECT_FALSE(result["limitations"][0].isMember("server_limit"));
+    EXPECT_EQ(nothing, kinds_of(result["arms"]["right"]["limitations"]));
+
+    // server_clamp: the server lowers the derived-set cap to 2. The derived seed runs
+    // into it (and its seed_labels entry names the server's maximum); a seed with an
+    // explicit list in the same request does not.
+    Json::Value req = request(nothing, R"({"direction": "right", "branching": {"on_reconverge": "keep"}})");
+    Json::Value named;
+    named["sequence"] = X;
+    for (const std::string &l : ABC) {
+        named["labels"].append(l);
+    }
+    req["seeds"].append(named);
+    cli::TraverseLimits limits;
+    limits.max_seed_labels = 2;
+    out = traverse(req, limits);
+    ASSERT_EQ(1u, out["strategy"]["clamped"].size());
+    result = out["results"][0];
+    ASSERT_EQ((std::vector<std::string>{ "seed_labels", "server_clamp" }), kinds_of(result["limitations"]));
+    EXPECT_EQ(2u, result["limitations"][0]["server_limit"].asUInt64());
+    const Json::Value &clamp = result["limitations"][1];
+    EXPECT_EQ("labels.max_seed_labels", clamp["knob"].asString());
+    EXPECT_EQ(2.0, clamp["limit"].asDouble());
+    EXPECT_EQ(1000.0, clamp["observed"].asDouble());   // what the request asked for
+    EXPECT_EQ(nothing, kinds_of(out["results"][1]["limitations"]));
+
+    // a time budget raised from zero (it also bounds the derivation) binds every seed's
+    // walk; a lowered one that never tripped binds none
+    limits = cli::TraverseLimits();
+    limits.max_time_ms = 60000;
+    out = traverse(request(nothing, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                        "bounds": {"time_budget_ms": 0}})"), limits);
+    result = out["results"][0];
+    ASSERT_EQ(std::vector<std::string>{ "server_clamp" }, kinds_of(result["limitations"]));
+    EXPECT_EQ("bounds.time_budget_ms", result["limitations"][0]["knob"].asString());
+    EXPECT_EQ(60000.0, result["limitations"][0]["limit"].asDouble());
+    EXPECT_EQ(0.0, result["limitations"][0]["observed"].asDouble());
+    out = traverse(request(nothing, R"({"direction": "right", "branching": {"on_reconverge": "keep"},
+                                        "bounds": {"time_budget_ms": 120000}})"), limits);
+    EXPECT_EQ(1u, out["strategy"]["clamped"].size());
+    EXPECT_EQ(nothing, kinds_of(out["results"][0]["limitations"]));
+
+    // switch_sources (the SwitchSources fixture): with one priced source B's cheap
+    // switch into E is never considered; with two it is
+    auto s = clean_blocks({ 60, 40 }, 34);
+    const std::string &S = s[0], &Z = s[1];
+    auto switching = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { S, S, S, S.substr(S.size() - kK) + Z }, { "A", "B", "C", "E" }, DeBruijnGraph::BASIC);
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.extra = { "E" };
+    st.loss_budget = 1;
+    st.merge_reconverge = false;
+    auto table = LabelChangeCost::table({ { { 0, 3 }, 2.0 }, { { 1, 3 }, 0.5 } }, kInfiniteLoss);
+    st.max_switch_sources = 1;
+    Json::Value arm = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
+                                               st, "summary", false)["arms"]["right"];
+    ASSERT_EQ(std::vector<std::string>{ "switch_sources" }, kinds_of(arm["limitations"]));
+    EXPECT_EQ("labels.max_switch_sources", arm["limitations"][0]["knob"].asString());
+    EXPECT_EQ(1u, arm["limitations"][0]["limit"].asUInt64());
+    EXPECT_EQ(1u, arm["limitations"][0]["observed"].asUInt64());
+    st.max_switch_sources = 2;
+    arm = cli::seed_result_to_json(run(*switching, S, { "A", "B", "C" }, st, table),
+                                   st, "summary", false)["arms"]["right"];
+    EXPECT_EQ(nothing, kinds_of(arm["limitations"]));
 }
 
 } // namespace

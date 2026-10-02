@@ -266,6 +266,9 @@ struct ArmState {
     // extension depth of the first head not expanded (or first pruned): the level it
     // belongs to is partial and does not count toward complete_to_bp
     uint64_t boundary = std::numeric_limits<uint64_t>::max();
+    // depth of the last branch event emitted: levels are synchronous, so it never
+    // decreases, which is what makes the stored prefix a depth boundary
+    uint64_t last_branch_event_bp = 0;
     // ancestor marks of |marked_segment| (ancestors never change after creation), and
     // the marked segments as a list: the proper ancestors, in no particular order
     std::vector<uint32_t> visit_mark;
@@ -433,8 +436,9 @@ class Walker {
     // re-entry, per-path edge reuse; requires c.kmer
     void check_structure(ArmState &arm, const Item &item, Cand &c);
     // the caps, decided before anything is committed; nf = successors to follow
+    // sets cap_demand_ when a cap trips
     std::optional<EndReason> cap_check(const ArmState &arm, size_t nf,
-                                       size_t remaining_in_level) const;
+                                       size_t remaining_in_level);
     void account_steps(ArmState &arm, uint64_t at, size_t nf);
     void record_edge(ArmState &arm, size_t segment, const Cand &c);
     void prefetch(ArmState &arm, const std::vector<Item> &items,
@@ -531,6 +535,8 @@ class Walker {
     uint64_t steps_total_ = 0;
     uint64_t pair_evaluations_ = 0;
     bool seed_stopped_ = false;
+    // what the last cap to trip compared against its limit (CapTrigger::demand)
+    double cap_demand_ = 0;
 
     // scratch reused across steps
     Scratch scratch_;
@@ -2076,7 +2082,8 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
         } else {
             if (!arm.result.cap_trigger) {
                 arm.result.cap_trigger = CapTrigger{ EndReason::BEAM_PRUNED, depth, item.segment,
-                                                     arm.next.size(), live_labels, exact };
+                                                     arm.next.size(), live_labels, exact,
+                                                     static_cast<double>(arm.next.size()) };
             }
             // the pruned heads are walks of length |depth| that will not be expanded:
             // walks of that length are all present, longer ones are not
@@ -2117,7 +2124,7 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
     const Item &first = items && from < items->size() ? (*items)[from] : arm.next.front();
     if (!arm.result.cap_trigger) {
         arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, first.segment,
-                                             live, labels, exact };
+                                             live, labels, exact, cap_demand_ };
     }
     // Levels are synchronous, so every head of |items| before |from| was expanded and
     // none after it: walks of length first.ext_bp are all present, longer ones are
@@ -2647,8 +2654,14 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // ---- branch event: an ambiguity taken or any refusal (a quorum or split-limit
     // stop, an excluded source and a successor refused by the budget each recorded one)
     if (!ambiguous_taken.empty() || !refused.empty()) {
+        assert(at >= arm.last_branch_event_bp);
+        arm.last_branch_event_bp = at;
         arm.result.branch_events_total++;
-        if (arm.result.branch_events.size() < strategy_.max_branch_events) {
+        if (arm.result.branch_events.size() >= strategy_.max_branch_events) {
+            // the first event not kept: all events below its depth are kept (§7.2)
+            arm.result.branch_events_complete_to_bp
+                = std::min(arm.result.branch_events_complete_to_bp, at);
+        } else {
             BranchEvent be;
             be.at_bp = at;
             be.segment = item.segment;
@@ -2797,18 +2810,22 @@ void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
 }
 
 std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf,
-                                           size_t remaining_in_level) const {
+                                           size_t remaining_in_level) {
     if (!nf)
         return std::nullopt;
+    auto over = [&](uint64_t demand, EndReason reason) {
+        cap_demand_ = static_cast<double>(demand);
+        return reason;
+    };
     if (steps_total_ + nf > strategy_.max_steps)
-        return EndReason::MAX_STEPS;
+        return over(steps_total_ + nf, EndReason::MAX_STEPS);
     if (arm.result.output_bp + nf > strategy_.max_output_bp)
-        return EndReason::MAX_OUTPUT;
+        return over(arm.result.output_bp + nf, EndReason::MAX_OUTPUT);
     size_t live_after = remaining_in_level + arm.next.size() + nf;
     if (nf >= 2 && arm.finished_leaves + live_after > strategy_.max_paths)
-        return EndReason::MAX_PATHS;
+        return over(arm.finished_leaves + live_after, EndReason::MAX_PATHS);
     if (strategy_.on_overflow == Strategy::STOP && live_after > strategy_.max_live_paths)
-        return EndReason::MAX_LIVE_PATHS;
+        return over(live_after, EndReason::MAX_LIVE_PATHS);
     return std::nullopt;
 }
 
@@ -3159,6 +3176,7 @@ SeedResult Walker::run() {
         if (!any)
             break;
         if (depth > 0 && time_exceeded()) {
+            cap_demand_ = timer_.elapsed() * 1000.0;
             for (ArmState &arm : arms_) {
                 stop_frontier(arm, EndReason::TIME_BUDGET);
             }
