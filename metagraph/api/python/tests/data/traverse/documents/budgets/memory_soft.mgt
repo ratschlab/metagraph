@@ -1,0 +1,25 @@
+H mgt 1 15 basic $ACGT c k m 64 1000 0 walk fixtures * 178cc93c330374f0
+S 2e433ba3262fdd15 30 16 4 CGCAGGGGCGTGGGTCAGGCCAAAATCGGT
+L c 0 * 0 x.fa
+L c 1 * 0 y.fa
+L c 2 * 0 z.fa
+L c 3 * 0 w.fa
+O c c c i
+K * memory_bound_soft bounds.max_memory_mb i:1 i:0 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)
+K r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A r c 100 u 0 0 1 3 0 steps=68,successor_enumerations=69,output_bp=68,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=1482 * 3 * 3 5 2 1 0 68
+B 0 2 4 5 1 68 0 1 1 0 0 0 0 D:2,L:2,R:1
+V 10 0 AG 1,4 0 . A:minority:0
+V 12 0 CG 2,3 1 . .
+V 40 2 G 1 . 1 G:minority:1
+G * 0 12 * * * * 1 * AACTTCTGAAGT
+G 0 12 28 1,3 * * * * * CCAAGACAATGGGCCGAGCAAATCCTCT
+T * 1:0:1:0
+G 0 12 28 !3 * * * * * GCTCGTTCCAGAGAACGAAACCCTACCT
+T * 0:0:1:0,1:0:1:0
+R 2 0 0 40 L 0 * * 1 1 0
+R 1 1 0 40 D 0 * * 0 1 0
+R 2 2 0 40 L 0 * * 1 0 0
+R 1 3 0 40 D 0 * * 0 0 0
+R 2 1 0 40 Rm 0 * * 1 1 0
+Z 25

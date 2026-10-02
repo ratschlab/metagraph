@@ -1,0 +1,31 @@
+{
+ "seeds": [
+  {
+   "seed_id": "memory_soft",
+   "sequence": "CGCAGGGGCGTGGGTCAGGCCAAAATCGGT"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "branching": {
+   "min_successor_labels": 2,
+   "max_label_branches": 1
+  },
+  "bounds": {
+   "max_extension_bp": 100,
+   "max_memory_mb": 1
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "quorum",
+  "k": 15,
+  "doc": "the quorum fixture under bounds.max_memory_mb 1, which admits every head: no stop, but the seed-level memory_bound_soft limitation (annotation decoding is not charged yet)"
+ }
+}

@@ -1,0 +1,341 @@
+H mgt 1 15 basic $ACGT c k k 64 0 0 walk fixtures * dacc7dcb84187de4
+S 8322b11da77e686c 15 1 1 CTCCAGTTTCTTATC
+L c 0 * 0 comb.fa
+O p c c i
+Q locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 65 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal
+K * memory_bound_soft bounds.max_memory_mb i:1 i:0 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)
+K r walk_domain bounds.max_memory_mb i:1 i:2 65 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob
+A r t 65 p 2 1 1 1 0 steps=130,successor_enumerations=131,output_bp=130,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=2106 Y,65,129,2,1,1,2 65 * 131 66 66 65 0 130
+B 0 2 1 2 1 100 0 50 50 0 0 0 0 D:49
+B 50 2 1 2 1 30 0 15 15 0 0 0 0 D:15,Y:2
+V 0 0 CG 1,1 0 . .
+V 1 1 CG 1,1 0 . .
+V 2 3 AC 1,1 0 . .
+V 3 5 AC 1,1 0 . .
+V 4 7 AC 1,1 0 . .
+V 5 9 GT 1,1 0 . .
+V 6 11 CG 1,1 0 . .
+V 7 13 AC 1,1 0 . .
+V 8 15 GT 1,1 0 . .
+V 9 17 CG 1,1 0 . .
+V 10 19 AC 1,1 0 . .
+V 11 21 CG 1,1 0 . .
+V 12 23 CG 1,1 0 . .
+V 13 25 AC 1,1 0 . .
+V 14 27 GT 1,1 0 . .
+V 15 29 AT 1,1 0 . .
+V 16 32 GT 1,1 0 . .
+V 17 33 AT 1,1 0 . .
+V 18 36 AC 1,1 0 . .
+V 19 37 CG 1,1 0 . .
+V 20 39 CG 1,1 0 . .
+V 21 41 CG 1,1 0 . .
+V 22 43 CG 1,1 0 . .
+V 23 45 CG 1,1 0 . .
+V 24 47 AC 1,1 0 . .
+V 25 49 AC 1,1 0 . .
+V 26 51 GT 1,1 0 . .
+V 27 53 CG 1,1 0 . .
+V 28 55 GT 1,1 0 . .
+V 29 57 AT 1,1 0 . .
+V 30 60 AT 1,1 0 . .
+V 31 62 AC 1,1 0 . .
+V 32 63 GT 1,1 0 . .
+V 33 65 GT 1,1 0 . .
+V 34 67 AT 1,1 0 . .
+V 35 70 AC 1,1 0 . .
+V 36 71 GT 1,1 0 . .
+V 37 73 GT 1,1 0 . .
+V 38 75 GT 1,1 0 . .
+V 39 77 GT 1,1 0 . .
+V 40 79 AT 1,1 0 . .
+V 41 82 AC 1,1 0 . .
+V 42 83 AT 1,1 0 . .
+V 43 86 AT 1,1 0 . .
+V 44 88 GT 1,1 0 . .
+V 45 89 AC 1,1 0 . .
+V 46 91 CG 1,1 0 . .
+V 47 93 CG 1,1 0 . .
+V 48 95 AC 1,1 0 . .
+V 49 97 AC 1,1 0 . .
+V 50 99 AC 1,1 0 . .
+V 51 101 AT 1,1 0 . .
+V 52 104 AT 1,1 0 . .
+V 53 106 GT 1,1 0 . .
+V 54 107 CG 1,1 0 . .
+V 55 109 GT 1,1 0 . .
+V 56 111 AT 1,1 0 . .
+V 57 114 CG 1,1 0 . .
+V 58 115 GT 1,1 0 . .
+V 59 117 AC 1,1 0 . .
+V 60 119 AT 1,1 0 . .
+V 61 122 CG 1,1 0 . .
+V 62 123 CG 1,1 0 . .
+V 63 125 CG 1,1 0 . .
+V 64 127 GT 1,1 0 . .
+G * 0 0 * * * * 1 * .
+G 0 0 1 0 * * * 1 * C
+G 0 0 1 0 * * * * * G
+T * 0:0:1:0
+G 1 1 1 0 * * * 1 * C
+G 1 1 1 0 * * * * * G
+T * 0:0:2:0
+G 3 2 1 0 * * * 1 * A
+G 3 2 1 0 * * * * * C
+T * 0:0:3:0
+G 5 3 1 0 * * * 1 * A
+G 5 3 1 0 * * * * * C
+T * 0:0:4:0
+G 7 4 1 0 * * * 1 * A
+G 7 4 1 0 * * * * * C
+T * 0:0:5:0
+G 9 5 1 0 * * * 1 * G
+G 9 5 1 0 * * * * * T
+T * 0:0:6:0
+G 11 6 1 0 * * * 1 * C
+G 11 6 1 0 * * * * * G
+T * 0:0:7:0
+G 13 7 1 0 * * * 1 * A
+G 13 7 1 0 * * * * * C
+T * 0:0:8:0
+G 15 8 1 0 * * * 1 * G
+G 15 8 1 0 * * * * * T
+T * 0:0:9:0
+G 17 9 1 0 * * * 1 * C
+G 17 9 1 0 * * * * * G
+T * 0:0:10:0
+G 19 10 1 0 * * * 1 * A
+G 19 10 1 0 * * * * * C
+T * 0:0:11:0
+G 21 11 1 0 * * * 1 * C
+G 21 11 1 0 * * * * * G
+T * 0:0:12:0
+G 23 12 1 0 * * * 1 * C
+G 23 12 1 0 * * * * * G
+T * 0:0:13:0
+G 25 13 1 0 * * * 1 * A
+G 25 13 1 0 * * * * * C
+T * 0:0:14:0
+G 27 14 1 0 * * * 1 * G
+G 27 14 1 0 * * * * * T
+T * 0:0:15:0
+G 29 15 1 0 * * * * * A
+T * 0:0:16:0
+G 29 15 1 0 * * * 1 * T
+G 32 16 1 0 * * * 1 * G
+G 32 16 1 0 * * * * * T
+T * 0:0:17:0
+G 33 17 1 0 * * * * * A
+T * 0:0:18:0
+G 33 17 1 0 * * * 1 * T
+G 36 18 1 0 * * * 1 * A
+G 36 18 1 0 * * * * * C
+T * 0:0:19:0
+G 37 19 1 0 * * * 1 * C
+G 37 19 1 0 * * * * * G
+T * 0:0:20:0
+G 39 20 1 0 * * * 1 * C
+G 39 20 1 0 * * * * * G
+T * 0:0:21:0
+G 41 21 1 0 * * * 1 * C
+G 41 21 1 0 * * * * * G
+T * 0:0:22:0
+G 43 22 1 0 * * * 1 * C
+G 43 22 1 0 * * * * * G
+T * 0:0:23:0
+G 45 23 1 0 * * * 1 * C
+G 45 23 1 0 * * * * * G
+T * 0:0:24:0
+G 47 24 1 0 * * * 1 * A
+G 47 24 1 0 * * * * * C
+T * 0:0:25:0
+G 49 25 1 0 * * * 1 * A
+G 49 25 1 0 * * * * * C
+T * 0:0:26:0
+G 51 26 1 0 * * * 1 * G
+G 51 26 1 0 * * * * * T
+T * 0:0:27:0
+G 53 27 1 0 * * * 1 * C
+G 53 27 1 0 * * * * * G
+T * 0:0:28:0
+G 55 28 1 0 * * * 1 * G
+G 55 28 1 0 * * * * * T
+T * 0:0:29:0
+G 57 29 1 0 * * * * * A
+T * 0:0:30:0
+G 57 29 1 0 * * * 1 * T
+G 60 30 1 0 * * * * * A
+T * 0:0:31:0
+G 60 30 1 0 * * * 1 * T
+G 62 31 1 0 * * * 1 * A
+G 62 31 1 0 * * * * * C
+T * 0:0:32:0
+G 63 32 1 0 * * * 1 * G
+G 63 32 1 0 * * * * * T
+T * 0:0:33:0
+G 65 33 1 0 * * * 1 * G
+G 65 33 1 0 * * * * * T
+T * 0:0:34:0
+G 67 34 1 0 * * * * * A
+T * 0:0:35:0
+G 67 34 1 0 * * * 1 * T
+G 70 35 1 0 * * * 1 * A
+G 70 35 1 0 * * * * * C
+T * 0:0:36:0
+G 71 36 1 0 * * * 1 * G
+G 71 36 1 0 * * * * * T
+T * 0:0:37:0
+G 73 37 1 0 * * * 1 * G
+G 73 37 1 0 * * * * * T
+T * 0:0:38:0
+G 75 38 1 0 * * * 1 * G
+G 75 38 1 0 * * * * * T
+T * 0:0:39:0
+G 77 39 1 0 * * * 1 * G
+G 77 39 1 0 * * * * * T
+T * 0:0:40:0
+G 79 40 1 0 * * * * * A
+T * 0:0:41:0
+G 79 40 1 0 * * * 1 * T
+G 82 41 1 0 * * * 1 * A
+G 82 41 1 0 * * * * * C
+T * 0:0:42:0
+G 83 42 1 0 * * * * * A
+T * 0:0:43:0
+G 83 42 1 0 * * * 1 * T
+G 86 43 1 0 * * * * * A
+T * 0:0:44:0
+G 86 43 1 0 * * * 1 * T
+G 88 44 1 0 * * * 1 * G
+G 88 44 1 0 * * * * * T
+T * 0:0:45:0
+G 89 45 1 0 * * * 1 * A
+G 89 45 1 0 * * * * * C
+T * 0:0:46:0
+G 91 46 1 0 * * * 1 * C
+G 91 46 1 0 * * * * * G
+T * 0:0:47:0
+G 93 47 1 0 * * * 1 * C
+G 93 47 1 0 * * * * * G
+T * 0:0:48:0
+G 95 48 1 0 * * * 1 * A
+G 95 48 1 0 * * * * * C
+T * 0:0:49:0
+G 97 49 1 0 * * * 1 * A
+G 97 49 1 0 * * * * * C
+T * 0:0:50:0
+G 99 50 1 0 * * * 1 * A
+G 99 50 1 0 * * * * * C
+T * 0:0:51:0
+G 101 51 1 0 * * * * * A
+T * 0:0:52:0
+G 101 51 1 0 * * * 1 * T
+G 104 52 1 0 * * * * * A
+T * 0:0:53:0
+G 104 52 1 0 * * * 1 * T
+G 106 53 1 0 * * * 1 * G
+G 106 53 1 0 * * * * * T
+T * 0:0:54:0
+G 107 54 1 0 * * * 1 * C
+G 107 54 1 0 * * * * * G
+T * 0:0:55:0
+G 109 55 1 0 * * * 1 * G
+G 109 55 1 0 * * * * * T
+T * 0:0:56:0
+G 111 56 1 0 * * * * * A
+T * 0:0:57:0
+G 111 56 1 0 * * * 1 * T
+G 114 57 1 0 * * * 1 * C
+G 114 57 1 0 * * * * * G
+T * 0:0:58:0
+G 115 58 1 0 * * * 1 * G
+G 115 58 1 0 * * * * * T
+T * 0:0:59:0
+G 117 59 1 0 * * * 1 * A
+G 117 59 1 0 * * * * * C
+T * 0:0:60:0
+G 119 60 1 0 * * * * * A
+T * 0:0:61:0
+G 119 60 1 0 * * * 1 * T
+G 122 61 1 0 * * * 1 * C
+G 122 61 1 0 * * * * * G
+T * 0:0:62:0
+G 123 62 1 0 * * * 1 * C
+G 123 62 1 0 * * * * * G
+T * 0:0:63:0
+G 125 63 1 0 * * * 1 * C
+G 125 63 1 0 * * * * * G
+T * 0:0:64:0
+G 127 64 1 0 * * * * * G
+T Y 0:0:65:0
+C 0 0 65 0
+G 127 64 1 0 * * * * * T
+T Y 0:0:65:0
+C 0 0 65 0
+R 31 0 0 16 D 0 * * 0 16 0
+R 2 0 0 1 D 0 * * 0 1 0
+R 4 0 0 2 D 0 * * 0 2 0
+R 6 0 0 3 D 0 * * 0 3 0
+R 8 0 0 4 D 0 * * 0 4 0
+R 10 0 0 5 D 0 * * 0 5 0
+R 12 0 0 6 D 0 * * 0 6 0
+R 14 0 0 7 D 0 * * 0 7 0
+R 16 0 0 8 D 0 * * 0 8 0
+R 18 0 0 9 D 0 * * 0 9 0
+R 20 0 0 10 D 0 * * 0 10 0
+R 22 0 0 11 D 0 * * 0 11 0
+R 24 0 0 12 D 0 * * 0 12 0
+R 26 0 0 13 D 0 * * 0 13 0
+R 28 0 0 14 D 0 * * 0 14 0
+R 30 0 0 15 D 0 * * 0 15 0
+R 35 0 0 18 D 0 * * 0 18 0
+R 34 0 0 17 D 0 * * 0 17 0
+R 59 0 0 30 D 0 * * 0 30 0
+R 38 0 0 19 D 0 * * 0 19 0
+R 40 0 0 20 D 0 * * 0 20 0
+R 42 0 0 21 D 0 * * 0 21 0
+R 44 0 0 22 D 0 * * 0 22 0
+R 46 0 0 23 D 0 * * 0 23 0
+R 48 0 0 24 D 0 * * 0 24 0
+R 50 0 0 25 D 0 * * 0 25 0
+R 52 0 0 26 D 0 * * 0 26 0
+R 54 0 0 27 D 0 * * 0 27 0
+R 56 0 0 28 D 0 * * 0 28 0
+R 58 0 0 29 D 0 * * 0 29 0
+R 61 0 0 31 D 0 * * 0 31 0
+R 69 0 0 35 D 0 * * 0 35 0
+R 64 0 0 32 D 0 * * 0 32 0
+R 66 0 0 33 D 0 * * 0 33 0
+R 68 0 0 34 D 0 * * 0 34 0
+R 81 0 0 41 D 0 * * 0 41 0
+R 72 0 0 36 D 0 * * 0 36 0
+R 74 0 0 37 D 0 * * 0 37 0
+R 76 0 0 38 D 0 * * 0 38 0
+R 78 0 0 39 D 0 * * 0 39 0
+R 80 0 0 40 D 0 * * 0 40 0
+R 85 0 0 43 D 0 * * 0 43 0
+R 84 0 0 42 D 0 * * 0 42 0
+R 87 0 0 44 D 0 * * 0 44 0
+R 103 0 0 52 D 0 * * 0 52 0
+R 90 0 0 45 D 0 * * 0 45 0
+R 92 0 0 46 D 0 * * 0 46 0
+R 94 0 0 47 D 0 * * 0 47 0
+R 96 0 0 48 D 0 * * 0 48 0
+R 98 0 0 49 D 0 * * 0 49 0
+R 100 0 0 50 D 0 * * 0 50 0
+R 102 0 0 51 D 0 * * 0 51 0
+R 105 0 0 53 D 0 * * 0 53 0
+R 113 0 0 57 D 0 * * 0 57 0
+R 108 0 0 54 D 0 * * 0 54 0
+R 110 0 0 55 D 0 * * 0 55 0
+R 112 0 0 56 D 0 * * 0 56 0
+R 121 0 0 61 D 0 * * 0 61 0
+R 116 0 0 58 D 0 * * 0 58 0
+R 118 0 0 59 D 0 * * 0 59 0
+R 120 0 0 60 D 0 * * 0 60 0
+R 129 0 0 65 Y 0 * * 0 65 0
+R 124 0 0 62 D 0 * * 0 62 0
+R 126 0 0 63 D 0 * * 0 63 0
+R 128 0 0 64 D 0 * * 0 64 0
+R 130 0 0 65 Y 0 * * 0 65 0
+Z 341

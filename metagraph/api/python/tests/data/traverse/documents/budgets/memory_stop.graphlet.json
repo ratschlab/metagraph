@@ -1,0 +1,218 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "dacc7dcb84187de4",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 1,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "direct",
+    "direct_reads": 132,
+    "keys_mapped": 133,
+    "rows_requested": 133
+   },
+   "arms": {
+    "right": {
+     "branch_events_total": 65,
+     "cap_trigger": {
+      "at_bp": 65,
+      "exact": true,
+      "live_labels": 1,
+      "live_paths": 2,
+      "reason": "resource_limit",
+      "segment": 129
+     },
+     "complete_to_bp": 65,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 130,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 130,
+      "successor_enumerations": 131,
+      "switch_sources_cut": 0,
+      "work_units": 2106
+     },
+     "counts": {
+      "bases": 130,
+      "label_ends": {
+       "dead_end": 64,
+       "resource_limit": 2
+      },
+      "leaves": 66,
+      "leaves_by_reason": {
+       "resource_limit": 2,
+       "semantic": 64
+      },
+      "max_bp": 65,
+      "merges": 0,
+      "runs": 66,
+      "segments": 131,
+      "splits": 65
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 1,
+      "live_paths": 2
+     },
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 1,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "complete_to_bp": 65,
+       "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob",
+       "kind": "walk_domain",
+       "knob": "bounds.max_memory_mb",
+       "limit": 1,
+       "observed": 2
+      }
+     ],
+     "status": "truncated"
+    }
+   },
+   "graphlet": "H mgt 1 15 basic $ACGT c k k 64 0 0 walk fixtures * dacc7dcb84187de4\nS 8322b11da77e686c 15 1 1 CTCCAGTTTCTTATC\nL c 0 * 0 comb.fa\nO p c c i\nQ locus memory traversal i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 65 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal\nK * memory_bound_soft bounds.max_memory_mb i:1 i:0 * . the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)\nK r walk_domain bounds.max_memory_mb i:1 i:2 65 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob\nA r t 65 p 2 1 1 1 0 steps=130,successor_enumerations=131,output_bp=130,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=2106 Y,65,129,2,1,1,2 65 * 131 66 66 65 0 130\nB 0 2 1 2 1 100 0 50 50 0 0 0 0 D:49\nB 50 2 1 2 1 30 0 15 15 0 0 0 0 D:15,Y:2\nV 0 0 CG 1,1 0 . .\nV 1 1 CG 1,1 0 . .\nV 2 3 AC 1,1 0 . .\nV 3 5 AC 1,1 0 . .\nV 4 7 AC 1,1 0 . .\nV 5 9 GT 1,1 0 . .\nV 6 11 CG 1,1 0 . .\nV 7 13 AC 1,1 0 . .\nV 8 15 GT 1,1 0 . .\nV 9 17 CG 1,1 0 . .\nV 10 19 AC 1,1 0 . .\nV 11 21 CG 1,1 0 . .\nV 12 23 CG 1,1 0 . .\nV 13 25 AC 1,1 0 . .\nV 14 27 GT 1,1 0 . .\nV 15 29 AT 1,1 0 . .\nV 16 32 GT 1,1 0 . .\nV 17 33 AT 1,1 0 . .\nV 18 36 AC 1,1 0 . .\nV 19 37 CG 1,1 0 . .\nV 20 39 CG 1,1 0 . .\nV 21 41 CG 1,1 0 . .\nV 22 43 CG 1,1 0 . .\nV 23 45 CG 1,1 0 . .\nV 24 47 AC 1,1 0 . .\nV 25 49 AC 1,1 0 . .\nV 26 51 GT 1,1 0 . .\nV 27 53 CG 1,1 0 . .\nV 28 55 GT 1,1 0 . .\nV 29 57 AT 1,1 0 . .\nV 30 60 AT 1,1 0 . .\nV 31 62 AC 1,1 0 . .\nV 32 63 GT 1,1 0 . .\nV 33 65 GT 1,1 0 . .\nV 34 67 AT 1,1 0 . .\nV 35 70 AC 1,1 0 . .\nV 36 71 GT 1,1 0 . .\nV 37 73 GT 1,1 0 . .\nV 38 75 GT 1,1 0 . .\nV 39 77 GT 1,1 0 . .\nV 40 79 AT 1,1 0 . .\nV 41 82 AC 1,1 0 . .\nV 42 83 AT 1,1 0 . .\nV 43 86 AT 1,1 0 . .\nV 44 88 GT 1,1 0 . .\nV 45 89 AC 1,1 0 . .\nV 46 91 CG 1,1 0 . .\nV 47 93 CG 1,1 0 . .\nV 48 95 AC 1,1 0 . .\nV 49 97 AC 1,1 0 . .\nV 50 99 AC 1,1 0 . .\nV 51 101 AT 1,1 0 . .\nV 52 104 AT 1,1 0 . .\nV 53 106 GT 1,1 0 . .\nV 54 107 CG 1,1 0 . .\nV 55 109 GT 1,1 0 . .\nV 56 111 AT 1,1 0 . .\nV 57 114 CG 1,1 0 . .\nV 58 115 GT 1,1 0 . .\nV 59 117 AC 1,1 0 . .\nV 60 119 AT 1,1 0 . .\nV 61 122 CG 1,1 0 . .\nV 62 123 CG 1,1 0 . .\nV 63 125 CG 1,1 0 . .\nV 64 127 GT 1,1 0 . .\nG * 0 0 * * * * 1 * .\nG 0 0 1 0 * * * 1 * C\nG 0 0 1 0 * * * * * G\nT * 0:0:1:0\nG 1 1 1 0 * * * 1 * C\nG 1 1 1 0 * * * * * G\nT * 0:0:2:0\nG 3 2 1 0 * * * 1 * A\nG 3 2 1 0 * * * * * C\nT * 0:0:3:0\nG 5 3 1 0 * * * 1 * A\nG 5 3 1 0 * * * * * C\nT * 0:0:4:0\nG 7 4 1 0 * * * 1 * A\nG 7 4 1 0 * * * * * C\nT * 0:0:5:0\nG 9 5 1 0 * * * 1 * G\nG 9 5 1 0 * * * * * T\nT * 0:0:6:0\nG 11 6 1 0 * * * 1 * C\nG 11 6 1 0 * * * * * G\nT * 0:0:7:0\nG 13 7 1 0 * * * 1 * A\nG 13 7 1 0 * * * * * C\nT * 0:0:8:0\nG 15 8 1 0 * * * 1 * G\nG 15 8 1 0 * * * * * T\nT * 0:0:9:0\nG 17 9 1 0 * * * 1 * C\nG 17 9 1 0 * * * * * G\nT * 0:0:10:0\nG 19 10 1 0 * * * 1 * A\nG 19 10 1 0 * * * * * C\nT * 0:0:11:0\nG 21 11 1 0 * * * 1 * C\nG 21 11 1 0 * * * * * G\nT * 0:0:12:0\nG 23 12 1 0 * * * 1 * C\nG 23 12 1 0 * * * * * G\nT * 0:0:13:0\nG 25 13 1 0 * * * 1 * A\nG 25 13 1 0 * * * * * C\nT * 0:0:14:0\nG 27 14 1 0 * * * 1 * G\nG 27 14 1 0 * * * * * T\nT * 0:0:15:0\nG 29 15 1 0 * * * * * A\nT * 0:0:16:0\nG 29 15 1 0 * * * 1 * T\nG 32 16 1 0 * * * 1 * G\nG 32 16 1 0 * * * * * T\nT * 0:0:17:0\nG 33 17 1 0 * * * * * A\nT * 0:0:18:0\nG 33 17 1 0 * * * 1 * T\nG 36 18 1 0 * * * 1 * A\nG 36 18 1 0 * * * * * C\nT * 0:0:19:0\nG 37 19 1 0 * * * 1 * C\nG 37 19 1 0 * * * * * G\nT * 0:0:20:0\nG 39 20 1 0 * * * 1 * C\nG 39 20 1 0 * * * * * G\nT * 0:0:21:0\nG 41 21 1 0 * * * 1 * C\nG 41 21 1 0 * * * * * G\nT * 0:0:22:0\nG 43 22 1 0 * * * 1 * C\nG 43 22 1 0 * * * * * G\nT * 0:0:23:0\nG 45 23 1 0 * * * 1 * C\nG 45 23 1 0 * * * * * G\nT * 0:0:24:0\nG 47 24 1 0 * * * 1 * A\nG 47 24 1 0 * * * * * C\nT * 0:0:25:0\nG 49 25 1 0 * * * 1 * A\nG 49 25 1 0 * * * * * C\nT * 0:0:26:0\nG 51 26 1 0 * * * 1 * G\nG 51 26 1 0 * * * * * T\nT * 0:0:27:0\nG 53 27 1 0 * * * 1 * C\nG 53 27 1 0 * * * * * G\nT * 0:0:28:0\nG 55 28 1 0 * * * 1 * G\nG 55 28 1 0 * * * * * T\nT * 0:0:29:0\nG 57 29 1 0 * * * * * A\nT * 0:0:30:0\nG 57 29 1 0 * * * 1 * T\nG 60 30 1 0 * * * * * A\nT * 0:0:31:0\nG 60 30 1 0 * * * 1 * T\nG 62 31 1 0 * * * 1 * A\nG 62 31 1 0 * * * * * C\nT * 0:0:32:0\nG 63 32 1 0 * * * 1 * G\nG 63 32 1 0 * * * * * T\nT * 0:0:33:0\nG 65 33 1 0 * * * 1 * G\nG 65 33 1 0 * * * * * T\nT * 0:0:34:0\nG 67 34 1 0 * * * * * A\nT * 0:0:35:0\nG 67 34 1 0 * * * 1 * T\nG 70 35 1 0 * * * 1 * A\nG 70 35 1 0 * * * * * C\nT * 0:0:36:0\nG 71 36 1 0 * * * 1 * G\nG 71 36 1 0 * * * * * T\nT * 0:0:37:0\nG 73 37 1 0 * * * 1 * G\nG 73 37 1 0 * * * * * T\nT * 0:0:38:0\nG 75 38 1 0 * * * 1 * G\nG 75 38 1 0 * * * * * T\nT * 0:0:39:0\nG 77 39 1 0 * * * 1 * G\nG 77 39 1 0 * * * * * T\nT * 0:0:40:0\nG 79 40 1 0 * * * * * A\nT * 0:0:41:0\nG 79 40 1 0 * * * 1 * T\nG 82 41 1 0 * * * 1 * A\nG 82 41 1 0 * * * * * C\nT * 0:0:42:0\nG 83 42 1 0 * * * * * A\nT * 0:0:43:0\nG 83 42 1 0 * * * 1 * T\nG 86 43 1 0 * * * * * A\nT * 0:0:44:0\nG 86 43 1 0 * * * 1 * T\nG 88 44 1 0 * * * 1 * G\nG 88 44 1 0 * * * * * T\nT * 0:0:45:0\nG 89 45 1 0 * * * 1 * A\nG 89 45 1 0 * * * * * C\nT * 0:0:46:0\nG 91 46 1 0 * * * 1 * C\nG 91 46 1 0 * * * * * G\nT * 0:0:47:0\nG 93 47 1 0 * * * 1 * C\nG 93 47 1 0 * * * * * G\nT * 0:0:48:0\nG 95 48 1 0 * * * 1 * A\nG 95 48 1 0 * * * * * C\nT * 0:0:49:0\nG 97 49 1 0 * * * 1 * A\nG 97 49 1 0 * * * * * C\nT * 0:0:50:0\nG 99 50 1 0 * * * 1 * A\nG 99 50 1 0 * * * * * C\nT * 0:0:51:0\nG 101 51 1 0 * * * * * A\nT * 0:0:52:0\nG 101 51 1 0 * * * 1 * T\nG 104 52 1 0 * * * * * A\nT * 0:0:53:0\nG 104 52 1 0 * * * 1 * T\nG 106 53 1 0 * * * 1 * G\nG 106 53 1 0 * * * * * T\nT * 0:0:54:0\nG 107 54 1 0 * * * 1 * C\nG 107 54 1 0 * * * * * G\nT * 0:0:55:0\nG 109 55 1 0 * * * 1 * G\nG 109 55 1 0 * * * * * T\nT * 0:0:56:0\nG 111 56 1 0 * * * * * A\nT * 0:0:57:0\nG 111 56 1 0 * * * 1 * T\nG 114 57 1 0 * * * 1 * C\nG 114 57 1 0 * * * * * G\nT * 0:0:58:0\nG 115 58 1 0 * * * 1 * G\nG 115 58 1 0 * * * * * T\nT * 0:0:59:0\nG 117 59 1 0 * * * 1 * A\nG 117 59 1 0 * * * * * C\nT * 0:0:60:0\nG 119 60 1 0 * * * * * A\nT * 0:0:61:0\nG 119 60 1 0 * * * 1 * T\nG 122 61 1 0 * * * 1 * C\nG 122 61 1 0 * * * * * G\nT * 0:0:62:0\nG 123 62 1 0 * * * 1 * C\nG 123 62 1 0 * * * * * G\nT * 0:0:63:0\nG 125 63 1 0 * * * 1 * C\nG 125 63 1 0 * * * * * G\nT * 0:0:64:0\nG 127 64 1 0 * * * * * G\nT Y 0:0:65:0\nC 0 0 65 0\nG 127 64 1 0 * * * * * T\nT Y 0:0:65:0\nC 0 0 65 0\nR 31 0 0 16 D 0 * * 0 16 0\nR 2 0 0 1 D 0 * * 0 1 0\nR 4 0 0 2 D 0 * * 0 2 0\nR 6 0 0 3 D 0 * * 0 3 0\nR 8 0 0 4 D 0 * * 0 4 0\nR 10 0 0 5 D 0 * * 0 5 0\nR 12 0 0 6 D 0 * * 0 6 0\nR 14 0 0 7 D 0 * * 0 7 0\nR 16 0 0 8 D 0 * * 0 8 0\nR 18 0 0 9 D 0 * * 0 9 0\nR 20 0 0 10 D 0 * * 0 10 0\nR 22 0 0 11 D 0 * * 0 11 0\nR 24 0 0 12 D 0 * * 0 12 0\nR 26 0 0 13 D 0 * * 0 13 0\nR 28 0 0 14 D 0 * * 0 14 0\nR 30 0 0 15 D 0 * * 0 15 0\nR 35 0 0 18 D 0 * * 0 18 0\nR 34 0 0 17 D 0 * * 0 17 0\nR 59 0 0 30 D 0 * * 0 30 0\nR 38 0 0 19 D 0 * * 0 19 0\nR 40 0 0 20 D 0 * * 0 20 0\nR 42 0 0 21 D 0 * * 0 21 0\nR 44 0 0 22 D 0 * * 0 22 0\nR 46 0 0 23 D 0 * * 0 23 0\nR 48 0 0 24 D 0 * * 0 24 0\nR 50 0 0 25 D 0 * * 0 25 0\nR 52 0 0 26 D 0 * * 0 26 0\nR 54 0 0 27 D 0 * * 0 27 0\nR 56 0 0 28 D 0 * * 0 28 0\nR 58 0 0 29 D 0 * * 0 29 0\nR 61 0 0 31 D 0 * * 0 31 0\nR 69 0 0 35 D 0 * * 0 35 0\nR 64 0 0 32 D 0 * * 0 32 0\nR 66 0 0 33 D 0 * * 0 33 0\nR 68 0 0 34 D 0 * * 0 34 0\nR 81 0 0 41 D 0 * * 0 41 0\nR 72 0 0 36 D 0 * * 0 36 0\nR 74 0 0 37 D 0 * * 0 37 0\nR 76 0 0 38 D 0 * * 0 38 0\nR 78 0 0 39 D 0 * * 0 39 0\nR 80 0 0 40 D 0 * * 0 40 0\nR 85 0 0 43 D 0 * * 0 43 0\nR 84 0 0 42 D 0 * * 0 42 0\nR 87 0 0 44 D 0 * * 0 44 0\nR 103 0 0 52 D 0 * * 0 52 0\nR 90 0 0 45 D 0 * * 0 45 0\nR 92 0 0 46 D 0 * * 0 46 0\nR 94 0 0 47 D 0 * * 0 47 0\nR 96 0 0 48 D 0 * * 0 48 0\nR 98 0 0 49 D 0 * * 0 49 0\nR 100 0 0 50 D 0 * * 0 50 0\nR 102 0 0 51 D 0 * * 0 51 0\nR 105 0 0 53 D 0 * * 0 53 0\nR 113 0 0 57 D 0 * * 0 57 0\nR 108 0 0 54 D 0 * * 0 54 0\nR 110 0 0 55 D 0 * * 0 55 0\nR 112 0 0 56 D 0 * * 0 56 0\nR 121 0 0 61 D 0 * * 0 61 0\nR 116 0 0 58 D 0 * * 0 58 0\nR 118 0 0 59 D 0 * * 0 59 0\nR 120 0 0 60 D 0 * * 0 60 0\nR 129 0 0 65 Y 0 * * 0 65 0\nR 124 0 0 62 D 0 * * 0 62 0\nR 126 0 0 63 D 0 * * 0 63 0\nR 128 0 0 64 D 0 * * 0 64 0\nR 130 0 0 65 Y 0 * * 0 65 0\nZ 341\n",
+   "graphlet_bytes": 8798,
+   "graphlet_lines": 341,
+   "label_mode": "constrain",
+   "limitations": [
+    {
+     "effect": "the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)",
+     "kind": "memory_bound_soft",
+     "knob": "bounds.max_memory_mb",
+     "limit": 1,
+     "observed": 0
+    }
+   ],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "partial"
+   },
+   "resource_stop": {
+    "actions": [
+     "raise_memory_budget",
+     "use_graphlet",
+     "drop_sequences",
+     "continue_from_leaves"
+    ],
+    "effective": 1,
+    "message": "the memory budget (bounds.max_memory_mb) stopped the walk at 65 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal",
+    "phase": "traversal",
+    "remaining": 0,
+    "requested": 1,
+    "resource": "memory",
+    "scope": "locus",
+    "used": 1
+   },
+   "seed": {
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": true,
+    "labels_supporting_total": 1,
+    "length_bp": 15,
+    "num_kmers": 1,
+    "num_labels": 1,
+    "num_seed_labels": 1,
+    "seed_id": "memory_stop",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "8322b11da77e686c"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 240,
+   "max_live_paths": 1000,
+   "max_memory_mb": 1,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "keep",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "right",
+  "exhaustive": true,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 64,
+   "max_seed_labels": 1000,
+   "max_switch_sources": "unlimited",
+   "mode": "constrain",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 0,
+   "detail": "graphlet",
+   "max_branch_events": "unlimited",
+   "profile_bin_bp": 50,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); it is followed while some permitted label supports every node of it under the strategy's label rules"
+}

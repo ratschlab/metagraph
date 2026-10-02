@@ -1,0 +1,31 @@
+{
+ "seeds": [
+  {
+   "seed_id": "work_stop",
+   "sequence": "ATGAGCGTGCCTCTAACGTTCATACCAAAT"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "branching": {
+   "max_label_branches": "unlimited"
+  },
+  "bounds": {
+   "max_extension_bp": 100,
+   "max_work_units": 1500
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "continuation_bp": 40,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "bubbles",
+  "k": 15,
+  "doc": "the merge fixture under bounds.max_work_units 1500: the walk stops between two heads at the work budget (Q work, resource_limit leaves and runs, a walk_domain limitation on the budget, the work_units counter)"
+ }
+}

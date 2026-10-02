@@ -164,6 +164,16 @@ INDEXES = {
                               ('hY', ['S', 'P', 'I', 'Q', 'R', 'Z']),
                               ('hZ', [('Z', 5, 25), 'N'])]},
     },
+    # a comb: a 260 bp backbone with a one-base dead-end tip at each of 230 positions (a
+    # tip record is one k-mer: the backbone's last 14 bases there and another base), all
+    # in one column. An exhaustive walk splits at every node, so the leaves' chains sum
+    # quadratically: what detail full spells out and the memory budget charges (§14)
+    'comb': {
+        'k': 15, 'seed': 909,
+        'blocks': {'B': 260},
+        'files': {'comb.fa': [('backbone', ['B'])]
+                  + [('tip%d' % i, [('B', i - 14, i), ('alt', 'B', i)]) for i in range(15, 245)]},
+    },
 }
 
 
@@ -441,6 +451,71 @@ COMPARE_FIXTURES = {
 # hand-made: what the CLI cannot produce today
 HAND_MADE = ('clipped_merge', 'limits')
 
+# CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14, stage 2), written to
+# documents/budgets/ (the top-level fixture list stays as it is). A work stop is the same
+# walk in every detail, so its full and graphlet responses are both written; a memory
+# stop is charged in the requested detail (the output is part of the budget), so the same
+# request stops at another depth in another detail and each memory stop is written in its
+# own detail only.
+BUDGET_DIR = 'budgets'
+BUDGET_FIXTURES = {
+    'work_stop': {
+        'index': 'bubbles',
+        'doc': 'the merge fixture under bounds.max_work_units 1500: the walk stops between two '
+               'heads at the work budget (Q work, resource_limit leaves and runs, a walk_domain '
+               'limitation on the budget, the work_units counter)',
+        'shows': ['Q:work', 'T:Y', 'R:Y', 'K:walk_domain'],
+        'details': ('full', 'graphlet'),
+        'request': {'seeds': [{'seed_id': 'work_stop', 'sequence': ['S']}],
+                    'strategy': {'direction': 'right',
+                                 'labels': {'seed_label_kind': 'column'},
+                                 'branching': {'max_label_branches': 'unlimited'},
+                                 'bounds': {'max_extension_bp': 100, 'max_work_units': 1500},
+                                 'output': {'profile_bin_bp': 50, 'continuation_bp': 40}}},
+    },
+    'memory_soft': {
+        'index': 'quorum',
+        'doc': 'the quorum fixture under bounds.max_memory_mb 1, which admits every head: no '
+               'stop, but the seed-level memory_bound_soft limitation (annotation decoding is '
+               'not charged yet)',
+        'shows': ['K:memory_bound_soft', 'V:refused'],
+        'details': ('full', 'graphlet'),
+        'request': {'seeds': [{'seed_id': 'memory_soft', 'sequence': ['S']}],
+                    'strategy': {'direction': 'right',
+                                 'labels': {'seed_label_kind': 'column'},
+                                 'branching': {'min_successor_labels': 2,
+                                               'max_label_branches': 1},
+                                 'bounds': {'max_extension_bp': 100, 'max_memory_mb': 1},
+                                 'output': {'profile_bin_bp': 50}}},
+    },
+    'memory_stop': {
+        'index': 'comb',
+        'doc': 'the exhaustive comb under bounds.max_memory_mb 1, detail graphlet: the budget '
+               'stops the walk (Q memory, walk_domain on the budget, memory_bound_soft)',
+        'shows': ['Q:memory', 'T:Y', 'K:walk_domain', 'K:memory_bound_soft'],
+        'details': ('graphlet',),
+        'request': {'seeds': [{'seed_id': 'memory_stop', 'sequence': [('B', 0, 15)]}],
+                    'strategy': {'direction': 'right', 'exhaustive': True,
+                                 'labels': {'seed_label_kind': 'column'},
+                                 'bounds': {'max_extension_bp': 240, 'max_memory_mb': 1},
+                                 'output': {'profile_bin_bp': 50, 'continuation_bp': 0,
+                                            'max_branch_events': 'unlimited'}}},
+    },
+    'memory_stop_full': {
+        'index': 'comb',
+        'doc': 'the memory_stop request in detail full: the JSON spells every leaf\'s chain '
+               '(quadratic on a comb), so the same budget stops it earlier than the graphlet',
+        'shows': [],
+        'details': ('full',),
+        'request': {'seeds': [{'seed_id': 'memory_stop', 'sequence': [('B', 0, 15)]}],
+                    'strategy': {'direction': 'right', 'exhaustive': True,
+                                 'labels': {'seed_label_kind': 'column'},
+                                 'bounds': {'max_extension_bp': 240, 'max_memory_mb': 1},
+                                 'output': {'profile_bin_bp': 50, 'continuation_bp': 0,
+                                            'max_branch_events': 'unlimited'}}},
+    },
+}
+
 
 def materialize(request, blocks):
     """The request as sent: seed sequences resolved, timing off (deterministic JSON)."""
@@ -474,6 +549,8 @@ def features(body):
             arm, seg, run = x[1], -1, -1
         elif tag == 'O':
             f.add('O:' + ''.join(x[1:5]))
+        elif tag == 'Q':
+            f.add('Q:' + x[2])
         elif tag == 'K':
             f.add('K:' + x[2])
         elif tag == 'X':
@@ -725,6 +802,31 @@ def build_cli(metagraph, root, name):
     return files, features(body)
 
 
+def build_budget(metagraph, root, name):
+    """-> {filename: text} for budget fixture |name| (in BUDGET_DIR), and the features its
+    body shows (none without a graphlet)."""
+    fx = BUDGET_FIXTURES[name]
+    spec = INDEXES[fx['index']]
+    graph = os.path.join(root, fx['index'], 'graph.dbg')
+    if not os.path.exists(graph):
+        build_index(fx['index'], metagraph, root)
+    annotation = os.path.join(root, fx['index'], 'annotation.column_coord.annodbg')
+    request = materialize(fx['request'], blocks_of(spec))
+    stored = dict(request, fixture_index={'cli': fx['index'], 'k': spec['k'], 'doc': fx['doc']})
+    files = {name + '.request.json': dumps(stored)}
+    shown = set()
+    for detail in fx['details']:
+        r = copy.deepcopy(request)
+        r['strategy']['output']['detail'] = detail
+        out = run_traverse(metagraph, graph, annotation, r)
+        files['%s.%s.json' % (name, detail)] = dumps(out)
+        if detail == 'graphlet':
+            body = out['results'][0]['graphlet']
+            files[name + '.mgt'] = body
+            shown = features(body)
+    return {os.path.join(BUDGET_DIR, f): text for f, text in files.items()}, shown
+
+
 def build_compare(metagraph, root, name):
     """-> the body of comparison fixture |name| (detail graphlet, timing off)."""
     index, request = COMPARE_FIXTURES[name]
@@ -771,6 +873,26 @@ def main(argv=None):
                     stale.append('%s no longer shows %s (shows %s)'
                                  % (name, missing, sorted(shown)))
                     continue
+                for fname, text in files.items():
+                    path = os.path.join(args.dir, fname)
+                    if not differs(path, text):
+                        continue
+                    if args.check:
+                        stale.append(fname)
+                    else:
+                        with open(path, 'w', encoding='utf-8', newline='') as f:
+                            f.write(text)
+                        print('wrote', fname)
+            for name in BUDGET_FIXTURES:
+                if args.only and name not in args.only:
+                    continue
+                files, shown = build_budget(args.from_cli, root, name)
+                missing = sorted(set(BUDGET_FIXTURES[name]['shows']) - shown)
+                if missing:
+                    stale.append('%s no longer shows %s (shows %s)'
+                                 % (name, missing, sorted(shown)))
+                    continue
+                os.makedirs(os.path.join(args.dir, BUDGET_DIR), exist_ok=True)
                 for fname, text in files.items():
                     path = os.path.join(args.dir, fname)
                     if not differs(path, text):

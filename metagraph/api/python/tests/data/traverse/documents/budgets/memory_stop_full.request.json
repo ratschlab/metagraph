@@ -1,0 +1,30 @@
+{
+ "seeds": [
+  {
+   "seed_id": "memory_stop",
+   "sequence": "CTCCAGTTTCTTATC"
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "exhaustive": true,
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "bounds": {
+   "max_extension_bp": 240,
+   "max_memory_mb": 1
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "continuation_bp": 0,
+   "max_branch_events": "unlimited",
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "comb",
+  "k": 15,
+  "doc": "the memory_stop request in detail full: the JSON spells every leaf's chain (quadratic on a comb), so the same budget stops it earlier than the graphlet"
+ }
+}

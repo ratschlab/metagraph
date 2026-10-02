@@ -1,0 +1,25 @@
+H mgt 1 15 basic $ACGT c k m 64 40 0 walk fixtures * fbfd396e439f0d22
+S 1c38c1d2a2cf1283 30 16 4 ATGAGCGTGCCTCTAACGTTCATACCAAAT
+L c 0 * 0 a.fa
+L c 1 * 0 b.fa
+L c 2 * 0 c.fa
+L c 3 * 0 both.fa
+O p c c i
+Q locus work traversal i:1500 i:1500 i:1519 i:0 raise_work_budget,continue_from_leaves the work budget (bounds.max_work_units) stopped the walk at 42 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; work is checked at least every 65536 units, so used can exceed the budget by that much; work bounds the walk, not its delivery: the size of the output (and the time to write it) is bounded by bounds.max_memory_mb; a continuation from a leaf is a new traversal
+K r walk_domain bounds.max_work_units i:1500 i:1519 42 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob
+K r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A r t 42 u 1 4 1 3 0 steps=58,successor_enumerations=58,output_bp=58,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=1327 Y,42,3,1,4,1,1519 1 * 4 5 1 1 1 58
+B 0 2 4 5 1 58 0 1 1 1 0 0 0 Y:4
+V 20 0 AT 3,2 3 . .
+G * 0 20 * * * * 1 * TTTCCTATTTAGCCTCTGTC
+G 0 20 16 !1 * * * * * ATTACGTTTGACAATG
+G 0 20 16 1,3 * * * * * TTTACGTTTGACAATG
+G 1,2 36 6 * * * 0,2-3|1 * * ACCCAG
+T Y 1:0:0:36,3:0:1:0
+C 15 0 0 !1
+R 3 0 0 42 Y 0 * * 0 0 0
+R 3 1 0 42 Y 36 * * 0 0 0
+R 3 2 0 42 Y 0 * * 0 0 0
+R 3 3 0 42 Y 0 * * 0 1 0
+R 2 3 0 36 m 0 * * * 1 0
+Z 25

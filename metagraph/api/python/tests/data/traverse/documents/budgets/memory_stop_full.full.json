@@ -1,0 +1,1867 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "capabilities": {
+  "alphabet": "$ACGT",
+  "cost_models_available": [
+   "forbid",
+   "constant",
+   "table"
+  ],
+  "detail_levels": [
+   "summary",
+   "tree",
+   "full",
+   "graphlet"
+  ],
+  "direct_access": true,
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": null,
+  "index_meta_fp": "dacc7dcb84187de4",
+  "index_ns": "fixtures",
+  "k": 15,
+  "label_modes": [
+   "constrain",
+   "annotate"
+  ],
+  "num_labels": 1,
+  "regime": "basic",
+  "release": "",
+  "schema_version": 1,
+  "supports_trace": true
+ },
+ "release": "",
+ "results": [
+  {
+   "annotation": {
+    "access_path": "direct",
+    "direct_reads": 26,
+    "keys_mapped": 27,
+    "rows_requested": 27
+   },
+   "arms": {
+    "right": {
+     "branch_events": [
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 0,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 0,
+       "successors": "CG"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 1,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 1,
+       "successors": "CG"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 2,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 3,
+       "successors": "AC"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 3,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 5,
+       "successors": "AC"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 4,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 7,
+       "successors": "AC"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 5,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 9,
+       "successors": "GT"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 6,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 11,
+       "successors": "CG"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 7,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 13,
+       "successors": "AC"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 8,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 15,
+       "successors": "GT"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 9,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 17,
+       "successors": "CG"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 10,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 19,
+       "successors": "AC"
+      },
+      {
+       "ambiguous": [
+        0
+       ],
+       "at_bp": 11,
+       "dropped": [],
+       "labels_per_successor": [
+        1,
+        1
+       ],
+       "refused": [],
+       "segment": 21,
+       "successors": "CG"
+      }
+     ],
+     "branch_events_truncated": 0,
+     "cap_trigger": {
+      "at_bp": 12,
+      "exact": true,
+      "live_labels": 1,
+      "live_paths": 2,
+      "reason": "resource_limit",
+      "segment": 23
+     },
+     "complete_to_bp": 12,
+     "completeness_scope": "per_path",
+     "counters": {
+      "edge_reuse_probes": 0,
+      "max_reminimisation_rounds": 0,
+      "output_bp": 24,
+      "pair_evaluations": 0,
+      "refusal_scans": 0,
+      "reminimisation_rounds": 0,
+      "steps": 24,
+      "successor_enumerations": 25,
+      "switch_sources_cut": 0,
+      "work_units": 410
+     },
+     "evidence": {
+      "complete": true,
+      "complete_to_bp": null
+     },
+     "frontier_remaining": {
+      "exact": true,
+      "live_labels": 1,
+      "live_paths": 2
+     },
+     "growth": [
+      {
+       "ambiguous_branches": 12,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 1,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 0,
+       "label_ends": {
+        "dead_end": 11,
+        "resource_limit": 2
+       },
+       "live_pairs": 2,
+       "max_live_paths": 2,
+       "reconvergences": 0,
+       "splits": 12,
+       "steps": 24,
+       "tips": 0
+      }
+     ],
+     "labels_per_node": {
+      "cap": 64,
+      "max_seen": 1,
+      "nodes_truncated": 0
+     },
+     "limitations": [
+      {
+       "complete_to_bp": 12,
+       "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob",
+       "kind": "walk_domain",
+       "knob": "bounds.max_memory_mb",
+       "limit": 1,
+       "observed": 2
+      }
+     ],
+     "needed_budgets": [],
+     "paths": [
+      {
+       "end_labels": [
+        {
+         "branches": 1,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 1
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 0,
+       "length_bp": 1,
+       "n_labels": 1,
+       "segments": [
+        0,
+        2
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 2,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 2
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 1,
+       "length_bp": 2,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        4
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 3,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 3
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 2,
+       "length_bp": 3,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        6
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 4,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 4
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 3,
+       "length_bp": 4,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        8
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 5,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 5
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 4,
+       "length_bp": 5,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        10
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 6,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 6
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 5,
+       "length_bp": 6,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        12
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 7,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 7
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 6,
+       "length_bp": 7,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        14
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 8,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 8
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 7,
+       "length_bp": 8,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        16
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 9,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 9
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 8,
+       "length_bp": 9,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        18
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 10,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 10
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 9,
+       "length_bp": 10,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        20
+       ]
+      },
+      {
+       "end_labels": [
+        {
+         "branches": 11,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 11
+        }
+       ],
+       "end_reasons": {
+        "dead_end": 1
+       },
+       "id": 10,
+       "length_bp": 11,
+       "n_labels": 1,
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        22
+       ]
+      },
+      {
+       "continuation": {
+        "branches_used": 12,
+        "labels": [
+         0
+        ],
+        "loss_used": 0.0,
+        "sequence": ""
+       },
+       "end_labels": [
+        {
+         "branches": 12,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 0
+        }
+       ],
+       "end_reasons": {
+        "resource_limit": 1
+       },
+       "id": 11,
+       "length_bp": 12,
+       "n_labels": 1,
+       "path_reason": "resource_limit",
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23
+       ]
+      },
+      {
+       "continuation": {
+        "branches_used": 12,
+        "labels": [
+         0
+        ],
+        "loss_used": 0.0,
+        "sequence": ""
+       },
+       "end_labels": [
+        {
+         "branches": 12,
+         "label": 0,
+         "loss": 0.0,
+         "route_bp": 0,
+         "run": 12
+        }
+       ],
+       "end_reasons": {
+        "resource_limit": 1
+       },
+       "id": 12,
+       "length_bp": 12,
+       "n_labels": 1,
+       "path_reason": "resource_limit",
+       "segments": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        24
+       ]
+      }
+     ],
+     "runs": [
+      {
+       "branches": 12,
+       "end_reason": "resource_limit",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 23,
+       "to_bp": 12
+      },
+      {
+       "branches": 1,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 2,
+       "to_bp": 1
+      },
+      {
+       "branches": 2,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 4,
+       "to_bp": 2
+      },
+      {
+       "branches": 3,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 6,
+       "to_bp": 3
+      },
+      {
+       "branches": 4,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 8,
+       "to_bp": 4
+      },
+      {
+       "branches": 5,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 10,
+       "to_bp": 5
+      },
+      {
+       "branches": 6,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 12,
+       "to_bp": 6
+      },
+      {
+       "branches": 7,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 14,
+       "to_bp": 7
+      },
+      {
+       "branches": 8,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 16,
+       "to_bp": 8
+      },
+      {
+       "branches": 9,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 18,
+       "to_bp": 9
+      },
+      {
+       "branches": 10,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 20,
+       "to_bp": 10
+      },
+      {
+       "branches": 11,
+       "end_reason": "dead_end",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 22,
+       "to_bp": 11
+      },
+      {
+       "branches": 12,
+       "end_reason": "resource_limit",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 0,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 24,
+       "to_bp": 12
+      }
+     ],
+     "segments": [
+      {
+       "events": [],
+       "from_bp": 0,
+       "id": 0,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 0,
+       "parents": [],
+       "sequence": ""
+      },
+      {
+       "events": [],
+       "from_bp": 0,
+       "id": 1,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        0
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 1,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 0,
+       "id": 2,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        0
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [],
+       "from_bp": 1,
+       "id": 3,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        1
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 2,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 1,
+       "id": 4,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        1
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [],
+       "from_bp": 2,
+       "id": 5,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        3
+       ],
+       "sequence": "A"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 3,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 2,
+       "id": 6,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        3
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [],
+       "from_bp": 3,
+       "id": 7,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        5
+       ],
+       "sequence": "A"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 4,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 3,
+       "id": 8,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        5
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [],
+       "from_bp": 4,
+       "id": 9,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        7
+       ],
+       "sequence": "A"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 5,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 4,
+       "id": 10,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        7
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [],
+       "from_bp": 5,
+       "id": 11,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        9
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 6,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 5,
+       "id": 12,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        9
+       ],
+       "sequence": "T"
+      },
+      {
+       "events": [],
+       "from_bp": 6,
+       "id": 13,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        11
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 7,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 6,
+       "id": 14,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        11
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [],
+       "from_bp": 7,
+       "id": 15,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        13
+       ],
+       "sequence": "A"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 8,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 7,
+       "id": 16,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        13
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [],
+       "from_bp": 8,
+       "id": 17,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        15
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 9,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 8,
+       "id": 18,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        15
+       ],
+       "sequence": "T"
+      },
+      {
+       "events": [],
+       "from_bp": 9,
+       "id": 19,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        17
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 10,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 9,
+       "id": 20,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        17
+       ],
+       "sequence": "G"
+      },
+      {
+       "events": [],
+       "from_bp": 10,
+       "id": 21,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        19
+       ],
+       "sequence": "A"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 11,
+         "label": 0,
+         "reason": "dead_end",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 10,
+       "id": 22,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        19
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 12,
+         "label": 0,
+         "reason": "resource_limit",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 11,
+       "id": 23,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        21
+       ],
+       "sequence": "C"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 12,
+         "label": 0,
+         "reason": "resource_limit",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 11,
+       "id": 24,
+       "labels": [
+        0
+       ],
+       "labels_at_end": [
+        0
+       ],
+       "labels_total": 1,
+       "labels_truncated": false,
+       "length_bp": 1,
+       "parents": [
+        21
+       ],
+       "sequence": "G"
+      }
+     ],
+     "splits": [
+      {
+       "at_bp": 0,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 1
+        },
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 2
+        }
+       ],
+       "children": [
+        1,
+        2
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 0,
+       "segment": 0
+      },
+      {
+       "at_bp": 1,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 3
+        },
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 4
+        }
+       ],
+       "children": [
+        3,
+        4
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 1,
+       "segment": 1
+      },
+      {
+       "at_bp": 2,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 5
+        },
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 6
+        }
+       ],
+       "children": [
+        5,
+        6
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 2,
+       "segment": 3
+      },
+      {
+       "at_bp": 3,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 7
+        },
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 8
+        }
+       ],
+       "children": [
+        7,
+        8
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 3,
+       "segment": 5
+      },
+      {
+       "at_bp": 4,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 9
+        },
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 10
+        }
+       ],
+       "children": [
+        9,
+        10
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 4,
+       "segment": 7
+      },
+      {
+       "at_bp": 5,
+       "branches": [
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 11
+        },
+        {
+         "char": "T",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 12
+        }
+       ],
+       "children": [
+        11,
+        12
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 5,
+       "segment": 9
+      },
+      {
+       "at_bp": 6,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 13
+        },
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 14
+        }
+       ],
+       "children": [
+        13,
+        14
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 6,
+       "segment": 11
+      },
+      {
+       "at_bp": 7,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 15
+        },
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 16
+        }
+       ],
+       "children": [
+        15,
+        16
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 7,
+       "segment": 13
+      },
+      {
+       "at_bp": 8,
+       "branches": [
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 17
+        },
+        {
+         "char": "T",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 18
+        }
+       ],
+       "children": [
+        17,
+        18
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 8,
+       "segment": 15
+      },
+      {
+       "at_bp": 9,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 19
+        },
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 20
+        }
+       ],
+       "children": [
+        19,
+        20
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 9,
+       "segment": 17
+      },
+      {
+       "at_bp": 10,
+       "branches": [
+        {
+         "char": "A",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 21
+        },
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 22
+        }
+       ],
+       "children": [
+        21,
+        22
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 10,
+       "segment": 19
+      },
+      {
+       "at_bp": 11,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 23
+        },
+        {
+         "char": "G",
+         "labels": [
+          0
+         ],
+         "labels_distinct": 1,
+         "labels_truncated": false,
+         "segment": 24
+        }
+       ],
+       "children": [
+        23,
+        24
+       ],
+       "kind": "ambiguous",
+       "labels_before": 1,
+       "prefix_bp": 11,
+       "segment": 21
+      }
+     ],
+     "status": "truncated"
+    }
+   },
+   "label_dict": [
+    {
+     "column": 0,
+     "kind": "column",
+     "name": "comb.fa"
+    }
+   ],
+   "label_mode": "constrain",
+   "label_summary": [
+    {
+     "label": 0,
+     "right": {
+      "direct_bp": 12,
+      "reach_bp": 12,
+      "reentries": 0,
+      "runs": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     }
+    }
+   ],
+   "limitations": [
+    {
+     "effect": "the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)",
+     "kind": "memory_bound_soft",
+     "knob": "bounds.max_memory_mb",
+     "limit": 1,
+     "observed": 0
+    }
+   ],
+   "outcome": {
+    "branch_diagnostics": "complete",
+    "delivery": "inline",
+    "label_evidence": "complete",
+    "walks": "partial"
+   },
+   "resource_stop": {
+    "actions": [
+     "raise_memory_budget",
+     "use_graphlet",
+     "drop_sequences",
+     "continue_from_leaves"
+    ],
+    "effective": 1,
+    "message": "the memory budget (bounds.max_memory_mb) stopped the walk at 12 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; memory is modelled (the walker's state and the output in the requested detail, charged per head; detail graphlet costs the least), annotation decoding is not charged yet (memory_bound_soft); a continuation from a leaf is a new traversal",
+    "phase": "traversal",
+    "remaining": 0,
+    "requested": 1,
+    "resource": "memory",
+    "scope": "locus",
+    "used": 1
+   },
+   "seed": {
+    "dropped_labels": [],
+    "labels": [
+     "comb.fa"
+    ],
+    "labels_dropped": 0,
+    "labels_dropped_digest": "",
+    "labels_from_seed": true,
+    "labels_supporting_total": 1,
+    "length_bp": 15,
+    "num_kmers": 1,
+    "seed_id": "memory_stop",
+    "seed_id_mismatch": true,
+    "validated_seed_id": "8322b11da77e686c"
+   }
+  }
+ ],
+ "strategy": {
+  "annotation": {
+   "batch_kmers": 64
+  },
+  "bounds": {
+   "max_extension_bp": 240,
+   "max_live_paths": 1000,
+   "max_memory_mb": 1,
+   "max_output_bp": 2000000,
+   "max_paths": 10000,
+   "max_steps": 1000000,
+   "min_live_labels": 1,
+   "time_budget_ms": 30000.0
+  },
+  "branching": {
+   "bubble_window_bp": 0,
+   "hairpins": "skip",
+   "max_label_branches": "unlimited",
+   "max_splits_per_path": "unlimited",
+   "min_successor_fraction": 0.0,
+   "min_successor_labels": 1,
+   "on_reconverge": "keep",
+   "tip_window_bp": 0
+  },
+  "clamped": [],
+  "direction": "right",
+  "exhaustive": true,
+  "frontier": {
+   "on_overflow": "stop",
+   "order": "breadth_first"
+  },
+  "labels": {
+   "change_cost": {
+    "model": "forbid"
+   },
+   "extra": [],
+   "loss_budget": 0.0,
+   "max_labels_per_node": 64,
+   "max_seed_labels": 1000,
+   "max_switch_sources": "unlimited",
+   "mode": "constrain",
+   "seed_label_kind": "column",
+   "switch_on": "loss"
+  },
+  "output": {
+   "continuation_bp": 0,
+   "detail": "full",
+   "max_branch_events": "unlimited",
+   "profile_bin_bp": 50,
+   "sequences": true,
+   "timing": false
+  },
+  "schema_version": 1,
+  "support": "kmer"
+ },
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); it is followed while some permitted label supports every node of it under the strategy's label rules"
+}
