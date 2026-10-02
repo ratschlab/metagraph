@@ -743,12 +743,12 @@ Per seed result (JSON, every detail level — `full`, `tree`, `summary` and `gra
 }
 ```
 
-- An occurrence `[start, end)` is the **half-open base interval in record (or column) coordinates** spelled by that
-  run's bases **together with the seed-side context that makes them k-mers**: for a right-arm run the bases
-  `[from_bp, to_bp)` of the walk are record bases `[c + k − 1 + from_bp − d, …)` — the normative rule is: the run's
-  first node (the k-mer entered by step `from_bp + 1`) has coordinate `c₀`, its last node coordinate `c₁`; the run's
-  **own bases** (the last base of every k-mer it entered) are record bases `[c₀ + k − 1, c₁ + k)` on the right arm and
-  `[c₁, c₀ + 1)` on the left arm (where coordinates decrease outward). Seed occurrences are `[c_first, c_last + k)`.
+- An occurrence `[start, end)` is a **half-open base interval in record (or column) coordinates**. Normative rule:
+  the run's first node (the k-mer entered by step `from_bp + 1`) has k-mer coordinate `c₀`, its last node `c₁`. The
+  run's **own bases** — the base each of its steps adds, i.e. the walk's bases `[from_bp, to_bp)` — are record bases
+  `[c₀ + k − 1, c₁ + k)` on the right arm, where coordinates increase outward, and `[c₁, c₀ + 1)` on the left arm,
+  where they decrease outward (a left-arm step adds the first base of the k-mer it enters). A seed occurrence is
+  `[c_first, c_last + k)` over the seed's first and last k-mer.
 - Several occurrences per run occur when the label's record repeats the walked sequence (two live coordinate chains);
   they are listed in ascending `start`.
 - Runs closed by a merge do not occur (trace and merging are mutually exclusive). Runs entered by a switch carry the
