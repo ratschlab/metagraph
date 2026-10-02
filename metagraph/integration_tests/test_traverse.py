@@ -862,6 +862,28 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(200, ret.status_code, ret.text)
         return ret.json()
 
+    def test_api_traversal_routes_are_compact_and_compressible(self):
+        """HTTP transport: the traversal routes write compact JSON (no indentation) and
+        honour Accept-Encoding with gzip (preferred) or deflate; the capabilities say so."""
+        payload = json.dumps({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+                              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 20}}})
+        url = f'http://{self.host}:{self.port}/traverse'
+        plain = requests.post(url=url, data=payload, headers={'Accept-Encoding': 'identity'})
+        self.assertEqual(200, plain.status_code, plain.text)
+        self.assertNotIn('Content-Encoding', plain.headers)
+        self.assertNotIn('\n', plain.text)
+        self.assertNotIn('\t', plain.text)
+        for encoding in ('gzip', 'deflate'):
+            ret = requests.post(url=url, data=payload, headers={'Accept-Encoding': encoding})
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual(encoding, ret.headers.get('Content-Encoding'))
+            self.assertLess(len(ret.raw.getheader('Content-Length') or '0'), 20)
+            self.assertEqual(plain.json()['results'][0]['arms'], ret.json()['results'][0]['arms'])
+        both = requests.post(url=url, data=payload, headers={'Accept-Encoding': 'deflate, gzip'})
+        self.assertEqual('gzip', both.headers.get('Content-Encoding'))
+        caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
+        self.assertEqual(['gzip', 'deflate'], caps['content_encodings'])
+
     def test_api_annotate_defaults_to_keep_and_merging_qualifies_the_walk_rule(self):
         """HTTP: without `exhaustive`, annotate mode defaults to `on_reconverge: keep` (it
         promises the per-path trie) while constrain mode keeps merging as its default; when

@@ -18,11 +18,16 @@ using mtg::common::logger;
  * Source: https://panthema.net/2007/0328-ZLibString.html
  */
 std::string compress_string(const std::string &str,
-                            int compressionlevel = Z_BEST_COMPRESSION) {
+                            int compressionlevel = Z_BEST_COMPRESSION,
+                            bool gzip = false) {
     z_stream zs; // z_stream is zlib's control structure
     memset(&zs, 0, sizeof(zs));
 
-    if (deflateInit(&zs, compressionlevel) != Z_OK)
+    // zlib's deflate stream by default; a gzip container (window bits + 16) when the
+    // client asked for gzip, which is what most HTTP clients send by default
+    const int window_bits = 15 + (gzip ? 16 : 0);
+    if (deflateInit2(&zs, compressionlevel, Z_DEFLATED, window_bits, 8,
+                     Z_DEFAULT_STRATEGY) != Z_OK)
         throw std::runtime_error("deflateInit failed while compressing.");
 
     zs.next_in = (Bytef *)(str.data());
@@ -56,10 +61,22 @@ std::string compress_string(const std::string &str,
     return outstring;
 }
 
-bool is_compression_requested(const std::shared_ptr<HttpServer::Request> &request) {
+// The content encoding the client accepts, "gzip" preferred over "deflate", or "" when
+// it accepts neither (the response is then sent uncompressed).
+std::string requested_encoding(const std::shared_ptr<HttpServer::Request> &request) {
     auto encoding_header = request->header.find("Accept-Encoding");
-    return encoding_header != request->header.end()
-            && encoding_header->second.find("deflate") != std::string::npos;
+    if (encoding_header == request->header.end())
+        return "";
+    const std::string &accept = encoding_header->second;
+    if (accept.find("gzip") != std::string::npos)
+        return "gzip";
+    if (accept.find("deflate") != std::string::npos)
+        return "deflate";
+    return "";
+}
+
+bool is_compression_requested(const std::shared_ptr<HttpServer::Request> &request) {
+    return !requested_encoding(request).empty();
 }
 
 Json::Value parse_json_string(const std::string &msg) {
@@ -84,7 +101,8 @@ std::string json_str_with_error_msg(const std::string &msg) {
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
                      size_t request_id,
-                     const std::function<Json::Value(const std::string &)> &process) {
+                     const std::function<Json::Value(const std::string &)> &process,
+                     bool compact) {
     logger->info("[Server] {} request {} from {}", request->path, request_id,
                  request->remote_endpoint().address().to_string());
     Timer timer;
@@ -97,10 +115,14 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     try {
         // Return JSON string
         status = SimpleWeb::StatusCode::success_ok;
-        ret = Json::writeString(Json::StreamWriterBuilder(), process(content));
-        if (is_compression_requested(request)) {
-            ret = compress_string(ret);
-            header.insert(std::make_pair("Content-Encoding", "deflate"));
+        Json::StreamWriterBuilder builder;
+        if (compact)
+            builder["indentation"] = "";   // the traversal routes: half the bytes of the indented form
+        ret = Json::writeString(builder, process(content));
+        const std::string encoding = requested_encoding(request);
+        if (!encoding.empty()) {
+            ret = compress_string(ret, Z_BEST_COMPRESSION, encoding == "gzip");
+            header.insert(std::make_pair("Content-Encoding", encoding));
             header.insert(std::make_pair("Content-Length", std::to_string(ret.size())));
         }
     } catch (const CurrentlyInitializingError& e) {

@@ -577,7 +577,7 @@ int run_server(Config *config) {
                                                        indexes, graphs_cache);
             return process_resolve_request(json, index, config->index_release,
                                            config->resolve_max_query_bp);
-        });
+        }, /* compact */ true);
     };
 
     // Extend frozen seeds along consistent annotation labels.
@@ -596,7 +596,7 @@ int run_server(Config *config) {
             limits.max_seed_bp = config->traverse_max_seed_bp;
             limits.max_seed_labels = config->traverse_max_seed_labels;
             return process_traverse_request(json, index, config->index_release, limits);
-        });
+        }, /* compact */ true);
     };
 
     // What this deployment supports, so a client can pick a strategy before asking.
@@ -616,8 +616,14 @@ int run_server(Config *config) {
             caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
             caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
             caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
+            // transport: the traversal routes write compact JSON and honour
+            // Accept-Encoding (gzip preferred, deflate accepted)
+            Json::Value encodings(Json::arrayValue);
+            encodings.append("gzip");
+            encodings.append("deflate");
+            caps["content_encodings"] = encodings;
             return caps;
-        });
+        }, /* compact */ true);
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
