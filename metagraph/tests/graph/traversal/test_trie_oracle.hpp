@@ -699,6 +699,13 @@ inline const Event* label_end_at(const SeedResult &r, const Segment &seg,
 struct SubsetReport {
     size_t present = 0;   // (walk, label) claims of A the tuned run reaches in full
     size_t omitted = 0;   // ... it leaves early, each with a recorded reason
+    // ... it leaves early at a depth at or beyond the tuned run's
+    // branch_events_complete_to_bp with no recorded reason: the refusal that would
+    // explain it may be among the events max_branch_events did not keep, and the result
+    // states that cut (a `branch_events` limitation), so it is not a problem; below the
+    // boundary every event is kept and a missing reason is one
+    size_t unexplained_capped = 0;
+    uint64_t min_capped_bp = std::numeric_limits<uint64_t>::max();   // the shallowest of them
     Problems problems;    // every violation found; empty iff the tuned run passes
 };
 
@@ -791,6 +798,10 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
 //     there for any reason;
 //  and, before both, that every refusal the tuned run states is supported by its
 //  strategy (refusal_problem), whether or not an omission rests on it.
+// Discard evidence lives in branch events, which max_branch_events cuts at a depth
+// boundary (ArmResult::branch_events_complete_to_bp): an omission at or beyond it
+// without discard evidence counts as unexplained_capped, not as a problem; below it
+// the evidence is complete and is required exactly as without a cap.
 // |ctx| is the seed and the strategy and cost the TUNED run was made with (SeedContext):
 // what verifying a BLOCKED / HAIRPIN event and a refusal takes.
 // The report lists every violation; check_tuned_subset() asserts that it is empty.
@@ -861,6 +872,17 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
     // 2. every omission has a reason
     const Segment &root = root_of(ta);
     const std::set<std::string> permitted = name_set(tuned, root.labels_start);
+    // no discard evidence for the label leaving |w| at depth |d|: a problem below the
+    // evidence boundary, a stated cut at or beyond it
+    bool capped = false;
+    auto unexplained = [&](uint64_t d, std::string problem) {
+        if (d >= ta.branch_events_complete_to_bp) {
+            capped = true;
+            rep.min_capped_bp = std::min(rep.min_capped_bp, d);
+        } else {
+            problems.push_back(std::move(problem));
+        }
+    };
     for (const auto &[w, labels] : a_claims) {
         for (const auto &[l, a_reason] : labels) {
             if (!permitted.count(l)) {
@@ -877,6 +899,7 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
             // follow w through the tuned trie with l alive
             const Segment *seg = &root;
             bool present = false, decided = false;
+            capped = false;
             while (!decided) {
                 const std::string seq = outward(ta, seg->sequence);
                 const Segment *next = nullptr;
@@ -923,9 +946,9 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                         if (seq[j] == w[d])
                             continue;   // the tuned run follows w
                         if (!branch_recorded(tuned, ta, ctx, w.substr(0, d), seg->id, d, w[d], l)) {
-                            problems.push_back(what + ": the tuned run leaves " + shown(w) + " at "
-                                               + bp(d) + " (takes " + seq[j] + ", not " + w[d]
-                                               + ") with " + l + " alive and no recorded reason");
+                            unexplained(d, what + ": the tuned run leaves " + shown(w) + " at "
+                                           + bp(d) + " (takes " + seq[j] + ", not " + w[d]
+                                           + ") with " + l + " alive and no recorded reason");
                         }
                         decided = true;
                         break;
@@ -958,9 +981,9 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
                                                  "exhaustive trie continues to " + shown(w));
                         }
                     } else if (!branch_recorded(tuned, ta, ctx, w.substr(0, d), seg->id, d, w[d], l)) {
-                        problems.push_back(what + ": the tuned run drops " + w[d] + " at " + bp(d)
-                                           + " on " + shown(w) + " with " + l
-                                           + " alive and no recorded reason");
+                        unexplained(d, what + ": the tuned run drops " + w[d] + " at " + bp(d)
+                                       + " on " + shown(w) + " with " + l
+                                       + " alive and no recorded reason");
                     }
                     decided = true;
                 }
@@ -969,6 +992,8 @@ inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &t
             }
             if (present)
                 rep.present++;
+            else if (capped)
+                rep.unexplained_capped++;
             else
                 rep.omitted++;
         }

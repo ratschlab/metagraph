@@ -1517,12 +1517,23 @@ TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
 // followed and skipped) every tuned run — each branch, quorum and split knob, all of
 // them at once, a step cap — passes against its exhaustive trie: every refusal it states
 // is one its strategy makes, and a skipped hairpin excuses its omission (the reviewer's
-// dense sweep for finding 1, widened to every refusal cause). max_branch_events is
-// lifted because the refusals ARE the evidence and on a graph this dense the default
-// 100 events do not hold them all.
-TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
+// dense sweep for finding 1, widened to every refusal cause).
+// The refusals ARE the evidence, and on a graph this dense the default 100 branch events
+// do not hold them all. The cut is stated (branch_events_complete_to_bp, a level
+// boundary), so the sweep runs with the DEFAULT cap: below the boundary every omission
+// must be explained exactly as without a cap, at or beyond it an unexplained one counts
+// as unexplained_capped; with "unlimited" nothing is cut and nothing is unexplained.
+namespace {
+
+struct DenseSweep {
     std::map<std::string, size_t> causes;
     size_t cells = 0;
+    size_t cut_arms = 0;       // arms whose branch events were cut by the cap
+    size_t capped = 0;         // omissions counted unexplained_capped, over all cells
+};
+
+DenseSweep dense_tuned_sweep(size_t max_branch_events) {
+    DenseSweep out;
     for (auto mode : all_modes()) {
         for (bool skip : { false, true }) {
             for (uint32_t s = 1; s <= 6; ++s) {
@@ -1536,11 +1547,12 @@ TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
                 full.skip_hairpins = skip;
                 full.max_live_paths = 100000;
                 full.max_paths = 100000;
-                full.max_branch_events = 1000000;
+                // the checker reads the exhaustive run's claims, never its events
                 auto A = run(*anno, "AAA", { "C", "D", "E" }, full);
                 for (int knob = 0; knob < 8; ++knob) {
                     Strategy st = full;
                     st.exhaustive = false;
+                    st.max_branch_events = max_branch_events;
                     switch (knob) {
                         case 0: st.max_label_branches = 0; break;
                         case 1: st.max_label_branches = 1; break;
@@ -1557,26 +1569,89 @@ TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
                         case 7: st.max_steps = 10; break;
                     }
                     auto t = run(*anno, "AAA", { "C", "D", "E" }, st);
+                    // the walker's guarantee, against the same run with every event kept:
+                    // the events kept are the first ones, and every event below the
+                    // boundary is among them
+                    std::optional<SeedResult> all;
+                    if (max_branch_events != Strategy::kUnlimited) {
+                        Strategy st_all = st;
+                        st_all.max_branch_events = Strategy::kUnlimited;
+                        all = run(*anno, "AAA", { "C", "D", "E" }, st_all);
+                    }
                     const trie::SeedContext ctx { "AAA", mode != DeBruijnGraph::BASIC, st };
                     for (size_t side : { kLeft, kRight }) {
-                        for (const BranchEvent &be : t.arms[side].branch_events) {
-                            for (const auto &rf : be.refused) causes[rf.cause]++;
+                        const ArmResult &ta = t.arms[side];
+                        if (all) {
+                            const auto &every = all->arms[side].branch_events;
+                            EXPECT_EQ(every.size(), ta.branch_events_total);
+                            for (size_t i = 0; i < every.size(); ++i) {
+                                if (i < ta.branch_events.size()) {
+                                    const BranchEvent &x = ta.branch_events[i], &y = every[i];
+                                    EXPECT_TRUE(x.at_bp == y.at_bp && x.segment == y.segment
+                                                && x.chars == y.chars && x.ambiguous == y.ambiguous
+                                                && x.dropped == y.dropped
+                                                && x.refused.size() == y.refused.size())
+                                        << "event " << i << " differs from the uncapped run's";
+                                } else {
+                                    EXPECT_GE(every[i].at_bp, ta.branch_events_complete_to_bp)
+                                        << "an event below the boundary was not kept";
+                                }
+                            }
+                        }
+                        for (const BranchEvent &be : ta.branch_events) {
+                            for (const auto &rf : be.refused) out.causes[rf.cause]++;
                         }
                         const std::string what = "mode " + std::to_string(mode) + " skip "
                             + std::to_string(skip) + " random " + std::to_string(s) + " knob "
                             + std::to_string(knob) + " arm " + std::to_string(side);
                         const trie::SubsetReport rep = trie::tuned_subset_report(A, t, side, what, ctx);
-                        ASSERT_TRUE(rep.problems.empty()) << trie::listed(rep.problems);
-                        cells++;
+                        if (!rep.problems.empty()) {
+                            ADD_FAILURE() << trie::listed(rep.problems);
+                            return out;
+                        }
+                        const uint64_t boundary = ta.branch_events_complete_to_bp;
+                        if (boundary == std::numeric_limits<uint64_t>::max()) {
+                            // nothing cut: every omission carries its reason
+                            EXPECT_EQ(ta.branch_events_total, ta.branch_events.size()) << what;
+                            EXPECT_EQ(0u, rep.unexplained_capped) << what;
+                        } else {
+                            out.cut_arms++;
+                            EXPECT_LT(ta.branch_events.size(), ta.branch_events_total) << what;
+                            EXPECT_GE(rep.min_capped_bp, boundary) << what;
+                        }
+                        out.capped += rep.unexplained_capped;
+                        out.cells++;
                     }
                 }
             }
         }
     }
-    // not vacuous: every cause the walker emits under forbid occurred
+    return out;
+}
+
+} // namespace
+
+TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
+    const DenseSweep sweep = dense_tuned_sweep(Strategy().max_branch_events);
+    // not vacuous: every cause the walker emits under forbid occurred ...
     for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" })
-        EXPECT_GT(causes[cause], 0u) << cause;
-    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, cells);
+        EXPECT_GT(sweep.causes.count(cause) ? sweep.causes.at(cause) : 0, 0u) << cause;
+    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, sweep.cells);
+    // ... the default cap does cut evidence here, and omissions resting on the cut
+    // events exist and are accepted only at or beyond the boundary (checked per cell)
+    EXPECT_GT(sweep.cut_arms, 0u);
+    EXPECT_GT(sweep.capped, 0u);
+}
+
+// The same sweep with every branch event kept: no boundary, and every omission of every
+// tuned run is explained by a recorded reason.
+TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphsWithAllEvents) {
+    const DenseSweep sweep = dense_tuned_sweep(Strategy::kUnlimited);
+    for (const char *cause : { "branch", "minority", "below_min_labels", "split_limit" })
+        EXPECT_GT(sweep.causes.count(cause) ? sweep.causes.at(cause) : 0, 0u) << cause;
+    EXPECT_EQ(all_modes().size() * 2 * 6 * 8 * 2, sweep.cells);
+    EXPECT_EQ(0u, sweep.cut_arms);
+    EXPECT_EQ(0u, sweep.capped);
 }
 
 // Finding 3 (the reference model, support: trace). Two occurrences of the seed under
