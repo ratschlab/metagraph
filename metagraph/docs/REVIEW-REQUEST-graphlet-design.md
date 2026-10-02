@@ -1,5 +1,17 @@
 # Review request: the traversal graphlet design (retrieve once, process locally)
 
+> **Round 2 (design v2).** Your review of v1 (`9fc93893`) is addressed in `docs/DESIGN-traverse-graphlet.md` v2; §12
+> there is the list (17 items), each change is made in place and marked *(v2)*. In particular: `G.split` stores
+> `Split::ambiguous`; `LabelRun` gains terminal `branches`/`loss` (`R` fields; unknown at an earlier cut); the codec
+> is pinned (positional shortest round-trip floats, normative SETEXPR bases, UTF-8 byte prefixes at character
+> boundaries) with shared golden vectors as the freeze gate (§2.7); `evidence_from` is derived per claim through merge
+> partitions and `prev_run` (§5.1), never from `R.route_bp`; both continuation formulas are stated; labels are
+> addressed by `{name, ref}` and ambiguous bare names are rejected; cursors, per-tool ceilings, `replay` and the
+> oversize policy are defined (§6); entry handles are opaque and separate from body dedup; comparability uses the
+> oriented seed sequence and index identity; `label_summary` is given as normative pseudocode matching
+> `Walker::summarize()`. Please verify the v2 changes, look for what the corrections themselves broke, and say
+> whether MGT v1 can be frozen once the golden vectors pass. The original v1 request follows unchanged.
+
 **What I want from you:** an adversarial review of a *design*, before its implementation hardens. The document is
 `docs/DESIGN-traverse-graphlet.md` on branch `gr/labeled-traversal` (head `e5273acc` or later; the design is
 committed next to it). You know the traversal feature from rounds 1–3 (`docs/REVIEW-REQUEST-labeled-traversal.md`,
