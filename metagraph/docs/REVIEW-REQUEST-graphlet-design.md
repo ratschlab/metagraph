@@ -1,5 +1,14 @@
 # Review request: the traversal graphlet design (retrieve once, process locally)
 
+> **Round 3 (design v3).** Your review of v2 is addressed in v3; §13 of the design lists the nine changes, each marked
+> *(v3)* in place: views keep original ids and are saved as the unchanged backing body plus a view selector in `J`;
+> an index identity (`index_ns` + content fingerprint `index_fp`, §3.1) gates every cross-retrieval join; one float
+> algorithm (shortest scientific digits expanded positionally — 0 mismatches between C++ and Python on 20,000 raw-bit
+> doubles plus edge cases) with raw-bit and differential golden vectors; evidence derived at the run's anchored
+> endpoint and then clipped (`route_only` when the intersection is empty); tagged label selectors; a defined canonical
+> form with whole-document fixtures; annotate `label_summary` pseudocode; cursors for walk chains and comparisons.
+> Please check the v3 changes and say whether the freeze gate (§2.7) is now sufficient.
+
 > **Round 2 (design v2).** Your review of v1 (`9fc93893`) is addressed in `docs/DESIGN-traverse-graphlet.md` v2; §12
 > there is the list (17 items), each change is made in place and marked *(v2)*. In particular: `G.split` stores
 > `Split::ambiguous`; `LabelRun` gains terminal `branches`/`loss` (`R` fields; unknown at an earlier cut); the codec

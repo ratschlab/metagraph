@@ -1,7 +1,8 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** draft v2 (2026-10-02), revised after the external design review of v1 (`9fc93893`); every change is
-listed in §12 and marked *(v2)* where it is made. Not frozen: the shared golden vectors of §2.7 are the freeze gate. Companion documents:
+**Status:** draft v3 (2026-10-02), revised after two external design reviews (of v1 `9fc93893` and v2 `23d109fc`);
+changes are listed in §12 (v2) and §13 (v3) and marked *(v2)* / *(v3)* where they are made. Not frozen: the shared
+golden vectors and whole-document fixtures of §2.7 are the freeze gate. Companion documents:
 `SPEC-labeled-traversal-core.md` (the traversal contract this builds on; §7.5 will carry §2 of this document once
 accepted), `DESIGN-labeled-traversal-endpoint.md` (the owner's design note), `REVIEW-REQUEST-graphlet-design.md`
 (the review prompt for this design).
@@ -71,7 +72,7 @@ Additional corrections: `LabelEnd.route_bp` is the *entry's* route_bp (walker.cp
 ## 2.1 Lexical rules
 
 - One record per line, `\n`-terminated, fields separated by one space, first field a capital letter. The only free-text field is the **last** field of `L` and `X` (label names) and runs to end of line; in it `%`, LF and CR are percent-encoded (`%25 %0A %0D`), nothing else. Every other field is ASCII without spaces. Seed ids live in the JSON summary, not in the body.
-- Integers decimal. *(v2)* Floats: the shortest digit string that round-trips the IEEE double, written in **positional notation, never an exponent** (C++: `std::to_chars(first, last, x, std::chars_format::fixed)` without a precision; Python: `numpy.format_float_positional(x, unique=True, trim='-')` or the equivalent `repr`→`Decimal`→`format(d, 'f')`), no trailing zeros, no trailing `.`, `-0` written `0`, `inf` for +∞; NaN never occurs. (v1 said "`to_chars` / `repr`", which disagree: `to_chars(0.0001)` = `1e-04`, `repr(0.0001)` = `0.0001`.) Booleans `0|1`. `*` = absent / "derive by the rule of this field". `.` = empty list. Lists comma-separated; a list of lists uses `|` (never contains spaces).
+- Integers decimal. *(v3)* **Floats, one normative algorithm:** take the *shortest round-trip significant digits* `d₁…dₙ` and decimal exponent of the double — the digits of C++ `std::to_chars(first, last, x, std::chars_format::scientific)` without a precision, equal to those of Python `repr(x)` (both produce the unique shortest digit string, nearest on ties) — and **expand them positionally**: zeros padded up to the decimal point, a `.` only when there is a fractional part, no trailing zeros, `-0` written `0`, `inf` for +∞ (NaN never occurs; all floats in the format are costs, budgets and losses ≥ 0). Python: `format(decimal.Decimal(repr(x)), 'f')` with `-0`/trailing-`.` normalisation. So `1e23` → `100000000000000000000000` and `1.2345678901234568e20` → `123456789012345680000`. (v1's `to_chars`/`repr` disagreed on `0.0001`; v2's `to_chars(..., fixed)` writes the exact binary value — `99999999999999991611392` for `1e23` — which round-trips but is not the same bytes.; a differential probe of this rule — 20,000 non-negative finite doubles drawn over raw bits plus the edge cases above, `DBL_MAX` and subnormals — gave 0 mismatches between the two languages.) Booleans `0|1`. `*` = absent / "derive by the rule of this field". `.` = empty list. Lists comma-separated; a list of lists uses `|` (never contains spaces).
 - **RANGES**: ascending label ids with consecutive runs collapsed: `0-5,7,9-12`; `.` = empty.
 - *(v2)* **Strings** are UTF-8. `L.prefix_len` counts **bytes** of the previous name's UTF-8 encoding, and the encoder shortens the shared prefix to the nearest UTF-8 character boundary, so the suffix is always valid UTF-8 on its own; a reader reconstructs `prev_bytes[:prefix_len] + suffix_bytes` and decodes. A name may contain spaces and may equal `*` or `.`: it is the remainder of the line after the fixed fields, preserved exactly (after percent-decoding `%25 %0A %0D`).
 - **SETEXPR** (against a *base set* defined per field; *(v2)* the bases are normative: `G.entry` → parent[0]'s end set (merges: union of the parents' end sets; root: none — explicit RANGES only); `G.end` → this segment's entry set; `P` → the previous `P` of the segment, the first `P` → the entry set; `C.labels` → the leaf segment's end set): `RANGES` (explicit) | `!` (equal to the base) | `!REMOVED` | `!+ADDED` | `!REMOVED+ADDED` (base minus REMOVED plus ADDED, both RANGES). The encoder emits whichever of explicit/delta is shorter, tie → explicit. Canonical in both encoders, so `dump(parse(x)) == x` byte-exact.
@@ -82,7 +83,11 @@ Additional corrections: `LabelEnd.route_bp` is the *entry's* route_bp (walker.cp
 Document order: `H [J] S X* L*`, then per requested arm, left before right: `A B* V*`, then per segment in id order `G P* E* T? C?`, then `R*`; finally `Z`.
 
 ```
-H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp> <seed_index> walk
+H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp> <seed_index> walk <index_ns|*> <index_fp>
+                                       # (v3) index identity: <index_ns> = the deployment's name for the index
+                                       # ([A-Za-z0-9._-]+, new server flag --index-name; * = unset), <index_fp> = a
+                                       # content fingerprint computed once per loaded index (§3.1). Labels are joined
+                                       # across retrievals only under equal fingerprints.
 J <compact JSON>                       # standalone FILES only: the response envelope with results[] reduced to this
                                        # seed's summary (graphlet string removed). Written by the library, never by
                                        # the server. At most once, directly after H.
@@ -145,7 +150,8 @@ A field marked `|*` has a *rule*. The C++ writer computes the rule's value from 
 - `G.entry_total *` = |entry| (the only non-`*` case is the annotate root's cut boundary list, walker.cpp:1196, and cut children).
 - `G.end *` *(v2, chronological)*: constrain → start from the entry set and apply, in increasing position (ties: ends before switch-ins), every run end anchored on this segment with `to_bp < from_bp+length_bp` (remove its label) and every switch event on it (add its `to`); the result is the end set. v1's set formula removed a label that re-entered after ending (A→B→A inside one segment). Any field may legitimately be written explicitly: the conformance test (T37) checks that every `*` the writer emitted reproduces the walker's value — not that `*` is always emitted. The v1 text read:
   `(entry ∪ {to : E s on this segment}) − {label(r) : R anchored here with to_bp < from_bp+length_bp}` (spec §7.1 "label sets change only through events"; runs ending exactly at the segment end are still in `labels_end`, walker.cpp:2580, 1487); annotate → last `P` set, or entry when the segment has no `P`.
-- `G.partition *` = no merge (|parents| ≤ 1) or annotate mode (`labels_via_parent` empty).
+- `G.partition *` = no merge (|parents| ≤ 1), or annotate mode, where `*` decodes to **one empty list per parent** (`labels_via_parent` is empty in annotate mode; *(v3)* stated so the reader reconstructs the right arity).
+- *(v3)* **Canonical form.** The writer MUST emit `*` whenever the field's rule reproduces the walker's value, and the explicit value otherwise; every SETEXPR in its shortest form (tie → explicit); RANGES collapsed. `dump()` always writes this canonical form, so `dump(parse(x)) == x` holds for every canonical document — all writer output — while a valid non-canonical document (e.g. an explicit set where `*` would do) parses and dumps to its canonical form. `is_canonical(x)` is part of the library and of T37.
 - `T.path_reason *` = none (semantic end). `R.from_label:cost *` = entered by seed. `R.prev_run *` = none. `R.structural_successors *` for `Lw`/`m`.
 
 ## 2.4 Orientation (the one rule, answering REVIEW-REQUEST §5.1.7)
@@ -163,7 +169,7 @@ Not information, normalised by the conformance test: event order among equal `at
 ## 2.6 Worked excerpt (integration fixture, quorum-pruned right arm, `min_successor_labels: 2`, radius 130; acc2 is the minority at the seed boundary)
 
 ```
-H mgt 1 31 basic $ACGT c k m 64 1000 0 walk
+H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * 9f3c2a71d04be8e5
 S 3e6218a89e928eba 120 90 3 TAGCTCAATTTATGTACTGATTGCTTAAAGG…CGGT
 L h 0 1 0 acc1
 L h 0 2 3 2
@@ -172,22 +178,23 @@ A r c 130 u 0 0 1 3 0 120,121,120,0,0,0,0 * 1 1 3 1 0 0 120
 B 0 1 3 3 1 100 0 0 0 0 0 0 0 R:1
 B 100 1 2 2 1 20 0 0 0 0 0 0 0 D:2
 V 0 0 GT 2,1 . 1 T:minority:1
-G * 0 120 * * * * * GCTGATATATGTGGAATTGGTCCTACGCCAACGG…TGATA
+G * 0 120 * * * * * * GCTGATATATGTGGAATTGGTCCTACGCCAACGG…TGATA
 T * .
-R 0 0 0 120 D 0 * * 0
-R 0 1 0 0 Rm 0 * * 2
-R 0 2 0 120 D 0 * * 0
+R 0 0 0 120 D 0 * * 0 0 0
+R 0 1 0 0 Rm 0 * * 2 0 0
+R 0 2 0 120 D 0 * * 0 0 0
 Z 15
 ```
-Reading: root entry `*` = {0,1,2}; `G.end *` = {0,1,2} − {label 1, ends at 0 < 120} = {0,2} = `labels_at_end`; label 1's `Rm` run becomes the `label_end` event (at 0, minority, 2 structural successors); labels 0 and 2 are the leaf's `end_labels` (loss 0, branches 0, route 0); `V` keeps the refused `T` successor and its label. Left arm, radius 10 (both proposals' example): children `G 0 0 10 2 * * * * GTCAGGTGGT` and `G 0 0 10 !2 * * * * TCGTGGATTA`; natural spelling of the first is `TGGTGGACTG` = `LEFT2[-10:]`, which is what today's JSON `sequence` holds.
+Reading: root entry `*` = {0,1,2}; `G.end *` = {0,1,2} − {label 1, ends at 0 < 120} = {0,2} = `labels_at_end`; label 1's `Rm` run becomes the `label_end` event (at 0, minority, 2 structural successors); labels 0 and 2 are the leaf's `end_labels` (loss 0, branches 0, route 0); `V` keeps the refused `T` successor and its label. Left arm, radius 10 (both proposals' example): children `G 0 0 10 2 * * * * * GTCAGGTGGT` and `G 0 0 10 !2 * * * * * TCGTGGATTA` (the left root then carries `split 0`, a divergence); natural spelling of the first is `TGGTGGACTG` = `LEFT2[-10:]`, which is what today's JSON `sequence` holds.
 
 ## 2.7 Shared golden vectors — the freeze gate *(v2)*
 
-Before either implementation is treated as authoritative: `api/python/tests/data/traverse/codec_vectors.tsv`, consumed
-by a gtest and a Python test alike — floats (0, -0, 1, 0.5, 0.1, 0.0001, 1e-05, 1e16, 2.5e-07, 1/3, inf), RANGES and
-SETEXPR against each normative base (shorter-wins, tie → explicit), percent escapes, and front-coded names including
-multi-byte UTF-8 (`éfoo`→`ébar`), names with spaces and the names `*` and `.`. MGT v1 is frozen when both codecs pass
-the same file byte-exactly.
+Before either implementation is treated as authoritative, both must pass the same files byte-exactly:
+
+- `api/python/tests/data/traverse/codec_vectors.tsv` (a gtest and a Python test read it): floats given as **raw IEEE bits** (hex) with the expected text — 0, -0, 1, 0.5, 0.1, 0.0001, 1e-05, 2.5e-07, 1/3, inf, *(v3)* 1e16, 1e22, 1e23, 1.2345678901234568e20, 2⁵³, 2⁵³+2, every 10ᵏ for k = −20…25 and its two neighbouring doubles, `DBL_MAX`, the smallest normal and the smallest subnormal — plus a **differential section** of 10,000 non-negative finite doubles from a seeded generator over raw bits, expected strings produced once by the Python reference and committed; RANGES and SETEXPR against each normative base (shorter-wins, tie → explicit); percent escapes; front-coded names including multi-byte UTF-8 (`éfoo`→`ébar`), names with spaces, and the names `*`, `.`, `c:0`.
+- *(v3)* **Whole-document fixtures** `api/python/tests/data/traverse/documents/*.{request.json,full.json,mgt}`: the C++ writer must produce each `.mgt` byte-exactly from its request (gtest + CLI), the library must parse it, `dump()` it back byte-exactly and reproduce `full.json` with `to_json()`. They include the review counterexamples of §9 and the **clipped-merge evidence case** of §5.1 with its expected claims.
+
+MGT v1 is frozen when both sides pass all of them.
 
 # 3. The JSON summary (per seed, `detail: graphlet`)
 
@@ -207,6 +214,10 @@ Envelope unchanged (`release`, `capabilities`(+2 keys), `strategy`(+`output.deta
 ```
 Derivation failures keep today's `{seed, error}` shape, no `graphlet`. No names, no per-leaf rows, no `label_summary`, no `growth` (in `B`), no `label_dict` (in `L`). Size ≈ 2.5 KB envelope + ~0.7 KB per arm; a 64-seed batch stays ~100 KB of summary.
 
+## 3.1 Index identity *(v3)*
+
+`release`, `k`, regime and alphabet do not identify an index: two different annotations over one graph report the same four values (reproduced by the review with an empty release), and their `c:0` would be joined. The server therefore exposes, in `capabilities` and in `H`, `index_ns` (the deployment's name for the index, new flag `--index-name`, may be unset) and `index_fp` = FNV-1a-64 over (k, regime, alphabet, the graph's node count, the annotation's row count, column count, every column name in order, whether coordinates and a `CoordToHeader` are present and the header count), computed **once per loaded index** at load (≈1 s for 33 M column names) and cached. Comparability (§5, §6) requires equal `index_fp` and, when both are set, equal `index_ns` and `release`; a missing fingerprint means *unverifiable*, never equal. As a consistency check, labels joined by ref must also agree by name; a disagreement makes the pair incomparable.
+
 # 4. The walker changes (marked separately) — *(v2: three run fields, was one)*
 
 `src/graph/traversal/walker.hpp` `LabelRun`: `uint32_t segment = UINT32_MAX;` — the segment on which the run ended or was closed. Set at three sites, no behavioural effect:
@@ -225,7 +236,7 @@ Justification: the run↔segment association exists only in `Item`/`Entry` state
 | module | contents |
 |---|---|
 | `_codec.py` | `encode_ranges/decode_ranges`, `encode_setexpr(ids, base)/decode_setexpr(tok, base)` (shorter-wins, tie explicit), `fmt_num/parse_num`, `pct_escape/unescape`, `REASON/QUAL` code tables, `LabelSetInterner` (content-hashed `array('I')`), `GraphletFormatError(line_no, msg)` |
-| `model.py` | slotted dataclasses: `Label(id, kind, column, seq_id, name)`, `SeedInfo(…)`, `Segment(id, parents, from_bp, length_bp, walk, entry, entry_total, end, partition, first_base, presence: list[PresenceRun], events: list[Event], leaf: Leaf|None; derived: children, depth)`, `Event`, `PresenceRun(from_bp, to_bp, labels, total)`, `Leaf(path_reason, extras: dict[label,(loss,branches,route_bp)], continuation: Continuation|None)`, `Run(id, segment, label, from_bp, to_bp, end_code, reason, qualifier, silent, merged, route_bp, from_label, cost, prev_run, structural_successors, needed_budget)`, `Arm(side, status, complete_to_bp, scope, frontier, labels_per_node, cap_trigger, counters, growth, branch_events, segments, runs)`, `Graphlet(format, k, regime, alphabet, mode, support, reconverge, cap, continuation_bp, seed_index, seed: SeedInfo, labels, dropped, arms, summary: dict|None, derived_from)` |
+| `model.py` | slotted dataclasses: `Label(id, kind, column, seq_id, name)`, `SeedInfo(…)`, `Segment(id, parents, from_bp, length_bp, walk, entry, entry_total, end, partition, split, first_base, presence: list[PresenceRun], events: list[Event], leaf: Leaf|None; derived: children, depth)`, `Event`, `PresenceRun(from_bp, to_bp, labels, total)`, `Leaf(path_reason, extras: dict[label,(loss,branches,route_bp)], continuation: Continuation|None)`, `Run(id, segment, label, from_bp, to_bp, end_code, reason, qualifier, silent, merged, route_bp, from_label, cost, prev_run, structural_successors, branches, loss, needed_budget)`, `Arm(side, status, complete_to_bp, scope, frontier, labels_per_node, cap_trigger, counters, growth, branch_events, segments, runs)`, `Graphlet(format, k, regime, alphabet, index_ns, index_fp, mode, support, reconverge, cap, continuation_bp, seed_index, seed: SeedInfo, labels, dropped, arms, summary: dict|None, derived_from)` |
 | `parser.py` | `parse(text) -> Graphlet` (one pass; `A` counts and `Z` validated → raises on truncation), `dump(g) -> str` (canonical; `== text`), `Graphlet.from_response(result, response)`, `Graphlet.load(path)/save(path)` (the `J` line) |
 | `derive.py` | cached per arm: `leaves, paths, splits, label_end_events, end_labels(leaf), labels_at_end, label_summary, needed_budgets, continuation_sequence(leaf), reconverge_events`; `check_rules(g)` = the §2.3 rules recomputed and compared with explicit fields (the oracle that any `*`-vs-explicit divergence is reported) |
 | `ops.py` | the queries below |
@@ -247,17 +258,19 @@ Graphlet.from_response(result: dict, response: dict) -> Graphlet   # results[i] 
 Graphlet.load(path) / .save(path)             # the .mgt file: H, J (envelope with this seed only), body
 Graphlet.to_json() -> dict                    # today's detail: full results[i] (natural orientation); the conformance oracle
 Graphlet.summary() -> dict                    # agent-facing ≤ 2 KB: per-arm status/complete_to/counts, top labels, caveats
-Graphlet.label(selector) -> Label                # (v2) selector = LabelRef 'h:<column>:<seq_id>' | 'c:<column>' | id |
-                                              # bare name; a bare name matching several labels (annotate mode can record
-                                              # two headers 'ACC1' from different columns) raises AmbiguousLabel listing
-                                              # the refs; every API result carries {name, ref}, never a bare name alone
+Graphlet.label(selector) -> Label                # (v3) TAGGED selectors: {'ref': 'h:<column>:<seq_id>' | 'c:<column>'} |
+                                              # {'name': str} | {'id': int}. A bare string is a convenience only: it
+                                              # resolves when exactly one label matches it as a ref OR as a name, and
+                                              # raises AmbiguousLabel otherwise (a column may be NAMED 'c:0'; annotate mode
+                                              # can record two headers 'ACC1' from different columns). Every API result
+                                              # carries {name, ref}, never a bare name alone
 Graphlet.spell(arm, leaf, orientation='natural'|'walk', with_seed=False) -> str
 Graphlet.walks(arm, *, top=None, by='support'|'length'|'loss', labels=None, route_consistent=True, min_bp=0) -> list[Walk]
     # Walk(path_id, leaf, segments, length_bp, sequence, path_reason, end_reasons, claims, labels_full, n_alive,
     #      complete, beyond_certified_bp); 'support' ranks by (-len(labels_full), -n_alive, -length_bp, path_id)
 Graphlet.claims(arm=None, labels=None, at_most_bp=None, strict=True) -> list[Claim]
     # the §6.9 unit: one per RUN END (claims, not leaves). Claim(label, arm, path_id, segment, from_bp, to_bp, route_bp,
-    # evidence_from=max(from_bp, route_bp), kind∈{end, alive, diverged, merged, stretch}, reason, qualifier, end_class∈
+    # evidence_from (§5.1), kind∈{end, alive, diverged, merged, stretch, route_only}, reason, qualifier, end_class∈
     # {lost, dead_end, radius, capped, blocked, pruned, open}, entered_by, from_label, cost, loss, branches, support, exact)
     # strict=True raises IncompleteRecording when annotate nodes_truncated > 0 (a cut list makes the oracle a lower bound)
 Graphlet.label_walks(label, arm=None) -> list[LabelWalk]        # per run: (from, to, evidence_from, sequence, end, leaves_below, merged_into)
@@ -267,15 +280,18 @@ Graphlet.support_changes(arm, leaf) -> list[Change(at_bp, added, removed, reason
 Graphlet.label_summary() -> dict                                 # direct_bp / reach_bp / reentries / runs, both modes
 Graphlet.continuation(arm, leaf) -> Continuation(sequence, labels, loss_used, branches_used, seed_coord, as_seed())
 Graphlet.next_request(arm, leaves, bp=None, reduce_budget=True, **overrides) -> dict   # resubmittable /traverse request
-Graphlet.subgraph(labels, arm=None, mode='any'|'all') -> GraphletView   # (v2) a VIEW over the backing graphlet:
-                                              # original segment/run/path ids kept and exposed, dump() writes the view with
-                                              # remapped ordinals plus an original-id column; completeness inherited AND
-                                              # qualified by the selection predicate (complete for the selected labels only)
+Graphlet.subgraph(selectors, arm=None, mode='any'|'all') -> GraphletView   # (v3) a VIEW over the backing graphlet:
+                                              # every id is the backing graphlet's original id (no remapping, no new
+                                              # record type); save() writes the UNCHANGED backing body plus, in J,
+                                              # {view: {selectors, mode, arm, of: <entry handle or body digest>}}; load()
+                                              # restores the view; its completeness is the backing complete_to_bp
+                                              # qualified 'for the selected labels' (stated in the view's summary)
 Graphlet.to_fasta(arm=None, leaves=None, with_seed=True, orientation='natural', width=None) -> str
 Graphlet.to_gfa(with_seed=True) -> str          # S per segment on the seed strand, L with k-1 overlap, P per walk, LB/ER tags
 Graphlet.compare(other, *, arm=None, labels=None, mode='claims'|'walks'|'labels'|'prefix_subset') -> Comparison
     # keyed by LabelRef (kind, column, seq_id) — names only for display (v2); restricted to min(complete_to_bp); claims
-    # cut at D get end_class 'open'; comparable only for the same index identity (release, k, regime, alphabet) and
+    # cut at D get end_class 'open'; comparable only for the same index identity (§3.1: equal index_fp, and equal
+    # index_ns and release when set; names agreeing per ref) and
     # the same ORIENTED SEED SEQUENCE — not validated_seed_id, which includes the permitted label names and so
     # differs between a constrain and an annotate retrieval of the same seed (v2); results carry the support kind,
     # both strategies and both completeness scopes, and a per_path vs united_history pair is 'qualified', never
@@ -304,19 +320,22 @@ The library must not need the C++ to reproduce these; they are part of the forma
 **Displayed-path evidence** (`Claim.evidence_from`, `Walk.labels_full`, `walks(by='support')` ranking,
 `support_profile(kind='displayed')`). v1 used `max(from_bp, R.route_bp)`, which is wrong after two non-first-parent
 merges at `d1 < d2`: the run keeps `d1`, the entry and the leaf record `d2`, and `[d1, d2)` would be attributed to the
-label on the displayed path. For a lineage alive at depth `t` on a displayed path `p` (first-parent chain root → leaf):
+label on the displayed path. *(v3)* Provenance is derived **at the run's anchored endpoint** and then clipped — never by evaluating the walk at a cut depth, which skips a later merge and attributes the displayed prefix to a label whose own route spells something else (reproduced: B joins through a non-first parent at depth 14, the displayed path begins `AACC`, B's own route `TCTA`; v2 evaluated at `D = 4` gave `evidence_from = 0`). For the run of a claim, with `p` = the first-parent chain from the root to the run's **anchor** segment (also for merge-closed `m` runs) and `t = to_bp`:
 
 ```
 evidence_from(lineage, p, t) = 0
 cur = the lineage's label at t                       # follow prev_run backwards across switches
 for each segment s on p with |parents(s)| > 1, in decreasing from_bp, from_bp(s) <= t:
-    label_at = the lineage's label at from_bp(s)     # (switches change the name: walk R.prev_run / from_label)
+    label_at = the lineage's INCOMING label at from_bp(s), i.e. before any switch committed at that depth
+                                                     # (switches change the name: walk R.prev_run / from_label)
     if label_at not in partition(s)[0]:              # the lineage's kept entry came through a non-first parent
         evidence_from = from_bp(s); break            # the displayed bases before s are not this lineage's
 evidence_from = max(evidence_from, from_bp of the claimed run)   # a label never claims bases before its own run
 ```
-For leaf labels the merge-derived part (before the `max` with the run start) equals `T.route_bp` (asserted by T37); interior claims use the same walk. Claims cut at a depth
-`D < to_bp` use `t = D`.
+For leaf labels the merge-derived part (before the `max` with the run start) equals `T.route_bp` (asserted by T37); interior claims use the same walk. *(v3)* A claim cut at `D < to_bp` reports the displayed-support interval
+`[evidence_from, to_bp) ∩ [0, D)`; when that is empty the claim is `route_only` at `D`: the label carries a route
+of that length, but not the displayed bases; `routes()` reconstructs and spells the label's own ancestral route
+through the partitions when the caller asks for it.
 
 **`label_summary`** (constrain), per arm, exactly `Walker::summarize()`:
 
@@ -331,8 +350,25 @@ for r in runs:
 for every switch EVENT e:  summary[to(e)].reentries += 1          # events, not switched runs: split clones
                                                                   # copy from_label/cost without a 2nd switch
 ```
- Annotate mode: the parents-first pass of
-spec §6.11 over `G`/`P` (union of parents' surviving sets at a merge, intersection along a segment).
+
+**`label_summary`** (annotate), per arm, exactly `Walker::summarize_annotate()` *(v3, normative)*:
+
+```
+for s in segments, for each P run of s, for l in labels(P):      # recorded lists (cut lists: lower bounds)
+    summary[l].reach_bp = max(reach_bp, to_bp(P))
+alive_end = {}
+for s in segments in id order:                                   # parents precede children
+    alive = entry(s) if s is the root else ∪ alive_end[p] for p in parents(s)
+    for each P run of s in order:
+        if alive is empty: break
+        still = alive ∩ labels(P)
+        for l in alive − still: summary[l].direct_bp = max(direct_bp, from_bp(P))
+        alive = still
+    for l in alive: summary[l].direct_bp = max(direct_bp, from_bp(s) + length_bp(s))
+    alive_end[s] = alive
+# runs = []  and  reentries = 0  for every label (no lineages are tracked in annotate mode)
+```
+
 
 # 6. MCP tool surface (functions in `mcp_tools.py`; every return ≤ `max_bytes`; ids never leave the server, agents see `{name, ref}`; every local answer carries `evidence: {complete_to_bp, exact, support, reconverge, scope}`)
 
@@ -340,7 +376,7 @@ spec §6.11 over `G`/`P` (union of parents' surviving sets at a merge, intersect
 
 Backend-calling: `traverse_capabilities(index)`; `traverse_resolve(index, sequence, labels?|discover?, select?, limit=10)`; `traverse_fetch(index, seed:{sequence, labels?, seed_id?}, strategy, keep=True, max_graphlet_mb=8) -> summary + handle` (the probe is this with tight bounds); `traverse_continue(handle, arm, walk, overrides?, execute=True) -> new summary + parent:{handle, arm, walk, overlap_bp}` (or the request when `execute=False`).
 
-Local over a handle: `graphlet_summary(handle, arm?)`; `graphlet_walks(handle, arm, rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60)`; `graphlet_walk(handle, arm, walk)` (segment chain, labels in/out per segment, continuation); `graphlet_support(handle, arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C"); `graphlet_labels(handle, arm?, rank=direct_bp|reach_bp, n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes); `graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0, route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)` (≤ 16 KB slice); `graphlet_export(handle, format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes, records}`; `graphlet_compare(a, b, arm, mode) -> Comparison dict` (preconditions *(v2)*: same index identity and the same oriented seed sequence, else `comparable: false`; differing completeness scopes → `comparable: qualified`); `graphlet_subtrie(handle, labels, arm?) -> derived handle`; `graphlet_list/free/save/load`. Unknown handle → "replay with traverse_fetch(replay=<handle>)" (the store keeps the request).
+Local over a handle: `graphlet_summary(handle, arm?)`; `graphlet_walks(handle, arm, rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60)`; `graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, continuation; *(v3)* the chain is paged by `cursor` like a list); `graphlet_support(handle, arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C"); `graphlet_labels(handle, arm?, rank=direct_bp|reach_bp, n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes); `graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0, route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)` (≤ 16 KB slice); `graphlet_export(handle, format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes, records}`; `graphlet_compare(a, b, arm, mode, cursor?) -> Comparison dict` (preconditions *(v2/v3)*: same index identity (§3.1) and the same oriented seed sequence, else `comparable: false`; differing completeness scopes → `comparable: qualified`; *(v3)* returns the counts and the first page of `only_in_a` / `only_in_b` / `differ`, with `next_cursor`; `graphlet_export(format=json, what=compare|walk, …)` writes the complete lists to a file — a truncated field is always recoverable by cursor or export); `graphlet_subtrie(handle, labels, arm?) -> derived handle`; `graphlet_list/free/save/load`. Unknown handle → "replay with traverse_fetch(replay=<handle>)" (the store keeps the request).
 
 # 7. Size and memory (SRA case; estimates from per-record byte costs, to be re-measured by `scripts/traversal/graphlet_measure.py`)
 
@@ -360,7 +396,7 @@ Tests/docs: `integration_tests/test_traverse.py` (new classes, §9), `tests/grap
 # 9. Test plan
 
 C++ / integration (`integration_tests/test_traverse.py`, CLI and HTTP; `skipUnless metagraph.traverse importable`, the venv installs `api/python` editable):
-- T37 round trip: for constrain tuned (merge), constrain exhaustive (keep), annotate exhaustive, annotate beam, quorum, left-only, both arms, caps-tripped `max_steps`, `max_labels_per_node: 1`, 3-seed batch with a derivation failure: run `detail: full` and `detail: graphlet` on the same request; `Graphlet.from_response(r, out).to_json()` equals the full `results[i]` after normalisation (events sorted within equal `at_bp`, `needed_budgets` sorted, `timing` removed); `parse(text).dump() == text`; `A` counts match; `graphlet_lines == Z`; `check_rules()` reports no divergence; `#label_end events ≤ #runs`; every `Lw` run has a `SWITCH` with `from == label` at `to_bp` on its anchor's chain.
+- T37 round trip: for constrain tuned (merge), constrain exhaustive (keep), annotate exhaustive, annotate beam, quorum, left-only, both arms, caps-tripped `max_steps`, `max_labels_per_node: 1`, 3-seed batch with a derivation failure: run `detail: full` and `detail: graphlet` on the same request; `Graphlet.from_response(r, out).to_json()` equals the full `results[i]` after normalisation (events sorted within equal `at_bp`, `needed_budgets` sorted, `timing` removed); `parse(text).dump() == text`; `A` counts match; `graphlet_lines == Z`; `check_rules()` reports no divergence; `#label_end events ≤ #runs`; every `Lw` run is the `prev_run` of at least one run entered by switch at its `to_bp` (§4; the switch events may sit on the anchor's children); `is_canonical(text)` holds for every writer output.
 - *(v2)* T37 must also cover the review's counterexamples: an ambiguous split with disjoint child sets after a switch, a divergence with overlapping child sets, a followed-hairpin split, a quorum-filtered split, an A→B→A re-entry inside one segment, a silent switch-source end at a split (switches on the children), two interior ends whose branch counts differ only through a quorum-rejected successor, two runs through two non-first-parent merges (`R.route_bp` ≠ `T.route_bp`), and two same-name headers from different columns in annotate mode. The CI job installs the Python package so T37 cannot silently skip.
 - T38 orientation: `spell(left) + seed + spell(right)` reproduces `acc1/acc2/acc3`; left `continuation(leaf).sequence == paths[].continuation.sequence` *(v2: for continuations contained in the flank and for ones crossing into the seed, on both arms)*; resubmitting a locally derived continuation returns 200 and extends.
 - T39 oracle through the library: `constrain.compare(annotate, mode='claims').equal` reproduces test_traverse.py:954-978; `prefix_subset` on tuned-vs-exhaustive with `minority` as the omission reason (:621-672 semantics).
@@ -422,3 +458,21 @@ assignment sites cover every run closure; leaf-end membership is recoverable; an
 cut-boundary information; frontier orders have deterministic path-id tie breakers; spaces and literal `*`/`.` in names
 are representable when the parser keeps the final-field remainder exactly. The two-track plan stands, with the
 grammar and evidence corrections above made before step 0's freeze.
+
+# 13. Changes in v3 (after the external review of v2)
+
+| # | v2 problem | v3 change | where |
+|---|---|---|---|
+| 1 | `GraphletView.dump()` promised remapped ordinals + an original-id column that no record defines | views keep original ids; `save()` writes the unchanged backing body + the view selector in `J`; no new record | §5 |
+| 2 | index identity `(release, k, regime, alphabet)` joins unrelated labels (two annotations over one graph, empty release) | `index_ns` + content fingerprint `index_fp` in `capabilities` and `H`; missing → unverifiable; names checked per ref | §2.2, §3.1, §5, §6 |
+| 3 | `to_chars(fixed)` and `Decimal(repr)` differ on `1e23`, `1.2345678901234568e20` | one algorithm: shortest scientific digits, expanded positionally; raw-bit vectors incl. powers of ten, `DBL_MAX`, subnormals; a 10,000-value differential section | §2.1, §2.7 |
+| 4 | evidence evaluated at a cut depth skips a later merge (false displayed support) | provenance at the run's anchored endpoint, then intersected with the cut; `route_only` when empty; chain ends at the anchor (incl. `m` runs); incoming label before switches at `d` | §5.1 |
+| 5 | ref strings collide with legal names (a column named `c:0`) | tagged selectors; bare strings resolve only when unique as ref or name | §5 |
+| 6 | canonical `dump()` vs preserved input encodings | canonical form defined (writer must emit it); identity guaranteed for canonical documents; `is_canonical`; whole-document fixtures | §2.3, §2.7, §9 |
+| 7 | stale text: worked records, model table, claims comment, T37 silent-switch assertion; annotate `*` partition arity | all updated; `*` decodes to one empty list per parent | §2.2, §2.3, §2.6, §5, §9 |
+| 8 | annotate `label_summary` not normative | pseudocode matching `Walker::summarize_annotate()` | §5.1 |
+| 9 | `graphlet_walk` chains and `graphlet_compare` lists not recoverable when large | cursors on both; complete lists by export | §6 |
+
+Confirmed by the review as correct in v2: stored split ambiguity, the chronological `G.end`, terminal run metadata,
+both continuation formulas, UTF-8 prefix boundaries, silent-end validation through `prev_run`, opaque entry handles,
+`MissingEnvelope`; the full-depth evidence scan is sound with the anchor and switch-boundary qualifications above.
