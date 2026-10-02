@@ -1,8 +1,12 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+
+#include "tests/graph/traversal/test_trie_oracle.hpp"
+#include "tests/graph/traversal/test_trie_checks.hpp"
 
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/walker.hpp"
@@ -18,6 +22,7 @@ namespace {
 using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::traversal;
+namespace trie = mtg::test::trie;
 
 /**
  * Opt-in tests against a real index in the format of the public `refseq33m`
@@ -515,6 +520,204 @@ TEST_F(MiniRefSeq, ExtendBlaNDMAndValidateAgainstSourceRecords) {
     EXPECT_EQ(19u, left.growth.front().max_live_labels);
     EXPECT_EQ(19u, right.growth.front().max_live_labels);
     EXPECT_LT(left.growth.back().max_live_labels, right.growth.back().max_live_labels);
+}
+
+// The verification contract (spec §6.9) on the real index. T is the structural trie
+// around the whole blaNDM gene with the labels recorded, E its walks filtered by the
+// 19 derived carriers with test-side code (tests/graph/traversal/test_trie_oracle.hpp),
+// A the label-constrained exhaustive trie over the same carriers: leaves(A) == leaves(E)
+// at radius 100 and 300 on both arms, every run complete. The structural trie's size
+// against the constrained one is how much work the label constraint does at this locus;
+// it is recorded as test properties and printed.
+TEST_F(MiniRefSeq, StructuralOracleMatchesTheConstrainedTrie) {
+    for (uint64_t radius : { 100u, 300u }) {
+        const std::string tag = "r" + std::to_string(radius);
+        Strategy sc;
+        sc.exhaustive = true;
+        sc.max_label_branches = Strategy::kUnlimited;
+        sc.max_splits_per_path = Strategy::kUnlimited;
+        sc.merge_reconverge = false;
+        sc.max_extension_bp = radius;
+        Seed seed;
+        seed.sequence = query_;          // no labels: the carriers are derived
+        auto A = traverse_seed(*oracle_, seed, sc, LabelChangeCost::forbid());
+        ASSERT_EQ(19u, A.num_seed_labels);
+        std::set<std::string> carriers;
+        for (size_t i = 0; i < A.num_seed_labels; ++i) carriers.insert(A.label_dict[i].name);
+
+        Strategy st = sc;
+        st.label_mode = LabelMode::ANNOTATE;
+        st.max_labels_per_node = 100;    // 42 accessions in the index: nothing is cut
+        auto T = traverse_seed(*oracle_, seed, st, LabelChangeCost::forbid());
+        EXPECT_EQ(0u, T.num_seed_labels);
+
+        for (size_t a : { static_cast<size_t>(Arm::LEFT), static_cast<size_t>(Arm::RIGHT) }) {
+            const ArmResult &ta = T.arms[a], &aa = A.arms[a];
+            const std::string what = tag + " " + to_string(ta.arm);
+            ASSERT_EQ(ArmResult::COMPLETE, ta.status) << what << " structural";
+            ASSERT_EQ(ArmResult::COMPLETE, aa.status) << what << " constrained";
+            EXPECT_EQ(radius, ta.complete_to_bp);
+            EXPECT_EQ(radius, aa.complete_to_bp);
+            EXPECT_EQ(0u, ta.nodes_labels_truncated) << what;
+            EXPECT_LE(ta.max_labels_at_node, 42u);
+
+            auto v = trie::verify(T, A, a, carriers);
+            EXPECT_EQ(radius, v.depth);
+            EXPECT_FALSE(v.cut);
+            trie::expect_equal(v.expected, v.actual, what);
+            EXPECT_FALSE(v.actual.empty()) << what;
+
+            // the contrast: structural vs label-constrained trie
+            const std::string key = tag + "_" + to_string(ta.arm) + "_";
+            RecordProperty(key + "structural_leaves", static_cast<int>(ta.paths.size()));
+            RecordProperty(key + "structural_segments", static_cast<int>(ta.segments.size()));
+            RecordProperty(key + "structural_splits", static_cast<int>(ta.splits.size()));
+            RecordProperty(key + "structural_bp", static_cast<int>(ta.output_bp));
+            RecordProperty(key + "structural_max_labels_at_node", static_cast<int>(ta.max_labels_at_node));
+            RecordProperty(key + "constrained_leaves", static_cast<int>(aa.paths.size()));
+            RecordProperty(key + "constrained_segments", static_cast<int>(aa.segments.size()));
+            RecordProperty(key + "constrained_splits", static_cast<int>(aa.splits.size()));
+            RecordProperty(key + "constrained_bp", static_cast<int>(aa.output_bp));
+            std::cout << "[  METRIC  ] blaNDM radius " << radius << ' ' << to_string(ta.arm)
+                      << " arm: structural trie " << ta.paths.size() << " leaves / "
+                      << ta.segments.size() << " segments / " << ta.splits.size()
+                      << " splits / " << ta.output_bp << " bp (up to "
+                      << ta.max_labels_at_node << " labels at a node) vs label-constrained "
+                      << aa.paths.size() << " leaves / " << aa.segments.size()
+                      << " segments / " << aa.splits.size() << " splits / " << aa.output_bp
+                      << " bp; oracle leaves " << v.expected.size() << std::endl;
+        }
+    }
+}
+
+
+/*
+ * The trie contract (spec §6.9) on the real index, with the 42 source records as the
+ * third party: the string model of test_trie_reference.hpp is built from the very
+ * FASTA the index was made from, so on this graph — k = 31, basic, dummy k-mers not
+ * masked, RowDiff<BRWT> with coordinates, header labels — the structural trie, the
+ * label-constrained walker and the records can all be compared (test_trie_checks.hpp),
+ * and support: trace against the records themselves.
+ */
+std::pair<std::vector<std::string>, std::vector<std::string>> load_source_records() {
+    std::vector<std::filesystem::path> files;
+    for (const auto &entry : std::filesystem::directory_iterator(kIndexDir + "/fasta"))
+        files.push_back(entry.path());
+    std::sort(files.begin(), files.end());
+    std::vector<std::string> seqs, labels;
+    for (const auto &path : files) {
+        std::ifstream in(path);
+        std::string line, name, seq;
+        auto flush = [&]() {
+            if (!name.empty()) {
+                labels.push_back(name);
+                seqs.push_back(seq);
+            }
+        };
+        while (std::getline(in, line)) {
+            if (!line.empty() && line[0] == '>') {
+                flush();
+                name = line.substr(1, line.find_first_of(" \t\r") - 1);
+                seq.clear();
+            } else {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                seq += line;
+            }
+        }
+        flush();
+    }
+    return { seqs, labels };
+}
+
+// the whole blaNDM gene as the longest frozen seed, as the extension test picks it
+std::string blandm_seed(LabelOracle &oracle, const std::string &query) {
+    ResolveOptions options;
+    options.discover = true;
+    options.discover_kind = LabelKind::HEADER;
+    options.discover_max_labels = 100;
+    auto profile = resolve_support(oracle, query, options);
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::LONGEST_FIRST;
+    policy.max_seeds = 1;
+    auto selection = select_seeds(profile, query, policy, false);
+    return selection.seeds.empty() ? "" : selection.seeds[0].sequence;
+}
+
+TEST_F(MiniRefSeq, TrieContractAgainstTheSourceRecords) {
+    auto [seqs, labels] = load_source_records();
+    ASSERT_EQ(42u, seqs.size());
+    const size_t k = oracle_->get_k();
+    ASSERT_EQ(31u, k);
+    trie::PhaseTimer timer;
+    trie::StringIndex ix(k, DeBruijnGraph::BASIC, seqs, labels);
+    timer.lap("string model of 42 records");
+
+    struct SeedCase { std::string name, seq; };
+    std::vector<SeedCase> cases;
+    const std::string blandm = blandm_seed(*oracle_, query_);
+    ASSERT_FALSE(blandm.empty());
+    cases.push_back({ "blaNDM", blandm });
+    // and 150 bp windows cut from three records at 1 kb
+    for (size_t i : { 0u, 17u, 33u }) {
+        ASSERT_GT(seqs[i].size(), 1200u) << labels[i];
+        cases.push_back({ "window:" + labels[i], seqs[i].substr(1000, 150) });
+    }
+
+    const uint64_t radius = 300;
+    size_t structural_leaves = 0;
+    for (const SeedCase &sc : cases) {
+        const std::set<std::string> carriers = ix.carriers(sc.seq);
+        ASSERT_FALSE(carriers.empty()) << sc.name;
+        std::vector<std::set<std::string>> permitted { carriers, { *carriers.begin() } };
+        if (carriers.size() > 1)
+            permitted.push_back({ *std::prev(carriers.end()) });
+        trie::CaseSpec c(sc.name, k, seqs, labels, sc.seq, radius, permitted);
+        trie::CaseResult r = trie::check_case_on(*anno_graph_, ix, DeBruijnGraph::BASIC, c);
+        EXPECT_EQ(carriers, r.carriers) << sc.name;
+        for (size_t a : { trie::kLeft, trie::kRight })
+            structural_leaves += r.T.arms[a].paths.size();
+        // the index is unmasked: no '$' may ever reach the output
+        for (size_t a : { trie::kLeft, trie::kRight }) {
+            for (const auto &seg : r.T.arms[a].segments)
+                EXPECT_EQ(std::string::npos, seg.sequence.find('$')) << sc.name;
+        }
+        timer.lap(sc.name + " contract");
+        SeedResult trace;
+        trie::check_trace(*anno_graph_, ix, c, carriers, r.A.at(carriers), &trace, sc.name);
+        timer.lap(sc.name + " trace");
+        if (sc.name == "blaNDM") {
+            EXPECT_EQ(19u, carriers.size());
+            // the shape of this locus at 300 bp, as first measured when the trie oracle
+            // was built: 24 structural walks on the left, 2 on the right
+            EXPECT_EQ(24u, r.T.arms[trie::kLeft].paths.size());
+            EXPECT_EQ(2u, r.T.arms[trie::kRight].paths.size());
+        }
+    }
+    EXPECT_GT(structural_leaves, 2 * cases.size());
+
+    // deeper, label-constrained only (the structural trie is a small-radius tool): the
+    // claims of the 19 carriers at 1000 bp under k-mer and under trace support, against
+    // the records
+    const std::set<std::string> carriers = ix.carriers(blandm);
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        Strategy st = trie::exhaustive(LabelMode::CONSTRAIN, 1000);
+        st.support = support;
+        SeedResult A = trie::run(*anno_graph_, blandm, trie::as_list(carriers), st);
+        EXPECT_TRUE(A.dropped_labels.empty());
+        for (size_t a : { trie::kLeft, trie::kRight }) {
+            const Arm arm = A.arms[a].arm;
+            const std::string what = std::string("blaNDM 1000 bp ") + to_string(support)
+                                     + " arm " + to_string(arm);
+            EXPECT_EQ(ArmResult::COMPLETE, A.arms[a].status) << what;
+            const trie::RefClaims ref = support == Support::KMER
+                    ? trie::claims(ix, carriers, blandm, arm, 1000)
+                    : trie::trace_claims(ix, carriers, blandm, arm, 1000);
+            trie::expect_equal(ref.leaves, trie::constrained_claims(A, a, 1000), what);
+            EXPECT_FALSE(ref.leaves.empty()) << what;
+        }
+        timer.lap(std::string("blaNDM 1000 bp ") + to_string(support));
+    }
 }
 
 } // namespace
