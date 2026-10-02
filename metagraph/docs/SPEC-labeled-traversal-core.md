@@ -186,7 +186,10 @@ to a header).
     "schema_version": 1,
     "direction": "both",
     "support": "kmer",
+    "exhaustive": false,
     "labels": {
+      "mode": "constrain",
+      "max_labels_per_node": 64,
       "extra": [],
       "change_cost": {"model": "forbid"},
       "loss_budget": 0,
@@ -234,7 +237,9 @@ to a header).
 - `labels.max_seed_labels` (default 1000, 1 … 100 000; the server may clamp it lower, see below): cap on a
   **derived** set. It bounds the traversal state, not the
   discovery cost — the labels above it are found in the same pass either way and are reported, never dropped
-  silently (§6.1, §7.1). Ignored when `labels` is given (that list is the caller’s own cap).
+  silently (§6.1, §7.1). Ignored when `labels` is given (that list is the caller’s own cap). Under
+  `exhaustive` a derived set over the cap is **refused** per seed (a `SeedDerivationError` naming the knob),
+  not cut: every walk of a dropped carrier would be missing from a trie that promises no walk is dropped.
 - `labels.seed_label_kind`: `auto` (default) | `column` | `header` — what a *derived* label denotes. `auto` is
   `header` when the index has a `CoordToHeader` (so a derived label is an indexed sequence / accession) and
   `column` otherwise. `header` without a `CoordToHeader`, and any kind needing coordinates on an annotation
@@ -247,10 +252,28 @@ to a header).
   `denominator`). Costs ≥ 0; `cost(ℓ → ℓ) = 0`; `forbid` = +∞.
 - `labels.loss_budget` ≥ 0, per arm. `labels.switch_on`: `loss` (default; a switch into ℓ′ is allowed only from a
   label that does **not** continue at v — switching is forced, never free-riding) | `any`.
-  `max_switch_sources`: for pairwise models, only the cheapest that many sources are considered per step.
+  `max_switch_sources` (default 64, or `"unlimited"`): for pairwise models, only the cheapest that many sources
+  are considered per step. Under `exhaustive` its default is `"unlimited"` and, with a `table` cost, a number is
+  **rejected**: a target label reachable only from a cut source is not entered, and if it was the only label on
+  that successor the walk into it would be pruned with no path-level reason.
 - `branching.*`: see §6.4–§6.5. `max_label_branches` is a **depth** along a root-to-leaf path (a lineage may reach
   up to d^b leaves, d ≤ number of successor characters), not a total.
 - `bounds.*` scopes are in §6.8. `frontier.*` in §6.8. `output.detail`: `summary | tree | full` (§7).
+- **`labels.mode`**: `constrain` (default; everything above) | `annotate` (§6.9: every structural successor is
+  followed, the labels present are recorded, nothing is filtered). In `annotate` mode `seeds[].labels`,
+  `labels.extra`, a `change_cost` other than `forbid`, a `loss_budget`, the quorum knobs, `bounds.min_live_labels`
+  and `support: trace` are **rejected** naming the field (there is no permitted set for them to act on), and
+  `branching.max_label_branches` / `max_splits_per_path` may only be `"unlimited"` (there is no lineage to count).
+- **`labels.max_labels_per_node`** (1 … 100 000; default 64 in `constrain` mode and `max(64, max_seed_labels)` in
+  `annotate` mode, so that the structural oracle can by default record what the constrain side admits as a
+  derived set): cap on every per-node label list in the output — the recorded sets of `annotate` mode, the
+  lists on `blocked` / `hairpin` events, the root's boundary list and the per-branch lists of the trie view in
+  both modes. The true count is always reported beside a cut list (§7.4); a cut is never silent.
+- **`exhaustive`** (default `false`): the preset of §6.9 — unlimited branch allowance, `on_reconverge: keep`, no
+  split limit, no quorum, no beam. It changes the *defaults* of those knobs; a knob given explicitly with a
+  conflicting value is **rejected** (400) rather than overridden.
+- `branching.max_label_branches` and `branching.max_splits_per_path` accept an integer or the string
+  `"unlimited"`, and the normalized echo uses `"unlimited"` where it applies.
 - Values above are placeholders, not benchmarked defaults.
 
 ## 6. Traversal semantics
@@ -455,6 +478,11 @@ one label (within-sample variation) is an ambiguous branch for that label; §6.5
   entered. Cycle junctions and self-loops are ambiguous branches for labels on both sides (so with
   `max_label_branches = 0` the label stops at the junction with `branch`; with 1 the loop is unrolled once).
   One unrolling is not an estimate of copy number.
+- **Homopolymers (a consequence worth knowing).** A run A^n with n ≥ k+1 is a self-loop on the node A^k, and every
+  node whose (k−1)-suffix is A^(k−1) has the exit A^(k−1)·Z[0] as a successor. For a record X·A^(k+3)·Z the trie
+  therefore holds A^(k−1)·Z, A^k·Z and A^(k+1)·Z — and never the record's own A^(k+3)·Z, under k-mer *or* trace
+  support (the loop edge may be used once; the coordinates force the record's path onto it a second time). Pinned
+  by `TrieCases.HomopolymerSelfLoop` and `TrieCasesTrace.HomopolymerLimitation`.
 
 ### 6.7 Termination reasons
 
@@ -479,8 +507,10 @@ or with a **resource** reason: `max_steps`, `time_budget` (per seed: end all liv
 `max_live_paths`, `max_paths`, `max_output_bp` (per arm: end that arm only). `beam_pruned` marks pruned paths.
 
 Each arm reports `status: complete | truncated (a resource reason) | pruned (beam)`, `frontier_remaining:
-{live_paths, live_labels, exact}` and `cap_trigger: {reason, arm, at_bp, segment, live_paths, live_labels}` when
-truncated. `max_output_bytes` / `max_events` are **delivery** truncation (`delivery: {truncated, next_cursor}`),
+{live_paths, live_labels, exact}` and `cap_trigger: {reason, arm, at_bp, segment, live_paths, live_labels,
+exact}` when truncated. `exact` is `false` when a head counted carried a list cut by `labels.max_labels_per_node`
+(`annotate` mode): `live_labels` is then a lower bound. The same flag sits on every `growth[]` bin
+(`exact`); in `constrain` mode it is always `true` (the live state is never cut). `max_output_bytes` / `max_events` are **delivery** truncation (`delivery: {truncated, next_cursor}`),
 separate from exploration status. A capped or pruned result is never evidence of absence.
 
 ### 6.8 Exploration order, bounds, determinism
@@ -502,6 +532,97 @@ separate from exploration status. A capped or pruned result is never evidence of
   request is split into one seed per request, for the same graph, annotation, seeds and normalized strategy,
   provided no time budget tripped. All wall-clock values and cache-hit counters live in a separate `timing`
   object excluded from that contract (`output.timing: false` omits it). The annotation cache is per seed.
+
+### 6.9 Label modes and the `exhaustive` preset (the trie oracle)
+
+The walk's own output cannot validate its label filtering: it *is* the filtered result. An exhaustive trie built
+**without** the label constraint, with the labels merely recorded, shares no label logic with §6.3–§6.4 and is
+therefore usable as independent evidence for it. That is what the second label mode is for.
+
+- **`labels.mode: constrain`** (default): §6.1–§6.8 as written — a successor is admissible iff some permitted
+  label survives on it.
+- **`labels.mode: annotate`**: admissibility is **purely structural**. Every non-`'$'` successor is followed,
+  subject only to the per-path edge-reuse rule, hairpin handling and seed re-entry of §6.5–§6.6. There is no
+  permitted set, no label state, no loss budget, no switching, no quorum and no branch limit: `seeds[].labels`
+  must be omitted and the label machinery is rejected (§5). The labels present at every node are **recorded**
+  instead — `label_dict` is filled in the order labels are first met, each segment carries the sets present
+  along it as runs (§7.4), and `labels_start` / `labels_end` are the sets at the segment's entry node (the seed
+  boundary for the root) and last node. A path ends with a **path-level** reason only — `dead_end`,
+  `edge_reuse`, `edge_reuse_rc`, `rejoined_seed` (a successor that was only a skipped hairpin is a `dead_end`
+  with its `hairpin` event), `max_extension_bp` or a resource cap — and `end_labels` / `end_reasons` are empty,
+  because no lineage is tracked. Splits are never `ambiguous` (a lineage notion). `label_summary` is computed
+  from the recorded sets: `reach_bp` is the furthest position a label was recorded at, `direct_bp` its
+  continuous presence from the seed boundary along *some* route (exact when no list was cut, a lower bound
+  otherwise), `runs` is empty.
+  **Cost.** Every node costs a **full row** (or tuple row, for `header` labels: every coordinate is mapped so that
+  the true count is known). Nothing narrows the read, which is why this is a verification tool at small radius
+  and not a search primitive; the per-node cap `labels.max_labels_per_node` bounds the *output* and the
+  dictionary, not the read. The label kind recorded is `labels.seed_label_kind` (`auto`: `header` with a
+  `CoordToHeader`, `column` otherwise).
+- **`exhaustive: true`** (both modes): unlimited `max_label_branches`, `on_reconverge: keep` (the result is a
+  **trie** of walks, not a DAG), unlimited `max_splits_per_path`, no quorum (`min_successor_labels: 1`,
+  `min_successor_fraction: 0`, `min_live_labels: 1`), `on_overflow: stop`. The preset sets the defaults of
+  exactly these knobs and **refuses** a request that sets any of them to something else — asking for the
+  exhaustive trie and receiving a beam-pruned result would be the failure this flag exists to prevent, so the
+  conflict is a 400 naming the knob and the value the preset requires. **No pruning of any kind happens under
+  the preset**: the only legitimate stop besides a semantic end is "end of the last complete level" (§6.10).
+
+The verification contract this enables, for a seed S, radius R and permitted set P, all exhaustive:
+`T = trie(S, R, annotate)`, `E = {paths p of T : for some l in P, every node of p carries l}` (computed by
+filtering the raw recorded sets — no walker label logic), `A = trie(S, R, constrain, P, cost forbid)`; then
+`claims(A) == E` where a claim is a (walk, label) pair — `E` holds, per permitted label, its maximal
+label-consistent walks, and `claims(A)` the walker's label ends, so that a label ending inside a walk that other
+labels continue is checked at its own end position (comparing leaves alone would never see it) — and for any
+tuned run `leaves(tuned) ⊆ leaves(A)` with every omission carrying a reported reason. Comparisons are
+restricted to `min(complete_to_bp)` of the runs compared (§6.10).
+
+**The third party.** T and A share the graph, the annotation and the walker's structural code, so their
+agreement cannot catch an error common to both (a successor the graph fails to enumerate, a dummy k-mer followed,
+a label the annotation attaches to the wrong node). The tests therefore add a model that shares nothing with the
+index: `tests/graph/traversal/test_trie_reference.hpp` builds, from the records a fixture is made of, the k-mer
+sets per label and enumerates the walk rule of §6.10 over the strings — the structural walks with the labels
+present at every node, each label's maximal walks with the reason each ends, the §6.3 recurrence for a constant
+switch cost and a budget, and the records' own continuations for `support: trace`. Every fixture of
+`test_trie_cases.cpp` is checked three ways (records ⇔ T ⇔ A, with end reasons), plus: the run over P is the union
+of the single-label runs (the complete list of single-label walks), a permitted set derived from the seed runs
+like the explicit list, and the recurrence at budget 0 gives the forbid leaves. On the real mini-refseq index the
+same model is built from the 42 source FASTA records (9.3 Mbp, 2.8 s packed) and the contract holds on the whole
+blaNDM seed and on windows cut from records, under k-mer and under trace support
+(`MiniRefSeq.TrieContractAgainstTheSourceRecords`).
+
+### 6.10 Size bounds and the completeness guarantee (`complete_to_bp`)
+
+The structural trie can explode, so the bound is the crux, and **its order decides whether the result proves
+anything**: a depth-first walk cut by a size cap yields some deep paths and some wholly unexplored ones — complete
+for nothing — while a breadth-first walk cut by the same cap yields a trie in which every walk of length ≤ d has
+been fully explored, which is a usable oracle, just a shallower one. Exploration here is level-synchronous (§6.8),
+so no new order is needed; what the bound needs is a **per-level completion boundary and an honest report of it**.
+
+- The size caps are the existing ones: `max_steps` (nodes entered, per seed), `max_output_bp` (bases emitted, per
+  arm), `max_paths` (leaves, per arm), `max_live_paths` (frontier, per arm), `time_budget_ms`. Radius is what the
+  caller pushes; size is what is capped.
+- A cap trips **between two heads of one level**: the heads expanded before it have all their children, the heads
+  after it have none. That level is **partial and does not count**. Every arm reports **`complete_to_bp`** = the
+  extension depth up to which *every* admissible walk is present: for every n ≤ `complete_to_bp`, every walk of
+  n bases from the seed boundary that obeys the walk rule below is in `segments`, and every path that ended
+  before `complete_to_bp` ended for the reported semantic reason. Walks longer than that may be present (the
+  partial level's children, honestly ended with the cap reason) but nothing is claimed about them.
+- `status: complete` ⇔ `complete_to_bp == bounds.max_extension_bp`; otherwise `truncated` (or `pruned`) with
+  `cap_trigger` naming the cap. Heads that have already reached the radius when the time budget or a seed-level
+  cap trips are ended as `max_extension_bp`, not censored, so an arm whose every walk is present is reported
+  complete; a beam never prunes heads at the radius.
+- **The walk rule**, stated in every response as `walk_rule`, is what makes "all walks" a finite set in a graph
+  with cycles and therefore defines what `complete_to_bp` quantifies over: a walk uses no (k+1)-mer edge twice on
+  its own path (canonical (k+1)-mers in canonical/primary regimes, each use keeping its orientation), enters no
+  seed node (of either strand in those regimes), and takes no hairpin step (`hairpins: skip`) or takes them
+  flagged (`follow`); in `constrain` mode it is additionally followed only while some permitted label supports
+  every node of it. The statement is exact for the index it is issued on: for even k a step into or out of a
+  self-reverse-complementary k-mer node is a hairpin too, and when a (k+1)-mer does not pack into 64 bits
+  ((k+1) · bits per symbol > 64, e.g. k ≥ 32 on DNA) edges are identified by a 128-bit FNV-1a hash of the
+  (k+1)-mer, so a collision blocks a step as a reuse — the finite set of walks is then slightly smaller than
+  "no (k+1)-mer twice".
+- The depth at which the structural trie stops is itself a measurement: "the unconstrained trie explodes at 40 bp
+  here" is a reportable property of the locus.
 
 ## 7. `traverse` response
 
@@ -589,7 +710,37 @@ ends by reason; splits of kind `ambiguous` = Σ_bins ambiguous branches taken; m
 ### 7.3 Provenance (response level)
 
 `k`, `regime`, `alphabet`, graph and annotation types, annotation access path, `algorithm_version`,
-`release` (configured id, §10.3), the normalized strategy, the seeds as validated, `capabilities` (§10.3).
+`release` (configured id, §10.3), the normalized strategy, the seeds as validated, `capabilities` (§10.3, now
+including `label_modes`), and `walk_rule` (§6.10).
+
+### 7.4 The trie view and the completeness contract
+
+Per arm, in both modes:
+
+- `complete_to_bp` (§6.10) next to `status`, `frontier_remaining` and `cap_trigger`.
+- `labels_per_node: {cap, max_seen, nodes_truncated}` — `cap` is `labels.max_labels_per_node`, `max_seen` the
+  largest true label count met at a node, `nodes_truncated` how many recorded lists lost labels to the cap: the
+  root's boundary list, every node entered, every successor not taken (listed on its `blocked` / `hairpin`
+  event, the only place it appears) and every trie-view branch. Non-zero means the recorded sets are
+  incomplete and must not be read as "these labels and no other". Every such list carries its true count:
+  `segments[].labels_total` / `labels_truncated` (the entry node; for the root, the seed boundary),
+  `label_sets[].labels_total`, `events[].labels_total` / `truncated` on `blocked` and `hairpin` events, and
+  `branches[].labels_distinct`.
+- `splits[]` is the trie (design note §5.1.1): `at_bp` (echoed as `prefix_bp`) is the shared prefix length from
+  the seed boundary, and `branches: [{segment, char, labels_distinct, labels, labels_truncated}]`, parallel to
+  `children`, gives per branch its first base and the labels at its first node — the true count and a list cut
+  at the cap. `labels_before` is the count at the split node. **A branch's count is not a share of
+  `labels_before`: one label may follow several branches** (an ambiguous branch in `constrain` mode; always
+  possible in `annotate` mode), so the children's counts can sum to more than the parent's.
+- `label_mode` on every seed result.
+
+In `annotate` mode additionally, per segment, `label_sets: [{from_bp, to_bp, labels, labels_total, truncated}]`:
+the labels present along the segment as maximal runs with an identical (capped list, count), half-open over
+outward base indices so that `[from_bp, to_bp)` covers the nodes entered by steps `from_bp + 1 … to_bp`. The
+root segment has no run (it adds no base); its `labels` list is the seed boundary's own set. `end_labels` and
+`end_reasons` are empty, `path_reason` is always set, and a `continuation` (at the radius or a cap) lists the
+labels recorded on *every* node of its tail — each of them validates as a seed label of that continuation, so the
+tail stays valid `/traverse` input.
 
 ## 8. Annotation access (`LabelOracle`)
 
@@ -784,6 +935,12 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T30 | derived seed labels | Seed carried in full by 2 of 3 labels, `labels` omitted: derives exactly those 2, `labels_from_seed`, results identical to naming them; `max_seed_labels` truncation reports counts + digest and does NOT drop them; empty intersection rejected; `extra` on top of a derived set; coordinate fixture: header kind derives accessions, column kind the column, `trace` holds the derived set to coordinate continuity; mini-refseq: the whole blaNDM gene with no labels derives the 19 full-length carriers and traverses identically to the explicit run | Hit-labelled seed |
 | T30b | derived-set cost and usability | 25 labels, one carrying only a prefix: the derived set and the same list named explicitly agree field by field, and `labels_supporting_total` equals the kept count for the explicit list too; `bounds.time_budget_ms` stops the derivation (which runs before the walk's clock check) while leaving an explicit request a truncated walk; 100 decoy records sharing only the seed's first k-mer: the intersection starts from the cheapest row of the first batch, so `coords_mapped` stays at two per k-mer instead of paying for that row; the same accession in two columns makes a derived `header` set ambiguous and is refused naming the header and `seed_label_kind`, while the `column` kind and an explicit `ACC1` still work; under `trace`, a set that halves outside the first batch (8 carriers of the first 100 k-mers, 2 of the rest) still reports the coordinates the explicit run finds, i.e. the retained per-k-mer coordinates survive being compacted; mini-refseq: derived and explicit agree on dropped labels, label summary, runs, access path and the row/key counters | Hit-labelled seed |
 | T30c | per-seed derivation failure | Three seeds, the middle one carried in full by no label: HTTP 200 / exit 0 with `{"seed": {...}, "error": …}` in its place and the other two traversed; the same seed with an EXPLICIT label list still fails the whole request; `max_seed_labels` out of `[1, 100000]` is a parse error; a seed over `--traverse-max-seed-bp` and more than `--traverse-max-seeds` seeds are 400s; `max_seed_labels` above `--traverse-max-seed-labels` is clamped and reported | Hit-labelled seed |
+| T31 | trie oracle (§6.9) | `test_trie.cpp`: annotate records what constrain filters; the exhaustive preset refuses conflicting knobs; a tripped cap reports `complete_to_bp` and the partial level is excluded; cut recorded lists are reported and break the oracle; `TrieOracle` (4 graph × annotation pairs, 3 modes): `claims(A) == E` for 5 permitted sets on both arms, tuned runs are prefix-subsets with a reason for every omission, merged routes are sound | — |
+| T32 | records model, edge and non-edge cases | `test_trie_cases.cpp` + `test_trie_reference.hpp` + `test_trie_checks.hpp`, two graph × annotation pairs, three modes, both arms, every case three ways (records ⇔ T ⇔ A with end reasons) plus single-label union, derived == explicit and the recurrence at budget 0: linear; seed at record start / end / the whole record; radius 0, 1, 2, |R|−1, |R|, |R|+1 (a head at the radius is `max_extension_bp`, not `dead_end`); fork; unequal bubble (+ merged routes); nested bubbles; one-base tip at the seed boundary; homopolymer self-loop (3 walks, never the record's); cycle junction; circle (`rejoined_seed` on both arms); repeat in two records plus a chimera; seed twice in one record (the walk runs through the k−1 junction k-mers before `rejoined_seed`); seed spanning a bubble (the other label is dropped, nothing else changes); an unlabeled region (recorded empty, `label_lost` at its edge); a reverse-complement record (not a carrier in basic, the second fork branch in canonical/primary); hairpin skip and follow; even-k palindromic node; 100 labels (default cap cuts the lists and the oracle says so; uncapped the contract holds); unmasked DBGSuccinct ('$' never recorded); 16 random fixtures at k = 7 | Cycle / self-loop, Reverse complements |
+| T33 | switching vs the §6.3 recurrence | `OneSwitch`: forbid ends A in Y; budget 1 spells P·Y·Z under B at loss 1 switched at |P·Y|, budget 0 reports `loss_budget` needed 1; `TwoSwitches`: budget 1 cuts A's walk at |P·Y·Z| needing 2, budget 2 spells P·Y·Z·W under C at loss 2, B's walk needs one; leaves, losses and switch events equal the recurrence over the records | Sample-switching chain |
+| T34 | trace vs the records | `TrieCasesTrace`: k-mer support follows the four combinations of two records sharing a stretch, trace the two records; a record ending where another goes on is `record_end` under trace and continues under k-mer; a seed twice in one record gives two traces; the homopolymer limitation (§6.6) | Cross-record boundary |
+| T35 | size caps vs the completeness guarantee | `TrieCasesCaps`: `max_steps` 1…120, `max_live_paths` 1–3 (stop and beam), `max_output_bp` 1…90, `max_paths` 1–2 on the nested bubbles, three modes: every tuned run is a prefix-subset with a reason per omission, its walks equal the exhaustive trie's at every depth ≤ `complete_to_bp`, and `complete_to_bp` never decreases as `max_steps` grows | Caps |
+| T36 | the contract on a real index | `MiniRefSeq.TrieContractAgainstTheSourceRecords`: the string model from the 42 source records (k = 31, basic, unmasked, RowDiff<BRWT> + coordinates, header labels); the whole blaNDM seed (19 carriers; 24 structural walks left, 2 right at 300 bp) and three 150 bp windows: records ⇔ T ⇔ A, trace ⇔ records, no '$' in any output; at 1000 bp the 19 carriers' claims under k-mer and trace support equal the records' | — |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
@@ -899,6 +1056,33 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
     `tuple_rows_fetched` and `cache_hits` include lookahead work and belong to `timing`.
 15. `seed_id` / `validated_seed_id` are computed over the case-mapped sequence (`make_seed_id` applies the
     build's case mapping), so `select_seeds` and `traverse_seed` agree for a seed submitted in either case.
+16. **Annotate mode reads full rows** (§6.9): `LabelRecorder` reconstructs one whole row (or tuple row) per
+    node, cached per seed like the permitted-set query. For `header` labels the true count needs the sequences
+    a k-mer occurs in, which only the coordinate mapping tells; a sequence's coordinates are contiguous, so the
+    recorder maps ONE coordinate per (column, sequence) and skips the rest of that sequence's range
+    (`coords_mapped` is O(distinct sequences · log coordinates) per row, not O(coordinates)). The row cache is
+    bounded in rows (1M) and in kept keys (64M, about 1 GB), whichever trips first. Accepted for a verification
+    tool at small radius; the per-node cap is mandatory and bounds the output, not the read. In that mode
+    `max_label_branches` and `max_splits_per_path` have no meaning (no lineage, no path-level split budget: a
+    split limit would be a pruning the oracle must not have) and are `"unlimited"`; a number is refused.
+    Annotate mode's `validated_seed_id` is the seed's id under an empty label list.
+17. **The completeness boundary** (§6.10) is `ArmState::boundary`: the extension depth of the first head a cap
+    left unexpanded (or the first head a beam pruned), minimised over events; `complete_to_bp` is its minimum with
+    the radius. Two existing behaviours changed to keep `complete ⇔ complete_to_bp == radius` exact: a frontier
+    head that has already reached the radius when the time budget or `max_steps` (other arm) trips is ended with
+    `max_extension_bp` instead of being censored with the cap reason, and a beam does not prune heads sitting at
+    the radius. `algorithm_version` is `traverse-0.2`.
+18. **Seed validation** sweeps the k-mers once and scatters every hit into its label's run list (O(hits), as
+    `resolve.cpp` does) instead of looking each label up at each k-mer; under `trace` the live coordinate sets
+    of all labels advance in that same sweep. Nothing L × M is materialised. The one quadratic term left in
+    the walk is `derive()` under a `table` cost: every (source, target) pair of a successor is evaluated,
+    O(|σ| · |A(v)|) per successor, bounded by `max_switch_sources` except under `exhaustive`, where that bound
+    is refused. It is avoidable for a sparse table (the best source for a target is the best-two-by-loss
+    source unless an explicit entry beats it, so O(|A(v)| + entries) suffices); not implemented.
+19. **The verification contract is label-granular** (§6.9): the test-side oracle compares (walk, label) CLAIMS
+    — for every permitted label its maximal label-consistent walks — with the walker's label ends, not leaves
+    with leaves: a label whose walk ends inside a walk that other labels continue is a claim of its own and
+    its end position is checked.
 
 **Open decisions (need input or data):**
 
