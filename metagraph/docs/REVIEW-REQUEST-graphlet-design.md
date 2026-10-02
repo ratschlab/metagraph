@@ -1,5 +1,16 @@
 # Review request: the traversal graphlet design (retrieve once, process locally)
 
+> **Round 4 (design v4).** Your v3 review and resource proposal are addressed in v4 (§15 lists the changes, §14 is the
+> new resource and guarantee contract): `index_fp` is now the digest of the immutable index bundle via a build
+> manifest (no manifest → joins are unverifiable; the metadata hash survives only as a negative check; a
+> swapped-membership test joins the freeze gate); `route_only` applies the run-start guard first and zero-length
+> boundary claims are defined; responses carry `outcome` (complete / partial / failed / deferred), a structured
+> `resource_stop`, a `resource_limit` end reason, and per-arm `evidence` + `limitations` that name the knob to turn
+> (also stored in MGT); budgets per locus / analysis / service with `budget_id`/`locus_id`, a delivery reserve, a
+> row-level decode guard, local-library budgets, and exhaustion fixtures in the freeze gate. Please check §14 for
+> anything that cannot be delivered as stated (in particular the walker-side memory accounting and the row guard)
+> and whether the freeze gate is now sufficient.
+
 > **Round 3 (design v3).** Your review of v2 is addressed in v3; §13 of the design lists the nine changes, each marked
 > *(v3)* in place: views keep original ids and are saved as the unchanged backing body plus a view selector in `J`;
 > an index identity (`index_ns` + content fingerprint `index_fp`, §3.1) gates every cross-retrieval join; one float

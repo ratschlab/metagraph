@@ -1,8 +1,9 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** draft v3 (2026-10-02), revised after two external design reviews (of v1 `9fc93893` and v2 `23d109fc`);
-changes are listed in §12 (v2) and §13 (v3) and marked *(v2)* / *(v3)* where they are made. Not frozen: the shared
-golden vectors and whole-document fixtures of §2.7 are the freeze gate. Companion documents:
+**Status:** draft v4 (2026-10-02), revised after three external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
+v3 `91bda3e9`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3) and §15 (v4) and
+marked *(v2)*/*(v3)*/*(v4)* where they are made. §14 is the resource and guarantee contract. Not frozen: the shared
+golden vectors, whole-document fixtures and exhaustion fixtures of §2.7 are the freeze gate. Companion documents:
 `SPEC-labeled-traversal-core.md` (the traversal contract this builds on; §7.5 will carry §2 of this document once
 accepted), `DESIGN-labeled-traversal-endpoint.md` (the owner's design note), `REVIEW-REQUEST-graphlet-design.md`
 (the review prompt for this design).
@@ -76,18 +77,18 @@ Additional corrections: `LabelEnd.route_bp` is the *entry's* route_bp (walker.cp
 - **RANGES**: ascending label ids with consecutive runs collapsed: `0-5,7,9-12`; `.` = empty.
 - *(v2)* **Strings** are UTF-8. `L.prefix_len` counts **bytes** of the previous name's UTF-8 encoding, and the encoder shortens the shared prefix to the nearest UTF-8 character boundary, so the suffix is always valid UTF-8 on its own; a reader reconstructs `prev_bytes[:prefix_len] + suffix_bytes` and decodes. A name may contain spaces and may equal `*` or `.`: it is the remainder of the line after the fixed fields, preserved exactly (after percent-decoding `%25 %0A %0D`).
 - **SETEXPR** (against a *base set* defined per field; *(v2)* the bases are normative: `G.entry` → parent[0]'s end set (merges: union of the parents' end sets; root: none — explicit RANGES only); `G.end` → this segment's entry set; `P` → the previous `P` of the segment, the first `P` → the entry set; `C.labels` → the leaf segment's end set): `RANGES` (explicit) | `!` (equal to the base) | `!REMOVED` | `!+ADDED` | `!REMOVED+ADDED` (base minus REMOVED plus ADDED, both RANGES). The encoder emits whichever of explicit/delta is shorter, tie → explicit. Canonical in both encoders, so `dump(parse(x)) == x` byte-exact.
-- **Codes.** End reasons (traversal_types.cpp:37-55): `D` dead_end, `L` label_lost, `B` loss_budget, `R` branch, `U` edge_reuse, `V` edge_reuse_rc, `J` rejoined_seed, `T` trace_break, `X` max_extension_bp, `S` max_steps, `P` max_live_paths, `N` max_paths, `O` max_output_bp, `M` time_budget, `W` beam_pruned; a second letter keeps the walker's text qualifier (walker.cpp:2473-2480, quorum texts at the BRANCH ends): `Rm` minority, `Rb` below_min_labels, `Rs` split_limit, `Dh` hairpin, `Ls` superseded, `Lx` switch_sources. Enum and qualifier both survive (today's JSON replaces the enum by the text). Arm `l|r`; status `c|t|p`; scope `p|u` (per_path | united_history); mode `c|a`; support `k|t`; reconverge `m|k`; label kind `c|h`; hairpin `f|s`.
+- **Codes.** End reasons (traversal_types.cpp:37-55): `D` dead_end, `L` label_lost, `B` loss_budget, `R` branch, `U` edge_reuse, `V` edge_reuse_rc, `J` rejoined_seed, `T` trace_break, `X` max_extension_bp, `S` max_steps, `P` max_live_paths, `N` max_paths, `O` max_output_bp, `M` time_budget, `W` beam_pruned, *(v4)* `Y` resource_limit (memory or work budget, §14); a second letter keeps the walker's text qualifier (walker.cpp:2473-2480, quorum texts at the BRANCH ends): `Rm` minority, `Rb` below_min_labels, `Rs` split_limit, `Dh` hairpin, `Ls` superseded, `Lx` switch_sources. Enum and qualifier both survive (today's JSON replaces the enum by the text). Arm `l|r`; status `c|t|p`; scope `p|u` (per_path | united_history); mode `c|a`; support `k|t`; reconverge `m|k`; label kind `c|h`; hairpin `f|s`.
 
 ## 2.2 Records
 
 Document order: `H [J] S X* L*`, then per requested arm, left before right: `A B* V*`, then per segment in id order `G P* E* T? C?`, then `R*`; finally `Z`.
 
 ```
-H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp> <seed_index> walk <index_ns|*> <index_fp>
+H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp> <seed_index> walk <index_ns|*> <index_fp|*> <index_meta_fp>
                                        # (v3) index identity: <index_ns> = the deployment's name for the index
-                                       # ([A-Za-z0-9._-]+, new server flag --index-name; * = unset), <index_fp> = a
-                                       # content fingerprint computed once per loaded index (§3.1). Labels are joined
-                                       # across retrievals only under equal fingerprints.
+                                       # ([A-Za-z0-9._-]+, new server flag --index-name; * = unset), <index_fp> = the
+                                       # digest of the index bundle's manifest (v4, §3.1; * = no manifest: joins are
+                                       # unverifiable), <index_meta_fp> = the metadata hash, a negative check only.
 J <compact JSON>                       # standalone FILES only: the response envelope with results[] reduced to this
                                        # seed's summary (graphlet string removed). Written by the library, never by
                                        # the server. At most once, directly after H.
@@ -210,13 +211,34 @@ Envelope unchanged (`release`, `capabilities`(+2 keys), `strategy`(+`output.deta
                                "label_ends":{reason:n},"leaves_by_reason":{path_reason|"semantic":n}}},
           "right"?: {…}},
  "annotation": {"access_path","keys_mapped","rows_requested","direct_reads"}, "timing"?: {…},
+ "outcome": "complete|partial|failed|deferred",                      # (v4, §14)
+ "resource_stop"?: {…},  "limitations": [ {…} ],                     # (v4, §14; per arm too: "evidence", "limitations")
  "graphlet": "<MGT text>", "graphlet_bytes": N, "graphlet_lines": N}
 ```
 Derivation failures keep today's `{seed, error}` shape, no `graphlet`. No names, no per-leaf rows, no `label_summary`, no `growth` (in `B`), no `label_dict` (in `L`). Size ≈ 2.5 KB envelope + ~0.7 KB per arm; a 64-seed batch stays ~100 KB of summary.
 
-## 3.1 Index identity *(v3)*
+## 3.1 Index identity *(v3, corrected in v4)*
 
-`release`, `k`, regime and alphabet do not identify an index: two different annotations over one graph report the same four values (reproduced by the review with an empty release), and their `c:0` would be joined. The server therefore exposes, in `capabilities` and in `H`, `index_ns` (the deployment's name for the index, new flag `--index-name`, may be unset) and `index_fp` = FNV-1a-64 over (k, regime, alphabet, the graph's node count, the annotation's row count, column count, every column name in order, whether coordinates and a `CoordToHeader` are present and the header count), computed **once per loaded index** at load (≈1 s for 33 M column names) and cached. Comparability (§5, §6) requires equal `index_fp` and, when both are set, equal `index_ns` and `release`; a missing fingerprint means *unverifiable*, never equal. As a consistency check, labels joined by ref must also agree by name; a disagreement makes the pair incomparable.
+`release`, `k`, regime and alphabet do not identify an index: two different annotations over one graph report the
+same four values, and their `c:0` would be joined. v3 fixed that with a hash of *metadata* (counts, ordered column
+names) — which the v3 review showed is still not identity: two indexes with identical counts and names that swap
+which sequences columns A and B annotate get the same fingerprint, and the per-ref name check agrees too.
+
+*(v4)* **`index_fp` is the digest of the immutable index bundle**, not of its metadata:
+
+- The index build writes a **manifest** next to the files (`<prefix>.manifest.json`: every file of the bundle —
+  graph, annotation, sidecars (`.seqs`, `.anchors`, `.rd_succ`, `.edgemask`, `.coords`) — with size and sha256, plus
+  the builder's version and inputs), and `index_fp` = sha256 over the canonical manifest. Hashing hundreds of GB at
+  server start is not an option; hashing at build time is free. For public indexes whose files were not built with
+  a manifest, the deployment supplies one (computed once, or from immutable object-store digests such as S3
+  checksums) and the server loads it with `--index-manifest`.
+- `index_ns` (`--index-name`) names the index for humans and routing; it is not identity.
+- Without a manifest the server reports `index_fp: *`, and everything that joins labels across retrievals reports
+  *unverifiable* — never equal. The v3 metadata hash survives as `index_meta_fp`: a cheap **negative** check (a
+  mismatch proves different indexes), never a positive one.
+- Test (freeze gate): two indexes over the same records with identical counts and column names but swapped
+  memberships must get different `index_fp` and must compare `unverifiable`/`different`, never equal;
+  `scripts/traversal/build_mini_refseq.sh` writes the manifest so the fixture exercises the positive path.
 
 # 4. The walker changes (marked separately) — *(v2: three run fields, was one)*
 
@@ -336,6 +358,12 @@ For leaf labels the merge-derived part (before the `max` with the run start) equ
 `[evidence_from, to_bp) ∩ [0, D)`; when that is empty the claim is `route_only` at `D`: the label carries a route
 of that length, but not the displayed bases; `routes()` reconstructs and spells the label's own ancestral route
 through the partitions when the caller asks for it.
+*(v4)* **Run-start guard, applied first:** intersect the run's own interval `[from_bp, to_bp)` with the cut
+`[0, D)`. If it is empty — the run starts at or after `D`, e.g. B entered by a switch at depth 10 and the cut is at
+5 — the run makes **no claim** at `D` (it does not exist yet); only a run with surviving route support can be
+`route_only`. A run of zero length (`from_bp == to_bp`: a label present at the boundary node only, e.g. ended
+`minority` at the seed boundary) is a **boundary claim**: reported at its position with `kind: boundary`, no
+bases, and only when `from_bp ≤ D`.
 
 **`label_summary`** (constrain), per arm, exactly `Walker::summarize()`:
 
@@ -476,3 +504,82 @@ grammar and evidence corrections above made before step 0's freeze.
 Confirmed by the review as correct in v2: stored split ambiguity, the chronological `G.end`, terminal run metadata,
 both continuation formulas, UTF-8 prefix boundaries, silent-end validation through `prev_run`, opaque entry handles,
 `MissingEnvelope`; the full-depth evidence scan is sound with the anchor and switch-boundary qualifications above.
+
+# 14. Resource and guarantee contract *(v4)*
+
+**The principle (the owner's requirement).** Every response certifies what it covers and states every limitation:
+either an answer is complete, or a valid shallower answer is returned together with exactly where it stops, what was
+cut, why, and which knob or action would go further. Nothing is cut silently, and no resource measure may change the
+question being answered without saying so.
+
+**Outcomes.** Per seed result, `outcome` is one of:
+
+| outcome | meaning |
+|---|---|
+| `complete` | every arm complete to the requested radius under `walk_rule`/`completeness_scope`; all evidence present |
+| `partial` | a **valid certified prefix**: each arm's `complete_to_bp` (and `evidence.complete_to_bp`) says how far the guarantee goes; `limitations` lists every cap that limited it; `resource_stop` says why it stopped when a budget did |
+| `failed` | no valid traversal exists (e.g. the seed's own rows exceeded the memory budget, the derivation was refused) — an error with a structured reason, never a half-built result |
+| `deferred` | the traversal is complete but delivery is spooled or paged (the body exceeds the transport limit); the handle and the pages carry it |
+
+**Stated limitations** (already being implemented on the JSON side, spec §7.0): per arm `evidence: {complete,
+complete_to_bp}` and `limitations: [{kind, knob, limit, observed, effect, complete_to_bp?}]` with kinds `walk_domain`,
+`branch_events` (the stored branch events stop at `max_branch_events`; every branch decision and refusal before the
+first dropped event's depth is present — a run cut there says so and names `output.max_branch_events`, which also
+accepts `"unlimited"`), `label_lists`, `switch_sources`, `inexact_counts`, `scope`; per seed `seed_labels`,
+`server_clamp`. MGT carries them: `A` gains `<evidence_complete_to_bp|*>`, and a new `K` record per limitation
+(`K <kind> <knob> <limit> <observed> <complete_to_bp|*>`), so a saved graphlet keeps its own caveats.
+
+**Budgets enforce the bound; depth is the graceful fallback.** A depth limit alone does not protect against a very
+wide first level or one enormous annotation row (annotate mode materialises a full row, or every coordinate tuple,
+before cutting the recorded list — label_oracle.cpp). So:
+
+- *Memory and work budgets in the walker*: `bounds.max_memory_mb` (simultaneously retained allocations: label state
+  per head, segments, runs, recorded sets, the row cache) and the existing `max_steps`/time budget for work. Checked
+  **before** each expensive allocation (a level's successor batch, a row fetch, a tuple decode) and during bounded
+  batches. On exhaustion the walker stops at the last completed level: an unfinished level never raises
+  `complete_to_bp`, the stop reason is `resource_limit` (`Y`), and `resource_stop` is filled.
+- *Reserve for delivery*: a fraction of the memory and time budget is reserved for finalisation and serialisation of
+  the partial result, so a stop at the limit can still be delivered.
+- *Row-level guard*: a single annotation row (or coordinate tuple set) estimated above the remaining budget is not
+  decoded; the step stops with `resource_stop.phase = annotation_decode` and the suggestion to use a more selective
+  seed or a label-constrained query (narrowing the radius would not help).
+
+`resource_stop` = `{scope: locus|analysis|service, resource: memory|work|time|delivery|capacity, phase:
+annotation_decode|traversal|finalisation|serialisation|parse|compare, message, requested, effective, used,
+remaining, suggested_actions: [...]}`. Suggested actions by cause: traversal too broad → `use_available_prefix`,
+`narrow_label_selection`, `select_branches`; one row too expensive → `more_selective_seed`, `constrain_labels`;
+allowance exhausted → completed loci returned, others `not_started`, the agent prioritises; service capacity → a
+separate `service_unavailable` with `retry_after`; delivery too large → `deferred` with the spooled graphlet and
+pages.
+
+**Scopes.** *Locus*: peak working memory and cumulative work across both arms, retries and continuations of one
+locus. *Analysis*: total work across loci, an overall deadline, retained graphlet memory and spool storage.
+*Service*: concurrent workers and aggregate memory reservations. Requests carry a stable `budget_id` (analysis) and
+`locus_id`; splitting a request or retrying never resets an allowance — memory limits what is held at once, work
+accumulates across attempts. The backend enforces the locus scope per request (it sees one request); the analysis
+and service scopes belong to the MCP layer / search service, which forwards the remaining locus allowance as the
+request's bounds and accounts the reported usage.
+
+**No silent semantic changes.** Enabling a beam, dropping labels, raising a cut, switching `on_reconverge` or the
+support kind changes the question or the evidence; none of them is ever applied as a resource measure. When the
+agent chooses one, the response says what it changed (`strategy` echo + `limitations`/`scope`).
+
+**The local library has budgets too.** Parsing (a compact MGT expands into large label sets), route enumeration,
+comparisons and exports run under allocation and work budgets; an interrupted comparison returns
+`comparable: unknown` / `incomplete`, never equality, and an interrupted parse is an error, never a partial graphlet.
+
+**Continuation is a new traversal.** It does not resume the original exhaustive search (the backend keeps no
+frontier or edge history between requests); its result is certified on its own, with the overlap stated.
+
+**Freeze-gate fixtures for this section.** Exhaustion during annotation decoding, mid-level traversal, finalisation
+and Python parsing; in each case a valid shallower result is delivered whenever one exists (`partial` with the right
+`complete_to_bp` and `resource_stop`), and `failed` only when none does.
+
+# 15. Changes in v4 (after the external review of v3 and the owner's guarantee requirement)
+
+| # | v3 problem | v4 change | where |
+|---|---|---|---|
+| 1 | `index_fp` hashed metadata: swapped memberships with identical counts/names collide | digest of the immutable index bundle via a build manifest; no manifest → unverifiable; metadata hash kept as a negative check; swapped-membership test | §2.2, §3.1 |
+| 2 | `route_only` created claims for runs that start after the cut | run-start guard first; future runs make no claim; zero-length boundary claims defined | §5.1 |
+| 3 | no representation of resource stops; no guarantee statement | `outcome` (complete/partial/failed/deferred), `resource_stop`, `resource_limit` end reason (`Y`), per-arm `evidence` + `limitations` (also in MGT: `A` field, `K` records), budgets per locus/analysis/service, reserve for delivery, row-level guard, local-library budgets, exhaustion fixtures in the freeze gate | §2.1, §3, §14 |
+| 4 | `max_branch_events` cut refusal evidence silently | boundary `evidence.complete_to_bp` + a `branch_events` limitation naming the knob; `"unlimited"` accepted (implemented now, spec §7.0/§7.2) | §14 |
