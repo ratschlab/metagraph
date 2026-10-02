@@ -71,7 +71,9 @@ namespace {
  *   on it (quorum, split limit, branch limit, loss budget) is stated on the step's
  *   BranchEvent as a Refusal (§7.2): the tuned-run checker takes only that, or a
  *   structural block it can verify itself, as evidence for an omission — a missing
- *   child says nothing about why it is missing.
+ *   child says nothing about why it is missing. Recording them is linear per
+ *   re-minimisation round (ArmResult::refusal_scans), and a loss-budget refusal does
+ *   not depend on whether the source goes on elsewhere (review round 4).
  * - Hairpins (§6.5): with skip_hairpins the self-RC step is inadmissible and gets a
  *   HAIRPIN event; without it the step is followed, flagged with a HAIRPIN event
  *   (text "followed") on the parent segment and never counts toward ambiguity
@@ -171,6 +173,9 @@ struct Cand {
     size_t initial_labels = 0;      // |σ_v| before any source was excluded
     bool truncated = false;         // derive() cut the switch sources (max_switch_sources)
     SourceKey cut {};               // key of the last eligible source when truncated
+    // the predecessors of the entries whose source the current re-minimisation round
+    // excluded (refused "branch"; duplicates removed when the event is emitted)
+    std::vector<LabelId> excluded_preds;
     LabelRecorder::NodeLabels present;   // annotate mode: the labels at the successor
     bool admissible() const { return !skipped && !blocked; }
     void reset() {
@@ -185,6 +190,7 @@ struct Cand {
         quorum_text = "";
         initial_labels = 0;
         truncated = false;
+        excluded_preds.clear();
         present.labels.clear();
         present.total = 0;
     }
@@ -271,16 +277,21 @@ struct ArmState {
 
 // Per-label scratch of process_item, sized |label_dict| once and cleared over the
 // touched labels only, so that a step costs O(|σ| + |A(v)|) and not O(|label_dict|).
+// |marked| is set and cleared within one pass (the sources excluded in one
+// re-minimisation round, the predecessors on one successor); |budget_checked| marks the
+// sources whose loss-budget refusals were recorded with their label end.
 struct Scratch {
     std::vector<uint8_t> trace_broken, excluded, seen, has_cont, stays, only_hairpin,
-                         in_quorum_fail, superseded, blocked, is_touched;
+                         in_quorum_fail, superseded, blocked, is_touched, marked,
+                         budget_checked;
     std::vector<uint32_t> cont_count;
     std::vector<const char*> qtext;
     std::vector<LabelId> touched;
 
     void init(size_t n) {
         for (auto *v : { &trace_broken, &excluded, &seen, &has_cont, &stays, &only_hairpin,
-                         &in_quorum_fail, &superseded, &blocked, &is_touched }) {
+                         &in_quorum_fail, &superseded, &blocked, &is_touched, &marked,
+                         &budget_checked }) {
             v->assign(n, 0);
         }
         cont_count.assign(n, 0);
@@ -296,7 +307,8 @@ struct Scratch {
     void reset() {
         for (LabelId l : touched) {
             trace_broken[l] = excluded[l] = seen[l] = has_cont[l] = stays[l] = only_hairpin[l]
-                = in_quorum_fail[l] = superseded[l] = blocked[l] = is_touched[l] = 0;
+                = in_quorum_fail[l] = superseded[l] = blocked[l] = is_touched[l] = marked[l]
+                = budget_checked[l] = 0;
             cont_count[l] = 0;
             qtext[l] = "";
         }
@@ -2287,15 +2299,19 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // distinct and ascending when the event is emitted. Empty on an ordinary step, so
     // nothing is allocated there.
     std::vector<BranchEvent::Refusal> refused;
-    auto refuse = [&](char ch, const char *cause, LabelId source) {
+    // the labels of refusal (ch, cause), created when first needed; a step has a few
+    // of them at most (successors x causes). The reference is used before the next call.
+    auto refusals = [&](char ch, const char *cause) -> std::vector<LabelId>& {
         for (BranchEvent::Refusal &r : refused) {
-            if (r.ch == ch && std::string_view(r.cause) == cause) {
-                r.labels.push_back(source);
-                return;
-            }
+            if (r.ch == ch && std::string_view(r.cause) == cause)
+                return r.labels;
         }
-        refused.push_back({ ch, cause, { source } });
+        refused.push_back({ ch, cause, {} });
+        return refused.back().labels;
     };
+    // successors with an entry of a source excluded in this round: (the smallest such
+    // source, successor index)
+    std::vector<std::pair<LabelId, size_t>> excluded_on;
     // Every changing round excludes at least one source for good, so the fixpoint
     // settles within |σ| + 1 rounds (the last one changes nothing). The bound is
     // explicit so that nothing here can spin; it is never what ends the loop.
@@ -2326,24 +2342,51 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             }
         }
         changed = false;
+        const size_t excluded_from = ambiguous_over.size();
         for (const Entry &src : item.state) {
             if (sc.excluded[src.label] || sc.cont_count[src.label] < 2)
                 continue;
             if (src.branches + 1 > strategy_.max_label_branches) {
                 sc.excluded[src.label] = 1;
+                sc.marked[src.label] = 1;
                 ambiguous_over.push_back(src.label);
-                // the next derivation removes its entries from every successor: record
-                // which successors refused it while those entries are still visible
-                for (const Cand &c : cands_) {
-                    if (!c.admissible())
-                        continue;
-                    if (std::any_of(c.state.begin(), c.state.end(),
-                                    [&](const Entry &e) { return e.pred == src.label; })) {
-                        refuse(c.succ->ch, "branch", src.label);
-                    }
-                }
                 changed = true;
             }
+        }
+        if (!changed)
+            break;
+        // The next derivation removes the excluded sources' entries from every
+        // successor: record which successors refused them while those entries are
+        // still visible. Each successor's state is scanned once per round for all the
+        // sources this round excluded — a scan per excluded source was Θ(|σ|²) at a
+        // node where every source is ambiguous (review round 4, finding 2).
+        excluded_on.clear();
+        for (size_t i = 0; i < cands_.size(); ++i) {
+            Cand &c = cands_[i];
+            c.excluded_preds.clear();
+            if (!c.admissible())
+                continue;
+            arm.result.refusal_scans += c.state.size();
+            for (const Entry &e : c.state) {
+                if (sc.marked[e.pred])
+                    c.excluded_preds.push_back(e.pred);
+            }
+            if (!c.excluded_preds.empty()) {
+                excluded_on.emplace_back(*std::min_element(c.excluded_preds.begin(),
+                                                           c.excluded_preds.end()), i);
+            }
+        }
+        // a new (char, "branch") group is created where the per-source scan created it
+        // (by the smallest excluded source on the successor, then successor order), so
+        // that the refusals keep their order
+        std::sort(excluded_on.begin(), excluded_on.end());
+        for (const auto &[first, i] : excluded_on) {
+            const Cand &c = cands_[i];
+            std::vector<LabelId> &labels = refusals(c.succ->ch, "branch");
+            labels.insert(labels.end(), c.excluded_preds.begin(), c.excluded_preds.end());
+        }
+        for (size_t j = excluded_from; j < ambiguous_over.size(); ++j) {
+            sc.marked[ambiguous_over[j]] = 0;
         }
     }
     assert(!changed);
@@ -2422,8 +2465,69 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         arm.result.segments[item.segment].events.push_back(std::move(ev));
     }
 
+    // What a switch from |src| into the admissible successor |c| would cost (§6.3), for
+    // the loss-budget ends and refusals (finite costs only): |present| a target within
+    // the budget (kept through a cheaper predecessor, as |src| has no entry there),
+    // |cut| a finite switch derive() never priced (max_switch_sources), |over| a target
+    // nobody entered that |src| reaches only above the budget, the cheapest at |needed|.
+    // A constant cost prices every target but |src|'s own alike, so the targets nobody
+    // entered are counted, not scanned (an entry's label is always a target): a test per
+    // (source, successor), where scanning the targets for every ending source made a
+    // step O(|σ| · Σ|A(v)|).
+    struct BudgetLook {
+        bool present = false, cut = false, over = false;
+        double needed = kInfiniteLoss;
+    };
+    auto budget_look = [&](const Entry &src, const Cand &c) {
+        BudgetLook b;
+        const LabelId l = src.label;
+        const bool eligible = !c.truncated || !(c.cut < source_key(src));
+        if (cost_.model() == LabelChangeCost::CONSTANT) {
+            arm.result.refusal_scans++;
+            assert(c.state.size() <= c.targets.size());
+            auto it = std::lower_bound(c.targets.begin(), c.targets.end(), l,
+                                       [](const Target &t, LabelId x) { return t.label < x; });
+            const bool own = it != c.targets.end() && it->label == l;
+            const double v = src.loss + cost_.default_cost();
+            if (c.targets.size() == (own ? 1u : 0u) || v == kInfiniteLoss)
+                return b;
+            // the targets other than |l| nobody entered
+            const size_t absent = c.targets.size() - c.state.size()
+                                    - (own && !find_entry(c.state, l) ? 1 : 0);
+            if (!eligible) {
+                b.cut = true;
+            } else if (v <= strategy_.loss_budget) {
+                b.present = true;
+            } else if (absent) {
+                b.over = true;
+                b.needed = v;
+            }
+            return b;
+        }
+        arm.result.refusal_scans += c.targets.size();
+        for (const Target &t : c.targets) {
+            if (t.label == l)
+                continue;
+            double v = src.loss + cost_.cost(l, t.label);
+            if (v == kInfiniteLoss)
+                continue;
+            if (!eligible) {
+                b.cut = true;
+            } else if (v <= strategy_.loss_budget) {
+                b.present = true;
+            } else if (!find_entry(c.state, t.label)) {
+                b.needed = std::min(b.needed, v);
+                b.over = true;
+            }
+        }
+        return b;
+    };
+
     // ---- per-source outcomes
     for (const Cand &c : cands_) {
+        // a quorum or split-limit stop refuses the successor to every source on it
+        std::vector<LabelId> *quorum_refused = c.quorum_fail && !c.state.empty()
+            ? &refusals(c.succ->ch, c.quorum_text) : nullptr;
         for (const Entry &e : c.state) {
             if (c.followed) {
                 sc.has_cont[e.pred] = 1;
@@ -2434,7 +2538,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             } else if (c.quorum_fail) {
                 sc.in_quorum_fail[e.pred] = 1;
                 sc.qtext[e.pred] = c.quorum_text;
-                refuse(c.succ->ch, c.quorum_text, e.pred);
+                quorum_refused->push_back(e.pred);
             } else if (c.blocked) {
                 sc.blocked[e.pred] = std::max(sc.blocked[e.pred], block_rank(c.block_reason));
             } else if (c.skipped) {
@@ -2479,37 +2583,25 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             bool present_target = false, cut_finite = false;
             std::string over_budget_on;     // successors refused to l by the budget alone
             if (cost_.finite()) {
-                const SourceKey key = source_key(src);
                 for (const Cand &c : cands_) {
                     if (!c.admissible())
                         continue;
-                    const bool eligible = !c.truncated || !(c.cut < key);
-                    bool over = false;
-                    for (const Target &t : c.targets) {
-                        if (t.label == l)
-                            continue;
-                        double v = src.loss + cost_.cost(l, t.label);
-                        if (v == kInfiniteLoss)
-                            continue;
-                        if (!eligible) {
-                            cut_finite = true;
-                        } else if (v <= strategy_.loss_budget) {
-                            present_target = true;     // kept through a cheaper predecessor
-                        } else if (!find_entry(c.state, t.label)) {
-                            best_absent = std::min(best_absent, v);
-                            over = true;
-                        }
-                    }
-                    if (over)
+                    const BudgetLook b = budget_look(src, c);
+                    present_target |= b.present;
+                    cut_finite |= b.cut;
+                    if (b.over) {
+                        best_absent = std::min(best_absent, b.needed);
                         over_budget_on.push_back(c.succ->ch);
+                    }
                 }
+                sc.budget_checked[l] = 1;
             }
             if (best_absent != kInfiniteLoss) {
                 reason = EndReason::LOSS_BUDGET;
                 needed = best_absent;
                 dropped.push_back(l);
                 for (char ch : over_budget_on) {
-                    refuse(ch, "loss_budget", l);
+                    refusals(ch, "loss_budget").push_back(l);
                 }
             } else {
                 reason = EndReason::LABEL_LOST;
@@ -2523,8 +2615,37 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         end_label(arm, item, src, reason, succs.size(), text, needed);
     }
 
+    // ---- loss-budget refusals of the sources whose end was not decided by the budget
+    // above: a successor on which a lineage could go on only by a switch above the
+    // budget is refused to it by the budget whether the lineage continues on another
+    // successor or ends for another reason — only the label END depends on that
+    // (review round 4, finding 3). A source excluded by the branch limit is left out:
+    // the limit took it out of every successor's source set, so no switch of it was
+    // priced, and its refusals are the "branch" ones.
+    if (cost_.finite()) {
+        for (const Cand &c : cands_) {
+            // every target entered: the budget refused nothing here
+            if (!c.admissible() || c.targets.size() == c.state.size())
+                continue;
+            for (const Entry &e : c.state) {
+                sc.marked[e.pred] = 1;
+            }
+            for (const Entry &src : item.state) {
+                const LabelId l = src.label;
+                // ... nor to a lineage that continues on |c| (or that a quorum refused it)
+                if (sc.excluded[l] || sc.budget_checked[l] || sc.marked[l])
+                    continue;
+                if (budget_look(src, c).over)
+                    refusals(c.succ->ch, "loss_budget").push_back(l);
+            }
+            for (const Entry &e : c.state) {
+                sc.marked[e.pred] = 0;
+            }
+        }
+    }
+
     // ---- branch event: an ambiguity taken or any refusal (a quorum or split-limit
-    // stop, an excluded source and a loss-budget stop each recorded one)
+    // stop, an excluded source and a successor refused by the budget each recorded one)
     if (!ambiguous_taken.empty() || !refused.empty()) {
         arm.result.branch_events_total++;
         if (arm.result.branch_events.size() < strategy_.max_branch_events) {

@@ -393,7 +393,10 @@ struct BranchEvent {
     // or "split_limit" (the quorum and split-limit texts of the BRANCH ends), "branch"
     // (an ambiguous source over its allowance, whose entries on every successor are
     // removed) or "loss_budget" (the only switch into the successor costs more than the
-    // budget). This is the walker's explicit per-successor refusal evidence: |dropped|
+    // budget — stated whether or not the source goes on along another successor, and
+    // not for a source the branch limit excluded, which no switch was priced for). Each
+    // cause is a decision of one strategy knob, and a checker verifies it against that
+    // knob. This is the walker's explicit per-successor refusal evidence: |dropped|
     // and |ambiguous| alone cannot tell a successor that was refused from one that was
     // followed and then deleted from the output (review round 3, finding 1), and a
     // missing child says nothing about why it is missing.
@@ -480,6 +483,13 @@ struct ArmResult {
     // a node needs at most |σ| of them, and a large maximum marks a pathological locus.
     uint64_t reminimisation_rounds = 0;
     size_t max_reminimisation_rounds = 0;
+    // The work of recording refusals (BranchEvent::refused): per round that excludes
+    // sources, the successor state entries scanned once for those sources (scanning
+    // every successor once per excluded source was Θ(|σ|²) at a node where every
+    // source is ambiguous: review round 4), plus the loss-budget tests of a finite
+    // change cost — one per (source, successor) under a constant cost, one per target
+    // under a table. Linear in |σ| + Σ|σ_v| per round under forbid and constant costs.
+    uint64_t refusal_scans = 0;
 };
 
 struct LabelArmSummary {

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <numeric>
 #include <random>
 #include <set>
 #include <sstream>
@@ -3089,6 +3090,113 @@ TEST(Walker, LabelFreeBeamRanksByTheTrueCount) {
             }
             ASSERT_NE(nullptr, kept) << what;
             EXPECT_EQ(major, spell_path(arm, *kept)) << what << ": the beam kept the minority branch";
+        }
+    }
+}
+
+
+// Review round 4, finding 2: recording the refusals of an ambiguous node is linear in its
+// labels. k = 3, n labels each carrying AAA·C and AAA·G, seed AAA, branch allowance 0:
+// every label is ambiguous and excluded in the first round. Each successor used to be
+// scanned once PER excluded source for that source's entries — n(n + 1) tests for the 2n
+// refused label ids (10 000 labels: 7.5 ms before refusals were recorded, 104 ms after).
+// One scan of each successor's state per round now: 2n entries, so the work doubles with
+// n. Pinned through ArmResult::refusal_scans, not wall time; the refusals are unchanged.
+TEST(Walker, RefusalRecordingIsLinearInTheLabels) {
+    for (size_t n : { 250, 500 }) {
+        std::vector<std::string> seqs, labels, names;
+        for (size_t i = 0; i < n; ++i) {
+            names.push_back("L" + std::to_string(i));
+            for (const char *s : { "AAAC", "AAAG" }) {
+                seqs.push_back(s);
+                labels.push_back(names.back());
+            }
+        }
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                3, seqs, labels, DeBruijnGraph::BASIC);
+        Strategy st = strategy(0, false);
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 10;
+        auto res = run(*anno, "AAA", names, st);
+        const ArmResult &arm = res.arms[kRight];
+        check_invariants(arm, st);
+        EXPECT_EQ(n, count_ends(arm, EndReason::BRANCH));
+        ASSERT_EQ(1u, arm.branch_events.size());
+        const BranchEvent &be = arm.branch_events[0];
+        EXPECT_EQ(n, be.ambiguous.size());
+        EXPECT_EQ(n, be.dropped.size());
+        std::vector<LabelId> all(n);
+        std::iota(all.begin(), all.end(), 0);
+        ASSERT_EQ(2u, be.refused.size());
+        std::set<char> chars;
+        for (const auto &rf : be.refused) {
+            chars.insert(rf.ch);
+            EXPECT_STREQ("branch", rf.cause);
+            EXPECT_EQ(all, rf.labels);
+        }
+        EXPECT_EQ((std::set<char>{ 'C', 'G' }), chars);
+        // two successors of n entries, each scanned once: linear, not n(n + 1)
+        EXPECT_EQ(2 * n, arm.refusal_scans) << n;
+        EXPECT_LE(arm.refusal_scans, 4 * n) << n;
+    }
+}
+
+// Review round 4, finding 3: a successor the loss budget refuses to a source is stated
+// whether or not the source goes on along another one. Blocks X, U, P, V, Q: A carries
+// X·U·P, B carries X·V and U's last k - 1 bases + Q, the seed is X under {A, B}. B leaves
+// along V; at the end of U, A goes on along P and could enter Q only by switching to B
+// (constant cost 1). With budget 0 Q is refused to A by the budget alone — recorded only
+// for a source that ENDED at the node until now (has_cont skipped A), so the fork had no
+// branch event and Q's absence no reason. With budget 1, Q is followed through the switch.
+TEST(Walker, LossBudgetRefusalWhileTheSourceGoesOn) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 582; ; ++seed) {
+        b = clean_blocks({ 30, 30, 40, 40, 40 }, seed);
+        if (b[1][0] != b[3][0] && b[2][0] != b[4][0])
+            break;
+    }
+    const std::string &X = b[0], &U = b[1], &P = b[2], &V = b[3], &Q = b[4];
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { X + U + P, X + V, U.substr(U.size() - kK + 1) + Q }, { "A", "B", "B" }, mode);
+        const std::string where = "mode " + std::to_string(mode);
+        Strategy st = strategy(Strategy::kUnlimited, false);
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 100;
+        st.loss_budget = 0;
+        auto r0 = run(*anno, X, { "A", "B" }, st, LabelChangeCost::constant(1));
+        const ArmResult &arm = r0.arms[kRight];
+        check_invariants(arm, st);
+        std::set<std::string> walks;
+        for (const auto &p : arm.paths) walks.insert(spell_path(arm, p));
+        EXPECT_EQ((std::set<std::string>{ U + P, V }), walks) << where;
+        EXPECT_EQ(0u, count_events(arm, EventType::SWITCH)) << where;
+        const BranchEvent *fork = nullptr;
+        for (const BranchEvent &be : arm.branch_events) {
+            EXPECT_EQ(U.size(), be.at_bp) << where << ": a branch event off the fork";
+            if (be.at_bp == U.size())
+                fork = &be;
+        }
+        ASSERT_NE(nullptr, fork) << where << ": the fork has no branch event";
+        ASSERT_EQ(1u, fork->refused.size()) << where;
+        EXPECT_EQ(Q[0], fork->refused[0].ch) << where;
+        EXPECT_STREQ("loss_budget", fork->refused[0].cause) << where;
+        EXPECT_EQ((std::vector<LabelId>{ 0 }), fork->refused[0].labels) << where;
+        // A goes on: nothing ambiguous, no label end at the fork, only the refusal
+        EXPECT_TRUE(fork->ambiguous.empty()) << where;
+        EXPECT_TRUE(fork->dropped.empty()) << where;
+        EXPECT_EQ(0u, count_ends(arm, EndReason::LOSS_BUDGET)) << where;
+
+        st.loss_budget = 1;
+        auto r1 = run(*anno, X, { "A", "B" }, st, LabelChangeCost::constant(1));
+        const ArmResult &arm1 = r1.arms[kRight];
+        check_invariants(arm1, st);
+        walks.clear();
+        for (const auto &p : arm1.paths) walks.insert(spell_path(arm1, p));
+        EXPECT_EQ((std::set<std::string>{ U + P, U + Q, V }), walks) << where;
+        EXPECT_EQ(1u, count_events(arm1, EventType::SWITCH)) << where;
+        for (const BranchEvent &be : arm1.branch_events) {
+            EXPECT_TRUE(be.refused.empty()) << where << ": a refusal within the budget";
         }
     }
 }
